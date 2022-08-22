@@ -26,7 +26,7 @@ OPERATOR_SCHEMA(ImageInput)
       int batch_size = helper.GetSingleArgument<int>("batch_size", 0);
       int crop = helper.GetSingleArgument<int>("crop", -1);
       int color = helper.GetSingleArgument<int>("color", 1);
-      CHECK_GT(crop, 0);
+      TORCH_CHECK_GT(crop, 0);
       out[0] = CreateTensorShape(
           vector<int>{batch_size, crop, crop, color ? 3 : 1},
           TensorProto::FLOAT);

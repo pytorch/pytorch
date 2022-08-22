@@ -19,7 +19,6 @@ Let's demonstrate how to do this using an ensemble of simple CNNs.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
 torch.manual_seed(0)
 
 # Here's a simple CNN

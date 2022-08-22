@@ -2,7 +2,7 @@
 
 import random
 import sys
-from typing import Optional, List, Union
+from typing import Optional, List, Union, cast
 from torch.distributed._shard.checkpoint import (
     StorageReader,
     StorageWriter,
@@ -24,9 +24,6 @@ from torch.distributed._shard.checkpoint.resharding import (
 )
 
 from torch.distributed._shard import sharded_tensor
-from torch.distributed._shard.checkpoint.state_dict_loader import (
-    validate_metadata,
-)
 
 from torch.distributed._shard.checkpoint.state_dict_saver import (
     _prepare,
@@ -36,6 +33,7 @@ from torch.distributed._shard.checkpoint.metadata import (
     Metadata,
     BytesReadRequest,
     BytesWriteRequest,
+    MetadataIndex,
     TensorReadRequest,
     TensorWriteRequest,
 )
@@ -66,8 +64,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
-
 class TestModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -93,42 +89,6 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_validate_metadata(self) -> None:
-        module = TestModule()
-
-        metadata, _, _ = _prepare(module.state_dict(), True)
-        self.assertTrue(
-            "regular" in metadata.state_dict_metadata,
-            f"keys: {metadata.state_dict_metadata.keys()}",
-        )
-
-        module = TestModule()
-        validate_metadata(module.state_dict(), metadata)
-
-        module = TestModule()
-        module.extra_param = torch.nn.Parameter(torch.zeros(2, 2))
-        with self.assertRaisesRegex(ValueError, "Could not find Tensor metadata"):
-            validate_metadata(module.state_dict(), metadata)
-
-        module = TestModule()
-        module.regular = torch.nn.Parameter(torch.zeros(2, 4))
-
-        with self.assertRaisesRegex(ValueError, "Incompatible tensor size"):
-            validate_metadata(module.state_dict(), metadata)
-
-        module = TestModule()
-        module.extra_sharded = sharded_tensor.zeros(module.spec(), 4, 2)
-        with self.assertRaisesRegex(ValueError, "Could not find ShardedTensor metadata"):
-            validate_metadata(module.state_dict(), metadata)
-
-        module = TestModule()
-        module.sharded = sharded_tensor.zeros(module.spec(), 4, 2)
-        with self.assertRaisesRegex(ValueError, "Incompatible ShardedTensor size"):
-            validate_metadata(module.state_dict(), metadata)
-
     def gen_metadata(self) -> Metadata:
         module = TestModule()
         # compute the default saved metadata (must pass include_non_replicated_tensors or we'll get incomplete MD)
@@ -139,74 +99,6 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         dist.broadcast_object_list(metadata)
 
         return metadata[0]
-
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_checkpoint_has_shard_too_small(self) -> None:
-        metadata = self.gen_metadata()
-
-        # we make the first stored shard smaller
-        self.assertTrue(
-            "sharded" in metadata.state_dict_metadata,
-            f"keys: {metadata.state_dict_metadata.keys()}",
-        )
-
-        sizes = (
-            metadata.state_dict_metadata["sharded"]
-            .storage_metadata[0]
-            .shard_metadata.shard_sizes
-        )
-        for i in range(len(sizes)):
-            sizes[i] = 1
-
-        module = TestModule()
-        with self.assertRaisesRegex(ValueError, "only has 1 available"):
-            validate_metadata(module.state_dict(), metadata)
-
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_checkpoint_has_shard_overlap(self) -> None:
-        metadata = self.gen_metadata()
-
-        # we make the first stored shard smaller
-        self.assertTrue(
-            "sharded" in metadata.state_dict_metadata,
-            f"keys: {metadata.state_dict_metadata.keys()}",
-        )
-
-        sizes = (
-            metadata.state_dict_metadata["sharded"]
-            .storage_metadata[0]
-            .shard_metadata.shard_sizes
-        )
-        for i in range(len(sizes)):
-            sizes[i] += 1
-
-        module = TestModule()
-        with self.assertRaisesRegex(ValueError, "overlap"):
-            validate_metadata(module.state_dict(), metadata)
-
-
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_checkpoint_has_storage_type_mismatch(self) -> None:
-        module = TestModule()
-
-        metadata = self.gen_metadata()
-        regular = metadata.state_dict_metadata["regular"]
-        metadata.state_dict_metadata["sharded"] = regular
-        with self.assertRaisesRegex(ValueError, "ShardedTensorStorageMetadata but found"):
-            validate_metadata(module.state_dict(), metadata)
-
-        metadata = self.gen_metadata()
-        sharded = metadata.state_dict_metadata["sharded"]
-        metadata.state_dict_metadata["regular"] = sharded
-        with self.assertRaisesRegex(ValueError, "TensorStorageMetadata but found"):
-            validate_metadata(module.state_dict(), metadata)
-
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
@@ -222,11 +114,10 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         st = sharded_tensor.zeros(spec, 4, 4, dtype=torch.float64)
         mapping = dict()
 
-        (_, md) = _prepare_sharded_tensor_write(st, "tensor", mapping)
+        (_, md, storage_md) = _prepare_sharded_tensor_write("fqn", st, "tensor", mapping)
 
-        self.assertEqual(1, len(md.storage_metadata))
+        self.assertEqual(1, len(storage_md))
         self.assertEqual(1, len(mapping))
-
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
@@ -254,7 +145,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
             self.assertEqual(2, len(tensor_reqs))
 
             self.assertTrue('bytes' in metadata.state_dict_metadata)
-            self.assertEqual(bytes_reqs[0].storage_key, metadata.state_dict_metadata['bytes'].storage_key)
+            self.assertTrue(MetadataIndex('bytes') in metadata.storage_data)
 
             # tensor ordering is unspecified
             if len(tensor_reqs[0].tensor.size()) == 1:
@@ -265,15 +156,20 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
                 shard = tensor_reqs[0]
 
             self.assertTrue('replicated' in metadata.state_dict_metadata)
-            self.assertEqual(replicated.storage_key, metadata.state_dict_metadata['replicated'].storage_key)
+            storage_key = MetadataIndex('replicated', torch.Size([0]))
+            self.assertTrue(storage_key in metadata.storage_data)
+            self.assertTrue(metadata.storage_data[storage_key], replicated.storage_key)
         else:
             self.assertEqual(0, len(bytes_reqs))
             self.assertEqual(1, len(tensor_reqs))
             shard = tensor_reqs[0]
+            local_shard = state_dict["sharded"].local_shards()[0]
 
             self.assertTrue('sharded' in metadata.state_dict_metadata)
-            shard_keys = [sm.storage_key for sm in metadata.state_dict_metadata['sharded'].storage_metadata]
-            self.assertTrue(shard.storage_key in shard_keys)
+            storage_key = MetadataIndex('sharded', torch.Size(local_shard.metadata.shard_offsets))
+            self.assertTrue(storage_key in metadata.storage_data)
+            self.assertTrue(metadata.storage_data[storage_key], shard.storage_key)
+
 
 class TestStorageKeys(TestCase):
     def test_create_key_handles_collision(self):
@@ -396,8 +292,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
         else:
             with self.assertRaises(CheckpointException) as cm:
                 callback()
-            e = cm.exception
-            for rank, ex in e.failures.items():
+            e = cast(CheckpointException, cm.exception)
+            for rank, wrapped_ex in e.failures.items():
+                ex = wrapped_ex[0]
                 self.assertTrue(rank in bad_ranks, msg=f"{rank} did not fail")
                 if not kwargs.get("ignore_exception_type", False):
                     self.assertEqual(ValueError, type(ex), str(ex))

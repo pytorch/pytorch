@@ -4,6 +4,7 @@ from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import StreamWrapper, _check_unpickable_fn
 
@@ -28,6 +29,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         datapipes: Iterable DataPipes being concatenated
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> import random
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1 = IterableWrapper(range(3))
@@ -76,6 +78,7 @@ class ForkerIterDataPipe(IterDataPipe):
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(5))
         >>> dp1, dp2 = source_dp.fork(num_instances=2)
@@ -122,6 +125,7 @@ class _ForkerIterDataPipe(IterDataPipe):
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None:
             self._datapipe_iterator = iter(self.main_datapipe)
+            self._snapshot_state = _SnapshotState.Iterating
         while self.end_ptr is None or self.child_pointers[instance_id] + 1 < self.end_ptr:
             self.child_pointers[instance_id] += 1
             # Use buffer
@@ -171,6 +175,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -179,6 +185,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.buffer = deque()
@@ -202,15 +210,18 @@ class _ChildDataPipe(IterDataPipe):
         the previous iterators  for all ChildDataPipes must be invalidated, with the exception when a ChildDataPipe
         hasn't had an iterator created from it since the last invalidation. See the example below.
 
-    Singler Iterator per IteraDataPipe Invalidation Example:
+    Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
+        >>> # Singler Iterator per IteraDataPipe Invalidation
+        >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(10))
         >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
         >>> it1, it2 = iter(cdp1), iter(cdp2)
         >>> it3 = iter(cdp1)
-        The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
+        >>> # The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
         >>> it4 = iter(cdp2)
-        The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
-        the last invalidation.
+        >>> # The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
+        >>> # the last invalidation.
 
     Args:
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
@@ -281,6 +292,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
             Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def odd_or_even(n):
         ...     return n % 2
@@ -365,6 +377,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def get_next_element_by_instance(self, instance_id: int):
         if self._datapipe_iterator is None and not self.main_datapipe_exhausted:
             self._datapipe_iterator = iter(self.main_datapipe)
+            self._snapshot_state = _SnapshotState.Iterating  # This is necessary for the DataPipe to reset properly.
         stop = False
         while not stop:
             if self.child_buffers[instance_id]:
@@ -397,6 +410,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -407,6 +422,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
@@ -429,6 +446,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
         datapipes: Iterable DataPipes that will take turn to yield their elements, until the shortest DataPipe is exhausted
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.mux(dp2, dp3))
@@ -474,6 +492,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         state = (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -481,6 +501,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.buffer = []
 
@@ -498,6 +520,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         *datapipes: Iterable DataPipes being aggregated
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.zip(dp2, dp3))

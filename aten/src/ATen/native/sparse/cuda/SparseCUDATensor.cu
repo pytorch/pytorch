@@ -188,9 +188,6 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       Tensor indicesSlice = newIndices.narrow(0, d, 1);
-      // Note for the porting guide: THCTensor_(copy) does NOT do normal
-      // broadcasting logic; instead, it will blast the elements from one
-      // to the other so long as the numel is the same
       indicesSlice.copy_(indices1D);
       indices1D.divide_(self.size(d), "trunc");
       indicesSlice.add_(indices1D, -self.size(d));

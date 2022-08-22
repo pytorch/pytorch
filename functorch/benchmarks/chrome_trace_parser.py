@@ -21,7 +21,7 @@ def get_model_name(filename):
     return modelname
 
 def get_total_length(run_times_df, modelname):
-    return float(run_times_df[run_times_df["name"]==modelname]["runtime"])
+    return float(run_times_df[run_times_df["name"] == modelname]["runtime"])
 
 
 def main():
@@ -51,16 +51,16 @@ def main():
     else:
         print("Please provide a filename or a folder name")
 
-    print(f"modelname, GPU Utilization, MM and Conv time")
+    print("modelname, GPU Utilization, MM and Conv time")
 
-    run_times_df = pd.read_csv(args.runtime)   
+    run_times_df = pd.read_csv(args.runtime)
     for filename in filenames:
         try:
             modelname = get_model_name(filename)
             total_length = get_total_length(run_times_df, modelname) * 1e6
             utilization, mm_conv_utilization = compute_utilization(filenames, total_length)
             print(f"{modelname}, {utilization}, {mm_conv_utilization}")
-        except:
+        except BaseException:
             logging.exception(f"{filename}, ERROR")
             print(f"{filename}, ERROR")
 

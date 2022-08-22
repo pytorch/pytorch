@@ -162,6 +162,7 @@ public:
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  void callBoxedForDispatchKey(const OperatorHandle& op, DispatchKey dk, Stack* stack) const;
 
   // TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
   // See Note [Plumbing Keys Through The Dispatcher]
@@ -332,6 +333,9 @@ public:
     return operatorDef_->op.hasKernelForDispatchKey(k);
   }
 
+  bool hasComputedKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.hasComputedKernelForDispatchKey(k);
+  }
 
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
@@ -374,6 +378,10 @@ public:
 
   void callBoxed(Stack& stack) const {
     callBoxed(&stack);
+  }
+
+  void callBoxedForDispatchKey(DispatchKey dk, Stack& stack) const {
+    c10::Dispatcher::singleton().callBoxedForDispatchKey(*this, dk, &stack);
   }
 
   void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
@@ -559,9 +567,9 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
-#ifdef DEBUG
+#ifndef NDEBUG
   if (show_dispatch_trace()) {
-      std::cout << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      std::cerr << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
@@ -579,9 +587,9 @@ template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
-#ifdef DEBUG
+#ifndef NDEBUG
   if (show_dispatch_trace()) {
-      std::cout << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      std::cerr << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
@@ -592,9 +600,9 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
-#ifdef DEBUG
+#ifndef NDEBUG
   if (show_dispatch_trace()) {
-      std::cout << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      std::cerr << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
@@ -620,12 +628,24 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
+// NB: this doesn't count as a "true" dispatcher jump, so no instrumentation
+inline void Dispatcher::callBoxedForDispatchKey(const OperatorHandle& op, DispatchKey dk, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  const auto& entry = op.operatorDef_->op;
+  // We still compute this as we're obligated to pass it on to the internal
+  // kernel, if it is a boxed fallback
+  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+  const auto& kernel = entry.kernelForDispatchKey(dk);
+  kernel.callBoxed(op, dispatchKeySet, stack);
+}
+
+
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
-#ifdef DEBUG
+#ifndef NDEBUG
   if (show_dispatch_trace()) {
-      std::cout << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      std::cerr << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
