@@ -228,14 +228,14 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
     self_value = self_value.expand(shapeVec);
   }
   const auto orig_input_dim = self_value.dim();
-  if (orig_input_dim.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
+  if (orig_input_dim == 3 && (self_bdim || randomness == RandomnessType::Different)) {
     self_value = reshape_dim_into(1, 0, self_value);
   }
   auto out = multinomial(self_value, num_samples, replacement, generator);
   if (randomness == RandomnessType::Same && !self_bdim) {
     return out;
   }
-  if(orig_input_dim.dim() == 3 && self_bdim) {
+  if(orig_input_dim == 3 && self_bdim) {
     out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
   }
   return makeBatched(out, 0, cur_level);
