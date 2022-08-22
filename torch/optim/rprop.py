@@ -110,7 +110,10 @@ class Rprop(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
+                    if p.dtype.is_complex:
+                        state['step_size'] = grad.new().resize_as_(grad).fill_(complex(group['lr'], group['lr']))
+                    else:
+                        state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 prevs.append(state['prev'])
                 step_sizes.append(state['step_size'])
@@ -189,6 +192,12 @@ def _single_tensor_rprop(params: List[Tensor],
         prev = prevs[i]
         step_size = step_sizes[i]
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            prev = torch.view_as_real(prev)
+            param = torch.view_as_real(param)
+            step_size = torch.view_as_real(step_size)
+
         sign = grad.mul(prev).sign()
         sign[sign.gt(0)] = etaplus
         sign[sign.lt(0)] = etaminus
@@ -221,6 +230,15 @@ def _multi_tensor_rprop(params: List[Tensor],
 
     if len(params) == 0:
         return
+
+    # Handle complex params
+    def _view_complex_as_real(tensor_list):
+        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+
+    grads = _view_complex_as_real(grads)
+    prevs = _view_complex_as_real(prevs)
+    params = _view_complex_as_real(params)
+    step_sizes = _view_complex_as_real(step_sizes)
 
     if maximize:
         torch._foreach_neg_(grads)
