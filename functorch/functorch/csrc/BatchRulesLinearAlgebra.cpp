@@ -335,6 +335,22 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
 }
 
+oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
+                           const Tensor& other, c10::optional<int64_t> other_bdim, const int64_t dim) {
+  const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
+
+  const auto self_other_bundled = _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
+
+  // might be a bug but still doesn't incur an extra perf hit because input would be expanded in cross' broadcast
+  const auto self_ = ensure_has_bdim(std::get<0>(self_other_bundled), self_bdim.has_value(), batch_size);
+  // needed because of same bug since other_.conj() is used as input to cross in backwards formula
+  const auto other_ = ensure_has_bdim(std::get<1>(self_other_bundled), other_bdim.has_value(), batch_size);
+
+  const auto dim_ = getPhysicalDim(self_, true, dim);
+
+  return std::make_tuple(linalg_cross(self_, other_, dim_), 0);
+}
+
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
   LinalgCheckMatrixUnaryRuleHelper<\
     func_string_##fn,\
@@ -446,6 +462,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
+  VMAP_SUPPORT(linalg_cross, cross_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
