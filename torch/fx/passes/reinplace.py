@@ -2,7 +2,7 @@ import torch
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_map, tree_flatten, tree_map_only
 from torch.multiprocessing.reductions import StorageWeakRef
 
 import _operator
@@ -526,20 +526,18 @@ def reinplace(gm, *sample_args):
                 nodes_to_update = [n for n in old.users if n.meta['node_idx'] > node.meta['node_idx']]
                 for node_to_update in nodes_to_update:
                     new_args = []
-                    for arg_idx, a in enumerate(node_to_update.args):
-                        if a == old:
-                            new_args.append(new)
-                        else:
-                            new_args.append(a)
-                    new_kwargs = {}
-                    for kwarg_idx, (k, v) in enumerate(node_to_update.kwargs.items()):
-                        if isinstance(v, Node) and v.name == old.name:
-                            new_kwargs[k] = new
-                        else:
-                            new_kwargs[k] = v
-                    node_to_update.args = tuple(new_args)
-                    node_to_update.kwargs = new_kwargs
+                    args = node_to_update.args
 
+                    def replace_arg(a):
+                        if a == old:
+                            return new
+                        return a
+
+                    # First, replace usages of "b" with "a"
+                    node_to_update.args = tree_map_only(Node, replace_arg, node_to_update.args)
+                    node_to_update.kwargs = tree_map_only(Node, replace_arg, node_to_update.kwargs)
+
+                    # Second, update our storage_to_nodes data structure.
                     old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
                     node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
 
