@@ -159,7 +159,7 @@ static void resize_reduction_result(
 }
 
 inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
+  const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   DimMask mask = make_dim_mask(dim, self.dim());
   auto shape = shape_from_dim_mask(self, mask, keepdim);

@@ -1206,13 +1206,16 @@ class DistributedTest:
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
             p2p_op_list = []
+            recv_tensors = [None for _ in range(world_size)]
+            expected_tensors = [None for _ in range(world_size)]
 
             for val in ["1", "0"]:
                 os.environ["NCCL_BLOCKING_WAIT"] = val
                 for src in range(0, world_size):
-                    send_tensor = _build_tensor(rank + 1, device_id=device_id)
-                    recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                    recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
+                    send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(src)
+                    recv_tensors[src] = _build_tensor(src + 1, value=-1, device_id=device_id).fill_(-1)
+                    expected_tensors[src] = _build_tensor(src + 1, value=-1, device_id=device_id).fill_(rank)
+                    recv_op = dist.P2POp(dist.irecv, recv_tensors[src], src)
                     p2p_op_list.append(recv_op)
                     send_op = dist.P2POp(dist.isend, send_tensor, src)
                     p2p_op_list.append(send_op)
@@ -1220,6 +1223,9 @@ class DistributedTest:
                 reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
+
+                for src in range(0, world_size):
+                    self.assertEqual(recv_tensors[src], expected_tensors[src])
 
             self._barrier()
 
@@ -1402,7 +1408,7 @@ class DistributedTest:
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
                 with self.assertRaisesRegex(
-                    RuntimeError, "All groups need to use the same backend"
+                    RuntimeError, "All ops need to use the same group"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)

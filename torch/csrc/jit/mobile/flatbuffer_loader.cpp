@@ -50,6 +50,11 @@
 #include <cstdlib>
 #endif
 
+#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
+namespace flatbuffers = flatbuffers_fbsource;
+#define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
+#endif
+
 namespace torch {
 namespace jit {
 
