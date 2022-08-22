@@ -512,6 +512,12 @@ class TestNestedTensorDeviceType(TestCase):
         answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
         self.assertEqual(nt[1, 1, :], answer)
 
+        # Test that indexing works when requires_grad_(True)
+        # previously this was failing because the backward kernel for select.int uses .sizes()
+        nt = torch.nested_tensor([x0, x1]).requires_grad_(True)
+        self.assertEqual(nt[0], x0)
+        self.assertEqual(nt[-1], x1)
+
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_nested_tensor_indexing_noncontiguous(self, device, dtype):

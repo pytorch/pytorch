@@ -1400,8 +1400,12 @@
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  self: select_backward(grad, self.sizes(), dim, index)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: select_backward(grad, self.sizes(), dim, index)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_select_backward(grad, self, dim, index)
 
 - name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)

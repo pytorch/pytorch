@@ -4512,6 +4512,13 @@
     CompositeExplicitAutogradNonFunctional: select_backward
   autogen: select_backward.out
 
+- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, int index) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_select_backward
+
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
 
