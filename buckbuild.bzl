@@ -1359,6 +1359,7 @@ def define_buck_targets(
             "torch/csrc/api/src/jit.cpp",
             "torch/csrc/jit/serialization/export_bytecode.cpp",
             "torch/csrc/jit/serialization/export_module.cpp",
+            "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
