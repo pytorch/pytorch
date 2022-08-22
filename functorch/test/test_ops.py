@@ -962,7 +962,7 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
-        xfail('linalg_cross'),  # There's some issue when an input needs to be broadcasted
+        xfail('linalg.cross'),  # There's some issue when an input needs to be broadcasted
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),

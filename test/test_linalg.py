@@ -4586,26 +4586,6 @@ class TestLinalg(TestCase):
             IndexError, "Dimension out of range",
             lambda: torch.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
 
-    def test_linalg_cross_errors(self, device):
-        self.assertRaisesRegex(
-            RuntimeError, "dimension -1 does not have size 3",
-            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device)))
-        self.assertRaisesRegex(
-            RuntimeError, "must match the size of tensor",
-            lambda: torch.linalg.cross(torch.rand(100, 3, device=device), torch.rand(100, 3, 10, device=device)))
-        self.assertRaisesRegex(
-            RuntimeError, "must match the size of tensor",
-            lambda: torch.linalg.cross(torch.rand(5, 3, device=device), torch.rand(3, 5, device=device)))
-        self.assertRaisesRegex(
-            RuntimeError, "dimension 0 does not have size 3",
-            lambda: torch.linalg.cross(torch.rand(5, 4, 3, device=device), torch.rand(5, 4, 3, device=device), dim=0))
-        self.assertRaisesRegex(
-            RuntimeError, "dimension -1 does not have size 3",
-            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-1))
-        self.assertRaisesRegex(
-            IndexError, "Dimension out of range",
-            lambda: torch.linalg.cross(torch.rand(5, 3, 4, device=device), torch.rand(5, 3, 4, device=device), dim=-5))
-
     def test_renorm(self, device):
         m1 = torch.randn(20, 20, device=device)  # big enough to exercise vectorized path
         res1 = torch.tensor((), device=device)

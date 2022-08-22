@@ -4925,6 +4925,7 @@ def _clamp_numpy(a, min=None, max=None):
 
     return np.minimum(max, np.maximum(a, min))
 
+
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
