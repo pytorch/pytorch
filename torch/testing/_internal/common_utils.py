@@ -752,41 +752,37 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
-        if test_filename not in ['test_nn', 'test_fake_tensor', 'test_cpp_api_parity', 'test_jit_cuda_fuser', 'test_reductions',
-                                 'test_cuda', 'test_indexing', 'test_fx_backends', 'test_linalg', 'test_cpp_extensions_jit',
-                                 'test_torch', 'test_tensor_creation_ops', 'test_sparse_csr', 'test_dispatch',
-                                 'test_native_mha', 'test_ao_sparsity']:
-            # exclude linux cuda tests because we run into memory issues when running in parallel
-            import pytest
-            os.environ["NO_COLOR"] = "1"
-            os.environ["USING_PYTEST"] = "1"
-            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-            os.makedirs(pytest_report_path, exist_ok=True)
-            # part of our xml parsing looks for grandparent folder names
-            pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
-            print(f'Test results will be stored in {pytest_report_path}')
-            # mac slower on 4 proc than 3
-            num_procs = 3
-            # f = failed
-            # E = error
-            # X = unexpected success
-            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), f'-n={num_procs}', '-vv', '-x',
-                                    '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}', '-k=not ldl and not lu'])
-            del os.environ["USING_PYTEST"]
-            sanitize_pytest_xml(f'{pytest_report_path}')
-            print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            exit(0 if exit_code == 5 else exit_code)
-        else:
-            os.makedirs(test_report_path, exist_ok=True)
-            verbose = '--verbose' in argv or '-v' in argv
-            if verbose:
-                print(f'Test results will be stored in {test_report_path}')
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-                output=test_report_path,
-                verbosity=2 if verbose else 1,
-                resultclass=XMLTestResultVerbose))
+        # exclude linux cuda tests because we run into memory issues when running in parallel
+        import pytest
+        os.environ["NO_COLOR"] = "1"
+        os.environ["USING_PYTEST"] = "1"
+        pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+        os.makedirs(pytest_report_path, exist_ok=True)
+        # part of our xml parsing looks for grandparent folder names
+        pytest_report_path = os.path.join(pytest_report_path, f"{test_filename}.xml")
+        print(f'Test results will be stored in {pytest_report_path}')
+        # mac slower on 4 proc than 3
+        num_procs = 3
+        # f = failed
+        # E = error
+        # X = unexpected success
+        exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-vv', '-x',
+                                '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
+        del os.environ["USING_PYTEST"]
+        sanitize_pytest_xml(f'{pytest_report_path}')
+        print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        exit(0 if exit_code == 5 else exit_code)
+        # else:
+        #     os.makedirs(test_report_path, exist_ok=True)
+        #     verbose = '--verbose' in argv or '-v' in argv
+        #     if verbose:
+        #         print(f'Test results will be stored in {test_report_path}')
+        #     unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        #         output=test_report_path,
+        #         verbosity=2 if verbose else 1,
+        #         resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
