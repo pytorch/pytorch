@@ -222,8 +222,8 @@ PyObject* THPFInfo_str(THPFInfo* self) {
 PyObject* THPIInfo_str(THPIInfo* self) {
   std::ostringstream oss;
 
-  oss << "iinfo(min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr));
-  oss << ", max=" << PyFloat_AsDouble(THPIInfo_max(self, nullptr));
+  oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
+  oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPIInfo_dtype(self, nullptr)) << ")";
 
   return THPUtils_packString(oss.str().c_str());
