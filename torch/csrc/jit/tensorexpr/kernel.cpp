@@ -314,6 +314,43 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   return false;
 }
 
+bool mkldnnPrepackedLinearIsSupportedJit(const torch::jit::Node* node) {
+#if AT_MKLDNN_ENABLED()
+
+  auto const& input = getTensorInfoJit(node->input(0));
+  auto const& weight = getTensorInfoJit(node->input(1));
+
+  // TODO: skip bias check when bias is None
+  auto const& bias = getTensorInfoJit(node->input(2));
+
+  // Everything should be statically known.
+  if (!input || !weight) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedLinearIsSupportedJit: some params aren't static");
+    return false;
+  }
+
+  // Weights and bias should be Constant when using mkldnn backend
+  if (node->input(1)->node()->kind() != prim::Constant ||
+      node->input(2)->node()->kind() != prim::Constant) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedLinearIsSupportedJit: weight or bias is not Constant");
+    return false;
+  }
+
+  // Inputs should be contiguous, or the TE will needlessly transpose them.
+  if (!isContiguous(node->input(0)) || !isContiguous(node->input(1))) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedLinearIsSupportedJit: some inputs are not contiguous");
+    return false;
+  }
+
+  return mkldnnPrepackedLinearIsSupported(*input, *weight);
+
+#endif
+  return false;
+}
+
 // The fuser currently only supports matmul of 2D x 2D matrices
 bool matmulIsSupported(const torch::jit::Node* node) {
   auto const& input0 = getTensorInfoJit(node->input(0));
