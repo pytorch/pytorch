@@ -16,6 +16,9 @@ import torch.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
+# Because `torch.ao.nn` uses lazy imports, we need to make
+# sure we import the contents explicitly here.
+import torch.ao.nn.sparse
 import torch.ao.nn as ao_nn
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
