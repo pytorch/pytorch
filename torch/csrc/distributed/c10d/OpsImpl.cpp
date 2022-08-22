@@ -27,6 +27,26 @@ c10::intrusive_ptr<Work> send_cuda(
       tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<Work> recv_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> recv_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
 c10::intrusive_ptr<Work> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -87,6 +107,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("send", send_cuda);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("recv_", recv_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("recv_", recv_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {

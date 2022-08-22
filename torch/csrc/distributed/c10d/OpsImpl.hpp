@@ -19,6 +19,18 @@ c10::intrusive_ptr<Work> send_cuda(
     int64_t dstRank,
     int64_t tag);
 
+c10::intrusive_ptr<Work> recv_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag);
+
+c10::intrusive_ptr<Work> recv_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag);
+
 c10::intrusive_ptr<Work> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,

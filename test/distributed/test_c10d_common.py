@@ -1358,6 +1358,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         )
         collectives_and_args = [
             (dist.send, self.rank),
+            (dist.recv,),
             (dist.broadcast, self.rank),
             (dist.all_reduce,)
         ]
