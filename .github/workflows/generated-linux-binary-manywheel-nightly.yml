@@ -407,7 +407,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_7-rocm5_1_1
@@ -547,7 +547,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_7-rocm5_2
@@ -984,7 +984,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_8-rocm5_1_1
@@ -1124,7 +1124,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_8-rocm5_2
@@ -1561,7 +1561,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-rocm5_1_1
@@ -1701,7 +1701,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-rocm5_2
@@ -2138,7 +2138,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm5_1_1
@@ -2278,7 +2278,7 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm5_2
