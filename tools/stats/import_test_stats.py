@@ -110,7 +110,7 @@ def get_disabled_tests(
     def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
         # remove re-enabled tests and condense even further by getting rid of pr_num
         disabled_test_from_issues = dict()
-        for test_name, (pr_num, link, platforms) in the_response:
+        for test_name, (pr_num, link, platforms) in the_response.items():
             if pr_num not in IGNORE_DISABLED_ISSUES:
                 disabled_test_from_issues[test_name] = (
                     link,
