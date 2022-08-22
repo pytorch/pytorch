@@ -1,8 +1,7 @@
 import torch
 import torch._C as _C
-from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard  # type: ignore[attr-defined]
 from torch.utils._pytree import tree_flatten
-from torch.overrides import handle_torch_function, has_torch_function
+from torch.overrides import has_torch_function
 
 """
 This is a dispatcher (in Python)
@@ -11,14 +10,14 @@ This is a dispatcher (in Python)
 """
 
 class PyDispatcher:
-    def call(self, operator, args, kwargs):
+    def call(self, operator: "PyOperator", args, kwargs):
         dispatch_key_set = compute_keyset(args, kwargs)
         kernel = operator.lookup(dispatch_key_set)
-        return call_kernel(kernel, args, kwargs)
+        return kernel(*args, **kwargs)
 
     def redispatch(self, operator, dispatch_key_set, args, kwargs):
         kernel = operator.lookup(dispatch_key_set)
-        return call_kernel(kernel, args, kwargs)
+        return kernel(*args, **kwargs)
 
 
 dispatcher_singleton = PyDispatcher()
@@ -29,17 +28,13 @@ def compute_keyset(args, kwargs):
     return key_extractor(tensors)
 
 
-def call_kernel(kernel, args, kwargs):
-    return kernel(*args, **kwargs)
-
-
-def key_extractor(tensors, additional_exclude=None):
+# Note - this should maintain identical impl to the C++ dispatcher key extraction logic
+# at ATen/core/dispatch/DispatchKeyExtractor.h
+def key_extractor(tensors):
     key_set = _C._dispatch_tls_local_include_set()  # type: ignore[attr-defined]
     for tensor in tensors:
         key_set = key_set | _C._dispatch_keys(tensor)  # type: ignore[attr-defined]
     key_set = key_set - _C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
-    if additional_exclude is not None:
-        key_set = key_set - additional_exclude
     return key_set
 
 

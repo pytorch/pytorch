@@ -15,7 +15,7 @@ class TestControlFlow(TestCase):
 
         x = torch.randn(4)
         result = cond(False, true_fn, false_fn, x)
-        self.assertTrue(torch.allclose(result, torch.cos(x)))
+        self.assertEqual(result, torch.cos(x))
 
 
 class TestControlFlowTraced(TestCase):
@@ -35,8 +35,8 @@ class TestControlFlowTraced(TestCase):
         result_true = graph.forward(x, torch.tensor(True))
         result_false = graph.forward(x, torch.tensor(False))
         self.assertFalse(torch.allclose(result_true, result_false))
-        self.assertTrue(torch.allclose(result_true, torch.sin(x)))
-        self.assertTrue(torch.allclose(result_false, torch.cos(x)))
+        self.assertEqual(result_true, torch.sin(x))
+        self.assertEqual(result_false, torch.cos(x))
 
     def test_cond_nested_traced(self):
         def true_nested(y):
@@ -66,12 +66,12 @@ class TestControlFlowTraced(TestCase):
         self.assertNotEqual(result_true_true, result_true_false)
         self.assertFalse(torch.allclose(result_false_true, result_true_true))
 
-        self.assertTrue(torch.allclose(result_false_true, result_false_false))
+        self.assertEqual(result_false_true, result_false_false)
 
-        self.assertTrue(torch.allclose(result_true_true, (x * x) + x))
-        self.assertTrue(torch.allclose(result_true_false, x + x + x))
+        self.assertEqual(result_true_true, (x * x) + x)
+        self.assertEqual(result_true_false, x + x + x)
 
-        self.assertTrue(torch.allclose(result_false_true, torch.cos(x)))
+        self.assertEqual(result_false_true, torch.cos(x))
 
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
@@ -95,11 +95,11 @@ class TestControlFlowTraced(TestCase):
 
         a = torch.tensor([1.0, 1.0])
         result_true_true = graph.forward(a, torch.tensor(True), torch.tensor(True))
-        self.assertTrue(torch.allclose(result_true_true, (a * a) + torch.tensor([0.25, 0.25])))
+        self.assertEqual(result_true_true, (a * a) + torch.tensor([0.25, 0.25]))
 
         b = torch.tensor([2.0, 2.0])
         result_true_true = graph.forward(b, torch.tensor(True), torch.tensor(True))
-        self.assertTrue(torch.allclose(result_true_true, (b * b) + torch.tensor([0.25, 0.25])))
+        self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
 
     def test_cond_nested_traced_multi(self):
         def true_a(y):

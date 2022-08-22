@@ -2,9 +2,8 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from functorch.experimental.ops import PyOperator
 from torch.utils._pytree import tree_flatten
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, disable_proxy_modes_tracing, get_proxy_slot
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
-from torch.dispatch.dispatcher import dispatcher_singleton
 from torch.utils._mode_utils import no_dispatch
 import random
 import string
@@ -94,7 +93,7 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
                     recursive_compare_same(a[i], b[i])
 
         recursive_compare_same(true_result, false_result)
-        
+
     args = (pred, true_graph, false_graph, operands)
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
@@ -108,15 +107,10 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
 def cond_dense(pred, true_fn, false_fn, *operands):
     mode = torch._C._get_torch_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU key"
-    try:
-        if pred:
-            return true_fn(*operands)
-        else:
-            return false_fn(*operands)
-    except Exception as e:
-        # Do something proper here, someday
-        print("Exception:", e)
-        raise e
+    if pred:
+        return true_fn(*operands)
+    else:
+        return false_fn(*operands)
 
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
@@ -129,23 +123,14 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
     return cond(pred, true_fn, false_fn, *operands)
 
 
-def cond_adinplaceorview(*args, **kwargs):
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.ADInplaceOrView))
-    return cond(*args, **kwargs)
-
-def cond_backendselect(*args, **kwargs):
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect))
-    return cond(*args, **kwargs)
-
 def python_fallback(op):
     def inner(*args, **kwargs):
         mode = torch._C._get_torch_dispatch_mode()
-        if mode:
-            with suspend_mode(mode):
-                res = trace_cond(mode, op, args, kwargs)
-            return res
-        else:
-            return cond(args, kwargs)
+        assert (mode is not None), "Mode should always be enabled for python fallback key"
+        with suspend_mode(mode):
+            res = trace_cond(mode, op, args, kwargs)
+        return res
+
     return inner
 
 

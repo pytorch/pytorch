@@ -9,8 +9,6 @@ class PyOperator:
         self.name = name
         self.table = {}
 
-        # TODO: torch_dispatch expects PyOperator to be an instance of a torch.ops.aten op.
-        self.overloadpacket = self
         self.__name__ = name
 
     def impl(self, dispatch_key, fn):
@@ -34,7 +32,7 @@ class PyOperator:
 
 def fallthrough_fn(operator, dispatch_key):
     def inner(*args, **kwargs):
-        all_keys_sans_current = _C._dispatch_keyset_full_after(dispatch_key)
-        all_keys_sans_current_masked = all_keys_sans_current & compute_keyset(args, kwargs)
-        return dispatcher_singleton.redispatch(operator, all_keys_sans_current_masked, args, kwargs)
+        all_keys_after_current = _C._dispatch_keyset_full_after(dispatch_key)
+        all_keys_after_current_masked = all_keys_after_current & compute_keyset(args, kwargs)
+        return dispatcher_singleton.redispatch(operator, all_keys_after_current_masked, args, kwargs)
     return inner
