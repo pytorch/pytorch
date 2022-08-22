@@ -3093,9 +3093,6 @@ class FullyShardedDataParallel(nn.Module):
         unsharded gradient.
         - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
         gradient (accumulating with any existing gradient).
-
-        TODO (awgu): I am not sure if gradient accumulation without
-        ``no_sync()`` works with ``NO_SHARD``.
         """
         param = handle.flat_param
         param._post_backward_called = True
