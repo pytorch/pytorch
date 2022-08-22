@@ -60,6 +60,9 @@ jobs:
           path: benchmark
           lfs: false
           ref: ${{ env.TORCHBENCH_BRANCH }}
+      - name: GPU Info
+        run: |
+          nvidia-smi
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
