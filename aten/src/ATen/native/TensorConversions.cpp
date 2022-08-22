@@ -25,20 +25,24 @@ namespace {
 // for this matrix can be performed in a single step followed by a single step
 // conversion to restore the batch dimension.
 void dense_to_sparse_compressed_prepare_check_mask_values_batched(
-    Layout const& target_layout,
+    const Layout& target_layout,
     Tensor& values,
     Tensor& mask,
     const int64_t& n_batch_dim) {
   if (n_batch_dim > 1) {
     // For inputs with more than 1 batch dim we flatten them out.
-    // Input shape (b0, b1 ..., bn, r, c) -> (b, r ,c)
+    // Input shape (b0, b1 ..., bn, r, c) -> (b0 * b1 * ... * bn, r ,c)
     values = values.flatten(0, n_batch_dim - 1);
     mask = mask.flatten(0, n_batch_dim - 1);
   }
 
+  // For informative messaging form the name of the function
+  // to_sparse_{csr,csc,bsr,bsc}.
   TORCH_CHECK(
       mask.size(0) > 0,
       "to_sparse_",
+      // We want the message to match the function name so generate the
+      // lowercase acronym for the layout
       sparse_csr::layoutToString(target_layout, false, true),
       ": Expected product of batch dimensions to be non-zero.");
 
@@ -70,6 +74,41 @@ void dense_to_sparse_compressed_prepare_check_mask_values_batched(
       });
 }
 
+// This function unfolds the compressed indices of a compressed sparse matrix
+// into a batched compressed sparse tensor.
+// This is analogous to an unflatten-like operation:
+// unflatten(0, {b, r}) for csr/bsr with input shape (r*b, c)
+//          (output shape (b, r, c))
+// unflatten(1, {b, c}).transpose(0,1) for csc/bsc with input shape (r, c*b)
+//          (output shape (r, b, c) unflatten, (b, r, c) unflatten + transpose)
+// This only operates on the compressed indices as the plain indices and values
+// can be manipulated as described above without special handling.
+// It is a prerequisite for the conversion that the sparsity pattern is sane for
+// the batched shape. That is each batch has the same number of nonzero
+// elements.
+Tensor compressed_to_batched_compressed_indices(
+    const Tensor& compressed_in,
+    const int64_t& n_batch,
+    bool out_int32) {
+  auto n_compressed_per_batch = (compressed_in.size(0) - 1) / n_batch;
+  ScalarType out_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  auto batched_out =
+      at::zeros({n_batch, n_compressed_per_batch + 1}, compressed_in.options());
+
+  using namespace indexing;
+  // If the compressed dimension has length zero there is 1 element in each
+  // batch and it is zero we already have this result formed
+  if (n_compressed_per_batch > 0) {
+    auto trailing_slice =
+        compressed_in.index({Slice(1, None)}).reshape({n_batch, -1});
+    auto offsets = compressed_in.index({Slice(0, -1, n_compressed_per_batch)})
+                       .reshape({n_batch, -1});
+    batched_out.index_put_(
+        {Ellipsis, Slice(1, None)}, trailing_slice - offsets);
+  }
+  return batched_out.to(out_type);
+}
+
 // After generating member tensors for sparse_compressed matrix, if the target
 // shape is N-D we must reform the batch dimensions.
 // Single kernel is used to restore one batch dimension in the compressed
@@ -77,7 +116,7 @@ void dense_to_sparse_compressed_prepare_check_mask_values_batched(
 // handling is needed for restoring batch dimensions of the values or
 // plain_indices it can be done with reshape/unflatten.
 void reshape_2d_sparse_compressed_members_to_nd_batched(
-    const IntArrayRef& full_sizes,
+    const IntArrayRef full_sizes,
     const int64_t& n_batch_dim,
     Tensor& compressed_indices,
     Tensor& plain_indices,
@@ -88,7 +127,7 @@ void reshape_2d_sparse_compressed_members_to_nd_batched(
   // NOTE: using this conversion requires the nnz per batch is the same for all
   // batches that will be formed. We ensured this was the case on the way in so
   // it is safe to use this conversion.
-  compressed_indices = at::_compressed_to_batched_compressed_indices(
+  compressed_indices = compressed_to_batched_compressed_indices(
       compressed_indices, n_batch, /*out_int32*/ false);
 
   // We can infer the last dim of the reshape targets, it will be nnz or
@@ -1109,49 +1148,6 @@ void convert_indices_from_csr_to_coo_cpu(
         }
       });
 }
-
-// This function unfolds the compressed indices of a compressed sparse matrix
-// into a batched compressed sparse tensor.
-// This is analogous to an unflatten-like operation:
-// unflatten(0, {b, r}) for csr/bsr with input shape (r*b, c)
-//          (output shape (b, r, c))
-// unflatten(1, {b, c}).transpose(0,1) for csc/bsc with input shape (r, c*b)
-//          (output shape (r, b, c) unflatten, (b, r, c) unflatten + transpose)
-// This only operates on the compressed indices as the plain indices and values
-// can be manipulated as described above without special handling.
-// It is a prerequisite for the conversion that the sparsity pattern is sane for
-// the batched shape. That is each batch has the same number of nonzero
-// elements.
-template <typename input_t, typename output_t>
-void compressed_to_batched_compressed_indices_cpu(
-    const Tensor& batched_out,
-    const Tensor& compressed_in,
-    const int64_t n_batch) {
-  auto compressed_ = compressed_in.expect_contiguous();
-  TORCH_INTERNAL_ASSERT(batched_out.is_contiguous());
-  input_t* compressed_data_in = compressed_->data_ptr<input_t>();
-  output_t* batched_data_out = batched_out.data_ptr<output_t>();
-
-  const auto nnz = compressed_data_in[compressed_in.size(-1) - 1];
-  const auto ncomp_per_batch = (compressed_in.size(-1) - 1) / n_batch;
-  const auto nnz_per_batch = nnz / n_batch;
-  // number of writes per batch
-  const auto batch_length = ncomp_per_batch + 1;
-
-  at::parallel_for(
-      0, n_batch, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        for (auto b : c10::irange(start, end)) {
-          const auto c0 = b * ncomp_per_batch;
-          const auto batch_delta = b * nnz_per_batch;
-          const auto b0 = b * batch_length;
-          for (auto i = 0; i < batch_length; ++i) {
-            batched_data_out[b0 + i] =
-                static_cast<output_t>(compressed_data_in[c0 + i] - batch_delta);
-          }
-        }
-      });
-}
-
 } // namespace
 
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
@@ -1191,30 +1187,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
         crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
           convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(
               result, crow_indices, col_indices, transpose);
-        });
-  }
-}
-
-TORCH_IMPL_FUNC(_compressed_to_batched_compressed_indices_structured_cpu)
-(const Tensor& compressed_indices,
- const int64_t n_batch,
- const bool out_int32,
- const Tensor& result) {
-  if (out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(
-        compressed_indices.scalar_type(),
-        "compressed_to_batched_compressed_indices_cpu",
-        [&] {
-          compressed_to_batched_compressed_indices_cpu<scalar_t, int32_t>(
-              result, compressed_indices, n_batch);
-        });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(
-        compressed_indices.scalar_type(),
-        "compressed_to_batched_compressed_indices_cpu",
-        [&] {
-          compressed_to_batched_compressed_indices_cpu<scalar_t, int64_t>(
-              result, compressed_indices, n_batch);
         });
   }
 }
