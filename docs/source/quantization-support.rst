@@ -350,16 +350,15 @@ quantization and will be dynamically quantized during inference.
 
     Linear
 
-torch.ao.nn.quantized
+torch.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.ao.nn.quantized
-   :noindex:
-.. automodule:: torch.ao.nn.quantized.modules
+.. automodule:: torch.nn.quantized
+.. automodule:: torch.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
 ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
 
-.. currentmodule:: torch.ao.nn.quantized
+.. currentmodule:: torch.nn.quantized
 
 .. autosummary::
     :toctree: generated
@@ -535,5 +534,3 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. These modules are missing docs. Adding them here only for tracking
 .. automodule:: torch.nn.quantizable
 .. automodule:: torch.nn.quantizable.modules
-.. automodule:: torch.nn.quantized
-   :noindex:

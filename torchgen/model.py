@@ -1694,9 +1694,6 @@ class Type:
     def is_list_like(self) -> Optional["ListType"]:
         raise NotImplementedError
 
-    def is_symint_like(self) -> bool:
-        raise NotImplementedError
-
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum(
@@ -2087,9 +2084,6 @@ class Arguments:
 
     def has_generator_arg(self) -> bool:
         return any(a.type.is_generator_like() for a in self.flat_non_out)
-
-    def has_symint_arg(self) -> bool:
-        return any(a.type.is_symint_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less
