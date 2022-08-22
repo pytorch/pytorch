@@ -37,10 +37,11 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
 }
 
 SymInt SymInt::operator+(SymInt sci) const {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic Add isn't supported yet");
-  return SymInt(data_ + sci.data_);
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return SymInt(data_ + sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->add(res[1]));
 }
 
 SymInt SymInt::operator*(SymInt sci) const {
@@ -72,22 +73,19 @@ bool SymInt::operator!=(SymInt sci) const {
 }
 
 bool SymInt::operator<(SymInt sci) const {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic lt isn't supported yet");
-  return data_ < sci.data_;
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ < sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->eq(res[1])->bool_();
 }
 
 void SymInt::operator*=(SymInt sci) {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic mul_ isn't supported yet");
-  data_ = data_ * sci.data_;
+  *this = *this * sci;
 }
 
 bool SymInt::operator<(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
-  return data_ < sci;
+  return *this < c10::SymInt(sci);
 }
 
 bool SymInt::operator==(int64_t sci) const {
