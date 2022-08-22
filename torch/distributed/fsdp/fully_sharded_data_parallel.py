@@ -3137,47 +3137,14 @@ class FullyShardedDataParallel(nn.Module):
                     p._post_backward_called = False
 
         # Update root and nested FSDP's hooks and flags.
-        for m in self.modules():  # includes self
-            if isinstance(m, FullyShardedDataParallel):
-                if any(p.requires_grad for p in m.parameters()):
-                    # Check if the module has params and if any of them has
-                    # the `requires_grad` field set. If `requires_grad=False` for
-                    # all the params, the post_backward hook will not fire and the
-                    # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
-                    if managed_param_requires_grad:
-                        p_assert(
-                            all(hasattr(p, '_post_backward_called') for p in m.params),
-                            "Expected all params to have flag _post_backward_called set!"
-                        )
-                        post_backward_hook_called = any(p._post_backward_called for p in m.params)
-                        if post_backward_hook_called:
-                            m._assert_state(TrainingState_.BACKWARD_POST)
-                        else:
-                            # post backward hook was not called, meaning param
-                            # did not have a gradient computed. It was either unused
-                            # in forward, or unused in loss computation so it did
-                            # not get gradient
-                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
-                    else:
-                        m._assert_state(TrainingState_.BACKWARD_PRE)
-                else:
-                    # When `m` and its children have no non-ignored params or
-                    # have non-ignored params but none with `requires_grad==True`,
-                    # there are two cases:
-                    # 1. output tensors are `requires_grad==True`. In this case,
-                    # pre-backward hook is still registered, so it is in BACKWARD_PRE state.
-                    # 2. output tensors are `requires_grad==False`. In this case,
-                    # pre-backward hook is not registered, so it is in IDLE state.
-                    m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+        for m in self.fsdp_modules(self):  # includes self
+            _finalize_params(m)
+            m._pre_backward_hook_has_run = False
+            m.training_state = TrainingState_.IDLE
 
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
-                m.training_state = TrainingState_.IDLE
-
-                if m._is_root:
-                    # reset this flag for cases like "one forward pass + multiple backward passes"
-                    self._post_backward_callback_queued = False
+            if m._is_root:
+                # reset this flag for cases like "one forward pass + multiple backward passes"
+                self._post_backward_callback_queued = False
 
         if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
             self._param_exec_order_policy_second_iter_init()
