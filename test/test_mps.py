@@ -3491,6 +3491,8 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6), 3, nn.ReplicationPad1d)
         # Constant Pad 1D
         helper((2, 3, 4), 2, nn.ConstantPad1d)
+        # Constant Pad 1D with single dimension input
+        helper((16), (1, 2), nn.ConstantPad1d)
 
         # 2D Padding
         helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
