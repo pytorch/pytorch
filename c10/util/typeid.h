@@ -529,10 +529,10 @@ class C10_API TypeMeta final {
   // from nvcc so that we always use clang (or whatever host C++ compiler)
   // for TypeIdentifier::Get.
   template <class T>
-    static uint16_t addTypeMetaData();
+  C10_EXPORT static uint16_t addTypeMetaData();
 #else
   template <class T>
-  static uint16_t addTypeMetaData() {
+  C10_EXPORT static uint16_t addTypeMetaData() {
     const auto identifier = TypeIdentifier::Get<T>();
     // Need to hold this for the rest of the function, protecting:
     // 1) existingMetaDataIndexForType()
