@@ -12408,8 +12408,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # RuntimeError: convolution does not support automatic differentiation for outputs with complex dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
