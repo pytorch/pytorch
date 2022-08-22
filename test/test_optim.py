@@ -874,9 +874,11 @@ class TestOptim(TestCase):
             self._test_complex_2d(optimizer)
             self._test_complex_2d(lambda param: optimizer(param, centered=True))
             self._test_complex_2d(lambda param: optimizer(param, momentum=0.1))
+            self._test_complex_2d(lambda param: optimizer(param, maximize=True))
             self._test_complex_optimizer(lambda param: optimizer([param]))
             self._test_complex_optimizer(lambda param: optimizer([param], centered=True))
             self._test_complex_optimizer(lambda param: optimizer([param], momentum=0.1))
+            self._test_complex_optimizer(lambda param: optimizer([param], maximize=True))
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
