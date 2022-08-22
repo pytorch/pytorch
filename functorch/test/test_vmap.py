@@ -3222,6 +3222,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
