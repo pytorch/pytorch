@@ -372,19 +372,22 @@ class _ExecOrderData:
     iteration for backward prefetching (which thus does not assume static
     graph but may be provide an incorrect order).
 
-    Additionally, if the distributed debug level is set to INFO, then this
-    tracks additional data structures for checking the execution order across
-    ranks on the first iteration and per rank across iterations.
+    Additionally, if the distributed debug level is set to at least INFO, then
+    this tracks additional data structures for checking the execution order
+    across ranks on the first iteration and per rank across iterations.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, debug_level: dist.DebugLevel) -> None:
         self.handles_to_pre_forward_order_index: Dict[Tuple[FlatParamHandle, ...], int] = {}
         self.handles_pre_forward_order: List[int] = []
         self.handles_to_post_forward_order_index: Dict[Tuple[FlatParamHandle, ...], int] = {}
         self.handles_post_forward_order: List[int] = []
-        self.is_first_iter = None
+        self.is_first_iter: Optional[bool] = None
+        self._checking_order: bool = (
+            debug_level in [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]
+        )
 
-        # The following are only used if distributed debug level is INFO
+        # The following are only used if distributed debug level >= INFO
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
@@ -400,11 +403,12 @@ class _ExecOrderData:
     ) -> None:
         """
         Initializes the data structures needed for checking the forward order.
-        This should only be called if the distributed debug level is INFO and
-        should be called after a root FSDP instance has been set during lazy
-        initialization.
+        This is a no-op if the distributed debug level is less than INFO.
+        Otherwise, this should be called after a root FSDP instance has been
+        set during lazy initialization.
         """
-        assert dist.get_debug_level() == dist.DebugLevel.INFO
+        if not self._checking_order:
+            return
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -483,15 +487,16 @@ class _ExecOrderData:
         where ``handles`` should be a group of handles used in the same
         module's forward. If ``handles`` is empty, then it is omitted.
 
-        If the distributed debug level is INFO, then this additionally checks
-        the execution order across ranks. See :meth:`_check_order` for details.
+        If the distributed debug level is at least INFO, then this additionally
+        checks the execution order across ranks. See :meth:`_check_order` for
+        details.
         """
         # TODO (awgu): For now, we exclude modules with no parameters from the
         # order, which is different from the existing implementation.
         if not handles:
             return
         handles_key = tuple(handles)
-        if dist.get_debug_level() == dist.DebugLevel.INFO:
+        if self._checking_order:
             self._check_order(handles_key)
         # Fix the order after the first iteration
         # TODO (awgu): For now, only record the first usage of a module, which
@@ -508,7 +513,7 @@ class _ExecOrderData:
     def _check_order(self, handles_key: Tuple[FlatParamHandle, ...]) -> None:
         """
         Checks the forward execution order. This should only be called if the
-        distributed debug level is INFO.
+        distributed debug level is at least INFO.
 
         On the first iteration, this uses all-gathers to check that all ranks
         are all-gathering the same handles and hence ``FlatParameter`` s,
@@ -680,7 +685,7 @@ class _ExecOrderData:
             self.is_first_iter = False
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
-        if dist.get_debug_level() == dist.DebugLevel.INFO:
+        if self._checking_order:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
                 self.warn_status = _ExecOrderWarnStatus.WARNED
@@ -960,6 +965,7 @@ class FullyShardedDataParallel(nn.Module):
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
         if self.world_size == 1:
+            # World size of 1 is functionally equivalent to `NO_SHARD`
             sharding_strategy = ShardingStrategy.NO_SHARD
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision or MixedPrecision()
@@ -1018,7 +1024,8 @@ class FullyShardedDataParallel(nn.Module):
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
         self._streams: Dict[str, torch.cuda.Stream] = {}
-        self._exec_order_data = _ExecOrderData()
+        self._debug_level = dist.get_debug_level()
+        self._exec_order_data = _ExecOrderData(self._debug_level)
         self._handles_prefetched: Dict[Tuple[FlatParamHandle, ...], bool] = {}
         # Used for `BACKWARD_POST` prefetching
         self._need_pre_backward_unshard: Dict[Tuple[FlatParamHandle, ...], bool] = {}
@@ -1718,8 +1725,7 @@ class FullyShardedDataParallel(nn.Module):
         self._cast_buffers(recurse=True)
         for handle in self._handles:
             self._init_param_attributes(handle)
-        if dist.get_debug_level() == dist.DebugLevel.INFO:
-            self._exec_order_data.init(self, self.process_group)
+        self._exec_order_data.init(self, self.process_group)
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
         for fsdp_module in self.fsdp_modules(self):
