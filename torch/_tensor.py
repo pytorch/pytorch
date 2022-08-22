@@ -770,7 +770,7 @@ class Tensor(torch._C._TensorBase):
                 pass
 
         if isinstance(split_size, int):
-            return torch._VF.split(self, split_size, dim)
+            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(self, split_size, dim)
 
