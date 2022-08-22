@@ -4076,10 +4076,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
         # since we are pruning the two lowest magnitude units, the outcome of
         # the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
+        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]].to(dtype=torch.float32))
         computed_mask = container.compute_mask(t, default_mask)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        #self.assertEqualIgnoreType(expected_mask, computed_mask)
+        # self.assertEqualIgnoreType(expected_mask, computed_mask)
+        print(expected_mask.dtype, computed_mask.dtype)
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning
@@ -4088,10 +4089,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         container.add_pruning_method(q)
         # since we are pruning the lowest magnitude one of the two rows, the
         # outcome of the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 0, 1]])
+        expected_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 0, 1]].to(dtype=torch.float32))
         computed_mask = container.compute_mask(t, default_mask)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        #self.assertEqualIgnoreType(expected_mask, computed_mask)
+        # self.assertEqualIgnoreType(expected_mask, computed_mask)
+        print(expected_mask.dtype, computed_mask.dtype)
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning, along another axis
@@ -4100,10 +4102,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         container.add_pruning_method(r)
         # since we are pruning the lowest magnitude of the four columns, the
         # outcome of the calculation should be this:
-        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
+        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]].to(dtype=torch.float32))
         computed_mask = container.compute_mask(t, default_mask)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        #self.assertEqualIgnoreType(expected_mask, computed_mask)
+        # self.assertEqualIgnoreType(expected_mask, computed_mask)
+        print(expected_mask.dtype, computed_mask.dtype)
         self.assertEqual(expected_mask, computed_mask)
 
     def test_l1_unstructured_pruning(self):
@@ -4387,6 +4390,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         #self.assertEqualIgnoreType(computed_mask, expected_mask)
+        print(expected_mask.dtype, computed_mask.dtype)
         self.assertEqual(computed_mask, expected_mask)
 
     def test_pruning_rollback(self):
@@ -11594,6 +11598,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(out.dtype, dtype)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             #self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0)
+            print(out.dtype, outf.dtype)
             self.assertEqual(out, outf, atol=0.1, rtol=0)
 
             out.sum().backward()
@@ -11726,6 +11731,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out.dtype, dtype)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         #self.assertEqualIgnoreType(out, outf, atol=1e-1, rtol=0)
+        print(out.dtype, outf.dtype)
         self.assertEqual(out, outf, atol=1e-1, rtol=0)
 
         outf.backward()
@@ -11733,6 +11739,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(input.grad.dtype, dtype)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         #self.assertEqualIgnoreType(input.grad, inputf.grad, atol=1e-1, rtol=0)
+        print(input.grad.dtype, inputf.grad.dtype)
         self.assertEqual(input.grad, inputf.grad, atol=1e-1, rtol=0)
 
     def test_cross_entropy_loss_precision(self):
@@ -18948,6 +18955,7 @@ torch.cuda.synchronize()
             self.assertEqual(indices.data.squeeze(), expected_indices)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             #self.assertEqualIgnoreType(output.data.squeeze(), expected_output)
+            print(output.data.squeeze().dtype, expected_output.dtype)
             self.assertEqual(output.data.squeeze(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
@@ -18958,6 +18966,7 @@ torch.cuda.synchronize()
         expected_grad = expected_grad(num_dim)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         #self.assertEqualIgnoreType(input_var.grad.data, expected_grad.view_as(input))
+        print(input_var.grad.data.dtype, expected_grad.view_as(input).dtype)
         self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
@@ -19921,6 +19930,7 @@ torch.cuda.synchronize()
         output = F.nll_loss(input, target, reduction=reduction)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         #self.assertEqualIgnoreType(output, expected)
+        print(output.dtype,expected.dtype)
         self.assertEqual(output, expected)
 
         output.sum().backward()
