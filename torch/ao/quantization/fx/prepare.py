@@ -32,7 +32,7 @@ from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
     update_qconfig_for_qat,
 )
-from .qconfig_utils import (
+from .qconfig_mapping_utils import (
     generate_qconfig_map,
     update_qconfig_for_fusion,
 )

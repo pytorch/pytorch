@@ -23,6 +23,36 @@ class LstmPackedContext final : virtual public VulkanPackedContext,
       bool bidirectional,
       bool batch_first);
 
+  /*
+   * Assigns a name to each index in the unpacked list.
+   */
+  struct Unpacked final {
+    static constexpr uint32_t Params = 0u;
+    static constexpr uint32_t hasBiases = 1u;
+    static constexpr uint32_t NumLayers = 2u;
+    static constexpr uint32_t Dropout = 3u;
+    static constexpr uint32_t Train = 4u;
+    static constexpr uint32_t Bidirectional = 5u;
+    static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
+  };
+
+  /*
+   * Assigns a name to each index in the packed list.
+   */
+  struct Packed final {
+    static constexpr uint32_t LinearContexts = 0u;
+    static constexpr uint32_t hasBiases = 1u;
+    static constexpr uint32_t NumLayers = 2u;
+    static constexpr uint32_t Dropout = 3u;
+    static constexpr uint32_t Train = 4u;
+    static constexpr uint32_t Bidirectional = 5u;
+    static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
+  };
+
   static LstmPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override;
