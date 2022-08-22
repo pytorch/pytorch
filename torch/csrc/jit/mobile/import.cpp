@@ -703,9 +703,28 @@ void _load_extra_only_for_mobile(
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  deserializer.deserialize_only_extra(device, extra_files);
+
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+
+  auto format = getFileFormat(data.get());
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      BytecodeDeserializer deserializer(std::move(reader));
+      deserializer.deserialize_only_extra(device, extra_files);
+      break;
+    }
+    case FileFormat::FlatbufferFileFormat: {
+      // hack: the current flatbuffers implementation will always load the whole module including the extra files. Ideally it should be possible to just get the extra files given data
+      load_flatbuffer_bytes(data, size, device, &extra_files);
+      break;
+    }
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 namespace mobile {
