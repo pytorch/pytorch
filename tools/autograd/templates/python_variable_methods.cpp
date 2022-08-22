@@ -232,7 +232,12 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     return THPUtils_packInt64(self_.numel());
+     auto si = self_.sym_numel();
+     if (si.is_symbolic()) {
+       return py::cast(si.toSymIntNodeImpl()).release().ptr();
+     } else {
+       return THPUtils_packInt64(si.as_int_unchecked());
+     }
    }
    END_HANDLE_TH_ERRORS
 }
@@ -1146,7 +1151,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1162,7 +1167,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,

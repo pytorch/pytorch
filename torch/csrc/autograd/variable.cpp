@@ -45,6 +45,8 @@ DifferentiableViewMeta::DifferentiableViewMeta(
     self_impl->set_version_counter(
         impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+    TORCH_INTERNAL_ASSERT(
+        backward_info_.value().base_.unsafeGetTensorImpl() != self_impl);
   }
   if (shared_view_info_) {
     TORCH_INTERNAL_ASSERT(
@@ -692,7 +694,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             torch::autograd::collect_next_edges(view_info.base_));
         fn->add_input_metadata(
             view_info.base_.options(),
-            self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+            self.sym_sizes(), // Note: sizes(), not base_.sizes(), is
+                              // intentional
             self.unsafeGetTensorImpl()->is_python_dispatch());
         diff_view_meta->grad_fn_ = std::move(fn);
       }

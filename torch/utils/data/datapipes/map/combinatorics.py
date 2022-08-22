@@ -28,6 +28,7 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         indices: a list of indices of the MapDataPipe. If not provided, we assume it uses 0-based indexing
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
         >>> shuffle_dp = dp.shuffle()
@@ -49,7 +50,10 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
         random.shuffle(self.indices)
 
     def __getitem__(self, index) -> T_co:
-        old_numeric_index = self.index_map[index]
+        try:
+            old_numeric_index = self.index_map[index]
+        except KeyError:
+            raise IndexError(f"Index {index} is out of range for {self}.")
         new_index = self.indices[old_numeric_index]
         return self.datapipe[new_index]
 

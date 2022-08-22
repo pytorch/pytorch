@@ -85,11 +85,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
-                fd.add_input(x)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
-                fd.add_input(x)
                 return x
             else:
                 return arg
@@ -117,7 +115,8 @@ def nvfuser_execute(gm: GraphModule, *args):
     nv_template_args = to_nvfuser_template_args(flat_args)
     fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
+    # Inputs to fusion.execute correspond to the same template/symbolic inputs
+    # marked with `define_tensor/scalar`
     concrete_fusion_inputs = tuple(
         arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
     )
@@ -148,6 +147,15 @@ class PartitionedInterpreter(torch.fx.Interpreter):
             return super().call_module(target, args, kwargs)
 
 
+class NvfuserGraphModule(torch.nn.Module):
+    def __init__(self, gm):
+        super().__init__()
+        self.gm = gm
+
+    def __call__(self, *args):
+        return nvfuser_execute(self.gm, *args)
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache()  # type: ignore[arg-type]
 def maybe_partition_graph(gm: GraphModule):
@@ -172,6 +180,17 @@ def maybe_partition_graph(gm: GraphModule):
                 category=RuntimeWarning,
             )
         partitioned_graph = partitioner.fuse_partitions(partitions)
+
+        # Replacing graph's fused submodules with a wrapper module with
+        # __call__() method that calls nvfuser_execute.
+        # This avoids the need to call the interpreter on the graph
+        for node in partitioned_graph.graph.nodes:
+            # TODO: use a better way to identify fused submodule
+            if node.op == "call_module" and "fused_" in node.name:
+                nvfuser_submodule = getattr(partitioned_graph, node.name)
+                partitioned_graph.delete_submodule(node.target)
+                gm.add_submodule(node.target, NvfuserGraphModule(nvfuser_submodule))
+
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
@@ -182,6 +201,6 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args):
     # because it avoids PartitionedInterpreter's overhead
     gm, is_partitioned = maybe_partition_graph(gm)
     if is_partitioned:
-        return PartitionedInterpreter(gm).run(*args)
+        return gm(*args)
     else:
         return nvfuser_execute(gm, *args)

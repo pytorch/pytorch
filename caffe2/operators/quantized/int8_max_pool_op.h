@@ -38,10 +38,10 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_EQ(Y_zero_point, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_EQ(Y_zero_point, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
 
-    CHECK_EQ(X.t.dim(), 4);
+    TORCH_CHECK_EQ(X.t.dim(), 4);
     const int channels = X.t.dim32(3);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), channels);
 

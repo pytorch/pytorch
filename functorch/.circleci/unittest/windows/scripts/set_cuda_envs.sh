@@ -4,7 +4,7 @@ set -ex
 echo CU_VERSION is "${CU_VERSION}"
 echo CUDA_VERSION is "${CUDA_VERSION}"
 
-# Currenly, CU_VERSION and CUDA_VERSION are not consistent. 
+# Currenly, CU_VERSION and CUDA_VERSION are not consistent.
 # to understand this code, see https://github.com/pytorch/vision/issues/4443
 version="cpu"
 if [[ ! -z "${CUDA_VERSION}" ]] ; then

@@ -31,6 +31,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             - Key(s) is used for dict.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def is_even(n):
         ...     return n % 2 == 0
