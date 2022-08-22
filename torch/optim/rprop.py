@@ -243,7 +243,7 @@ def _multi_tensor_rprop(params: List[Tensor],
     step_sizes = _view_complex_as_real(step_sizes)
 
     if maximize:
-        torch._foreach_neg_(grads)
+        torch._foreach_neg(grads)
 
     signs = torch._foreach_mul(grads, prevs)
     signs = [s.sign() for s in signs]

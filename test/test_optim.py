@@ -313,7 +313,7 @@ class TestOptim(TestCase):
 
         for _ in range(3):
             complex_param.grad = torch.randn_like(complex_param)
-            real_param.grad = torch.view_as_real(complex_param.grad.clone())
+            real_param.grad = torch.view_as_real(complex_param.grad)
             complex_opt.step()
             real_opt.step()
 
