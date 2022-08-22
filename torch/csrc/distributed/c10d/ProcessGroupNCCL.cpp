@@ -2054,7 +2054,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_oop(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * inputTensors.size() + opts.rootTensor;
         const auto ncclDataType = getNcclDataType(input.scalar_type());
-        const auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+        const auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -2199,7 +2200,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
           const auto ncclDataType = getNcclDataType(input.scalar_type());
-          const auto ncclReduceOp = getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+          const auto ncclReduceOp = getNcclReduceOp(
+              opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
           return ncclReduceScatter(
               input.data_ptr(),
               output.data_ptr(),
