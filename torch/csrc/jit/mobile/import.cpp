@@ -713,7 +713,9 @@ void _load_extra_only_for_mobile(
       break;
     }
     case FileFormat::FlatbufferFileFormat: {
-      // TODO: the current flatbuffers implementation will always load the whole module including the extra files. Ideally it should be possible to just get the extra files given data
+      // TODO: the current flatbuffers implementation will always load the
+      // whole module including the extra files. Ideally it should be
+      // possible to just get the extra files given data
       std::shared_ptr<char> data;
       size_t size = 0;
       std::tie(data, size) = get_file_content(filename.c_str());
