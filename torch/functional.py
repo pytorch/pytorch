@@ -1073,7 +1073,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     else:
         return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
 
-def cartesian_prod(*tensors):
+def cartesian_prod(*tensors: Tensor) -> Tensor:
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
 

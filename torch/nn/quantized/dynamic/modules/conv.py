@@ -9,8 +9,8 @@ from torch import Tensor
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.conv import _reverse_repeat_padding
-import torch.nn.quantized.modules as nnq
+from torch.ao.nn.quantized.modules.conv import _reverse_repeat_padding
+import torch.ao.nn.quantized as nnq
 import warnings
 
 __all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']

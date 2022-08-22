@@ -1562,8 +1562,9 @@ class FunctionSchema:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
     def has_symint(self) -> bool:
-        # TODO: handle symint return as well
-        return self.arguments.has_symint_arg()
+        return self.arguments.has_symint_arg() or any(
+            r.type.is_symint_like() for r in self.returns
+        )
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)
@@ -1675,11 +1676,17 @@ class Type:
     # so we can conveniently generate legacy Declarations.yaml but
     # really we should probably just remove these at some point
 
-    def is_tensor_like(self) -> bool:
+    def is_base_ty_like(self, base_ty: "BaseTy") -> bool:
         raise NotImplementedError
 
+    def is_tensor_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.Tensor)
+
     def is_generator_like(self) -> bool:
-        raise NotImplementedError
+        return self.is_base_ty_like(BaseTy.Generator)
+
+    def is_symint_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.SymInt)
 
     def is_nullable(self) -> bool:
         raise NotImplementedError
@@ -1724,11 +1731,8 @@ class BaseType(Type):
     def __str__(self) -> str:
         return f"{self.name.name}"
 
-    def is_tensor_like(self) -> bool:
-        return self.name == BaseTy.Tensor
-
-    def is_generator_like(self) -> bool:
-        return self.name == BaseTy.Generator
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.name == base_ty
 
     def is_nullable(self) -> bool:
         return False
@@ -1748,11 +1752,8 @@ class OptionalType(Type):
     def __str__(self) -> str:
         return f"{self.elem}?"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
-
-    def is_generator_like(self) -> bool:
-        return self.elem.is_generator_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
 
     def is_symint_like(self) -> bool:
         return self.elem.is_symint_like()
@@ -1775,13 +1776,7 @@ class CustomClassType(Type):
         """
         return f"__torch__.torch.classes.{self.class_name}"
 
-    def is_tensor_like(self) -> bool:
-        """
-        Assume a custom class is not a tensor.
-        """
-        return False
-
-    def is_generator_like(self) -> bool:
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
         return False
 
     def is_symint_like(self) -> bool:
@@ -1813,11 +1808,8 @@ class ListType(Type):
         size = f"{self.size}" if self.size else ""
         return f"{self.elem}[{size}]"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
-
-    def is_generator_like(self) -> bool:
-        return self.elem.is_generator_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
 
     def is_symint_like(self) -> bool:
         return self.elem.is_symint_like()
@@ -2089,6 +2081,9 @@ class Arguments:
 
     def has_tensor_arg(self) -> bool:
         return any(a.type.is_tensor_like() for a in self.flat_non_out)
+
+    def has_symint_arg(self) -> bool:
+        return any(a.type.is_symint_like() for a in self.flat_non_out)
 
     def has_generator_arg(self) -> bool:
         return any(a.type.is_generator_like() for a in self.flat_non_out)

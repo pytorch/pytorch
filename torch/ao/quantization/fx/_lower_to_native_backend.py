@@ -6,10 +6,10 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized._reference as nnqr
-from torch.nn.quantized.modules.utils import WeightedQuantizedModule
+from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from .graph_module import QuantizedGraphModule
 from .utils import (
     collect_producer_nodes,
