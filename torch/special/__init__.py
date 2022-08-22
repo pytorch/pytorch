@@ -9,13 +9,18 @@ __all__ = [
     'bessel_j1',
     'bessel_y0',
     'bessel_y1',
+    'bulirsch_elliptic_integral_el1',
+    'carlson_elliptic_r_c',
     'chebyshev_polynomial_t',
     'chebyshev_polynomial_u',
     'chebyshev_polynomial_v',
     'chebyshev_polynomial_w',
+    'complete_carlson_elliptic_r_f',
+    'complete_carlson_elliptic_r_g',
     'complete_legendre_elliptic_integral_d',
     'complete_legendre_elliptic_integral_e',
     'complete_legendre_elliptic_integral_k',
+    'complete_legendre_elliptic_integral_pi',
     'cos_pi',
     'cosh_pi',
     'digamma',
@@ -38,6 +43,9 @@ __all__ = [
     'i0e',
     'i1',
     'i1e',
+    'incomplete_legendre_elliptic_integral_d',
+    'incomplete_legendre_elliptic_integral_e',
+    'incomplete_legendre_elliptic_integral_f',
     'laguerre_polynomial_l',
     'legendre_polynomial_p',
     'ln_gamma_sign',
@@ -1477,3 +1485,12 @@ Args:
 Keyword args:
     {out}
 """.format(**common_args))
+
+bulirsch_elliptic_integral_el1 = _add_docstr(_special.special_bulirsch_elliptic_integral_el1, "")
+carlson_elliptic_r_c = _add_docstr(_special.special_carlson_elliptic_r_c, "")
+complete_carlson_elliptic_r_f = _add_docstr(_special.special_complete_carlson_elliptic_r_f, "")
+complete_carlson_elliptic_r_g = _add_docstr(_special.special_complete_carlson_elliptic_r_g, "")
+complete_legendre_elliptic_integral_pi = _add_docstr(_special.special_complete_legendre_elliptic_integral_pi, "")
+incomplete_legendre_elliptic_integral_d = _add_docstr(_special.special_incomplete_legendre_elliptic_integral_d, "")
+incomplete_legendre_elliptic_integral_e = _add_docstr(_special.special_incomplete_legendre_elliptic_integral_e, "")
+incomplete_legendre_elliptic_integral_f = _add_docstr(_special.special_incomplete_legendre_elliptic_integral_f, "")

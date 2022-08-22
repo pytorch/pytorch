@@ -1,4 +1,4 @@
-#include <ATen/native/special_functions/cos_pi.h>
+#include <ATen/native/special/cos_pi.h>
 #include <gtest/gtest.h>
 
 template<typename T1>

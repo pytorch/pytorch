@@ -123,7 +123,7 @@ file(GLOB native_ao_sparse_h
             "native/ao_sparse/quantized/cpu/*.h")
 file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
-
+file(GLOB native_cpu_special_h "native/cpu/special/*.cpp")
 file(GLOB native_cuda_cu "native/cuda/*.cu")
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
@@ -175,6 +175,7 @@ if(BUILD_LITE_INTERPRETER)
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
+    ${native_cpu_special_h}
     ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
     ${native_transformers_cpp}
