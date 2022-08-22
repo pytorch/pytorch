@@ -892,7 +892,8 @@ class FullyShardedDataParallel(nn.Module):
             the sharding strategy is ``FULL_SHARD``, this represents the
             maximum number of actively issued all-gathers. When this limit is
             reached, FSDP blocks the CPU thread to ensure that some FSDP
-            parameters are freed before issuing further all-gathers.
+            parameters are freed before issuing further all-gathers. (Default:
+            ``None``)
 
     """
     def __init__(
@@ -3116,9 +3117,6 @@ class FullyShardedDataParallel(nn.Module):
         unsharded gradient.
         - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
         gradient (accumulating with any existing gradient).
-
-        TODO (awgu): I am not sure if gradient accumulation without
-        ``no_sync()`` works with ``NO_SHARD``.
         """
         param = handle.flat_param
         param._post_backward_called = True
