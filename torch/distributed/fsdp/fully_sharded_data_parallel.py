@@ -3383,7 +3383,7 @@ class FullyShardedDataParallel(nn.Module):
             allowed_debug_levels = [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]
             if (
                 eod.warn_status == _ExecOrderWarnStatus.WARNED
-                or dist.get_debug_level() not in allowed_debug_levels
+                or self._debug_level not in allowed_debug_levels
             ):
                 return
             # However, we may issue multiple warnings on the first deviating
