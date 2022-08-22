@@ -484,12 +484,19 @@ wanted `const T*`.)
   autogen: my_op, my_op.out
 ```
 
-For an in-place variant of a native function (op name ends with an `_`), we offer the option to
-generate a functional variant and an out= variant. If a functional variant is given, we will be
-able to generate an out= variant. We don't support `autogen` for view ops, ops that bypass the
-dispatcher and composite ops. We also generate kernels for generated ops, which merely copy and
-return the result from the base ops. These generated kernels can be found in
-`<gen-out>/aten/src/ATen/CompositeViewCopyKernels.cpp`.
+`autogen` keyword is being used to specify which native function the codegen system should generate
+implementations for.
+* For an in-place variant of a native function (op name ends with an `_`), we will generate a functional
+variant and an out= variant.
+* If a functional variant is given, we generate an out= variant.
+* We don't support `autogen` for view ops, ops that bypass the dispatcher as well as composite ops.
+
+We also generate kernels for generated ops, which merely copy and return the result from the base ops.
+These generated kernels can be found in `<gen-out>/aten/src/ATen/CompositeViewCopyKernels.cpp`.
+
+Also notice that for new operators being added to `native_functions.yaml`, if they satisfy the requirements
+mentioned above, they should include `autogen` keyword, since functionalization depends on it. We will
+enforce this in codegen.
 
 
 ## Writing an implementation in C++
