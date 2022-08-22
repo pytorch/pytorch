@@ -444,12 +444,6 @@ $0 = input('x')
 $1 = torch._ops.aten.detach.default($0)
 $2 = torch._ops.aten.detach.default($1)''')
 
-    def test_metadata_change_not_allowed(self) -> None:
-        x = LoggingTensor(torch.ones(1))
-        y = x.data
-        self.assertIsInstance(y, LoggingTensor)
-        self.assertRaises(RuntimeError, lambda: y.resize_(4))
-
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
