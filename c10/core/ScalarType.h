@@ -81,7 +81,7 @@ enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
 #undef DEFINE_ENUM
-      Undefined,
+  Undefined,
   NumOptions
 };
 
