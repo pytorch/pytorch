@@ -523,6 +523,16 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
+@register_meta([aten.mm.default], register_dispatcher=False)
+def meta_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be 2D")
+    check(b.dim() == 2, lambda: "b must be 2D")
+    N, M1 = a.shape
+    M2, P = b.shape
+    check(M1 == M2, lambda: "a and b must have same reduction dim")
+    return a.new_empty(N, P)
+
+
 @register_meta([aten.addbmm.default, aten.addbmm.out])
 @out_wrapper()
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):

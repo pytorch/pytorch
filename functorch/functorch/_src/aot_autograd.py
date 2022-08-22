@@ -267,7 +267,10 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="symbolic")(*flat_args)
+    fw_module.graph.eliminate_dead_code()
+    fw_module.recompile()
+    print(fw_module.code)
     with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
@@ -293,7 +296,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         _num_outs = 1
 
     joint_inputs = (flat_args, out)
-    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+    fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode="symbolic")(*joint_inputs)
 
     if config.use_functionalize:
         # Functionalize the foward backward graph. First create a

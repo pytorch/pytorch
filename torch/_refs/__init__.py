@@ -2608,6 +2608,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
+        return prims.reshape(a, shape)
         while accum % length != 0:
             end = end + 1
             accum = accum * a_.shape[end]
@@ -3158,7 +3159,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, *shape, allow_copy=False)
+    return _reshape_view_helper(a, *shape, allow_copy=True)
 
 
 # CompositeImplicitAutograd - don't register decomp
