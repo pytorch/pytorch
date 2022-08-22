@@ -1963,6 +1963,8 @@ class TestCase(expecttest.TestCase):
 
 
         if TEST_WITH_TORCHDYNAMO:
+            # Avoid flakiness due to residual dynamo state
+            torchdynamo.reset()
             with torchdynamo.optimize("eager"):
                 super().run(result=result)
 
