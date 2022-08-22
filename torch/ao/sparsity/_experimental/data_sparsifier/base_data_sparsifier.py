@@ -51,7 +51,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             configuration. Only the keys that don't exist in the `config` will
             be updated.
     Example::
-
+        >>> # xdoctest: +SKIP
         >>> data_list = [('tensor_1', torch.randn(3,3)), ('tensor_2', torch.randn(4,4))]
         >>> defaults = {'sparsity_level': 0.7}
         >>> sparsifier = DerivedDataSparsifier(data_list = data_list, **defaults) # Some sparsifier that inherits BaseDataSparsifier

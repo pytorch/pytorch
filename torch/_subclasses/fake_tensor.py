@@ -34,11 +34,13 @@ class DynamicOutputShapeException(RuntimeError):
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
     aten.nested_tensor.default,
+    aten.nested_tensor.out,
     aten.pin_memory.default,
     aten.is_pinned.default,
     aten.to.device,
     aten.to.prim_Device,
     aten._pin_memory.default,
+    aten._pin_memory.out,
     aten._resize_output.default,
     aten._resize_output.out,
 )
@@ -56,19 +58,31 @@ def contains_tensor_types(type):
 
 _like_tensor_constructors = (
     aten.empty_like.default,
+    aten.empty_like.out,
     aten.full_like.default,
+    aten.full_like.out,
     aten.ones_like.default,
+    aten.ones_like.out,
     aten.rand_like.default,
+    aten.rand_like.out,
     aten.randn_like.default,
+    aten.randn_like.out,
     aten.randint_like.default,
+    aten.randint_like.out,
     aten.randint_like.low_dtype,
-    aten.randn_like.default,
+    aten.randint_like.low_dtype_out,
     aten.zeros_like.default,
+    aten.zeros_like.out,
     aten.new_empty.default,
+    aten.new_empty.out,
     aten.new_empty_strided.default,
+    aten.new_empty_strided.out,
     aten.new_full.default,
+    aten.new_full.out,
     aten.new_zeros.default,
+    aten.new_zeros.out,
     aten.new_ones.default,
+    aten.new_ones.out,
 )
 
 

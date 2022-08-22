@@ -11,30 +11,15 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Simple selector that only propagates across tensor views in the provided
-// unordered_set. Will also propagate to all consumers of those tensors, and the
-// siblings of those tensors.
-class TORCH_CUDA_CU_API InlinePropagatorSelector
-    : public MaxInfoSpanningTree::Selector {
-  std::unordered_set<TensorView*> selected_;
-
- public:
-  virtual bool allowC2P(TensorView* from, TensorView* to) override;
-  virtual bool allowP2C(TensorView* from, TensorView* to) override;
-  virtual bool allowSibling(TensorView* from, TensorView* to) override;
-
-  InlinePropagatorSelector(std::unordered_set<TensorView*> selected)
-      : selected_(std::move(selected)){};
-  const std::unordered_set<TensorView*>& selected() const {
-    return selected_;
-  }
-};
-
 class TORCH_CUDA_CU_API MaxPosCalculator {
   ComputeAtMode mode_ = ComputeAtMode::Standard;
 
   // Root domains in producer that's unmappable to any of its consumers
   std::unordered_set<IterDomain*> unmappable_dims_;
+
+  // User set IterDomains to not inline, used in schedulers to avoid inlining
+  // trivial reductions
+  std::unordered_set<IterDomain*> uninlinable_ids_;
 
   // Iterate through all TVs and collect the dimensions of each TV that don't
   // map to all its consumer TVs.
@@ -65,7 +50,9 @@ class TORCH_CUDA_CU_API MaxPosCalculator {
       TensorView* producer,
       TensorView* consumer) const;
 
-  MaxPosCalculator(ComputeAtMode mode);
+  MaxPosCalculator(
+      ComputeAtMode mode,
+      std::unordered_set<IterDomain*> uninlinable_ids = {});
 };
 
 // Propagate inline position to the `selected` tensors in the DAG. If `selected`
@@ -91,17 +78,18 @@ class TORCH_CUDA_CU_API InlinePropagator
 
   const MaxPosCalculator max_pos_calc;
   std::unordered_set<TensorView*> selected_;
+  std::unordered_set<TensorView*> needs_update_max_producer_;
   TensorView* reference_;
   size_t reference_pos_;
   ComputeAtMode mode_ = ComputeAtMode::Standard;
-  bool is_first_ = true;
 
  public:
   InlinePropagator(
       TensorView* reference,
       int64_t reference_pos,
       ComputeAtMode mode = ComputeAtMode::Standard,
-      std::unordered_set<TensorView*> selected = {});
+      std::unordered_set<TensorView*> selected = {},
+      std::unordered_set<IterDomain*> uninlinable_ids = {});
 
   InlinePropagator(
       TensorView* reference,
@@ -117,24 +105,11 @@ class TORCH_CUDA_CU_API InlinePropagator
 
   // Actually propagate the transformations for the inlining pass. Uses the
   // functions above to figure out what position to do the propagation at.
+  virtual void setUp() override;
   virtual void propagateC2P(TensorView* from, TensorView* to) override;
   virtual void propagateP2C(TensorView* from, TensorView* to) override;
   virtual void propagateSibling(TensorView* from, TensorView* to) override;
-};
-
-// This is actually not a propagation, it only sets the max producer position of
-// the tensors, and it is not needed to compute the max producer position in a
-// specific order. But MaxInfoSpanningTree provides a very convenient API to
-// visit the tensors, so I just use it for cleaner code.
-class TORCH_CUDA_CU_API MaxProducerPosUpdater
-    : public MaxInfoSpanningTree::Propagator {
-  std::unordered_set<TensorView*> updated_;
-  void handle(TensorView* tv);
-
- public:
-  virtual void propagateC2P(TensorView* from, TensorView* to) override;
-  virtual void propagateP2C(TensorView* from, TensorView* to) override;
-  virtual void propagateSibling(TensorView* from, TensorView* to) override;
+  virtual void tearDown() override;
 };
 
 } // namespace cuda
