@@ -109,15 +109,15 @@ def _get_default_op_backend_configs(dtype_configs: List[DTypeConfig]) -> List[Ba
     ]]
 
     default_op_backend_configs.append(
-        _get_default_op_backend_config(torch.nn.functional.layer_norm)
+        _get_default_op_backend_config(torch.nn.functional.layer_norm, dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 3})
     )
     default_op_backend_configs.append(
-        _get_default_op_backend_config(torch.nn.functional.group_norm)
+        _get_default_op_backend_config(torch.nn.functional.group_norm, dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 3})
     )
     default_op_backend_configs.append(
-        _get_default_op_backend_config(torch.nn.functional.instance_norm)
+        _get_default_op_backend_config(torch.nn.functional.instance_norm, dtype_configs)
         ._set_input_type_to_index({"weight": 3, "bias": 4})
     )
 
@@ -226,7 +226,7 @@ def get_test_only_legacy_native_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack) with various additional fp16 ops.
     """
-    default_dtype_configs = [default_dynamic_int8_dtype_config]
+    default_dtype_configs = [default_op_quint8_dtype_config]
     conv_dtype_configs = [weighted_op_int8_dtype_config]
     linear_dtype_configs = [
         weighted_op_int8_dtype_config,
@@ -262,7 +262,7 @@ def get_native_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack).
     """
-    default_dtype_configs = [default_dynamic_int8_dtype_config]
+    default_dtype_configs = [default_op_quint8_dtype_config]
     conv_dtype_configs = [weighted_op_int8_dtype_config]
     linear_dtype_configs = [
         weighted_op_int8_dtype_config,
