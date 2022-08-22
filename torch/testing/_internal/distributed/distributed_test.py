@@ -1206,13 +1206,16 @@ class DistributedTest:
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
             p2p_op_list = []
+            recv_tensors = [None for _ in range(world_size)]
+            expected_tensors = [None for _ in range(world_size)]
 
             for val in ["1", "0"]:
                 os.environ["NCCL_BLOCKING_WAIT"] = val
                 for src in range(0, world_size):
-                    send_tensor = _build_tensor(rank + 1, device_id=device_id)
-                    recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                    recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
+                    send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(src)
+                    recv_tensors[src] = _build_tensor(src + 1, value=-1, device_id=device_id).fill_(-1)
+                    expected_tensors[src] = _build_tensor(src + 1, value=-1, device_id=device_id).fill_(rank)
+                    recv_op = dist.P2POp(dist.irecv, recv_tensors[src], src)
                     p2p_op_list.append(recv_op)
                     send_op = dist.P2POp(dist.isend, send_tensor, src)
                     p2p_op_list.append(send_op)
@@ -1220,6 +1223,9 @@ class DistributedTest:
                 reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
+
+                for src in range(0, world_size):
+                    self.assertEqual(recv_tensors[src], expected_tensors[src])
 
             self._barrier()
 
@@ -1402,7 +1408,7 @@ class DistributedTest:
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
                 with self.assertRaisesRegex(
-                    RuntimeError, "All groups need to use the same backend"
+                    RuntimeError, "All ops need to use the same group"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
@@ -2195,6 +2201,46 @@ class DistributedTest:
                 True,
                 rank_to_GPU,
             )
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports reduce_scatter_v")
+        @sandcastle_skip_if(BACKEND in DistTestCases.skip_collective["reduce"], f"{BACKEND} does not support reduce")
+        @skip_if_no_gpu
+        def test_reduce_scatter_v_cuda(self):
+            self._barrier()
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            input_split_sizes = []
+            for src in group:
+                input_split_sizes.append(src + 1)
+            start_len = sum(input_split_sizes[:rank])
+            end_len = start_len + input_split_sizes[rank]
+            sum_len = sum(input_split_sizes)
+            master_value = 2
+            worker_value = 10
+
+            for async_val in [True, False]:
+                tensor = _build_tensor(sum_len, worker_value, device_id=device_id)
+                tensor[start_len:end_len].fill_(master_value)
+                out_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float).fill_(-1).cuda(device_id)
+
+                req = dist.reduce_scatter(
+                    out_tensor,
+                    list(torch.split(tensor, input_split_sizes)),
+                    dist.ReduceOp.SUM,
+                    group_id,
+                    async_val,
+                )
+                if async_val:
+                    req.wait()
+
+                expected_value = 2 + (10 * (len(group) - 1))
+                expected_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float)
+                expected_tensor = expected_tensor.fill_(expected_value).cuda(device_id)
+
+                self.assertEqual(out_tensor, expected_tensor)
+            self._barrier()
 
         @skip_if_no_gpu
         @require_backend(DistTestCases.backend_feature["gpu"])
@@ -3068,6 +3114,40 @@ class DistributedTest:
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports all_gather_v")
+        @skip_if_no_gpu
+        def test_all_gather_v_cuda(self):
+            self._barrier()
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            output_split_sizes = []
+            for dst in group:
+                output_split_sizes.append(dst + 1)
+            sum_len = sum(output_split_sizes)
+            value = 2
+
+            for async_val in [True, False]:
+                tensor = torch.empty(output_split_sizes[rank], sum_len, sum_len, dtype=torch.float).fill_(value).cuda(device_id)
+                out_tensor = _build_tensor(sum_len, -1, device_id=device_id)
+
+                req = dist.all_gather(
+                    list(torch.split(out_tensor, output_split_sizes)),
+                    tensor,
+                    group_id,
+                    async_val,
+                )
+                if async_val:
+                    req.wait()
+
+                expected_value = value
+                expected_tensor = _build_tensor(sum_len, expected_value, device_id=device_id)
+
+                self.assertEqual(out_tensor, expected_tensor)
+            self._barrier()
+
 
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
@@ -6146,7 +6226,6 @@ class DistributedTest:
             IS_MACOS or IS_WINDOWS,
             "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
         )
-        @skip_if_rocm
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA

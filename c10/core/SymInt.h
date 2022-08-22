@@ -28,10 +28,18 @@ namespace c10 {
 // SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
 class C10_API SymInt {
+  enum Unchecked {
+    UNCHECKED,
+  };
+
  public:
-  // TODO: this needs to only accept integers, not pointers
-  /*implicit*/ SymInt(int64_t d) : data_(d){};
-  SymInt() = default;
+  /*implicit*/ SymInt(int64_t d) : data_(d) {
+    TORCH_CHECK(!is_symbolic());
+  };
+  SymInt() : data_(0) {}
+
+  // unchecked c-tor accepting raw `data_`
+  SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
@@ -55,6 +63,7 @@ class C10_API SymInt {
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
+    release_(); // release the current SymIntNode if any
     data_ = s.data_;
     if (s.is_symbolic())
       s.data_ = 0;
@@ -70,10 +79,14 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  ~SymInt() {
+  void release_() {
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
+  }
+
+  ~SymInt() {
+    release_();
   }
 
   int64_t expect_int() const {
@@ -87,6 +100,7 @@ class C10_API SymInt {
 
   SymInt operator+(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  SymInt operator/(SymInt sci) const;
   bool operator==(SymInt sci) const;
   bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;

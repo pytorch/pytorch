@@ -1050,19 +1050,13 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
-               decorators=(
-                   # Failure on ROCM for BatchNorm2d float32 issue #70125
-                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
-               decorators=(
-                   # Failure on ROCM for BatchNorm3d float32 issue #70125
-                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Conv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),

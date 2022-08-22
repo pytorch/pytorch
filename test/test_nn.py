@@ -5795,7 +5795,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
-                nheads = random.randint(3, 10)
+                nheads = random.randint(2, 5) * 2
                 d_model = d_head * nheads
                 if same_embed_dim:
                     kv_dim = d_model
@@ -6035,62 +6035,62 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def _test_multihead_attn_invalid_shape_impl(self, mha):
         # Batched (3D) query cases
-        query = torch.randn(3, 3, 3)
-        key = torch.randn(3, 3, 3)
-        value = torch.randn(3, 3, 3)
+        query = torch.randn(4, 4, 4)
+        key = torch.randn(4, 4, 4)
+        value = torch.randn(4, 4, 4)
 
         msg = "expected `key` and `value` to be 3-D but found 2-D and 3-D tensors respectively"
         # 3D query, 2D key and 3D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(3, 3), value)
+            mha(query, torch.randn(4, 4), value)
 
         msg = "expected `key` and `value` to be 3-D but found 3-D and 2-D tensors respectively"
         # 3D query, 3D key and 2D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(3, 3))
+            mha(query, key, torch.randn(4, 4))
 
         msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
         # 3D query, 3D key, 3D value and 1D key_padding_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([False, True, True], dtype=torch.bool))
+            mha(query, key, value, key_padding_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
 
         msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
         # 3D query, 3D key, 3D value and 1D attn_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
 
         # Unbatched (2D) query cases
-        query = torch.randn(3, 3)
-        key = torch.randn(3, 3)
-        value = torch.randn(3, 3)
+        query = torch.randn(4, 4)
+        key = torch.randn(4, 4)
+        value = torch.randn(4, 4)
 
         msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
         # 2D query, 3D key and 2D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(3, 3, 3), value)
+            mha(query, torch.randn(4, 4, 4), value)
 
         msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
         # 2D query, 3D key and 2D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(3, 3, 3))
+            mha(query, key, torch.randn(4, 4, 4))
 
         msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
         # 2D query, 2D key, 2D value and 1D key_padding_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([[False, True, True] * 2], dtype=torch.bool))
+            mha(query, key, value, key_padding_mask=torch.tensor([[False, False, True, True] * 2], dtype=torch.bool))
 
         msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
         # 2D query, 2D key, 2D value and 1D attn_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
 
-        msg = r"Expected `attn_mask` shape to be \(3, 3, 3\)"
+        msg = r"Expected `attn_mask` shape to be \(4, 4, 4\)"
         # 2D query, 2D key, 2D value and 3D incorrect attn_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
+            mha(query, key, value, attn_mask=torch.randn(5, 4, 4).bernoulli_().to(torch.bool))
 
     def test_multihead_attn_invalid_shape(self):
-        mha = torch.nn.MultiheadAttention(3, 3)
+        mha = torch.nn.MultiheadAttention(4, 4)
         self._test_multihead_attn_invalid_shape_impl(mha)
         # Give the test a chance to hit the fast path. (Right now, it
         # won't, but gating may be less restricted in the future.)
@@ -6099,12 +6099,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @torch.no_grad()
     def test_multihead_attn_fast_path_invalid_shape(self):
-        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
+        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
 
         # Batched (3D) query cases
-        query = torch.randn(3, 3, 3)
-        key = torch.randn(3, 3, 3)
-        value = torch.randn(3, 3, 3)
+        query = torch.randn(4, 4, 4)
+        key = torch.randn(4, 4, 4)
+        value = torch.randn(4, 4, 4)
 
         # Currently, this case will just go to the slow path and get
         # the usual message because it fails the requirement to be
@@ -6134,38 +6134,38 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # Unbatched (2D) query cases
         # NOTE: error messages are the same as regular path because the fast path doesn't support 2D.
-        query = torch.randn(3, 3)
-        key = torch.randn(3, 3)
-        value = torch.randn(3, 3)
+        query = torch.randn(4, 4)
+        key = torch.randn(4, 4)
+        value = torch.randn(4, 4)
 
         msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
         # 2D query, 3D key and 2D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(3, 3, 3), value)
+            mha(query, torch.randn(4, 4, 4), value)
 
         msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
         # 2D query, 3D key and 2D value
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(3, 3, 3))
+            mha(query, key, torch.randn(4, 4, 4))
 
         msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
         # 2D query, 2D key, 2D value and 1D key_padding_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([[False, True, True] * 2], dtype=torch.bool))
+            mha(query, key, value, key_padding_mask=torch.tensor([[False, False, True, True] * 2], dtype=torch.bool))
 
         msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
         # 2D query, 2D key, 2D value and 1D attn_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
 
-        msg = r"Expected `attn_mask` shape to be \(3, 3, 3\)"
+        msg = r"Expected `attn_mask` shape to be \(4, 4, 4\)"
         # 2D query, 2D key, 2D value and 3D incorrect attn_mask
         with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
+            mha(query, key, value, attn_mask=torch.randn(5, 4, 4).bernoulli_().to(torch.bool))
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
-        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
-        nt = torch.nested_tensor([torch.randn(3, 3)])
+        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
+        nt = torch.nested_tensor([torch.randn(4, 4)])
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
         has_torch_func = torch.overrides.has_torch_function(
@@ -6186,7 +6186,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mha(nt, nt, nt)
         with torch.inference_mode():
             mha(nt, nt, nt)
-        nt = torch.nested_tensor([torch.randn(3, 3, requires_grad=False)])
+        nt = torch.nested_tensor([torch.randn(4, 4, requires_grad=False)])
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
@@ -13194,9 +13194,8 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            # TODO: fix numerical issue. See #44863
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
             output.backward(torch.randn_like(output))
             if output.is_cuda:
@@ -13213,9 +13212,8 @@ class TestNNDeviceType(NNTestCase):
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
             var = out_normed_reshaped.var(-1, unbiased=False)
-            # TODO: fix numerical issue. See #44863
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
         bad_shape_g = {
             (1, 2, 3, 4): 3,
@@ -17032,10 +17030,11 @@ torch.cuda.synchronize()
                 input = torch.randn((B, num_heads, L, L))
                 mask = torch.randint(0, 2, (B, L))
                 mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                mask_type = 1   # BxL => src_key_padding_mask
                 if (self.device_type == "cuda"):
                     input = input.cuda()
                     mask = mask.cuda()
-                native_res = torch._masked_softmax(input, mask, dim)
+                native_res = torch._masked_softmax(input, mask, dim, mask_type)
                 mask = ~mask
 
                 def slow_masked_softmax(input, mask):
@@ -17057,9 +17056,9 @@ torch.cuda.synchronize()
                     exact_dtype=True
                 )
 
-    def _test_masked_softmax_helper(self, input, dim, mask):
+    def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
-        result = torch._masked_softmax(input, mask, dim)
+        result = torch._masked_softmax(input, mask, dim, mask_type)
 
         expected = torch._softmax(input_ref.masked_fill(mask, float('-inf')), dim, False)
         grad = torch.randn_like(expected).to(dtype=expected.dtype)
@@ -17070,7 +17069,7 @@ torch.cuda.synchronize()
         # Make sure the optional argument works as well
         if dim == input.dim() - 1:
             input_ref_default = input.detach().clone().requires_grad_()
-            result_default = torch._masked_softmax(input_ref_default, mask)
+            result_default = torch._masked_softmax(input_ref_default, mask, None, mask_type)
             result_default.backward(grad)
             self.assertEqual(result, result_default)
             self.assertEqual(input.grad, input_ref_default.grad)
@@ -17090,10 +17089,11 @@ torch.cuda.synchronize()
             for dim in dims:
                 input = torch.randn(shape, requires_grad=True)
                 mask = torch.randint(0, 2, shape).bool()
+                mask_type = 1   # BxL => src_key_padding_mask
                 if (self.device_type == "cuda"):
                     input = input.cuda().detach().requires_grad_()
                     mask = mask.cuda()
-                self._test_masked_softmax_helper(input, dim, mask)
+                self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
@@ -17102,10 +17102,11 @@ torch.cuda.synchronize()
         for (x, y) in shapes:
             input = torch.randn((x, y), requires_grad=True)
             mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
+            mask_type = 1   # BxL => src_key_padding_mask
             if (self.device_type == "cuda"):
                 input = input.cuda().detach().requires_grad_()
                 mask = mask.cuda()
-            self._test_masked_softmax_helper(input, dim, mask)
+            self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     @onlyCUDA
     def test_masked_softmax_transformer_layout(self, device):
@@ -17115,11 +17116,12 @@ torch.cuda.synchronize()
         input = torch.randn((B, num_heads, L, L))
         dim = input.dim() - 1
         mask = torch.randint(0, 2, (B, L))
+        mask_type = 1   # BxL => src_key_padding_mask
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, mask, dim)
+        native_res = torch._masked_softmax(input, mask, dim, mask_type)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
@@ -17135,11 +17137,12 @@ torch.cuda.synchronize()
         input = torch.randn((B, num_heads, L, L))
         dim = input.dim() - 1
         mask = torch.randint(0, 2, (L, L))
+        mask_type = 0   # LxL => src_mask
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, mask, dim)
+        native_res = torch._masked_softmax(input, mask, dim, mask_type)
         mask = mask.expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
@@ -19755,7 +19758,6 @@ torch.cuda.synchronize()
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
@@ -19773,7 +19775,10 @@ torch.cuda.synchronize()
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
-            cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            if torch.version.hip:
+                cudnn_out = torch.miopen_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            else:
+                cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
                 self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
@@ -19781,7 +19786,6 @@ torch.cuda.synchronize()
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
@@ -19803,7 +19807,10 @@ torch.cuda.synchronize()
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
             z = z.to(memory_format=memory_format)
-            cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
+            if torch.version.hip:
+                cudnn_out = torch.miopen_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
+            else:
+                cudnn_out = torch.cudnn_convolution_add_relu(inp, w, z, alpha, None, (1, 1), (0, 0), (1, 1), 1)
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
@@ -20834,23 +20841,23 @@ torch.cuda.synchronize()
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
+        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True, dtype=dtype, device=device).eval()
         mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
-        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        query = torch.randn(4, 4, 4, dtype=dtype, device=device)
         mha(query, query, query)
 
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_fast_path_small_test(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
-        query = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True, dtype=dtype, device=device).eval()
+        query = torch.randn(4, 4, 4, dtype=dtype, device=device)
         mha(query, query, query)
 
     @dtypes(torch.double)
     @torch.no_grad()
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
-        query = torch.rand(3, 2, 1, dtype=dtype, device=device)
+        mha = torch.nn.MultiheadAttention(2, 2, bias=False, dtype=dtype, device=device)
+        query = torch.rand(2, 2, 2, dtype=dtype, device=device)
         mha(query, query, query)
 
     @dtypes(torch.double)
@@ -20863,6 +20870,17 @@ torch.cuda.synchronize()
         query = torch.rand(4, 4, 4, dtype=dtype, device=device)
         key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
+
+    @onlyCPU
+    @dtypes(torch.double)
+    def test_transformerencoderlayer_fast_path(self, device, dtype):
+        model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
+        src = torch.rand(32, 10, 512)
+        src_mask = torch.zeros(10, 10).to(torch.bool)
+
+        model.eval()
+        with torch.no_grad():
+            model(src, src_mask)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)

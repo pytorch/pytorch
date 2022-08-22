@@ -392,7 +392,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor& self, bool unbiased) {
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool unbiased,
     bool keepdim) {
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
@@ -730,6 +730,12 @@ std::vector<Shape> compute_shape_sum(
 
 std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_take(
+    const at::Tensor& self,
+    const at::Tensor& index) {
+  return {Shape(self.scalar_type(), index.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_trace(const at::Tensor& self) {
