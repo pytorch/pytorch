@@ -93,6 +93,19 @@ inline void transpose<float>(int64_t M, int64_t N, const float* src, int64_t ld_
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   fbgemm::transpose_simd<float>(M, N, src, ld_src, dst, ld_dst);
 }
+
+template <>
+inline void transpose<BFloat16>(int64_t M, int64_t N, const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  fbgemm::transpose_simd<uint16_t>(M, N, reinterpret_cast<const uint16_t*>(src), ld_src, reinterpret_cast<uint16_t*>(dst), ld_dst);
+}
+
+template <>
+inline void transpose<uint8_t>(int64_t M, int64_t N, const uint8_t* src, int64_t ld_src, uint8_t* dst, int64_t ld_dst) {
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  fbgemm::transpose_simd<uint8_t>(M, N, src, ld_src, dst, ld_dst);
+}
+
 #endif
 
 } // namespace utils
