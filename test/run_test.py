@@ -1027,6 +1027,7 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
+    options.continue_through_error = True
     has_failed = False
     failure_messages = []
     try:
