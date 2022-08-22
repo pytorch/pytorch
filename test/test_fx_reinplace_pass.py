@@ -259,8 +259,9 @@ def forward(self, a__1):
     select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
     add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
     as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 1);  clone_default = None
-    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 0);  as_strided_default = add_tensor = None
-    return select_scatter_default
+    select_int_2 = torch.ops.aten.select.int(as_strided_default, 0, 0)
+    copy__default = torch.ops.aten.copy_.default(select_int_2, add_tensor);  select_int_2 = add_tensor = None
+    return as_strided_default
     """)  # noqa: B950
 
     def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
@@ -291,8 +292,9 @@ def forward(self, a__1):
     select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
     add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
     as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 0);  clone_default = None
-    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 1);  as_strided_default = add_tensor = None
-    return select_scatter_default
+    select_int_2 = torch.ops.aten.select.int(as_strided_default, 0, 1)
+    copy__default = torch.ops.aten.copy_.default(select_int_2, add_tensor);  select_int_2 = add_tensor = None
+    return as_strided_default
     """)  # noqa: B950
 
 
@@ -320,6 +322,33 @@ def forward(self):
     diagonal_default = torch.ops.aten.diagonal.default(zeros)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, 1);  diagonal_default = None
     return [zeros]
+    """)
+
+    def test_reinplace_index_mutation(self):
+        def f():
+            a = torch.zeros(4, 4, 4)
+            a[:, 2:] = torch.ones(4, 2, 4)
+            return a
+
+        if not HAS_FUNCTIONALIZATION:
+            return
+        f2 = reinplace(make_fx(functionalize(f))())
+        expected_out = f()
+        actual_out = f2()
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self):
+    zeros = torch.ops.aten.zeros.default([4, 4, 4], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
+    slice_tensor = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_tensor_1 = torch.ops.aten.slice.Tensor(slice_tensor, 1, 2, 9223372036854775807);  slice_tensor = None
+    slice_tensor_2 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 1, 2, 9223372036854775807);  slice_tensor_2 = None
+    copy__default = torch.ops.aten.copy_.default(slice_tensor_3, ones);  slice_tensor_3 = ones = None
+    return zeros
     """)
 
 if __name__ == '__main__':
