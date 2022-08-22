@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/intrusive_ptr.h>
 
 struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor apply(
@@ -96,3 +97,7 @@ struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual int64_t groups() const = 0;
   virtual bool transpose() const = 0;
 };
+
+namespace caffe2 {
+CAFFE_DECLARE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
+} // namespace caffe2

@@ -3,10 +3,13 @@
 #include "rebatching_queue.h"
 
 #include "c10/util/irange.h"
+#include "c10/util/typeid.h"
 
 namespace caffe2 {
 
 using RebatchingQueuePtr = std::unique_ptr<RebatchingQueue>;
+
+CAFFE_DECLARE_KNOWN_TYPE(RebatchingQueuePtr);
 
 class CreateRebatchingQueueOp : public Operator<CPUContext> {
  public:

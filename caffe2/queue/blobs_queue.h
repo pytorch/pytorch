@@ -6,6 +6,7 @@
 #include <mutex>
 #include <queue>
 
+#include "c10/util/typeid.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/stats.h"
@@ -67,4 +68,5 @@ class TORCH_API BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     CAFFE_AVG_EXPORTED_STAT(write_time_ns);
   } stats_;
 };
+CAFFE_DECLARE_KNOWN_TYPE(std::shared_ptr<BlobsQueue>);
 } // namespace caffe2

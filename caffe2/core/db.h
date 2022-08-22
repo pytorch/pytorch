@@ -332,6 +332,8 @@ class TORCH_API DBReaderDeserializer : public BlobDeserializerBase {
 };
 
 } // namespace db
+CAFFE_DECLARE_KNOWN_TYPE(db::Cursor);
+CAFFE_DECLARE_KNOWN_TYPE(db::DBReader);
 } // namespace caffe2
 
 #endif // CAFFE2_CORE_DB_H_

@@ -5,9 +5,9 @@
 namespace caffe2 {
 using namespace std;
 using namespace dnnlowp;
-// Expilictly register TypeMeta
-CAFFE_KNOWN_TYPE(unique_ptr<Int8QuantSchemeBlob>);
-CAFFE_KNOWN_TYPE(unique_ptr<Int8QuantParamsBlob>);
+// Explicitly register TypeMeta
+CAFFE_DEFINE_KNOWN_TYPE(unique_ptr<Int8QuantSchemeBlob>);
+CAFFE_DEFINE_KNOWN_TYPE(unique_ptr<Int8QuantParamsBlob>);
 
 REGISTER_CPU_OPERATOR(
     Int8GenQuantParams,

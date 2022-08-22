@@ -345,5 +345,4 @@ Github Links:
     .Output(0, "nanos", "(*Tensor`<int64>`*): scalar containing time in nanoseconds");
 
 CAFFE_KNOWN_TYPE(TimerInstance*);
-CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);
 } // namespace caffe2

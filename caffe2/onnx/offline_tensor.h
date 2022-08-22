@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Storage.h>
+#include <c10/util/typeid.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 
@@ -49,5 +50,6 @@ class OfflineTensorShapeFunctions : public ExternalTensorFunctionsBase {
       size_t* capacity,
       DeviceOption* device) override;
 };
+CAFFE_DECLARE_KNOWN_TYPE(OfflineTensor);
 #endif
 } // namespace caffe2

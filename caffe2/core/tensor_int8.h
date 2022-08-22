@@ -16,6 +16,7 @@ struct Int8TensorCPU {
   Tensor t{CPU};
 };
 } // namespace int8
+CAFFE_DECLARE_KNOWN_TYPE(int8::Int8TensorCPU);
 } // namespace caffe2
 
 #endif // CAFFE2_TENSOR_INT8_H_

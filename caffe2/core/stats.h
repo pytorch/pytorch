@@ -6,6 +6,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "c10/util/typeid.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/static_tracepoint.h"
 
@@ -152,6 +154,8 @@ class TORCH_API StatRegistry {
 
   ~StatRegistry();
 };
+
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<StatRegistry>);
 
 struct TORCH_API Stat {
   std::string groupName;

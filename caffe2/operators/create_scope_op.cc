@@ -6,7 +6,7 @@ C10_DEFINE_bool(
     "Enable debug checks for CreateScope's workspace stack");
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(detail::WorkspaceStack);
+CAFFE_DEFINE_KNOWN_TYPE(detail::WorkspaceStack);
 
 template <>
 bool CreateScopeOp<CPUContext>::RunOnDevice() {

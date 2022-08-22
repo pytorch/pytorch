@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
 #define CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_
 
+#include "c10/util/typeid.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -942,6 +943,7 @@ class RNNApplyLinkOp : public Operator<Context> {
   int window_;
 };
 
+CAFFE_DECLARE_KNOWN_TYPE(detail::ScratchWorkspaces);
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_RECURRENT_NETWORK_OP_H_

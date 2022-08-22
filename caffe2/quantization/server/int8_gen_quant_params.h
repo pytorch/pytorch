@@ -1,6 +1,7 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 #pragma once
+#include "c10/util/typeid.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/dnnlowp.h"
 
@@ -57,5 +58,8 @@ class Int8GenQuantParamsOp final : public Operator<Context> {
   }
 
 }; // class Int8GenQuantParamsOp
+
+CAFFE_DECLARE_KNOWN_TYPE(unique_ptr<Int8QuantSchemeBlob>);
+CAFFE_DECLARE_KNOWN_TYPE(unique_ptr<Int8QuantParamsBlob>);
 
 } // namespace caffe2

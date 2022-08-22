@@ -17,6 +17,8 @@
 
 namespace caffe2 {
 
+CAFFE_DEFINE_KNOWN_TYPE(std::shared_ptr<BlobsQueue>);
+
 // Constants for user tracepoints
 C10_UNUSED static constexpr int SDT_NONBLOCKING_OP = 0;
 C10_UNUSED static constexpr int SDT_BLOCKING_OP = 1;

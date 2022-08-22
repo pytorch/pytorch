@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(RebatchingQueuePtr);
+CAFFE_DEFINE_KNOWN_TYPE(RebatchingQueuePtr);
 
 namespace {
 

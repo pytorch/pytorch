@@ -4,6 +4,7 @@
 
 #include <fbgemm/Fbgemm.h>
 
+#include "c10/util/typeid.h"
 #include <caffe2/core/tensor.h>
 #include "caffe2/quantization/server/dnnlowp.h"
 
@@ -43,5 +44,8 @@ struct Int8ConvDNNLowPPackedWeightBlob : public Int8FCDNNLowPPackedWeightBlob {
       fbgemm::PackWeightMatrixForGConv<std::int8_t, std::int32_t, 3>>
       W_gconv3d;
 };
+
+CAFFE_DECLARE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
+CAFFE_DECLARE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
 
 } // namespace caffe2

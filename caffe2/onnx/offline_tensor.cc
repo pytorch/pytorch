@@ -15,7 +15,7 @@ constexpr uint64_t kONNXIFI_DATATYPE_INT16 = 5;
 constexpr uint64_t kONNXIFI_DATATYPE_UINT16 = 4;
 } // namespace
 
-CAFFE_KNOWN_TYPE(OfflineTensor);
+CAFFE_DEFINE_KNOWN_TYPE(OfflineTensor);
 
 bool OfflineTensorShapeFunctions::IsSameMetaType(TypeIdentifier id) {
   return id == TypeMeta::Id<OfflineTensor>();

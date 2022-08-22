@@ -7,8 +7,8 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(db::DBReader);
-CAFFE_KNOWN_TYPE(db::Cursor);
+CAFFE_DEFINE_KNOWN_TYPE(db::DBReader);
+CAFFE_DEFINE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 

@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(MPICommonWorldWrapper);
+CAFFE_DEFINE_KNOWN_TYPE(MPICommonWorldWrapper);
 
 static std::mutex gCaffe2MPIMutex;
 

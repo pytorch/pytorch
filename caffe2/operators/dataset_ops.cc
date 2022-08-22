@@ -11,10 +11,10 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(std::unique_ptr<dataset_ops::TreeCursor>);
-CAFFE_KNOWN_TYPE(dataset_ops::TensorVectorPtr);
-CAFFE_KNOWN_TYPE(dataset_ops::SharedTensorVectorPtr);
-CAFFE_KNOWN_TYPE(dataset_ops::Shared2DTensorVectorPtr);
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<dataset_ops::TreeCursor>);
+CAFFE_DEFINE_KNOWN_TYPE(dataset_ops::TensorVectorPtr);
+CAFFE_DEFINE_KNOWN_TYPE(dataset_ops::SharedTensorVectorPtr);
+CAFFE_DEFINE_KNOWN_TYPE(dataset_ops::Shared2DTensorVectorPtr);
 
 namespace dataset_ops {
 namespace {

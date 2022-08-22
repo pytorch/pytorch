@@ -5,6 +5,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include "c10/util/typeid.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/tensor.h"
@@ -213,6 +215,11 @@ class SharedTensorVectorPtrDeserializer : public BlobDeserializerBase {
 };
 
 } // namespace dataset_ops
+
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<dataset_ops::TreeCursor>);
+CAFFE_DECLARE_KNOWN_TYPE(dataset_ops::TensorVectorPtr);
+CAFFE_DECLARE_KNOWN_TYPE(dataset_ops::SharedTensorVectorPtr);
+CAFFE_DECLARE_KNOWN_TYPE(dataset_ops::Shared2DTensorVectorPtr);
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_DATASET_OPS_H_

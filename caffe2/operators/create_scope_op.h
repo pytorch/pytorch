@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "c10/util/typeid.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -172,6 +173,8 @@ class HasScopeOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 };
+
+CAFFE_DECLARE_KNOWN_TYPE(detail::WorkspaceStack);
 
 } // namespace caffe2
 

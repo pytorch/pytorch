@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <mutex>
 
+#include "c10/util/typeid.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
@@ -156,4 +157,7 @@ void MPISetupPeers(
     const string& job_path);
 } // namespace caffe2
 
+namespace caffe2 {
+CAFFE_DECLARE_KNOWN_TYPE(MPICommonWorldWrapper);
+} // namespace caffe2
 #endif // CAFFE2_MPI_MPI_COMMON_H_

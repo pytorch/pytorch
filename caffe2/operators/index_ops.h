@@ -53,6 +53,8 @@ struct IndexBase {
   std::mutex dictMutex_;
 };
 
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<caffe2::IndexBase>);
+
 template <typename T>
 struct Index : IndexBase {
   explicit Index(int64_tValue maxElements)

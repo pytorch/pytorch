@@ -15,6 +15,6 @@ StoreHandler::~StoreHandler() {
   // symbols for this abstract class.
 }
 
-CAFFE_KNOWN_TYPE(std::unique_ptr<StoreHandler>);
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<StoreHandler>);
 
 } // namespace caffe2

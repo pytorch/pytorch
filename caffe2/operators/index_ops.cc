@@ -346,7 +346,7 @@ class IndexDeserializer : public BlobDeserializerBase {
   }
 };
 
-CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::IndexBase>);
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<caffe2::IndexBase>);
 
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<caffe2::IndexBase>>()),

@@ -4,6 +4,7 @@
 #include <thread>
 
 namespace caffe2 {
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);
 
 ExportedStatMap toMap(const ExportedStatList& stats) {
   ExportedStatMap statMap;

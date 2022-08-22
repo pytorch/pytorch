@@ -866,8 +866,8 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
 }
 
 // Explicitly register TypeMeta
-CAFFE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
-CAFFE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
+CAFFE_DEFINE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
+CAFFE_DEFINE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
 
 // Register DNNLOWP Type in caffe2 core
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(

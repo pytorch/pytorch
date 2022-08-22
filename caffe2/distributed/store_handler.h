@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "c10/util/typeid.h"
 
 namespace caffe2 {
 
@@ -63,6 +64,8 @@ class TORCH_API StoreHandler {
       const std::vector<std::string>& names,
       const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 };
+
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<StoreHandler>);
 
 /*
  * The backing store is no longer available. It may have been deleted.

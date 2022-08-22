@@ -257,5 +257,6 @@ class C10_EXPORT QTensor {
   size_t capacity_ = 0;
 };
 
+CAFFE_DECLARE_KNOWN_TYPE(QTensor<CPUContext>);
 } // namespace caffe2
 #endif // CAFFE2_CORE_QTENSOR_H_

@@ -299,7 +299,7 @@ SHOULD_NOT_DO_GRADIENT(CountDown);
 SHOULD_NOT_DO_GRADIENT(CountUp);
 SHOULD_NOT_DO_GRADIENT(RetrieveCount);
 
-CAFFE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<Counter<int64_t>>>()),
     CounterSerializer);

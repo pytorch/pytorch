@@ -3,6 +3,7 @@
 
 #include <atomic>
 
+#include "c10/util/typeid.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -38,6 +39,8 @@ class TORCH_API Counter {
  private:
   std::atomic<T> count_;
 };
+
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<Counter<int64_t>>);
 
 // TODO(jiayq): deprecate these ops & consolidate them with IterOp/AtomicIterOp
 

@@ -24,14 +24,14 @@
 #endif // USE_FBGEMM
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
+CAFFE_DEFINE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
 } // namespace caffe2
 
 #ifdef USE_FBGEMM
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
-CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>);
+CAFFE_DEFINE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
+CAFFE_DEFINE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>);
 } // namespace caffe2
 #endif // USE_FBGEMM
 

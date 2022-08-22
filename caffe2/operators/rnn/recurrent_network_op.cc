@@ -11,7 +11,7 @@ C10_DEFINE_bool(
     "If set, uses special RNN executor for executing RecurrentNetworkOp");
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(detail::ScratchWorkspaces);
+CAFFE_DEFINE_KNOWN_TYPE(detail::ScratchWorkspaces);
 
 REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetwork)
