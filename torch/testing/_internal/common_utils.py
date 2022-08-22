@@ -1835,6 +1835,10 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 
+class NoTest():
+    __test__ = False
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for

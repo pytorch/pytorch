@@ -10,7 +10,7 @@ from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.backends.nvfuser import NvFuserBackend
 
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase, NoTest
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfRocm,
@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)

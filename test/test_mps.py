@@ -19,7 +19,7 @@ from collections import defaultdict
 from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, run_tests, TestCase, download_file,
+    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, NoTest,
      TEST_WITH_UBSAN)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
@@ -37,8 +37,8 @@ import torch
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
     print('MPS not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
-    NNTestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
+    NNTestCase = NoTest  # noqa: F811
 
 class MPSReluTest(TestCase):
     def _npRelu(self, np_features):

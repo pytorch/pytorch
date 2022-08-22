@@ -13,7 +13,8 @@ sys.path.append(pytorch_test_dir)
 
 if not _IS_MONKEYTYPE_INSTALLED:
     print("monkeytype is not installed. Skipping tests for Profile-Directed Typing", file=sys.stderr)
-    JitTestCase = object  # type: ignore[misc, assignment] # noqa: F811
+    from torch.testing._internal.common_utils import NoTest
+    JitTestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
 
 if __name__ == "__main__":
     raise RuntimeError(
