@@ -23,7 +23,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_methods_invocations import op_db, clone_sample
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.utils._pytree import tree_map
 
