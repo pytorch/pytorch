@@ -63,26 +63,6 @@ struct Float2 {
 };
 
 template <typename scalar_t, typename accscalar_t, typename PTA>
-struct SumOp {
-  __device__ SumOp(const PTA& t) : tensor(t) {}
-  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
-    return static_cast<accscalar_t>(tensor[batch][plane][n]);
-  }
-  const PTA& tensor;
-};
-
-template <typename scalar_t, typename accscalar_t, typename PTA>
-struct VarOp {
-  __device__ VarOp(accscalar_t m, const PTA& t) : mean(m), tensor(t) {}
-  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
-    accscalar_t val = tensor[batch][plane][n];
-    return (val - mean) * (val - mean);
-  }
-  const accscalar_t mean;
-  const PTA& tensor;
-};
-
-template <typename scalar_t, typename accscalar_t, typename PTA>
 struct GradOp {
   __device__ GradOp(accscalar_t m, const PTA& i, const PTA& g)
     : mean(m), input(i), grad_output(g) {}
