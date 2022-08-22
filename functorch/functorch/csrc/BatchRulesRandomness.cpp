@@ -235,7 +235,7 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
     return out;
   }
   if(orig_self_value.dim() == 3 && self_bdim) {
-    out = out.reshape(self.sizes());
+    out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
   }
   return makeBatched(out, 0, cur_level);
 }
