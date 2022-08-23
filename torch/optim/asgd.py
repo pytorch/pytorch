@@ -187,6 +187,11 @@ def _single_tensor_asgd(params: List[Tensor],
         eta = etas[i]
         step_t = state_steps[i]
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            param = torch.view_as_real(param)
+            ax = torch.view_as_real(ax)
+
         # update step
         step_t += 1
         step = step_t.item()
@@ -210,6 +215,7 @@ def _single_tensor_asgd(params: List[Tensor],
         eta.copy_(new_eta)
         new_mu = torch.tensor(1 / max(1, step - t0))
         mu.copy_(new_mu)
+        print(eta, mu, param.clone(), grad)
 
 
 def _multi_tensor_asgd(params: List[Tensor],
@@ -232,6 +238,15 @@ def _multi_tensor_asgd(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(grads)
 
+    def _view_complex_as_real(tensor_list):
+        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+
+    grads = _view_complex_as_real(grads)
+    params = _view_complex_as_real(params)
+    axs = _view_complex_as_real(axs)
+    print("PARAMS:", params)
+    print("GRADS:", grads)
+    print("axs:", axs)
     # update step
     torch._foreach_add_(state_steps, 1)
 
@@ -258,3 +273,4 @@ def _multi_tensor_asgd(params: List[Tensor],
         etas[i].copy_(new_eta)
         new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
         mus[i].copy_(new_mu)
+    print("GRADS END:", grads)
