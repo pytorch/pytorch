@@ -29,11 +29,11 @@ namespace c10 {
 // named data_.
 
 #ifdef C10_MOBILE
-#define NO_TORCH_CHECK_ON_MOBILE(_) \
-  do {                              \
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(_) \
+  do {                                \
   } while (0)
 #else
-#define NO_TORCH_CHECK_ON_MOBILE(X) TORCH_CHECK(X)
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(X) TORCH_CHECK(X)
 #endif
 
 class C10_API SymInt {
@@ -43,7 +43,7 @@ class C10_API SymInt {
 
  public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
-    NO_TORCH_CHECK_ON_MOBILE(!is_symbolic());
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
   };
   SymInt() : data_(0) {}
 
@@ -106,11 +106,11 @@ class C10_API SymInt {
   }
 
   int64_t expect_int() const {
-    NO_TORCH_CHECK_ON_MOBILE(!is_symbolic());
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
     return data_;
   }
 
-  // It's important to keep the definition in the header
+  // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
   // where `is_symbolic` is always false
   C10_ALWAYS_INLINE bool is_symbolic() const {
@@ -176,7 +176,7 @@ class C10_API SymInt {
   int64_t data_;
 };
 
-#undef NO_TORCH_CHECK_ON_MOBILE
+#undef SKIP_IS_SYMBOLIC_ON_MOBILE
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10
