@@ -258,7 +258,7 @@ class TestFSDPMisc(FSDPTest):
         module that does not match the GPU device ID raises an error."""
         context = (
             self.assertRaisesRegex(
-                AssertionError,
+                RuntimeError,
                 f"cuda:{self.rank} vs cuda:0"
             ) if self.rank != 0 else suppress()
         )
