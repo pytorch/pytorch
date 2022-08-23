@@ -29,7 +29,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
   }
   
-  // Test that the FusionDefinition asserts a null FusionManager ptr
+  // Test that the FusionDefinition asserts on a null FusionManager ptr
   {
     FusionDefinition fd(nullptr, 5);
  
