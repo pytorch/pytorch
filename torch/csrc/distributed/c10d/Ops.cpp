@@ -89,9 +89,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int srcRank, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
-  m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
+  m.def(
+      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
