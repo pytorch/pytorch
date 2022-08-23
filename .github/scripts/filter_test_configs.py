@@ -114,7 +114,7 @@ def main() -> None:
     test_matrix = yaml.safe_load(args.test_matrix)
 
     if test_matrix is None:
-        warnings.warn(f"Invalid test matrix input {args.test_matrix}, exiting")
+        warnings.warn(f"Invalid test matrix input '{args.test_matrix}', exiting")
         # We handle invalid test matrix gracefully by marking it as empty
         print("::set-output name=is-test-matrix-empty::True")
         sys.exit(0)

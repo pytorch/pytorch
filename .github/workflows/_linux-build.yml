@@ -58,7 +58,7 @@ jobs:
         uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test_matrix }}
+          test-matrix: ${{ inputs.test-matrix }}
 
   build:
     needs: filter
