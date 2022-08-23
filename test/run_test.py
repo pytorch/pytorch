@@ -300,7 +300,8 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
             "UCX_TLS": "tcp,cuda",
-            "UCX_LOG_LEVEL": "info"
+            "UCX_LOG_LEVEL": "debug",
+            "UCC_LOG_LEVEL": "info",
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
