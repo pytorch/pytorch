@@ -10,6 +10,8 @@ from .._src.aot_autograd import (
     clear_compile_cache,
     aot_module_simplified,
     get_graph_being_compiled,
+    get_aot_graph_name,
+    get_aot_compilation_context,
     make_boxed_func,
     make_boxed_compiler
 )
