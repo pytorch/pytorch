@@ -88,11 +88,6 @@ def handle_symbolic_op(func, args, kwargs):
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
-    # TODO: hack, we don't currently support symbolic strides properly
-    # NB: this results in goop in the trace, it will be fixed when we have
-    # proper support
-    if func == torch.ops.aten.stride.default:
-        return create_contiguous(args[0].shape)
 
 def _handle_sym_dispatch(func, args, kwargs):
     global SYM_FUNCTION_MODE
@@ -228,5 +223,12 @@ class ShapeEnv(object):
 
         expr = expr.simplify()
         concrete_val = expr.subs(self.shape_env)
+
+        # Uncomment this to see what code triggered this guard.
+        # TODO: Save this to the guard representation so you can look
+        # at it later
+        # import traceback
+        # traceback.print_stack()
+
         self.guards.append((expr, concrete_val))
         return concrete_val

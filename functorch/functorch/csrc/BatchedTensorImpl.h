@@ -68,6 +68,7 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 
   // We have to override this because we opted into CustomStrides
   IntArrayRef strides_custom() const override;
+  SymIntArrayRef sym_strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error messages.
   bool is_contiguous_custom(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   void set_size(int64_t dim, int64_t new_size) override;
