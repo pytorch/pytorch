@@ -784,7 +784,9 @@ def arange(g, *args):
         )
         return g.op("Range", start, end, delta_default)
     else:
-        return symbolic_helper._unimplemented("aten::arange", f"with {len(args)} arguments")
+        return symbolic_helper._unimplemented(
+            "aten::arange", f"with {len(args)} arguments"
+        )
 
 
 @symbolic_helper.parse_args("v", "i")
