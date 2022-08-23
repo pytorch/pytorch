@@ -294,7 +294,7 @@ class CodeGen(object):
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, verbose: bool = False) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -437,11 +437,10 @@ class CodeGen(object):
 
                         if idx + 1 < len(lines):
                             summary_lines.append(lines[idx].strip())  # lineage
-                            summary_lines.append(lines[idx+1].strip())  # code snippet
+                            summary_lines.append(lines[idx + 1].strip())  # code snippet
 
                         summary_str = ', '.join(summary_lines)
                         body.append(f'\n# {summary_str}\n')
-                        # body.append(f'\n# {lines}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     body.append('\n# No stacktrace found for following nodes \n')
@@ -512,7 +511,8 @@ class CodeGen(object):
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
-            append_stacktrace_summary(node)
+            if verbose:
+                append_stacktrace_summary(node)
             emit_node(node)
             delete_unused_values(node)
 
@@ -1127,7 +1127,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str) -> PythonCode:
+    def python_code(self, root_module: str, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1186,10 +1186,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace)
+            return self._python_code(root_module, namespace, verbose)
 
-    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace)
+    def _python_code(self, root_module: str, namespace: _Namespace, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose)
 
 
     def __str__(self) -> str:

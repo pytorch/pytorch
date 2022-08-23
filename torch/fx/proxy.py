@@ -103,6 +103,7 @@ class TracerBase:
                     'torch/fx/_symbolic_trace.py',
                     'torch/fx/experimental/proxy_tensor.py',
                     'torch/_ops.py',
+                    'torch/_tensor.py',
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
