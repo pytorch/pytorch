@@ -18,8 +18,8 @@ from itertools import chain
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(
-    a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
-) -> Union[TensorLikeType, NumberType, Sequence]:
+    a: Union[TensorLikeType, NumberType, Sequence, None], dtype: torch.dtype
+) -> Union[TensorLikeType, NumberType, Sequence, None]:
     import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
@@ -31,6 +31,10 @@ def _maybe_convert_to_dtype(
         return utils.dtype_to_type(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
+    # Passthrough None because some functions wrapped with type promotion
+    # wrapper might have optional args
+    if a is None:
+        return None
 
     raise ValueError(
         "Received type {0} that is neither a tensor or a number!".format(type(a))
