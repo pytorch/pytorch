@@ -3210,6 +3210,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
+        xfail('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
@@ -3332,7 +3333,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.ihfftn'),
         xfail('allclose'),
         xfail('argwhere'),
-        xfail('linalg.cross'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
@@ -3812,6 +3812,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
