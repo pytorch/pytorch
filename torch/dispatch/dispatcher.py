@@ -10,12 +10,14 @@ This is a dispatcher (in Python)
 """
 
 class PyDispatcher:
+    # operator is a PyOperator
     @staticmethod
-    def call(operator: "PyOperator", *args, **kwargs):
+    def call(operator, *args, **kwargs):
         dispatch_key_set = compute_keyset(args, kwargs)
         kernel = operator.lookup(dispatch_key_set)
         return kernel(*args, **kwargs)
 
+    # operator is a PyOperator
     @staticmethod
     def redispatch(operator, dispatch_key_set, *args, **kwargs):
         kernel = operator.lookup(dispatch_key_set)

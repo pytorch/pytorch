@@ -4,10 +4,7 @@ from functorch.experimental.ops import PyOperator, fallthrough_fn
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
-from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-import random
-import string
 
 """
 We're going to define a `cond` operation.
@@ -38,7 +35,7 @@ def enable_mode(mode):
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy )
+        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
@@ -65,7 +62,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    # with no_dispatch():
     # This is not amazing.
     # However, if we have nested operators that have a call_function
     # in their graph that is not a torch op (ex: see conditional below, nested cond)
@@ -73,9 +69,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     # The reason is that an operation on the output of such an op is not
     # evalauted as a torch.Tensor.
     # So we execute the real true and false fn here and compare metadata
-    inp_ops = [o for o in operands]
     true_result = true_graph(operands)
     false_result = false_graph(operands)
+
     def recursive_compare_same(a, b):
         assert(type(a) == type(b))
         if isinstance(a, torch.Tensor):
@@ -95,7 +91,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
 
     return proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
-                                            name="conditional")
+        name="conditional")
 
 
 def cond_dense(pred, true_fn, false_fn, operands):
