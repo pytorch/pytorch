@@ -19,6 +19,11 @@ jobs:
     with:
       build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
@@ -27,11 +32,7 @@ jobs:
     with:
       build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
       docker-image: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
 
   linux-focal-rocm5_2-py3_7-slow-build:
     name: linux-focal-rocm5.2-py3.7-slow
@@ -39,6 +40,10 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_7-slow-test:
     name: linux-focal-rocm5.2-py3.7-slow
@@ -47,10 +52,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_7-slow-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_7-slow-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -61,6 +63,11 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_7-distributed-test:
     name: linux-focal-rocm5.2-py3.7-distributed
@@ -69,11 +76,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_7-distributed-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_7-distributed-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -84,6 +87,10 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+      test-matrix: |
+        { include: [
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
+        ]}
 
   linux-bionic-cuda10_2-py3_9-gcc7-test:
     name: linux-bionic-cuda10.2-py3.9-gcc7
@@ -92,10 +99,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_6-py3_7-gcc7-debug-build:
     name: linux-bionic-cuda11.6-py3.7-gcc7-debug
@@ -104,6 +108,13 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-with-debug: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-bionic-cuda11_6-py3_7-gcc7-debug-test:
     name: linux-bionic-cuda11.6-py3.7-gcc7-debug
@@ -112,13 +123,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_7-py3_7-gcc7-debug-build:
     name: linux-bionic-cuda11.7-py3.7-gcc7-debug
@@ -127,6 +132,13 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.7-gcc7-debug
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
       build-with-debug: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-bionic-cuda11_7-py3_7-gcc7-debug-test:
     name: linux-bionic-cuda11.7-py3.7-gcc7-debug
@@ -135,13 +147,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.7-py3.7-gcc7-debug
       docker-image: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.test-matrix }}
 
   libtorch-linux-bionic-cuda11_7-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.7-py3.7-gcc7
