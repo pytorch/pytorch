@@ -70,6 +70,11 @@ def _get_binary_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatt
                 BackendPatternConfig(bop_pattern)
                     .set_dtype_configs(dtype_configs)  # noqa: E131
                     ._set_num_tensor_args_to_observation_type(num_tensor_args_to_observation_type_mapping))
+    # matmul
+    binary_op_configs.append(
+        BackendPatternConfig(torch.matmul)
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+    )
     return binary_op_configs
 
 def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
