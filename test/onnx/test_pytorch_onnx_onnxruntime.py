@@ -11778,26 +11778,113 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @common_utils.parametrize(
+        "function_or_module",
+        [
+            common_utils.subtest(
+                torch.nn.ReLU(),
+                name="relu",
+            ),
+            common_utils.subtest(
+                torch.nn.LeakyReLU(),
+                name="leaky_relu",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.LeakyReLU(2.0, 1),
+                name="quantized_leaky_relu",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.Hardswish(2.0, 1),
+                name="quantized_hardswish",
+            ),
+            common_utils.subtest(
+                torch.nn.Sigmoid(),
+                name="sigmoid",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.Sigmoid(2.0, 1),
+                name="quantized_sigmoid",
+            ),
+            common_utils.subtest(
+                torch.nn.Hardsigmoid(),
+                name="hardsigmoid",
+            ),
+            common_utils.subtest(
+                torch.nn.Tanh(),
+                name="tanh",
+            ),
+            common_utils.subtest(
+                torch.nn.Hardtanh(),
+                name="hardtanh",
+            ),
+            common_utils.subtest(
+                lambda x: torch.transpose(x, 0, 1),
+                name="transpose",
+            ),
+            common_utils.subtest(
+                lambda x: x.expand(2, 4, 2, 3),
+                name="expand",
+            ),
+            common_utils.subtest(
+                lambda x: x.view(1, 4, 6),
+                name="view",
+            ),
+            common_utils.subtest(
+                lambda x: x.select(1, 1),
+                name="select",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.LayerNorm(
+                    [4, 2, 3],
+                    torch.nn.Parameter(torch.ones([4, 2, 3])),
+                    torch.nn.Parameter(torch.zeros([4, 2, 3])),
+                    2.0,
+                    1,
+                ),
+                name="layer_norm",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.InstanceNorm1d(
+                    2,
+                    torch.nn.Parameter(torch.ones(4)),
+                    torch.nn.Parameter(torch.zeros(4)),
+                    2.0,
+                    1,
+                ),
+                name="instance_norm",
+            ),
+            common_utils.subtest(
+                torch.nn.quantized.GroupNorm(
+                    2,
+                    4,
+                    torch.nn.Parameter(torch.zeros(4)),
+                    torch.nn.Parameter(torch.zeros(4)),
+                    2.0,
+                    1,
+                ),
+                name="group_norm",
+            ),
+            common_utils.subtest(
+                lambda x: torch.as_strided(x, (2, 2), (1, 2)),
+                name="as_strided",
+            ),
+        ],
+    )
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_hardswish(self):
-        model = torch.nn.quantized.Hardswish(1.0, 0)
-        input = torch.randn(2, 6)
+    def test_quantized_unary_ops(self, function_or_module):
+        input = torch.randn(1, 4, 2, 3)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
 
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_hardsigmoid(self):
-        model = torch.nn.Hardsigmoid()
-        input = torch.randn(2, 6)
-        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
+        class Model(torch.nn.Module):
+            def __init__(self, function_or_module):
+                super().__init__()
+                self.function_or_module = function_or_module
 
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_sigmoid(self):
-        model = torch.nn.Sigmoid()
-        input = torch.randn(2, 6)
-        q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(model, q_input)
+            def forward(self, x):
+                return self.function_or_module(x)
+
+        self.run_test(Model(function_or_module), q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
