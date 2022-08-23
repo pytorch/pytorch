@@ -28,7 +28,8 @@ Computes the cross product of two 3-dimensional vectors.
 
 Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
 of vectors, for which it computes the product along the dimension :attr:`dim`.
-It broadcasts over the batch dimensions.
+In this case, the output has the same batch dimensions as the inputs broadcast to
+a common shape.
 
 Args:
     input (Tensor): the first input tensor.
@@ -38,6 +39,9 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
 
+Raises:
+    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
+                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
 Example:
     >>> a = torch.randn(4, 3)
     >>> a
