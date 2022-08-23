@@ -3112,7 +3112,7 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view_symint(const Tensor& self,
+Tensor view_meta(const Tensor& self,
             at::SymIntArrayRef size) {
   // TODO: Properly support SymInt view
   return view_impl(self, c10::asIntArrayRefSlow(size));

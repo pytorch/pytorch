@@ -648,7 +648,7 @@ inline IValue argumentToIValue(
   try {
     return toIValue(
         object,
-        argument.real_type() ? argument.real_type() : argument.type(),
+        argument.real_type(),
         argument.N());
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(

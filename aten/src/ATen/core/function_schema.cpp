@@ -19,7 +19,7 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
 
 FunctionSchema FunctionSchema::cloneWithRealTypes() const {
   auto cloneWithRealTypes = [](const Argument& a) {
-    return a.cloneWithType(a.real_type() ? a.real_type() : a.type());
+    return a.cloneWithType(a.real_type());
   };
   std::vector<Argument> new_arguments, new_returns;
   std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);

@@ -11204,9 +11204,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(expected_out_t, out_t)
 
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
-        def helper(size, scale_factor, mode, device):
+        def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
             inputf = torch.randn(size, device=device, dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).detach().requires_grad_(True)
+            input = inputf.to(dtype).to(memory_format=memory_format).detach().requires_grad_(True)
             m = nn.Upsample(scale_factor=scale_factor, mode=mode)
 
             outf = m(inputf)
@@ -11222,9 +11222,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for device in ['cpu']:
             helper([3, 20, 30], 2, 'nearest', device)
             helper([3, 20, 11, 7], 2, 'nearest', device)
+            helper([3, 20, 11, 7], 2, 'nearest', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'nearest', device)
             helper([3, 20, 30], 2, 'linear', device)
             helper([3, 20, 11, 7], 2, 'bilinear', device)
+            helper([3, 20, 11, 7], 2, 'bilinear', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'trilinear', device)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")

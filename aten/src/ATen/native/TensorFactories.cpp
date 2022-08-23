@@ -186,11 +186,6 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
   return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty_symint_concrete(c10::SymIntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  return at::empty(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
 Tensor empty_names(
     IntArrayRef size,
     c10::optional<DimnameList> names,
@@ -1116,7 +1111,7 @@ Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
   auto size = c10::asIntArrayRefSlow(sym_size);
   if (result.is_sparse()) {
     // TODO: I think this branch should be dead, but we don't have an easy
-    // way to cover all sparse kernels with zeros_sparse_out, so retian this
+    // way to cover all sparse kernels with zeros_sparse_out, so retain this
     // for now
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
