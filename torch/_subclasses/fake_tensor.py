@@ -406,14 +406,22 @@ class FakeTensor(torch.Tensor):
             self_repr = super().__repr__()
         return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
 
-    def stride(self):
+    def stride(self, dim=None):
         if self.has_sym_ints:
             # TODO: As we currently don't support symbolic strides, we'll assume contiguous strides
             # The reason this needs to be here instead of __torch_dispatch__ is that
             # when aten.stride goes into __torch_dispatch__, it expects a list of
             # concrete ints to be returned. So we need to short-circuit that entirely
-            return symbolic_shapes.create_contiguous(self.shape)
-        return super().stride()
+            strides = symbolic_shapes.create_contiguous(self.shape)
+            if dim is None:
+                return strides
+            else:
+                return strides[dim]
+
+        if dim is None:
+            return super().stride()
+        else:
+            return super().stride(dim)
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
