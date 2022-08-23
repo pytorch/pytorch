@@ -1,3 +1,4 @@
+#include <ATen/Context.h>>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/quantization.h>
 
@@ -9,6 +10,7 @@ namespace quantization {
 void PTQQuanizationHelper::quantize_dynamic(
     torch::jit::mobile::Module& m,
     const std::string& method_name) {
+  at::globalContext().setReleaseWeightsWhenPrepacking(false);
   std::string reset_observers_method_name = "reset_observers_" + method_name;
   std::string observe_method_name = "observe_" + method_name;
   std::string quantize_method_name = "quantize_" + method_name;
