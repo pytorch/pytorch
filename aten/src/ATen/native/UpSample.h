@@ -2,10 +2,10 @@
 
 #include <math.h>
 
-#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
-
 
 /**
  * Note [compute_scales_value]
@@ -288,7 +288,8 @@ static inline scalar_t area_pixel_compute_source_index(
   if (align_corners) {
     return scale * dst_index;
   } else {
-    scalar_t src_idx = scale * (dst_index + 0.5) - 0.5;
+    scalar_t src_idx = scale * (dst_index + static_cast<scalar_t>(0.5)) -
+        static_cast<scalar_t>(0.5);
     // [Note] Follow Opencv resize logic:
     // We allow negative src_idx here and later will use
     //   dx = src_idx - floorf(src_idx)
@@ -301,7 +302,8 @@ static inline scalar_t area_pixel_compute_source_index(
     // where we should and then remove this cubic flag.
     // This matters in cubic mode, as we might need [-1, 0, 1, 2]
     // to interpolate and the weights can be affected.
-    return (!cubic && src_idx < 0) ? scalar_t(0) : src_idx;
+    return (!cubic && src_idx < static_cast<scalar_t>(0)) ? scalar_t(0)
+                                                          : src_idx;
   }
 }
 
@@ -445,8 +447,10 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-        ratio, output_index, align_corners, /*cubic=*/false);
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    const accscalar_t real_input_index =
+        area_pixel_compute_source_index<accscalar_t>(
+            ratio, output_index, align_corners, /*cubic=*/false);
     input_index0 = static_cast<int64_t>(real_input_index);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
