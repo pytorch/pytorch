@@ -767,7 +767,6 @@ struct HelperInterpNearest : public HelperInterpBase {
 
     AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, scalar_type, "compute_indices_weights_nearest", [&] {
-
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
@@ -778,10 +777,11 @@ struct HelperInterpNearest : public HelperInterpBase {
         // index_f32 = (output_index) * scale
         // input_index = floor(index_f32)
         // Same as OpenCV INTER_NEAREST
-
+        using accscalar_t = at::acc_type<scalar_t, false>;
         for (const auto i : c10::irange(output_size)) {
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/true, /*cubic=*/false);
+          const accscalar_t real_input_index =
+              area_pixel_compute_source_index<accscalar_t>(
+                  scale, i, /*align_corners=*/true, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
         }
@@ -818,7 +818,6 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
 
     AT_DISPATCH_FLOATING_TYPES(
       scalar_type, "compute_indices_weights_nearest", [&] {
-
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
@@ -829,10 +828,11 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // index_f32 = (output_index + 0.5) * scale - 0.5
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-
+        using accscalar_t = at::acc_type<scalar_t, false>;
         for (const auto i : c10::irange(output_size)) {
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
+          const accscalar_t real_input_index =
+              area_pixel_compute_source_index<accscalar_t>(
+                  scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
         }
@@ -865,10 +865,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     std::vector<Tensor> output;
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
-
     AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, scalar_type, "compute_indices_weights_linear", [&] {
-
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index0_ptr = output[0].data_ptr<int64_t>();
@@ -970,7 +968,6 @@ struct HelperInterpCubic : public HelperInterpBase {
 
     AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, scalar_type, "compute_indices_weights_cubic", [&] {
-
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         int64_t input_index;
@@ -980,11 +977,11 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-
+        using accscalar_t = at::acc_type<scalar_t, false>;
         for (const auto i : c10::irange(output_size)) {
-
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, align_corners, /*cubic=*/true);
+          const accscalar_t real_input_index =
+              area_pixel_compute_source_index<accscalar_t>(
+                  scale, i, align_corners, /*cubic=*/true);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           get_cubic_upsample_coefficients<scalar_t>(coeffs, real_input_index - input_index);
 
@@ -1184,7 +1181,6 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
 
   int interp_size = F::interp_size;
   auto input_scalar_type = input.scalar_type();
-
   if (interp_size == 1 && input_scalar_type == at::ScalarType::Byte) {
     // nearest also supports uint8 tensor, but we have to use float
     // with compute_indices_weights
