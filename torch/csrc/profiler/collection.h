@@ -253,6 +253,17 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
     return c10::visit(std::forward<T>(visitor), extra_fields_);
   }
 
+  template <typename T, typename Fn>
+  void visit_if_base(Fn&& fn) const {
+    visit([&](const auto& extra_fields) {
+      using extra_fields_t = typename std::remove_cv<
+          typename std::remove_reference<decltype(extra_fields)>::type>::type;
+
+      c10::guts::if_constexpr<std::is_base_of<T, extra_fields_t>::value>(
+          [&](auto _) { fn(_(extra_fields)); });
+    });
+  }
+
   EventType tag() const {
     return visit([](const auto& i) { return deduceTag(i); });
   }
