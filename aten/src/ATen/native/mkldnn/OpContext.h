@@ -13,6 +13,7 @@ namespace mkldnn {
 const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"none", ideep::attr_t()},
     {"relu", ideep::attr_t::fuse_relu()},
+    {"hardswish", ideep::attr_t::fuse_hardswish()},
 };
 
 using SerializationTypeConvPrePack = std::tuple<
