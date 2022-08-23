@@ -80,6 +80,7 @@ static const OperatorSet& supported_non_eltwise_set() {
   static const OperatorSet supported_non_eltwise_set{
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
@@ -1045,7 +1046,11 @@ class TensorExprFuser {
       }
     }
 
-    if (node->kind() == aten::conv2d) {
+    if (node->kind() == aten::_convolution && !tensorexpr::isConv2d(node)) {
+      GRAPH_DEBUG("This aten::_convolution node is not a 2D conv");
+      return false;
+    }
+    if (node->kind() == aten::_convolution || node->kind() == aten::conv2d) {
       if (!tensorexpr::conv2dIsSupportedJit(node) &&
           !tensorexpr::mkldnnPrepackedConvIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
