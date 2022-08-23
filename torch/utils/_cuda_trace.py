@@ -3,6 +3,8 @@ from typing import Callable, Generic, List
 
 from typing_extensions import ParamSpec
 
+_CUDA_HOOK_TRACE_OFFSET = -2
+
 logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 
