@@ -100,7 +100,11 @@ class TestTransformers(NNTestCase):
         batch_first = True
 
         model = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=batch_first),
+            torch.nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                batch_first=batch_first),
             num_layers=2,
             enable_nested_tensor=True
         ).to(device)
@@ -120,20 +124,20 @@ class TestTransformers(NNTestCase):
                 torch.ones(1, 2, d_model),
                 [[0, 1]]
             ),
-            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1024. 
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1024.
             (
                 torch.ones(1, 1026, d_model),
-                [[0]*1024+[1]*2]
+                [[0] * 1024 + [1] * 2]
             ),
-            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1025. 
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1025.
             (
                 torch.ones(1, 1026, d_model),
-                [[0]*1025+[1]*1]
+                [[0] * 1025 + [1] * 1]
             )
         ]
         input_mask_pairs = [
             (
-                torch.Tensor(pair[0]).to(torch.float).to(device), 
+                torch.Tensor(pair[0]).to(torch.float).to(device),
                 torch.Tensor(pair[1]).to(torch.bool).to(device)
             ) for pair in input_mask_pairs
         ]
