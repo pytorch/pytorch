@@ -623,7 +623,7 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._remove_meta_from_tls_dispatch_include()
 
         if has_symbolic_sizes:
-            constructors = [aten.empty.SymInt]
+            constructors = [aten.empty.memory_format]
             if func not in constructors:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
