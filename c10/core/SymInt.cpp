@@ -24,6 +24,7 @@ std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   return {a, b};
 }
 
+#ifndef C10_MOBILE
 SymIntNode SymInt::toSymIntNodeImpl() const {
   TORCH_CHECK(is_symbolic());
   return SymIntNode::reclaim_copy(toSymIntNodeImplUnowned());
@@ -35,6 +36,7 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto rep = (ptr & ~MASK) | IS_SYM;
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
+#endif
 
 SymInt SymInt::operator+(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
@@ -149,8 +151,7 @@ bool SymInt::operator!=(int64_t sci) const {
 }
 
 SymInt SymInt::operator*(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
-  return SymInt(data_ * sci);
+  return *this * c10::SymInt(sci);
 }
 
 } // namespace c10
