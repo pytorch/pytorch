@@ -579,7 +579,7 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
 
   ASSERT_TRUE(containedType.isWrite());
   ASSERT_TRUE(
-      containedType->beforeSets() ==
+      containedType.beforeSets() ==
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
 }
 
