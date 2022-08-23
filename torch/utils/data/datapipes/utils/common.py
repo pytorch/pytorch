@@ -25,7 +25,8 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     """
     Checks that function used in a callable datapipe works with the input column
 
-    This simply ensures that the number of positional arguments matches
+    This simply ensures that the number of
+     positional arguments matches
     the size of the input column. The function must not contain any non-default
     keyword-only arguments.
 
@@ -59,18 +60,6 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         input_col_size = 1
 
     fn_name = str(fn)
-
-    def get_non_default_params(signature: inspect.Signature):
-        excluded_types = [inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD]
-        return [p for p in signature.parameters.values() if p.default is p.empty and p.kind not in excluded_types]
-
-    def contains_var_positional(signature: inspect.Signature):
-        """Checks for the presences of *args in the signature"""
-        return any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in signature.parameters.values())
-
-    def get_normal_params(signature: inspect.Signature):
-        """Finds any position or keyword arguments in the signature"""
-        return [p for p in signature.parameters.values() if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD]
 
     pos = []
     var_positional = False
