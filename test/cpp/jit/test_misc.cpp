@@ -80,8 +80,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "ATen/core/ATen_fwd.h"
-#include "c10/util/intrusive_ptr.h"
 
 namespace torch {
 namespace jit {
@@ -1122,7 +1120,7 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   { // START: global test
     addGlobalCallback(RecordFunctionCallback(
-        [](const RecordFunction &
+        [](const RecordFunction&
            /* unused */) -> std::unique_ptr<at::ObserverContext> {
           auto ctx = std::make_unique<TestContext>();
           ctx->a = 123;
@@ -1147,7 +1145,7 @@ TEST(RecordFunctionTest, Callbacks) {
     auto ctx_th = std::thread([]() {
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [](const RecordFunction &
+          [](const RecordFunction&
              /* unused */) -> std::unique_ptr<at::ObserverContext> {
             auto ctx = std::make_unique<TestContext>();
             ctx->a = 234;
