@@ -1308,7 +1308,7 @@ class TestTorchTidyProfiler(TestCase):
         try:
             self.assertEqual(input_info.dtypes, ['long long', 'long long', 'Scalar'])
         except AssertionError:
-            # FIXME: Different systems have different names for int64t
+            # FIXME: Different systems have different names for int64_t
             self.assertEqual(input_info.dtypes, ['long', 'long', 'Scalar'])
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
