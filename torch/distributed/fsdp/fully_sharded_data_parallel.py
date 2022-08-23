@@ -970,10 +970,13 @@ class FullyShardedDataParallel(nn.Module):
         # dtype for model checkpointing
         self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
 
+        if not torch.cuda.is_available():
+            raise RuntimeError("FSDP does not support CPU only execution")
         self._check_single_device_module(module, ignored_params)
-        self.compute_device = self._get_compute_device(module, ignored_params, device_id)
-        self._materialize_module(module, param_init_fn)
-        self._move_module_to_device(module, ignored_params, device_id)
+        device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
+        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._move_module_to_device(module, ignored_params, device_from_device_id)
+        self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
         if sync_module_states:
             self._sync_module_states(module, params_to_flatten)
@@ -1084,8 +1087,7 @@ class FullyShardedDataParallel(nn.Module):
             child
             for module in ignored_root_modules
             for child in module.modules()
-            if not isinstance(child, FullyShardedDataParallel)
-            and not isinstance(child, FlattenParamsWrapper)
+            if not isinstance(child, (FullyShardedDataParallel, FlattenParamsWrapper))
         )
         if root_module in ignored_modules:
             warnings.warn(
@@ -1217,66 +1219,36 @@ class FullyShardedDataParallel(nn.Module):
                 f"FSDP only supports single device modules but got params on {devices}"
             )
 
-    def _get_compute_device(
+    def _get_device_from_device_id(
         self,
-        module: nn.Module,
-        ignored_params: Set[nn.Parameter],
         device_id: Optional[Union[int, torch.device]],
-    ) -> torch.device:
+    ) -> Optional[torch.device]:
         """
-        Determines and returns this FSDP instance's compute device. If the
-        module is already on a non-CPU device, then the compute device is that
-        non-CPU device. If the module is on CPU, then the compute device is the
-        current device.
-
-        The ``device_id`` argument should be what the user passed into the FSDP
-        constructor to produce a faithful error. If ``device_id`` is not
-        ``None``, then we enforce that it must either be (1) the same as the
-        compute device, (2) the same index as the compute device's index, or
-        (3) the general unindexed device. Hence, ``device_id`` is simply a way
-        for the user to have FSDP move the module to device, but that target
-        device is fixed to the current device.
-
-        NOTE: For now, the compute device is always a CUDA GPU device with its
-        explicit index.
-
-        Precondition: ``_check_single_device_module()``.
         """
-        if not torch.cuda.is_available():
-            raise RuntimeError("FSDP does not support CPU only execution")
-        # If the module is on GPU already, then that GPU device has priority
-        # over the current device
-        param = next(self._get_orig_params(module, ignored_params), None)
-        if param is not None and param.device.type == "cuda":
-            compute_device = param.device
-        else:
-            compute_device = torch.device("cuda", torch.cuda.current_device())
-        if device_id is not None:
-            device = (
-                device_id
-                if isinstance(device_id, torch.device)
-                else torch.device(device_id)
+        if device_id is None:
+            return None
+        device = (
+            device_id
+            if isinstance(device_id, torch.device)
+            else torch.device(device_id)
+        )
+        if device == torch.device("cuda"):
+            warnings.warn(
+                f"FSDP got the argument `device_id` {device_id} on rank "
+                f"{self.rank}, which does not have an explicit index. "
+                f"FSDP will use the current device {torch.cuda.current_device()}. "
+                "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+                "before FSDP initialization or pass in the explicit device "
+                "index as the `device_id` argument."
             )
-            if device == torch.device("cuda"):
-                warnings.warn(
-                    f"FSDP got the argument `device_id` {device_id} on rank "
-                    f"{self.rank}, which does not have an explicit index. "
-                    f"FSDP will use the current device {torch.cuda.current_device()}. "
-                    "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
-                    "before FSDP initialization or pass in the explicit device "
-                    "index as the `device_id` argument."
-                )
-            elif device != compute_device:
-                raise AssertionError(
-                    "Inconsistent compute device and `device_id` on rank "
-                    f"{self.rank}: {compute_device} vs {device}"
-                )
-        return compute_device
+            device = torch.device("cuda", torch.cuda.current_device())
+        return device
 
     def _materialize_module(
         self,
         module: nn.Module,
         param_init_fn: Optional[Callable[[nn.Module], None]],
+        device_from_device_id: Optional[torch.device],
     ) -> None:
         """
         Materializes the wrapped module ``module`` in place if needed: either
@@ -1285,11 +1257,10 @@ class FullyShardedDataParallel(nn.Module):
 
         This method uses ``param_init_fn`` to materialize the module if the
         function is not ``None`` and falls back to default behavior otherwise.
-        For meta device, this calls ``reset_parameters()``, and for torchdistX
-        fake tensors, this calls ``deferred_init.materialize_module()``.
-
-        Precondition: ``self.compute_device`` is set via
-        ``_get_compute_device()``.
+        For meta device, this moves the module to ``device_from_device_id`` if
+        it is not ``None`` or the current device otherwise and calls
+        ``reset_parameters()``, and for torchdistX fake tensors, this calls
+        ``deferred_init.materialize_module()``.
         """
         is_meta_module = any(p.is_meta for p in module.parameters())
         is_torchdistX_deferred_init = (
@@ -1307,7 +1278,8 @@ class FullyShardedDataParallel(nn.Module):
             param_init_fn(module)
         elif is_meta_module:
             # Run default meta device initialization
-            module.to_empty(device=self.compute_device)
+            materialization_device = device_from_device_id or torch.cuda.current_device()
+            module.to_empty(device=materialization_device)
             try:
                 with torch.no_grad():
                     module.reset_parameters()
@@ -1329,18 +1301,16 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         ignored_params: Set[nn.Parameter],
-        device_id: Optional[Union[int, torch.device]],
+        device_from_device_id: Optional[torch.device],
     ):
         """
-        Moves ``module`` depending on ``device_id`` and its current device,
-        where ``device_id`` should be what the user passed into the FSDP
-        constructor. Since the entire module is moved, ignored parameters are
-        moved as well.
+        Moves ``module`` depending on ``device_from_device_id`` and its current
+        device.
 
-        - If ``device_id`` is not ``None``, then this moves ``module`` to the
-        corresponding device.
-        - If ``device_id`` is ``None``, then this does not move ``module`` but
-        warns the user if it is only CPU.
+        - If ``device_from_device_id`` is not ``None``, then this moves
+        ``module`` to the device.
+        - If ``device_from_device_id`` is ``None``, then this does not move
+        ``module`` but warns the user if it is on CPU.
 
         Precondition: ``_check_single_device_module()``.
         """
@@ -1348,15 +1318,13 @@ class FullyShardedDataParallel(nn.Module):
         param = next(self._get_orig_params(module, ignored_params), None)
         if param is None:
             return  # no original parameters to manage
-        if device_id is not None:
-            assert param.device == cpu_device or param.device == self.compute_device, (
-                f"Unexpected device {param.device} -- check the FSDP implementation"
-            )
+        if device_from_device_id is not None:
             if param.device == cpu_device:
                 # NOTE: This includes moving ignored parameters.
-                module = module.to(device_id)
-                # TODO (awgu): This is a temporary hack to move already-
-                # constructed `FlatParameter`s back to CPU if needed.
+                module = module.to(device_from_device_id)
+                # TODO (awgu): This is a temporary fix to move already-
+                # constructed `FlatParameter`s back to CPU if needed. This is
+                # needed to make CPU offload work with `device_id`.
                 for submodule in module.modules():
                     if (
                         isinstance(submodule, FullyShardedDataParallel)
@@ -1366,16 +1334,49 @@ class FullyShardedDataParallel(nn.Module):
                             for handle in submodule._handles:
                                 handle._flat_param_to(torch.device("cpu"))
         elif param.device == cpu_device:
-            self._warn_cpu_init()
+            warnings.warn(
+                "Module is put on CPU and will thus have flattening and sharding"
+                " run on CPU, which is less efficient than on GPU. We recommend passing in "
+                "`device_id` argument which will enable FSDP to put module on GPU device,"
+                " module must also be on GPU device to work with `sync_module_states=True` flag"
+                " which requires GPU communication."
+            )
 
-    def _warn_cpu_init(self):
-        warnings.warn(
-            "Module is put on CPU and will thus have flattening and sharding"
-            " run on CPU, which is less efficient than on GPU. We recommend passing in "
-            "`device_id` argument which will enable FSDP to put module on GPU device,"
-            " module must also be on GPU device to work with `sync_module_states=True` flag"
-            " which requires GPU communication."
-        )
+    def _get_compute_device(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+        device_from_device_id: Optional[torch.device],
+    ) -> torch.device:
+        """
+        Determines and returns this FSDP instance's compute device. If the
+        module is already on a non-CPU device, then the compute device is that
+        non-CPU device. If the module is on CPU, then the compute device is the
+        current device.
+
+        Since this method should be called after materializing the module, any
+        non-CPU device should not be meta device. For now, the compute device
+        is always a CUDA GPU device with its explicit index.
+
+        Precondition: ``_check_single_device_module()`` and
+        ``_move_module_to_device()``.
+        """
+        # If the module is on GPU already, then that GPU device has priority
+        # over the current device
+        param = next(self._get_orig_params(module, ignored_params), None)
+        if param is not None and param.device.type == "cuda":
+            compute_device = param.device
+        else:
+            compute_device = torch.device("cuda", torch.cuda.current_device())
+        if (
+            device_from_device_id is not None
+            and compute_device != device_from_device_id
+        ):
+            raise RuntimeError(
+                "Inconsistent compute device and `device_id` on rank "
+                f"{self.rank}: {compute_device} vs {device_from_device_id}"
+            )
+        return compute_device
 
     def _sync_module_states(
         self, module: nn.Module, params: List[nn.Parameter]
