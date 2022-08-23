@@ -184,16 +184,23 @@ class NonWrapperTensor(torch.Tensor):
         return type(self)(torch.empty(shape))
 
 class RedispatchTensor(torch.Tensor):
+    __slots__ = ['call_log']
+
     def __new__(cls, data):
         t = torch.Tensor._make_subclass(cls, data)
         t.call_log = []
         return t
 
+    def __repr__(self):
+        with torch._C.DisableTorchFunction():
+            return super().__repr__()
+
+    def __reduce_ex__(self, proto):
+        with torch._C.DisableTorchFunction():
+            return super().__reduce_ex__(proto)
+
     @classmethod
     def __torch_function__(cls, func, types, args, kwargs=None):
-        if func in (torch.Tensor.__repr__,):
-            return super().__torch_function__(func, types, args, kwargs)
-
         def append_log(x):
             if isinstance(x, RedispatchTensor):
                 x.call_log.append((func.__qualname__, types, args, kwargs))
@@ -206,7 +213,9 @@ class RedispatchTensor(torch.Tensor):
 
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
-                return RedispatchTensor(x)
+                ret = x.as_subclass(cls)
+                ret.call_log = []
+                return ret
             return x
         return tree_map(wrap, ret)
 
