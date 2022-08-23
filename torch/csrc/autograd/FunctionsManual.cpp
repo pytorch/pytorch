@@ -1197,17 +1197,10 @@ at::IntArrayRef strides_or_error(
 Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::IntArrayRef mat1_sizes,
-    at::IntArrayRef mat1_strides,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
     c10::Layout mat1_layout,
     const Scalar& alpha) {
-  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
-      mat1_layout == c10::kStrided) {
-    // if input was column-major, return grad as column-order for efficiency
-    if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-      return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
-    }
-  }
 
   // General fallback, should work for any layout
   return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
@@ -1216,17 +1209,10 @@ Tensor mm_mat1_backward(
 Tensor mm_mat2_backward(
     const Tensor& grad,
     const Tensor& mat1,
-    IntArrayRef mat2_sizes,
-    IntArrayRef mat2_strides,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
     c10::Layout mat2_layout,
     const Scalar& alpha) {
-  if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
-      mat2_layout == c10::kStrided) {
-    // if input was column-major, return grad as column-order for efficiency
-    if (mat2_strides[0] == 1 && mat2_strides[1] == mat2_sizes[0]) {
-      return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
-    }
-  }
 
   // General fallback, should work for any layout
   return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());

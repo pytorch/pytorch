@@ -353,7 +353,8 @@ def min_cut_rematerialization_partition(
         return not all(is_fusible(node, user) for user in node.users)
 
     def get_node_weight(node):
-        mem_sz = _size_of(node.meta['tensor_meta'])
+        mem_sz = 128
+        # mem_sz = _size_of(node.meta['tensor_meta'])
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value

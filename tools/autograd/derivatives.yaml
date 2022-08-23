@@ -238,14 +238,14 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), mat1.layout(), alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sym_sizes(), mat1.sym_strides(), mat1.layout(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), alpha)
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat1_t.mm(mat2_p), alpha) + maybe_multiply(mat1_p.mm(mat2_t), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_sparse_backward(grad, mat1, mat2, alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -1124,8 +1124,8 @@
   result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
-  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
-  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), mat2.layout(), 1)
+  self: mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), 1)
+  mat2: mm_mat2_backward(grad, self, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), 1)
   result: at::mm(self_t, mat2_p) + at::mm(self_p, mat2_t)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -1548,7 +1548,7 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes())
+  self: grad.expand_symint(self.sym_sizes())
   result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor

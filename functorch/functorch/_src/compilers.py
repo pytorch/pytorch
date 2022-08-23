@@ -54,6 +54,7 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     Returns:
         Torch scripted model.
     """
+    print(fx_g.code)
 
     with _disable_jit_autocast():
         strip_overloads(fx_g)
@@ -151,7 +152,8 @@ default_decompositions = {
     aten.is_same_size,
 }
 
-default_decompositions = get_decompositions(default_decompositions)
+default_decompositions = torch._decomp.decomposition_table
+# default_decompositions = get_decompositions(default_decompositions)
 
 
 @make_boxed_compiler
