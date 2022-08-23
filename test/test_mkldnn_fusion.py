@@ -264,7 +264,7 @@ class TestMkldnnFusion(JitTestCase):
                     x = torch.randn(x_shape)
                     graph = self._check_model(m, x)
                     self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
-                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)    
+                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
 
 if __name__ == "__main__":
     run_tests()
