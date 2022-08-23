@@ -11,11 +11,10 @@ import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
-import torch
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
 import copyreg
 import pickle
 import pathlib
