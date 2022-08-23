@@ -1,4 +1,4 @@
-oame: periodic
+name: periodic
 
 on:
   schedule:
