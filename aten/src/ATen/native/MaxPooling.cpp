@@ -26,19 +26,19 @@ Tensor max_pool1d_impl(
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
   TORCH_CHECK(
       kernel_size.size() == 1,
-      "max_pool1d() kernel_size must be an int or int list of size 1 but got size ",
+      "max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size ",
       kernel_size.size());
   TORCH_CHECK(
       stride.size() == 0 || stride.size() == 1,
-      "max_pool1d() stride must be None, an int or int list of size 1 but got size ",
+      "max_pool1d() stride must be None, an int, list of ints, or tuple of ints of size 1 but got size ",
       stride.size());
   TORCH_CHECK(
       padding.size() == 1,
-      "max_pool1d() padding must be an int or int list of size 1 but got size ",
+      "max_pool1d() padding must be an int, list of ints, or tuple of ints of size 1 but got size ",
       padding.size());
   TORCH_CHECK(
       dilation.size() == 1,
-      "max_pool1d() dilation must be an int or int list of size 1 but got size ",
+      "max_pool1d() dilation must be an int, list of ints or tuple of ints of size 1 but got size ",
       dilation.size());
 
   // If stride=None then set it to kernel_size
