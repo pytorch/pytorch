@@ -264,6 +264,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         return None
 
     while True:
+        dump_state(fx.GraphModule(fail_f, failing_state.graph), failing_state.inps)
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
         new_state = try_granularity(failing_state, granularity, use_non_granular=True)
         if new_state is not None:
@@ -275,7 +276,6 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         while granularity >= 1:
             new_state = try_granularity(failing_state, granularity, use_non_granular=False)
             if new_state is not None:
-                dump_state(fx.GraphModule(fail_f, new_state.graph), new_state.inps)
                 failing_state = new_state
                 has_progress = True
                 break
@@ -296,4 +296,5 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     print(f"Made {num_queries} queries")
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
     dump_state(failing_fx, failing_state.inps)
+    print("Wrote minimal repro out to repro.py")
     return failing_fx, failing_state.inps
