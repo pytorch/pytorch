@@ -165,10 +165,15 @@ struct SchemaParser {
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
-      if (container && alias_info) {
-        container->addContainedType(std::move(*alias_info));
-      }
-      alias_info = std::move(container);
+        if (alias_info) {
+            if (!container) {
+                auto temp = at::AliasInfo();
+                temp.setIsWrite(alias_info->isWrite());
+                container = c10::optional<at::AliasInfo>(temp);
+            }
+            container->addContainedType(std::move(*alias_info));
+        }
+        alias_info = std::move(container);
       if (L.nextIf('?')) {
         fake_type =
             c10::TypeFactory::create<c10::OptionalType>(std::move(fake_type));
