@@ -268,6 +268,25 @@ struct TORCH_API Package {
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
 
+  // Load extra files from package.
+  // Example usage:
+  //  in python:
+  //    with PackageExporter(output) as pe:
+  //        pe.save_binary("extra_files", "greeting", b'\xff\xfeh\x00e\x00l\x00l\x00o\x00')
+  //  in cpp:
+  //    std::string decodedBinary = package->loadExtraFile("greeting", true).toStringRef();
+  //    std::cout << decodedBinary; --> outputs "hello"
+  c10::IValue loadExtraFile(const std::string& key, const bool isBinary = false) {
+    TORCH_DEPLOY_TRY
+    auto I = acquireSession();
+    if(isBinary) {
+      return I.self.attr("load_binary")({"extra_files", key}).toIValue();
+    } else {
+      return I.self.attr("load_text")({"extra_files", key}).toIValue();
+    }
+    TORCH_DEPLOY_SAFE_CATCH_RETHROW
+  }
+
   InterpreterSession acquireSession() {
     TORCH_DEPLOY_TRY
     auto I = manager_->acquireOne();
