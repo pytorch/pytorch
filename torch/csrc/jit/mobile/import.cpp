@@ -707,7 +707,7 @@ void _load_extra_only_for_mobile(
   switch (format) {
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<FileAdapter> rai =
-        std::make_unique<FileAdapter>(filename);
+          std::make_unique<FileAdapter>(filename);
       auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);
