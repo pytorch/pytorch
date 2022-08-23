@@ -1822,12 +1822,12 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
-    
+
     def test_trace_offset(self):
         class MockDispatchMode(TorchDispatchMode):
             def __init__(self, traceback):
                 self.traceback = traceback
-            
+
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 self.traceback.extend(traceback.format_stack())
 
@@ -1841,7 +1841,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             # appear in it.
             _long_and_unique_launch_name_ = torch.rand(3)
             self.assertIn(
-                "_long_and_unique_launch_name_", 
+                "_long_and_unique_launch_name_",
                 dispatch.traceback[expected_offset]
             )
 
