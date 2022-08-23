@@ -42,31 +42,9 @@ on:
         description: The docker image containing the built PyTorch.
 
 jobs:
-  # Apply the filter logic to the build step too if the test-config label is
-  # already there
-  filter:
-    runs-on: ubuntu-latest
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations (if test matrix is available)
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   build:
-    needs: filter
-    # Don't run on forked repos or empty test matrix unless the input test matrix itself is empty
-    if: github.repository_owner == 'pytorch' && (needs.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '')
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     outputs:
@@ -117,7 +95,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -164,13 +152,13 @@ jobs:
           docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
 
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts
+        if: inputs.build-generates-artifacts && steps.build.outcome == 'success'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts
+        if: inputs.build-generates-artifacts && steps.build.outcome == 'success'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -178,6 +166,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
