@@ -9,7 +9,7 @@
 #include <c10/util/string_view.h>
 
 #ifdef __CUDACC__
-#include <cuda.h>  // For CUDA_VERSION
+#include <cuda.h> // For CUDA_VERSION
 #endif
 
 #ifdef TEMPLATE_SELECTIVE_BUILD
