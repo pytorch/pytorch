@@ -15,7 +15,7 @@ TORCH_META_FUNC(linalg_cross)
   auto y_d = other.dim();
   // This is to avoid things like
   // linalg.cross(torch.randn(2, 3), torch.randn(5, 2, 3), dim=2)
-  TORCH_CHECK(x_d == y_d, "linalg.cross: inputs must have the same number of dimensions. Got ");
+  TORCH_CHECK(x_d == y_d, "linalg.cross: inputs must have the same number of dimensions.");
   TORCH_CHECK(input.size(dim) == 3 && other.size(dim) == 3, "linalg.cross: inputs dimension ", dim, " must have length 3. Got ", input.size(dim), " and ", other.size(dim));
 
   // Broadcast the batch dimension of input and other.
