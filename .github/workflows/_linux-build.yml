@@ -152,13 +152,13 @@ jobs:
           docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
 
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts && steps.build.outcome == 'success'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome == 'success'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
