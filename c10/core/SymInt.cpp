@@ -96,12 +96,48 @@ bool SymInt::operator<(SymInt sci) const {
   return res[0]->lt(res[1])->bool_();
 }
 
+bool SymInt::operator<=(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ <= sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->le(res[1])->bool_();
+}
+
+bool SymInt::operator>(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ > sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->gt(res[1])->bool_();
+}
+
+bool SymInt::operator>=(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ >= sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->ge(res[1])->bool_();
+}
+
 void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
 bool SymInt::operator<(int64_t sci) const {
   return *this < c10::SymInt(sci);
+}
+
+bool SymInt::operator<=(int64_t sci) const {
+  return *this <= c10::SymInt(sci);
+}
+
+bool SymInt::operator>(int64_t sci) const {
+  return *this > c10::SymInt(sci);
+}
+
+bool SymInt::operator>=(int64_t sci) const {
+  return *this >= c10::SymInt(sci);
 }
 
 bool SymInt::operator==(int64_t sci) const {
