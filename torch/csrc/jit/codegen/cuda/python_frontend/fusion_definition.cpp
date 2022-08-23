@@ -66,6 +66,7 @@ FusionManager* FusionDefinition::fusionManagerPtr() const {
 }
 
 FusionDefinition* FusionDefinition::enter() {
+  TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
   fusionManagerPtr()->resetFusionCachePtr();
   return this;
 }
