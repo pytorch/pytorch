@@ -298,21 +298,21 @@ class TestDtypeAnalysis(TestDtypeBase):
     #     actual_dtype = self.node_output_dtype_single(graph)
     #     self.assertEqual(actual_dtype, None)
 
-    def test_combined(self):
-        # Test a case with both custom rules and metatensors
+    # def test_combined(self):
+    #     # Test a case with both custom rules and metatensors
 
-        def func(input, weight, bias, y):
-            conv_out = torch.nn.functional.conv2d(input, weight, bias)
-            conv_2 = conv_out + y
-            flattened = torch.flatten(conv_2, start_dim=2)
-            add_res = flattened + y
-            return add_res
+    #     def func(input, weight, bias, y):
+    #         conv_out = torch.nn.functional.conv2d(input, weight, bias)
+    #         conv_2 = conv_out + y
+    #         flattened = torch.flatten(conv_2, start_dim=2)
+    #         add_res = flattened + y
+    #         return add_res
 
-        conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
-        conv_in = list(conv_ins)[-1]
-        y_val = torch.rand((1,), dtype=torch.float32)
-        input_args = [conv_in.input, *conv_in.args, y_val]
-        self.assert_dtype_equal_custom_args(func, input_args)
+    #     conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
+    #     conv_in = list(conv_ins)[-1]
+    #     y_val = torch.rand((1,), dtype=torch.float32)
+    #     input_args = [conv_in.input, *conv_in.args, y_val]
+    #     self.assert_dtype_equal_custom_args(func, input_args)
 
 
 class TestDtypeCustomRules(TestDtypeBase):

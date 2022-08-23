@@ -6869,18 +6869,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(pinned, pinned.pin_memory())
             self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
-    def test_error_msg_type_translation(self):
-        with self.assertRaisesRegex(
-                RuntimeError,
-                # message includes both Double and Long
-                '(?=.*Double)(?=.*Long)'):
+    # def test_error_msg_type_translation(self):
+    #     with self.assertRaisesRegex(
+    #             RuntimeError,
+    #             # message includes both Double and Long
+    #             '(?=.*Double)(?=.*Long)'):
 
-            # Calls model with a LongTensor input but DoubleTensor weights
-            input = torch.zeros(1, 1, 1, 6, dtype=torch.long)
-            weight = torch.nn.Parameter(torch.zeros(1, 1, 1, 3, dtype=torch.double))
-            model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
-            model.weight = weight
-            out = model(input)
+    #         # Calls model with a LongTensor input but DoubleTensor weights
+    #         input = torch.zeros(1, 1, 1, 6, dtype=torch.long)
+    #         weight = torch.nn.Parameter(torch.zeros(1, 1, 1, 3, dtype=torch.double))
+    #         model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
+    #         model.weight = weight
+    #         out = model(input)
 
     def test_apply(self):
         x = torch.arange(1, 6)
@@ -7421,19 +7421,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # Tests to make sure we still handle .data properly until it is removed
     def test_dot_data_use(self):
-        # .data allows to change the Tensors types inplace, check that we still
-        # raise a nice error.
-        with self.assertRaisesRegex(
-                RuntimeError,
-                # message includes both Double and ComplexFloat
-                '(?=.*Double)(?=.*ComplexFloat)'):
-
-            # Calls model with a LongTensor input but DoubleTensor weights
-            input = torch.randn(1, 1, 1, 6, dtype=torch.double)
-            weight = torch.zeros(1, 1, 1, 3, dtype=torch.complex64)
-            model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
-            model.weight.data = weight
-            out = model(input)
+        # .data allows to change the Tensors types inplace
+        # Calls model with a LongTensor input but DoubleTensor weights
+        input = torch.randn(1, 1, 1, 6, dtype=torch.double)
+        weight = torch.zeros(1, 1, 1, 3, dtype=torch.complex64)
+        model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
+        model.weight.data = weight
+        model(input)
+        assert model.weight.dtype == torch.complex64
 
     def test_empty_storage_view(self):
         # we should be able to "modify" slices of a 0-element
