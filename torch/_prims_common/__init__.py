@@ -659,6 +659,32 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
+def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
+    """
+    Infers the size of a dim with size -1, if it exists.
+    Also checks that new shape is compatible with the number of elements.
+    """
+    dim = None
+    newsize = 1
+    for i, d in enumerate(shape):
+        if d == -1:
+            check(dim is None, lambda: "only one dimension can be inferred")
+            dim = i
+        elif d >= 0:
+            newsize *= d
+        else:
+            check(False, lambda: f"invalid shape dimension {d}")
+    check(numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+          lambda: f"shape '{list(shape)}' is invalid for input of size {numel}")
+    if dim is not None:
+        check(newsize != 0,
+              lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+                      f"unspecified dimension size -1 can be any value and is ambiguous")
+        shape = list(shape)
+        shape[dim] = numel // newsize
+    return tuple(shape)
+
+
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
