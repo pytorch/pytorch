@@ -81,19 +81,6 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
         mode_info.set_mode(old)
 
 
-def _restore_mode(mode, mode_info: _ModeInfo):
-    if not hasattr(mode, "ancestors"):
-        raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
-    old = mode_info.get_mode()
-    if old is not None and old not in mode.ancestors:
-        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
-    mode_info.set_mode(mode)
-    try:
-        yield mode
-    finally:
-        mode_info.set_mode(old)
-
-
 # To help with non-lexical scoping, it will error if all the modes are from different scopes or haven't been used
 def find_outermost_mode(modes):
     outermost = None

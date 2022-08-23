@@ -1302,44 +1302,6 @@ class TestTorchFunctionMode(TestCase):
             with x:
                 pass
 
-    def test_restore_errors(self):
-        class A(TorchFunctionMode):
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
-            with A().restore():
-                pass
-
-        x = A()
-        with A():
-            with x:
-                pass
-
-        with A():  # a different mode instance than the one above
-            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
-                with x.restore():
-                    pass
-
-
-    def test_restore_ancestor_mode(self):
-        class A(TorchFunctionMode):
-            pass
-
-        x = A()
-        y = A()
-        with x:
-            with y:
-                pass
-
-        z = A()
-        with y.restore():
-            with z:
-                pass
-
-        with x.restore():
-            with z.restore():
-                pass
-
     def test_find_outermost_mode(self):
         class A(TorchFunctionMode):
             pass
@@ -1348,16 +1310,11 @@ class TestTorchFunctionMode(TestCase):
 
         x = A()
         y = A()
+        z = A()
         with x:
             with y:
-                pass
-
-        self.assertEqual(find_outermost_mode([x, y]), y)
-
-        z = A()
-        with y.restore():
-            with z:
-                pass
+                with z:
+                    pass
 
         self.assertEqual(find_outermost_mode([z, x]), z)
         i = A()
@@ -1392,8 +1349,6 @@ class TestTorchFunctionMode(TestCase):
         with x:
             with y:
                 pass
-
-        with x.restore():
             with z:
                 pass
 
