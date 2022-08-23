@@ -627,7 +627,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # policy should not have wrapped any other submodules
         self.assertFalse(isinstance(model.fc1, FSDP))
         self.assertFalse(isinstance(model.fc2, FSDP))
-        no_mixed_precision = MixedPrecision(None, None, None)
+        no_mixed_precision = MixedPrecision()
         self.assertEqual(no_mixed_precision, bn.mixed_precision)
         self.assertNotEqual(no_mixed_precision, model.mixed_precision)
 
