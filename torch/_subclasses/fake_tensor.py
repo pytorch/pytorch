@@ -441,7 +441,9 @@ class FakeTensor(torch.Tensor):
         # the default behavior.
         # TODO: when we get other tensor types online they will also
         # need to get entries here.
-        elif func == torch.ops.aten.stride.default:
+        elif func == torch.ops.aten.sym_size.default:
+            return None
+        elif func == torch.ops.aten.sym_stride.default:
             return None
 
         # Because fake mode can return NotImplemented (if it sees a subclass
