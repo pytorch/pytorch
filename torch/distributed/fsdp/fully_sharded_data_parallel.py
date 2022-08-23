@@ -1383,7 +1383,7 @@ class FullyShardedDataParallel(nn.Module):
             device_from_device_id is not None
             and compute_device != device_from_device_id
         ):
-            raise RuntimeError(
+            raise ValueError(
                 "Inconsistent compute device and `device_id` on rank "
                 f"{self.rank}: {compute_device} vs {device_from_device_id}"
             )
