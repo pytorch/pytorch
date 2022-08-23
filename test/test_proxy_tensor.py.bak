@@ -710,10 +710,10 @@ class TestSymbolicTracing(TestCase):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
-    mul = sym_size * 2;  sym_size = None
+    size = torch.ops.aten.size(a_1, 0);  a_1 = None
+    mul = torch.ops.math.mul(size, 2);  size = None
     empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    sym_size_1 = torch.ops.aten.sym_size(empty, 0)
+    size_1 = torch.ops.aten.size(empty, 0)
     return empty""")
 
     def test_cat(self):
