@@ -59,20 +59,7 @@ typedef unsigned long long int uint64_t;
 }
 
 static const std::string& defineComplexTypes() {
-  static std::string result = std::string() +
-#ifdef USE_ROCM
-      std::string(R"ESCAPE(
-__host__ __device__ float __int_as_float(int a)
-{
-  union {int a; float b;} u;
-
-  u.a = a;
-
-  return u.b;
-}
-)ESCAPE") +
-#endif
-      std::string(R"ESCAPE(
+  static std::string result = std::string(R"ESCAPE(
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define INFINITY POS_INFINITY
 #define NEG_INFINITY __int_as_float(0xff800000)
