@@ -14,7 +14,7 @@ class TestControlFlow(TestCase):
             return x.cos()
 
         x = torch.randn(4)
-        result = cond(False, true_fn, false_fn, x)
+        result = cond(False, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
 
@@ -26,15 +26,15 @@ class TestControlFlowTraced(TestCase):
         def false_fn(x):
             return x.cos()
 
-
         def f(x, y):
-            return cond(y, true_fn, false_fn, x)
+            return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False))
         result_true = graph.forward(x, torch.tensor(True))
         result_false = graph.forward(x, torch.tensor(False))
         self.assertFalse(torch.allclose(result_true, result_false))
+        print("result_true", result_true)
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
@@ -46,14 +46,14 @@ class TestControlFlowTraced(TestCase):
             return y + y
 
         def true_fn(x, pred2):
-            z = cond(pred2, true_nested, false_nested, x)
+            z = cond(pred2, true_nested, false_nested, [x])
             return x + z
 
         def false_fn(x, _):
             return x.cos()
 
         def f(x, pred, pred2):
-            return cond(pred, true_fn, false_fn, (x, pred2))
+            return cond(pred, true_fn, false_fn, [x, pred2])
 
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
@@ -81,14 +81,14 @@ class TestControlFlowTraced(TestCase):
             return y + y
 
         def true_fn(k, pred2):
-            z = cond(pred2, true_nested, false_nested, k)
+            z = cond(pred2, true_nested, false_nested, [k])
             return torch.add(torch.tensor([.25, .25]), z)
 
         def false_fn(k, _):
             return k.cos()
 
         def f(k, pred, pred2):
-            return cond(pred, true_fn, false_fn, (k, pred2))
+            return cond(pred, true_fn, false_fn, [k, pred2])
 
         x = torch.tensor([0.5, 0.5])
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
@@ -115,8 +115,8 @@ class TestControlFlowTraced(TestCase):
             return y * z
 
         def f(x, pred, pred2):
-            a_out = cond(pred, true_a, false_a, (x))
-            b_out = cond(pred2, true_b, false_b, (x, x))
+            a_out = cond(pred, true_a, false_a, [x])
+            b_out = cond(pred2, true_b, false_b, [x, x])
             return a_out + b_out
 
         x = torch.randn(4)
@@ -130,7 +130,7 @@ class TestControlFlowTraced(TestCase):
             conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, (x_1, x_1));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = conditional + conditional_1;  conditional = conditional_1 = None
             return add
         """

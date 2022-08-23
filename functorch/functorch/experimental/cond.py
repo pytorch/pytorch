@@ -44,11 +44,9 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
         proxy_or_e = get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy )
         return proxy_or_e
 
+    assert isinstance(operands, list), "Cond operands must be a list of tensors"
+    assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    if isinstance(operands, torch.Tensor):
-        operands = [operands]  # Little hack because * on a single ProxyTensor unpacks it
-    else:
-        operands = operands
 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
@@ -80,8 +78,9 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
         # The reason is that an operation on the output of such an op is not
         # evalauted as a torch.Tensor.
         # So we execute the real true and false fn here and compare metadata
-        true_result = true_fn(*operands)
-        false_result = false_fn(*operands)
+        # inp_ops = [o for o in operands]
+        true_result = true_graph(operands)
+        false_result = false_graph(operands)
         def recursive_compare_same(a, b):
             assert(type(a) == type(b))
             if isinstance(a, torch.Tensor):
@@ -100,7 +99,6 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
 
-    # Does this need random slug appended so as not to collide?
     proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
                                             name="conditional")
     return proxy_res
@@ -117,7 +115,7 @@ def cond_dense(pred, true_fn, false_fn, *operands):
 
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
-    flat_operands, _ = tree_flatten((true_fn, false_fn) + operands)
+    flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
     assert all([not f.requires_grad for f in flat_operands
                 if isinstance(f, torch.Tensor)])
 

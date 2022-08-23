@@ -15,7 +15,7 @@ class PyOperator:
         assert dispatch_key not in self.table
         if fn is fallthrough_fn:
             self.table[dispatch_key] = fn(self, dispatch_key)
-        else:    
+        else:
             self.table[dispatch_key] = fn
 
     def lookup(self, keyset):
