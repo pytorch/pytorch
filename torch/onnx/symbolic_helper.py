@@ -5,7 +5,7 @@ import inspect
 import sys
 import typing
 import warnings
-from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -559,42 +559,68 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     return dim
 
 
-def _unimplemented(op: str, msg: str):
+def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(
-            "ONNX export failed on " + op + " because " + msg + " not supported"
-        )
+        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
     elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
-        _onnx_unsupported(f"{op}, {msg}")
+        _onnx_unsupported(f"{op}, {msg}", value)
 
 
-def _onnx_unsupported(op_name: str):
-    raise RuntimeError(
+def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of operator {op_name}. "
-        "Please feel free to request support or submit a pull request on PyTorch GitHub."
+        f"Please feel free to request support or submit a pull request "
+        f"on PyTorch GitHub: {_constants.PYTORCH_GITHUB_ISSUES_URL}"
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
-def _onnx_opset_unsupported(op_name: str, current_opset: int, supported_opset: int):
-    raise RuntimeError(
+def _onnx_opset_unsupported(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    value: Optional[_C.Value] = None,
+) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _onnx_opset_unsupported_detailed(
-    op_name: str, current_opset: int, supported_opset: int, reason: str
-):
-    raise RuntimeError(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    reason: str,
+    value: Optional[_C.Value] = None,
+) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _block_list_in_opset(name: str):
     def symbolic_fn(*args, **kwargs):
-        raise RuntimeError(
+        raise errors.OnnxExporterError(
             f"ONNX export failed on {name}, which is not implemented for opset "
             f"{GLOBALS.export_onnx_opset_version}. "
             "Try exporting with other opset versions."
@@ -1252,8 +1278,8 @@ def _reshape_helper(g, input, shape, allowzero=0):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if GLOBALS.export_onnx_opset_version <= 13:
         if allowzero == 1:
-            raise _onnx_opset_unsupported(
-                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14
+            _onnx_opset_unsupported(
+                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
             )
         return g.op("Reshape", input, shape)
     else:
@@ -1444,6 +1470,7 @@ def dequantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            qtensor,
         )
 
     return (
@@ -1484,16 +1511,15 @@ def quantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            tensor,
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
