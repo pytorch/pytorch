@@ -18944,7 +18944,7 @@ torch.cuda.synchronize()
             expected_output = expected_output(num_dim)
             self.assertEqual(indices.dim(), input.dim())
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            #self.assertEqualIgnoreType(indices.data.squeeze(), expected_indices)
+            # self.assertEqualIgnoreType(indices.data.squeeze(), expected_indices)
             self.assertEqual(indices.data.squeeze().to(dtype=expected_indices.dtype), expected_indices)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             # self.assertEqualIgnoreType(output.data.squeeze(), expected_output)
@@ -18958,7 +18958,7 @@ torch.cuda.synchronize()
         expected_grad = expected_grad(num_dim)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         # self.assertEqualIgnoreType(input_var.grad.data, expected_grad.view_as(input))
-        self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
+        self.assertEqual(input_var.grad.data.to(dtype=expected_grad.view_as(input).dtype), expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
         indices.add_(1)
