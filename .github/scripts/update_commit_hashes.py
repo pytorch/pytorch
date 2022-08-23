@@ -136,6 +136,7 @@ def main() -> None:
     )
     with open(f".github/ci_commit_pins/{args.repo_name}.txt", "r+") as f:
         old_hash = f.read().strip()
+        subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name)
         f.seek(0)
         f.truncate()
         f.write(f"{hash}\n")

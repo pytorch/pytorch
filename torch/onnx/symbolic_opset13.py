@@ -6,6 +6,7 @@ import torch
 import torch._C._onnx as _C_onnx
 from torch.onnx import (
     _type_utils,
+    errors,
     symbolic_helper,
     symbolic_opset11 as opset11,
     symbolic_opset9 as opset9,
@@ -91,7 +92,9 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         if _outputs is not None:
             size = split_size * _outputs
         else:
-            raise RuntimeError("Unknown dimension size not supported")
+            raise errors.SymbolicValueError(
+                "Unknown dimension size not supported", self
+            )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -148,7 +151,9 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
             if _outputs is not None:
                 size = split_size * _outputs
             else:
-                raise RuntimeError("Unknown dimension size not supported")
+                raise errors.SymbolicValueError(
+                    "Unknown dimension size not supported", self
+                )
 
         min_split_size = size // split_size
         num_splits_one_extra = size % split_size
@@ -270,7 +275,7 @@ def nonzero_numpy(g, input, _outputs=None):
 @symbolic_helper.parse_args("v", "v", "v", "i")
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
-    if condition.type().scalarType() != "Bool":
+    if not symbolic_helper._is_bool(condition):
         condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = opset9.nonzero(g, condition)
@@ -287,9 +292,10 @@ def fake_quantize_per_channel_affine(
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
@@ -314,9 +320,10 @@ def fake_quantize_per_tensor_affine(
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
@@ -361,7 +368,7 @@ def _reduce_with_dtype(onnx_op, name):
                     "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype")
+                return symbolic_helper._unimplemented(name, "dtype", dtype)
             return symbolic(g, self)
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
@@ -372,7 +379,7 @@ def _reduce_with_dtype(onnx_op, name):
                     "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype")
+                return symbolic_helper._unimplemented(name, "dtype", dtype)
             return symbolic(g, self, dim, keepdim)
 
         return reduce_nodim, reduce_dim
@@ -428,16 +435,19 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
     input_sizes = symbolic_helper._get_tensor_sizes(input)
     if repeats_dim is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats rank."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
+            self,
         )
     if repeats_sizes is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats size."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
+            self,
         )
     if input_sizes is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "input size."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
+            self,
         )
     # Handle cases where dim is negative
     if dim < 0:
