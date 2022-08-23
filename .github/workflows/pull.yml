@@ -66,7 +66,7 @@ env:
       { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
       { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
       { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-  ]}
+    ]}
 
   linux-bionic-py3_7-clang8-xla-test-matrix: |
     { include: [
@@ -85,7 +85,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
-      test-matrix: ${{ env.linux-focal-py3_7-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-gcc7-test-matrix }}
 
   linux-focal-py3_7-gcc7-test:
     name: linux-focal-py3.7-gcc7
@@ -94,7 +94,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-focal-py3_7-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-gcc7-test-matrix }}
 
   linux-docs:
     name: linux-docs
@@ -124,7 +124,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang7-asan
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
-      test-matrix: ${{ env.linux-focal-py3_7-clang7-asan-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-clang7-asan-test-matrix }}
 
   linux-focal-py3_7-clang7-asan-test:
     name: linux-focal-py3.7-clang7-asan
@@ -133,7 +133,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang7-asan
       docker-image: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-focal-py3_7-clang7-asan-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-clang7-asan-test-matrix }}
 
   linux-focal-py3_7-clang10-onnx-build:
     name: linux-focal-py3.7-clang10-onnx
@@ -141,7 +141,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
-      test-matrix: ${{ env.linux-focal-py3_7-clang10-onnx-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-clang10-onnx-test-matrix }}
 
   linux-focal-py3_7-clang10-onnx-test:
     name: linux-focal-py3.7-clang10-onnx
@@ -150,7 +150,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-clang10-onnx
       docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-focal-py3_7-clang10-onnx-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-py3_7-clang10-onnx-test-matrix }}
 
   linux-bionic-py3_7-clang9-build:
     name: linux-bionic-py3.7-clang9
@@ -158,7 +158,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
-      test-matrix: ${{ env.linux-bionic-py3_7-clang9-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang9-test-matrix }}
 
   linux-bionic-py3_7-clang9-test:
     name: linux-bionic-py3.7-clang9
@@ -167,7 +167,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-bionic-py3_7-clang9-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang9-test-matrix }}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
     name: linux-bionic-cuda11.3-py3.7-clang9
@@ -182,7 +182,7 @@ jobs:
     with:
       build-environment: linux-vulkan-bionic-py3.7-clang9
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
-      test-matrix: ${{ env.linux-vulkan-bionic-py3_7-clang9-test-matrix }}
+      test-matrix: ${{ github.env.linux-vulkan-bionic-py3_7-clang9-test-matrix }}
 
   linux-vulkan-bionic-py3_7-clang9-test:
     name: linux-vulkan-bionic-py3.7-clang9
@@ -191,7 +191,7 @@ jobs:
     with:
       build-environment: linux-vulkan-bionic-py3.7-clang9
       docker-image: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-vulkan-bionic-py3_7-clang9-test-matrix }}
+      test-matrix: ${{ github.env.linux-vulkan-bionic-py3_7-clang9-test-matrix }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-build:
     name: linux-bionic-cuda11.6-py3.10-gcc7
@@ -199,7 +199,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      test-matrix: ${{ env.linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-test:
     name: linux-bionic-cuda11.6-py3.10-gcc7
@@ -208,7 +208,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
 
   linux-xenial-py3-clang5-mobile-build:
     name: linux-xenial-py3-clang5-mobile-build
@@ -239,7 +239,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3_7-clang8-xla
       docker-image-name: xla_base
-      test-matrix: ${{ env.linux-bionic-py3_7-clang8-xla-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang8-xla-test-matrix }}
 
   linux-bionic-py3_7-clang8-xla-test:
     name: linux-bionic-py3_7-clang8-xla
@@ -248,7 +248,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3_7-clang8-xla
       docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-bionic-py3_7-clang8-xla-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang8-xla-test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
@@ -315,7 +315,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-deploy
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      test-matrix: ${{ env.deploy-linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.deploy-linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
 
   deploy-linux-bionic-cuda11_6-py3_10-gcc7-test:
     name: linux-bionic-cuda11_6-py3_10-gcc7-deploy
@@ -324,7 +324,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-deploy
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-deploy-build.outputs.docker-image }}
-      test-matrix: ${{ env.deploy-linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.deploy-linux-bionic-cuda11_6-py3_10-gcc7-test-matrix }}
 
   linux-focal-rocm5_2-py3_7-build:
     # don't run build twice on master

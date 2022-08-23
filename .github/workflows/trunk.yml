@@ -56,7 +56,7 @@ jobs:
     with:
       build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
-      test-matrix: ${{ env.parallelnative-linux-focal-py3_7-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.parallelnative-linux-focal-py3_7-gcc7-test-matrix }}
 
   parallelnative-linux-focal-py3_7-gcc7-test:
     name: parallelnative-linux-focal-py3.7-gcc7
@@ -65,7 +65,7 @@ jobs:
     with:
       build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ env.parallelnative-linux-focal-py3_7-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.parallelnative-linux-focal-py3_7-gcc7-test-matrix }}
 
   # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-focal-py3_7-gcc7-build:
@@ -81,7 +81,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
-      test-matrix: ${{ env.linux-bionic-cuda10_2-py3_9-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-cuda10_2-py3_9-gcc7-test-matrix }}
 
   linux-bionic-cuda10_2-py3_9-gcc7-test:
     name: linux-bionic-cuda10.2-py3.9-gcc7
@@ -90,7 +90,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-bionic-cuda10_2-py3_9-gcc7-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-cuda10_2-py3_9-gcc7-test-matrix }}
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
@@ -127,7 +127,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9-slow
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
-      test-matrix: ${{ env.linux-bionic-py3_7-clang9-slow-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang9-slow-test-matrix }}
 
   linux-bionic-py3_7-clang9-slow-test:
     name: linux-bionic-py3.7-clang9-slow
@@ -136,7 +136,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9-slow
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-bionic-py3_7-clang9-slow-test-matrix }}
+      test-matrix: ${{ github.env.linux-bionic-py3_7-clang9-slow-test-matrix }}
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
@@ -264,7 +264,7 @@ jobs:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
       sync-tag: rocm-build
-      test-matrix: ${{ env.linux-focal-rocm5_2-py3_7-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-rocm5_2-py3_7-test-matrix }}
 
   linux-focal-rocm5_2-py3_7-test:
     name: linux-focal-rocm5.2-py3.7
@@ -273,7 +273,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.7
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_7-build.outputs.docker-image }}
-      test-matrix: ${{ env.linux-focal-rocm5_2-py3_7-test-matrix }}
+      test-matrix: ${{ github.env.linux-focal-rocm5_2-py3_7-test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
