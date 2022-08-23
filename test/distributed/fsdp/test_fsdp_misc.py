@@ -258,7 +258,7 @@ class TestFSDPMisc(FSDPTest):
         module that does not match the GPU device ID raises an error."""
         context = (
             self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 f"cuda:{self.rank} vs cuda:0"
             ) if self.rank != 0 else suppress()
         )
@@ -310,7 +310,7 @@ class TestFSDPMisc(FSDPTest):
         no_params = nn.ReLU().cuda()
         context = (
             self.assertRaisesRegex(
-                AssertionError,
+                ValueError,
                 f"Inconsistent.*cuda:{self.rank} vs cuda:0"
             )
         ) if self.rank != 0 else suppress()
