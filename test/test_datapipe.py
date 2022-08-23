@@ -1589,14 +1589,23 @@ class TestFunctionalIterDataPipe(TestCase):
         exp = list(range(100))
 
         # Serialization Test
-        shuffler_dp = input_dp.shuffle()
-        exp = []
-        it = iter(shuffler_dp)
-        for _ in range(2):
-            exp.append(next(it))
-        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
-        exp.extend(list(it))
-        self.assertEqual(exp, list(shuffler_dp_copy))
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+
+        def _serialization_helper(buffer_size):
+            shuffler_dp = input_dp.shuffle(buffer_size=buffer_size)
+            it = iter(shuffler_dp)
+            for _ in range(2):
+                next(it)
+            shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+            _simple_graph_snapshot_restoration(shuffler_dp_copy.datapipe, shuffler_dp.datapipe._number_of_samples_yielded)
+
+            exp = list(it)
+            shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
+            self.assertEqual(exp, list(shuffler_dp_copy), f"Failed Shuffler serialization test with {buffer_size=}")
+
+        buffer_sizes = [2, 5, 15]
+        for bs in buffer_sizes:
+            _serialization_helper(bs)
 
     def test_zip_iterdatapipe(self):
 
@@ -3126,15 +3135,12 @@ class TestIterDataPipeGraphFastForward(TestCase):
         res2 = [10 * x for x in res1]
         self._snapshot_test_helper(graph2, expected_res=res2)
 
-        # TODO: shuffle is not simple graph anymore
-        graph3 = graph2
-        res3 = res2
-        #  rng = torch.Generator()
-        #  graph3 = graph2.shuffle()
-        #  rng.manual_seed(0)
-        #  torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
-        #  res3 = list(graph3)
-        #  self._snapshot_test_helper(graph3, expected_res=res3)
+        rng = torch.Generator()
+        graph3 = graph2.shuffle()
+        rng.manual_seed(0)
+        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        res3 = list(graph3)
+        self._snapshot_test_helper(graph3, expected_res=res3)
 
         graph4 = graph3.map(_mul_10)
         res4 = [10 * x for x in res3]
