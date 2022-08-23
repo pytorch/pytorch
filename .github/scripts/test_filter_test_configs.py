@@ -4,7 +4,7 @@ import os
 import yaml
 import json
 from unittest import TestCase, main, mock
-from filter_test_configs import get_labels, filter, PREFIX, SUFFIX, VALID_TEST_CONFIG_LABELS
+from filter_test_configs import get_labels, filter, PREFIX, VALID_TEST_CONFIG_LABELS
 import requests
 from requests.models import Response
 from typing import Any, Dict
@@ -39,7 +39,7 @@ class TestConfigFilter(TestCase):
         self.assertFalse(labels)
 
     def test_filter(self) -> None:
-        mocked_labels = {f"{PREFIX}cfg{SUFFIX}", "ciflow/trunk", "plain-cfg"}
+        mocked_labels = {f"{PREFIX}cfg", "ciflow/trunk", "plain-cfg"}
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
@@ -63,8 +63,8 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_filter_with_valid_label(self) -> None:
-        mocked_labels = {f"{PREFIX}cfg{SUFFIX}", "ciflow/trunk"}
-        VALID_TEST_CONFIG_LABELS.add(f"{PREFIX}cfg{SUFFIX}")
+        mocked_labels = {f"{PREFIX}cfg", "ciflow/trunk"}
+        VALID_TEST_CONFIG_LABELS.add(f"{PREFIX}cfg")
 
         testcases = [
             {

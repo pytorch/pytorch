@@ -10,11 +10,10 @@ import yaml
 import warnings
 
 PREFIX = "test-config/"
-SUFFIX = "-only"
 
 # Same as shard names but with the -only suffix to make it clear that
 # only that test config is run
-VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}{SUFFIX}" for label in {
+VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "backwards_compat",
     "crossref",
     "default",
@@ -89,7 +88,7 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         if not config_name:
             continue
 
-        label = f"{PREFIX}{config_name.strip()}{SUFFIX}"
+        label = f"{PREFIX}{config_name.strip()}"
         if label in labels:
             print(f"Select {config_name} because label {label} is presented in the pull request by the time the test starts")
             filtered_test_matrix["include"].append(entry)
