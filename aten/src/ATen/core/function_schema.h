@@ -553,13 +553,12 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   if (unopt_type->kind() == ListType::Kind) {
     // sized lists get size N from arg, not type
     auto list = unopt_type->cast<c10::ListType>();
-      out << list->getElementType()->str();
+    out << list->getElementType()->str();
     if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
-        out << arg.alias_info()->containedTypes()[0] << "[]";
-//        out << "_test_";
+      out << arg.alias_info()->containedTypes()[0] << "[]";
     } else if (arg.N()) {
-          out << "[" << *arg.N() << "]";
-      }
+      out << "[" << *arg.N() << "]";
+    }
   } else {
     out << unopt_type->str();
   }
