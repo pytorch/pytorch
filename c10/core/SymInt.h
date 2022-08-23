@@ -27,6 +27,15 @@ namespace c10 {
 // SymInt will be extenteded to represent a union structure Union[int64_t,
 // SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
+
+#ifdef C10_MOBILE
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(_) \
+  do {                                \
+  } while (0)
+#else
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(X) TORCH_CHECK(X)
+#endif
+
 class C10_API SymInt {
   enum Unchecked {
     UNCHECKED,
@@ -34,7 +43,7 @@ class C10_API SymInt {
 
  public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
-    TORCH_CHECK(!is_symbolic());
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
   };
   SymInt() : data_(0) {}
 
@@ -70,6 +79,7 @@ class C10_API SymInt {
     return *this;
   }
 
+#ifndef C10_MOBILE
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
@@ -84,18 +94,31 @@ class C10_API SymInt {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
+#else
+  void release_() {}
+#endif
+
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   ~SymInt() {
     release_();
   }
 
   int64_t expect_int() const {
-    TORCH_CHECK(!is_symbolic());
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
     return data_;
   }
 
-  bool is_symbolic() const {
+  // N.B. It's important to keep this definition in the header
+  // as we expect if checks to be folded for mobile builds
+  // where `is_symbolic` is always false
+  C10_ALWAYS_INLINE bool is_symbolic() const {
+#ifdef C10_MOBILE
+    return false;
+#else
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
+#endif
   }
 
   SymInt operator+(SymInt sci) const;
@@ -118,9 +141,6 @@ class C10_API SymInt {
   bool operator<=(int64_t sci) const;
   bool operator>(int64_t sci) const;
   bool operator>=(int64_t sci) const;
-
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
 
   int64_t as_int_unchecked() const {
     return data_;
@@ -155,6 +175,8 @@ class C10_API SymInt {
   static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
+
+#undef SKIP_IS_SYMBOLIC_ON_MOBILE
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10
