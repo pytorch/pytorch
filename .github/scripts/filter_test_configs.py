@@ -11,8 +11,7 @@ import warnings
 
 PREFIX = "test-config/"
 
-# Same as shard names but with the -only suffix to make it clear that
-# only that test config is run
+# Same as shard names
 VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "backwards_compat",
     "crossref",
@@ -73,7 +72,7 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
     If the PR has one or more labels as specified in the VALID_TEST_CONFIG_LABELS set, only
     these test configs will be selected.  This also works with ciflow labels, for example,
-    if a PR has both ciflow/trunk and test-config/functorch-only, only trunk functorch builds
+    if a PR has both ciflow/trunk and test-config/functorch, only trunk functorch builds
     and tests will be run
 
     If the PR has none of the test-config label, all tests are run as usual.
