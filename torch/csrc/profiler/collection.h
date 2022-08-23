@@ -439,49 +439,47 @@ class TORCH_API ThreadLocalSubqueue {
   // See `containers.h` for block size benchmarks.
   static constexpr size_t BlockSize = 512;
 
-  template <typename T, size_t ChunkSize>
-  class EventBlock : public std::array<T, ChunkSize> {
-   public:
-    EventBlock();
-    uint64_t correlation_id(const T* ptr) const {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          ptr >= this->data() && ptr < this->data() + ChunkSize);
-      return id_start_ + (ptr - this->data());
-    }
+  struct TorchOpStorage {
+    // NB: This is a destructive operation.
+    void materialize(
+        std::vector<std::shared_ptr<Result>>& out,
+        const std::function<time_t(approx_time_t)> time_converter,
+        const uint64_t tid,
+        const kineto::DeviceAndResource& kineto_info);
 
-   private:
-    uint64_t id_start_;
-  };
+    template <typename T, size_t ChunkSize>
+    class EventBlock : public std::array<T, ChunkSize> {
+     public:
+      EventBlock();
+      uint64_t correlation_id(const T* ptr) const;
 
-  class OpList : public AppendOnlyList<
-                     KinetoObserverContext::Event,
-                     BlockSize,
-                     EventBlock> {
-   public:
-    template <class... Args>
-    std::pair<KinetoObserverContext::Event*, uint64_t> emplace_back(
-        Args&&... args);
-    static uint64_t correlationID(const OpList::Iterator& e);
-  };
+     private:
+      uint64_t id_start_;
+    };
 
-  OpList op_events_;
+    using event_t = KinetoObserverContext::Event;
+    class OpList : public AppendOnlyList<event_t, BlockSize, EventBlock> {
+     public:
+      template <class... Args>
+      std::pair<event_t*, uint64_t> emplace_back(Args&&... args);
+      static uint64_t correlationID(const OpList::Iterator& e);
+    } op_events_;
 
-  // report_input_shapes
-  InputOutputEncoder inputs_outputs_;
+    // report_input_shapes
+    InputOutputEncoder inputs_outputs_;
 
-  // with_stack
-  AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
-  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
-      py_calls_;
+    // with_stack (JIT)
+    AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
 
-  // with_modules
-  AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
+    // with_modules
+    AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
 
-  // with_flops
-  AppendOnlyList<extra_args_t, BlockSize> extra_args_;
+    // with_flops
+    AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-  // ProfilerState::KINETO_GPU_FALLBACK
-  AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+    // ProfilerState::KINETO_GPU_FALLBACK
+    AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+  } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
@@ -491,6 +489,10 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
+
+  // with_stack (Python)
+  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
+      py_calls_;
 };
 
 class TORCH_API RecordQueue {
