@@ -779,13 +779,12 @@ def _standard_gamma(g, self, generator):
     if symbolic_helper.is_caffe2_aten_fallback():
         if not symbolic_helper._is_none(generator):
             return symbolic_helper._unimplemented(
-                "_standard_gamma", "We are not able to export generator", self
+                "_standard_gamma", "not able to export generator", self
             )
         return g.at("_standard_gamma", self)
-    else:
-        return symbolic_helper._onnx_unsupported("_standard_gamma")
 
     return symbolic_helper._onnx_unsupported("_standard_gamma", self)
+
 
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
@@ -911,16 +910,15 @@ def transpose(g, self, dim0, dim1):
         axes = list(range(rank))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
-
-    # if we don't have dim information we cannot
-    # output a permute so use ATen instead
-    if symbolic_helper.is_caffe2_aten_fallback():
+    elif symbolic_helper.is_caffe2_aten_fallback():
+        # if we don't have dim information we cannot
+        # output a permute so use ATen instead
         return g.at("transpose", self, overload_name="int", dim0_i=dim0, dim1_i=dim1)
-
-    raise errors.SymbolicValueError(
-        "Unsupported: ONNX export of transpose for tensor of unknown rank.",
-        self,
-    )
+    else:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of transpose for tensor of unknown rank.",
+            self,
+        )
 
 
 @symbolic_helper.parse_args("v", "is")
