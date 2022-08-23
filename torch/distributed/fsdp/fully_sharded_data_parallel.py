@@ -1909,7 +1909,10 @@ class FullyShardedDataParallel(nn.Module):
         self,
         current_handles_key: Tuple[FlatParamHandle, ...],
     ) -> None:
-        """Prefetches the next handles if needed (without synchronization)."""
+        """
+        Prefetches the next handles if needed (without synchronization). An
+        empty handles key cannot prefetch.
+        """
         if not current_handles_key:
             return
         out = self._get_handles_to_prefetch(current_handles_key)
