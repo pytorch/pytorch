@@ -1315,6 +1315,7 @@ class TestTorchTidyProfiler(TestCase):
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_mkldnn_tensors(self):
         x = torch.ones(4, 3).to_mkldnn()
 
