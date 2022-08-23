@@ -32,11 +32,12 @@
 /*
  * TypeIdentifier is a small type containing an id.
  * Types must be registered using CAFFE_DECLARE_KNOWN_TYPE() (in their header)
- * and CAFFE_DEFINE_KNOWN_TYPE() (in their .cpp file) for them to have a type id.
- * If a type is registered, you can also create an object containing meta data
- * like constructor, destructor, stringified name, ... about the type by calling
- * TypeMeta::Make<T>. This returns a TypeMeta() object, which is basically just
- * a pointer to the type information, so it's cheap to pass around.
+ * and CAFFE_DEFINE_KNOWN_TYPE() (in their .cpp file) for them to have a type
+ * id. If a type is registered, you can also create an object containing meta
+ * data like constructor, destructor, stringified name, ... about the type by
+ * calling TypeMeta::Make<T>. This returns a TypeMeta() object, which is
+ * basically just a pointer to the type information, so it's cheap to pass
+ * around.
  */
 
 // TODO: This file is still in the caffe2 namespace, despite living
@@ -639,15 +640,15 @@ inline std::ostream& operator<<(
 
 // CAFFE_KNOWN_TYPE is deprecated! Use CAFFE_DECLARE_KNOWN_TYPE and
 // CAFFE_DEFINE_KNOWN_TYPE instead.
-#define CAFFE_KNOWN_TYPE(T)                                             \
-  template uint16_t TypeMeta::addTypeMetaData<T>();                     \
-  template <>                                                           \
-  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept {    \
-    static const uint16_t index = addTypeMetaData<T>();                 \
-    return index;                                                       \
+#define CAFFE_KNOWN_TYPE(T)                                          \
+  template uint16_t TypeMeta::addTypeMetaData<T>();                  \
+  template <>                                                        \
+  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
+    static const uint16_t index = addTypeMetaData<T>();              \
+    return index;                                                    \
   }
 
-#define CAFFE_DEFINE_KNOWN_TYPE(T)                                      \
+#define CAFFE_DEFINE_KNOWN_TYPE(T) \
   template uint16_t TypeMeta::addTypeMetaData<T>();
 
 // Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
@@ -657,20 +658,21 @@ inline std::ostream& operator<<(
 // C10_ALWAYS_INLINE so that it doesn't need to see a definition for
 // _addTypeMeta. See NOTE [ TypeIdentifier::Get nvcc/clang discrepancy
 // ].
-#define CAFFE_DECLARE_KNOWN_TYPE(T)                                     \
-  extern template uint16_t TypeMeta::addTypeMetaData<T>();              \
-  template <>                                                           \
+#define CAFFE_DECLARE_KNOWN_TYPE(T)                                         \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>();                  \
+  template <>                                                               \
   EXPORT_IF_NOT_GCC inline uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
-    static const uint16_t index = addTypeMetaData<T>();                 \
-    return index;                                                       \
+    static const uint16_t index = addTypeMetaData<T>();                     \
+    return index;                                                           \
   }
 #else
-#define CAFFE_DECLARE_KNOWN_TYPE(T)                                     \
-  extern template uint16_t TypeMeta::addTypeMetaData<T>();              \
-  template <>                                                           \
-  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
-    static const uint16_t index = addTypeMetaData<T>();                 \
-    return index;                                                       \
+#define CAFFE_DECLARE_KNOWN_TYPE(T)                        \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
+  template <>                                              \
+  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
+  TypeMeta::_typeMetaData<T>() noexcept {                  \
+    static const uint16_t index = addTypeMetaData<T>();    \
+    return index;                                          \
   }
 #endif
 
