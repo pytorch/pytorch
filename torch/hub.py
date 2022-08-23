@@ -666,7 +666,7 @@ def _legacy_zip_load(filename, model_dir, map_location):
 def load_state_dict_from_url(
     url: str,
     model_dir: Optional[str] = None,
-    map_location: Optional[Union[Callable[[str], str], Dict[str, str]]] = None,
+    map_location: Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]] = None,
     progress: bool = True,
     check_hash: bool = False,
     file_name: Optional[str] = None
