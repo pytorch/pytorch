@@ -16,6 +16,7 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+#include <ATen/native/cpu/utils.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -25,6 +26,53 @@
 namespace {
 
 using namespace at;
+
+bool fbgemm_copy_transpose_valid(const Tensor& self, const Tensor& src) {
+  const int MIN_SZ = 16 * 32;
+  if ((self.device().is_cpu() && src.device().is_cpu()) &&
+      (self.layout() == c10::kStrided) && (src.layout() == c10::kStrided) &&
+      !self.is_sparse() && !src.is_sparse() && self.is_contiguous() &&
+      (self.is_conj() == src.is_conj()) && (self.is_neg() == src.is_neg()) &&
+      !self.is_complex() && !src.is_complex() &&
+      self.sizes().equals(src.sizes()) && self.dim() >= 2 &&
+      src.size(src.dim() - 1) * src.size(src.dim() - 2) >= MIN_SZ &&
+      src.stride(src.dim() - 2) == 1 && src.stride(src.dim() - 1) == src.size(src.dim() - 2) &&
+      !(src.size(src.dim() - 2) == 1 && src.size(src.dim() - 1) == 1)) {
+      // Check src is in contiguous block
+      for (long i = 0; i < src.dim() - 2; i++) {
+        if (!(src.stride(i) == ((i + 1) == (src.dim() - 2)) ?
+                src.stride(src.dim() - 1) * src.size(src.dim() - 1) :  src.stride(i + 1) * src.size(i + 1))){
+              return false;
+            }
+      }
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void fbgemm_copy_transpose_same_type(Tensor& self, const Tensor& src) {
+  auto block_size = src.size(src.dim() - 1) * src.size(src.dim() - 2);
+  auto ntrans = src.numel() / block_size;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, src.scalar_type(),
+    "fbgemm_transpose_copy_same_type", [&] {
+    at::parallel_for(
+    0,
+    ntrans,
+    at::internal::GRAIN_SIZE / block_size,
+    [&](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; i++) {
+        native::utils::transpose(
+        src.size(src.dim() - 1),
+        src.size(src.dim() - 2),
+        src.data_ptr<scalar_t>() + i * block_size,
+        src.stride(src.dim() - 1),
+        self.data_ptr<scalar_t>() + i * block_size,
+        self.stride(self.dim() - 2));
+      }
+    });
+  });
+}
 
 bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
@@ -156,6 +204,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
               });
         }
       }
+      return self;
+    }
+
+    if (fbgemm::fbgemmSupportedCPU() && fbgemm_copy_transpose_valid(self, src) &&
+      src.dtype() == self.dtype() && (src.dtype() == at::kFloat || src.dtype() == at::kBFloat16)) {
+      fbgemm_copy_transpose_same_type(self, src);
       return self;
     }
   #endif
