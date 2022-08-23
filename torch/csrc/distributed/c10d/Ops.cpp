@@ -31,23 +31,6 @@ c10::intrusive_ptr<Work> reduce_scatter_(
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> reduce_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
-    int64_t root_rank,
-    int64_t root_tensor,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  return process_group->reduce(
-      tensor_vec,
-      ReduceOptions{
-          static_cast<ReduceOp>(reduce_op),
-          root_rank,
-          root_tensor,
-          std::chrono::milliseconds(timeout)});
-}
-
 c10::intrusive_ptr<Work> gather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -106,6 +89,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int srcRank, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def(
+      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
+  m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
@@ -115,9 +100,6 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
-  m.def(
-      "reduce_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
   m.def(
       "gather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));

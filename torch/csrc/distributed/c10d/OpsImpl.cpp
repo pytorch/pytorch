@@ -47,6 +47,40 @@ c10::intrusive_ptr<Work> recv_cuda_(
       tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<Work> reduce_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> reduce_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -115,6 +149,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("recv_", recv_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("reduce_", reduce_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("reduce_", reduce_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
