@@ -53,18 +53,27 @@ jobs:
           set -ex
           
           # install conda with cuda -- tested for all
-          if [ ${PACKAGE_VER} == 'conda' ] && [ ${CUDA_VER} != "cpu" ] && [ ${CUDA_VER} != "rocm" ]; then
+          if [ ${PACKAGE_VER} == 'conda' ]; then
             conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
-            conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge
-            conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"
-            conda env remove -p ${ENV_NAME}
-            
-          # install conda cpu only
-          elif [ ${PACKAGE_VER} == 'conda' ] && [ ${CUDA_VER} == "skip" ]; then
-            conda create -yp ${ENV_NAME} python=${PYTHON_VERSION} numpy
-            conda install pytorch torchvision torchaudio cpuonly -c pytorch
-            conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]);print(y);"
-            conda env remove -p ${ENV_NAME}
+            case $CUDA_VER in
+              ("cpu") { conda install pytorch torchvision torchaudio cpuonly -c pytorch;
+                        conda run --cwd /tmp -p ${ENV_NAME} python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
+                      ;;
+              ("10.2") { conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch;
+                        conda run -p ${ENV_NAME} python3 ./test/smoke_test/smoke_test.py;}
+                       ;;
+              ("11.3") { conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch;
+                        conda run -p ${ENV_NAME} python3 ./test/smoke_test/smoke_test.py; }
+                       ;;
+              ("11.6") { conda install -p ${ENV_NAME} pytorch torchvision torchaudio cudatoolkit=${CUDA_VER} -c pytorch -c conda-forge;
+                        conda run -p ${ENV_NAME} python3 ./test/smoke_test/smoke_test.py; }
+                       ;;
+              ("11.7") { conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch-nightly -c nvidia;
+                        conda run -p ${ENV_NAME} python3 ./test/smoke_test/smoke_test.py; }
+                       ;;
+             (*) echo "No binary available"
+                   ;;
+              esac
           fi
                     
           # install pip -- tested for all cuda except cpu -- takes a very long time
@@ -72,22 +81,22 @@ jobs:
             apt-get install python3-pip -y
             case $CUDA_VER in
               ("rocm") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/rocm5.1.1";
-                      python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
-                      ;;
+                       python3 ./test/smoke_test/smoke_test.py; }
+                       ;;
               ("cpu") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cpu";
-                     python3 -c "import torch;y=torch.randn([3,5]);print(y);"; }
-                     ;;
+                       python3 ./test/smoke_test/smoke_test.py; }
+                       ;;
               ("10.2") { python3 -m pip3 install torch torchvision torchaudio;
-                       python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
+                       python3 ./test/smoke_test/smoke_test.py; }
                        ;;
               ("11.3") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu113";
-                       python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
+                       python3 ./test/smoke_test/smoke_test.py; }
                        ;;
               ("11.6") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu116";
-                       python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
+                       python3 ./test/smoke_test/smoke_test.py; }
                        ;;
-              ("11.7") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu117";
-                       python3 -c "import torch;y=torch.randn([3,5]).cuda();print(y);print(torch.backends.cudnn.version())"; }
+              ("11.7") { python3 -m pip3 install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cu117";
+                       python3 ./test/smoke_test/smoke_test.py; }
                        ;;
              (*) echo "No binary available"
                    ;;
