@@ -182,8 +182,9 @@ Tensor _nested_select_backward(
   const Tensor& self_grad_buffer = self_buffer.new_empty(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
+  nt_grad.select(dim, index).copy_(grad);
 
-  return nt_grad.select(dim, index).copy_(grad);
+  return nt_grad;
 }
 
 } // namespace native

@@ -63,6 +63,43 @@ def _masks_match(a, b):
     return True
 
 
+def _map_mt_args_kwargs(args, kwargs, map_fn):
+    def _helper(a, map_fn):
+        if is_masked_tensor(a):
+            return map_fn(a)
+        elif torch.is_tensor(a):
+            return a
+        elif isinstance(a, list):
+            a_impl, _ = _map_mt_args_kwargs(a, {}, map_fn)
+            return a_impl
+        elif isinstance(a, tuple):
+            a_impl, _ = _map_mt_args_kwargs(a, {}, map_fn)
+            return tuple(a_impl)
+        else:
+            return a
+
+    if kwargs is None:
+        kwargs = {}
+    impl_args = []
+    for a in args:
+        impl_args.append(_helper(a, map_fn))
+    impl_kwargs = {}
+    for k, v in kwargs.items():
+        impl_kwargs[k] = _helper(a, map_fn)
+    return impl_args, impl_kwargs
+
+
+def _wrap_result(result_data, result_mask):
+    if isinstance(result_data, list):
+        return list(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
+    if isinstance(result_data, tuple):
+        return tuple(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
+    if torch.is_tensor(result_data):
+        return MaskedTensor(result_data, result_mask)
+    # Expect result_data and result_mask to be Tensors only
+    return NotImplemented
+
+
 def _check_args_kwargs_length(args, kwargs, error_prefix, len_args=None, len_kwargs=None):
     if len_args is not None and len_args != len(args):
         raise ValueError(f"{error_prefix}: len(args) must be {len_args} but got {len(args)}")
@@ -354,6 +391,21 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
+
+        from .passthrough import _apply_pass_through_fn, _is_pass_through_fn
+
+        if _is_pass_through_fn(func):
+            return _apply_pass_through_fn(func, *args, **kwargs)
+
+        from .unary import _apply_native_unary, _is_native_unary
+
+        if _is_native_unary(func):
+            return _apply_native_unary(func, *args, **kwargs)
+
+        from .binary import _apply_native_binary, _is_native_binary
+
+        if _is_native_binary(func):
+            return _apply_native_binary(func, *args, **kwargs)
 
         if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
