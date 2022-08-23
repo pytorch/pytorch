@@ -25,6 +25,19 @@ outputs:
 runs:
   using: composite
   steps:
+    - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+      name: Setup dependencies
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        shell: bash
+        timeout_minutes: 10
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eux
+          python3 -m pip install requests pyyaml
+
     - name: Parse ref
       shell: bash
       id: parse-ref
