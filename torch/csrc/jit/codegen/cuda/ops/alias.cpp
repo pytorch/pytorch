@@ -27,27 +27,34 @@ namespace {
 //! Before: TV0[I0, I1, I2]
 //! After: TV0[I0, I1, 2, ceilDiv(I2, 2)]
 //!
+//! orig_tv is the tensor view originally coming in from user for the view
+//! operation. This is the tensor view all of the view analysis is relative to.
+//! View might be doing trivial reductions before sending into the view
+//! operation, so we want the actual input to the view operation to be
+//! potentially after the original view operation.
 TensorView* applyViewTransforms(
-    TensorView* tv,
-    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+    TensorView* orig_tv,
+    TensorView* post_reduce_tv,
+    const AnalyzeViewResult& view_analysis) {
   TORCH_INTERNAL_ASSERT(
-      !tv->hasComputeAt(),
+      !post_reduce_tv->hasComputeAt(),
       "Cannot modify rfactor domain after compute at has been set.");
 
-  TORCH_INTERNAL_ASSERT(tv->nDims() > 0, "Tried to view a 0-dim TensorView");
+  TORCH_INTERNAL_ASSERT(
+      post_reduce_tv->nDims() > 0, "Tried to view a 0-dim TensorView");
 
   TORCH_CHECK(
-      !tv->domain()->hasRFactor(),
+      !post_reduce_tv->domain()->hasRFactor(),
       "Cannot call view on the same TensorView twice.");
 
-  TORCH_INTERNAL_ASSERT(!transforms.empty());
+  TORCH_INTERNAL_ASSERT(!view_analysis.transforms.empty());
 
   TensorView* consumer = IrBuilder::create<TensorView>(
-      tv->container(),
-      tv->domain()->view(transforms),
-      tv->getDataType().value());
+      orig_tv->container(),
+      orig_tv->domain()->view(view_analysis),
+      orig_tv->getDataType().value());
 
-  IrBuilder::create<ViewOp>(tv->container(), consumer, tv);
+  IrBuilder::create<ViewOp>(orig_tv->container(), consumer, post_reduce_tv);
 
   return consumer;
 }
@@ -77,23 +84,30 @@ TensorView* view(
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size() ==
       original_sizes.size());
+  TORCH_INTERNAL_ASSERT(
+      !original_sizes.empty(), "No support for 0-dim tensors in view support.");
 
-  auto analyze_view = analyzeView(x, original_sizes, new_sizes);
+  auto view_analysis = analyzeView(x, original_sizes, new_sizes);
 
-  auto reduction = (!analyze_view.trivial_reduction_axes.empty())
+  auto reduction = (!view_analysis.trivial_reduction_axes.empty())
       ? sum(x,
-            analyze_view.trivial_reduction_axes,
+            view_analysis.trivial_reduction_axes,
             false /* keep_dim */,
             x->getDataType().value())
       : x;
 
-  auto view = (!analyze_view.transforms.empty())
-      ? applyViewTransforms(reduction, analyze_view.transforms)
-      : reduction;
+  auto view = view_analysis.transforms.empty()
+      ? reduction
+      : applyViewTransforms(x, reduction, view_analysis);
 
-  return (analyze_view.has_broadcast)
-      ? broadcast(view, analyze_view.broadcast_axes)
+  auto bcasted = std::any_of(
+                     view_analysis.broadcast_axes.begin(),
+                     view_analysis.broadcast_axes.end(),
+                     [](bool b) { return b; })
+      ? broadcast(view, view_analysis.broadcast_axes)
       : view;
+
+  return bcasted;
 }
 
 TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {

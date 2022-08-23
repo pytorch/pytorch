@@ -247,7 +247,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments
-    if (kernel_summary.is_stochastic) {
+    if (kernel_summary.max_rng_offsets >= 0) {
       code_ << ", at::PhiloxCudaState philox_args";
     }
 
@@ -259,14 +259,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto& kernel_summary = kernel_->summary();
 
     // Random number generator (optional)
-    if (kernel_summary.is_stochastic) {
-      indent()
-          << "const auto idx = ((((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x) * blockDim.z + threadIdx.z) * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;";
+    if (kernel_summary.max_rng_offsets >= 0) {
       indent() << "auto offset = philox_args.captured_ ?\n";
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
       indent() << "  philox_args.offset_.val;\n";
-      indent() << "Philox rnd(philox_args.seed_, idx, offset);\n";
+      indent() << "uint4 rng_result;\n";
+      indent() << "nvfuser_index_t rng_subseq = -1;\n";
+      indent() << "nvfuser_index_t rng_offset = -1;\n";
     }
 
     // Do we have any dynamic shared memory buffers?
@@ -695,8 +695,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       }
     }
 
+    const auto op_type = uop->getUnaryOpType();
+
     if (uop->out()->isA<NamedScalar>()) {
-      const auto op_type = uop->getUnaryOpType();
       if (auto op = inline_op_str(op_type)) {
         indent() << gen(uop->out()) << " = " << *op << genInline(uop->in())
                  << ";\n";
@@ -705,15 +706,36 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     if (!print_inline_) {
+      if (op_type == UnaryOpType::RandLike) {
+        auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+        auto index = genTensorIndex(uop->in()->as<kir::TensorIndex>());
+        int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
+        indent() << "nvfuser_index_t subseq" << uop->name() << " = (" << index
+                 << ") / " << multiple << ";\n";
+        indent() << "nvfuser_index_t component" << uop->name() << " = ("
+                 << index << ") % " << multiple << ";\n";
+        indent() << "nvfuser_index_t offset" << uop->name() << " = "
+                 << uop->getRNGOffset() << ";\n";
+        indent() << "if (rng_subseq != subseq" << uop->name()
+                 << " || rng_offset != offset" << uop->name() << ") {\n";
+        indent() << "  rng_result = philox(philox_args.seed_, subseq"
+                 << uop->name() << ", offset / 4 + offset" << uop->name()
+                 << ");\n";
+        indent() << "  rng_subseq = subseq" << uop->name() << ";\n";
+        indent() << "  rng_offset = offset" << uop->name() << ";\n";
+        indent() << "}\n";
+      }
+
       indent() << gen(uop->out());
       if (!uop->out()->isScalar() && !uop->in()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
       }
       code_ << " = ";
+    } else {
+      TORCH_INTERNAL_ASSERT(op_type != UnaryOpType::RandLike);
     }
 
-    const auto op_type = uop->getUnaryOpType();
     if (auto op = inline_op_str(op_type)) {
       if (alsoBooleanOperator(op_type) &&
           uop->out()->dtype() == DataType::Bool) {
@@ -742,7 +764,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
       code_ << "(";
       if (op_type == UnaryOpType::RandLike) {
-        code_ << "rnd";
+        code_ << "rng_result, component" << uop->name();
       } else {
         code_ << gen(uop->in());
       }
@@ -1429,7 +1451,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         kernel_->profile().isProfiled(expr)) {
       const auto& buffer_indices =
           kernel_->profile().getIndicesInProfileBuffer(expr);

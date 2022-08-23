@@ -799,11 +799,12 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
   indexing.run(loop_indexing);
 
   // Populate indexing through exact map from initial indexing
+  auto consumer_root = index_producer ? consumer_tv->getRootDomain()
+                                      : consumer_tv->getMaybeRFactorDomain();
 
   // First collect all iterdomains in consumer transform history.
   auto all_consumer_vals = DependencyCheck::getAllValsBetween(
-      {consumer_tv->getMaybeRFactorDomain().begin(),
-       consumer_tv->getMaybeRFactorDomain().end()},
+      {consumer_root.begin(), consumer_root.end()},
       {consumer_tv->domain()->domain().begin(),
        consumer_tv->domain()->domain().end()});
 

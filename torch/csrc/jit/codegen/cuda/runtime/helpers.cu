@@ -299,14 +299,6 @@ __device__ int64_t where(bool c, int a, int64_t b) {
   return c ? a : b;
 }
 
-__device__ double randLike(Philox& rnd) {
-  return uniform(rnd(), rnd());
-}
-
-__device__ float randLikef(Philox& rnd) {
-  return uniformf(rnd());
-}
-
 __device__ constexpr int64_t remainder(int64_t a, int64_t b) {
   auto mod = a % b;
   if ((mod != 0) && ((b < 0) != (mod < 0)))
