@@ -6,7 +6,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 
 class TestControlFlow(TestCase):
-    def test_cond(self):
+    def test_cond_no_trace(self):
         def true_fn(x):
             return x.sin()
 
@@ -34,7 +34,6 @@ class TestControlFlowTraced(TestCase):
         result_true = graph.forward(x, torch.tensor(True))
         result_false = graph.forward(x, torch.tensor(False))
         self.assertFalse(torch.allclose(result_true, result_false))
-        print("result_true", result_true)
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
@@ -127,15 +126,14 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+            conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);  pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = conditional + conditional_1;  conditional = conditional_1 = None
             return add
         """
         code = graph.code
-
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
         out = "".join(out.split())

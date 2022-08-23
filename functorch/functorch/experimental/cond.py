@@ -36,17 +36,12 @@ def enable_mode(mode):
         torch._C._set_torch_dispatch_mode(curr_mode)
 
 
-def trace_cond(proxy_mode, func_overload, args, kwargs=None):
-    assert kwargs is None or not kwargs
-    pred, true_fn, false_fn, operands = args
-
+def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):
-        proxy_or_e = get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy )
-        return proxy_or_e
+        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy )
 
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
-
 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
@@ -63,48 +58,47 @@ def trace_cond(proxy_mode, func_overload, args, kwargs=None):
         else:
             next_name = candidate
 
-    random_slug = ''.join(random.choices(string.digits, k=5))
     true_name = next_name
     false_name = f"false_graph_{i}"
+    assert(not hasattr(proxy_mode.tracer.root, false_name))
 
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    with no_dispatch():
-        # This is not amazing.
-        # However, if we have nested operators that have a call_function
-        # in their graph that is not a torch op (ex: see conditional below, nested cond)
-        # we cannot get metadata for it from just looking at out vars.
-        # The reason is that an operation on the output of such an op is not
-        # evalauted as a torch.Tensor.
-        # So we execute the real true and false fn here and compare metadata
-        # inp_ops = [o for o in operands]
-        true_result = true_graph(operands)
-        false_result = false_graph(operands)
-        def recursive_compare_same(a, b):
-            assert(type(a) == type(b))
-            if isinstance(a, torch.Tensor):
-                assert(a.dtype == b.dtype)
-                assert(a.size() == b.size())
-                assert(a.stride() == b.stride())
-                assert(a.device == b.device)
-            elif isinstance(a, (list, tuple)):
-                assert(len(a) == len(b))
-                for i in range(0, len(a)):
-                    recursive_compare_same(a[i], b[i])
+    # with no_dispatch():
+    # This is not amazing.
+    # However, if we have nested operators that have a call_function
+    # in their graph that is not a torch op (ex: see conditional below, nested cond)
+    # we cannot get metadata for it from just looking at out vars.
+    # The reason is that an operation on the output of such an op is not
+    # evalauted as a torch.Tensor.
+    # So we execute the real true and false fn here and compare metadata
+    inp_ops = [o for o in operands]
+    true_result = true_graph(operands)
+    false_result = false_graph(operands)
+    def recursive_compare_same(a, b):
+        assert(type(a) == type(b))
+        if isinstance(a, torch.Tensor):
+            assert(a.dtype == b.dtype)
+            assert(a.size() == b.size())
+            assert(a.stride() == b.stride())
+            assert(a.device == b.device)
+        elif isinstance(a, (list, tuple)):
+            assert(len(a) == len(b))
+            for i in range(0, len(a)):
+                recursive_compare_same(a[i], b[i])
 
-        recursive_compare_same(true_result, false_result)
+    recursive_compare_same(true_result, false_result)
 
-    args = (pred, true_graph, false_graph, operands)
+    args = (pred, true_graph, false_graph, [operands])
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
 
-    proxy_res = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, kwargs,
+    return proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                             name="conditional")
-    return proxy_res
 
 
-def cond_dense(pred, true_fn, false_fn, *operands):
+def cond_dense(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU key"
     if pred:
@@ -124,11 +118,11 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
 
 
 def python_fallback(op):
-    def inner(*args, **kwargs):
+    def inner(pred, true_fn, false_fn, operands):
         mode = torch._C._get_torch_dispatch_mode()
         assert (mode is not None), "Mode should always be enabled for python fallback key"
         with suspend_mode(mode):
-            res = trace_cond(mode, op, args, kwargs)
+            res = trace_cond(mode, op, pred, true_fn, false_fn, operands)
         return res
 
     return inner
