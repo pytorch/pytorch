@@ -187,7 +187,7 @@ class RedispatchTensor(torch.Tensor):
     __slots__ = ['call_log']
 
     def __new__(cls, data):
-        t = torch.Tensor._make_subclass(cls, data)
+        t = torch.Tensor._make_subclass(cls, data, require_grad=data.requires_grad)
         t.call_log = []
         return t
 
@@ -213,9 +213,7 @@ class RedispatchTensor(torch.Tensor):
 
         def wrap(x):
             if isinstance(x, torch.Tensor) and not isinstance(x, RedispatchTensor):
-                ret = x.as_subclass(cls)
-                ret.call_log = []
-                return ret
+                return cls(x)
             return x
         return tree_map(wrap, ret)
 
