@@ -39,7 +39,7 @@ on:
     outputs:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}
-        description: The docker image containing thegithub-token: ${{ secrets.GITHUB_TOKEN }} built PyTorch.
+        description: The docker image containing the built PyTorch.
 
 jobs:
   # Apply the filter logic to the build step too if the test-config label is
