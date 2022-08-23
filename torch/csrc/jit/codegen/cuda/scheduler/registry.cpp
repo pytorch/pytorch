@@ -829,7 +829,7 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Temporarily allow view in reduction scheduler
+    // Temporarily disallow view in reduction scheduler
     // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
@@ -1259,6 +1259,15 @@ class TransposeScheduler : public SchedulerEntry {
     // Not enabling this yet. Needs more validation.
     return false;
 #if 0
+    // Temporarily disallow view in transpose scheduler
+    // TODO Add more testing before enabling
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction, "No support for view op");
+      return false;
+    }
+
     if (!hasAtLeastTwoValidGroups(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Transpose,

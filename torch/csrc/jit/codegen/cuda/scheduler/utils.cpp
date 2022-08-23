@@ -135,6 +135,64 @@ size_t merge_3d(
   }
 }
 
+void splitDims(
+    TensorView* tv,
+    std::vector<std::pair<size_t, size_t>> to_split, // (dim, size)
+    std::vector<size_t>& to_update) {
+  std::stable_sort(
+      to_split.begin(),
+      to_split.end(),
+      [](const std::pair<size_t, size_t>& p1,
+         const std::pair<size_t, size_t>& p2) { return p1.first < p2.first; });
+  size_t dim_offset = 0;
+  size_t pending_dim_offset = 0;
+  int64_t prev_dim = -1;
+  for (auto entry : to_split) {
+    size_t dim = entry.first;
+    size_t size = entry.second;
+    if (dim != prev_dim) {
+      dim_offset += pending_dim_offset;
+      pending_dim_offset = 0;
+    }
+    size_t actual_dim = dim_offset + dim;
+    tv->split(actual_dim, size);
+    pending_dim_offset++;
+    for (auto& i : to_update) {
+      if (i > actual_dim) {
+        i++;
+      }
+    }
+    prev_dim = dim;
+  }
+}
+
+c10::optional<size_t> mergeDims(
+    TensorView* tv,
+    std::vector<size_t> to_merge,
+    std::vector<size_t>& to_update) {
+  if (to_merge.empty()) {
+    return c10::nullopt;
+  }
+  if (to_merge.size() == 1) {
+    return to_merge[0];
+  }
+  std::sort(to_merge.begin(), to_merge.end());
+  size_t left = to_merge[0];
+  int64_t offset = 0;
+  for (auto right = to_merge.begin() + 1; right != to_merge.end(); right++) {
+    auto actual_right = offset-- + *right;
+    tv->merge(left, actual_right);
+    for (auto& i : to_update) {
+      if (i == actual_right) {
+        i = left;
+      } else if (i > actual_right) {
+        i--;
+      }
+    }
+  }
+  return left;
+}
+
 size_t mergeReduction(
     TensorView* tv,
     const std::unordered_set<IterDomain*>& dont_merge) {

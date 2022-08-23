@@ -44,6 +44,38 @@ inline int64_t safeDiv(const int64_t x, const int64_t y) {
   return std::max(x / y, (int64_t)1);
 }
 
+// Split the given dimensions in `to_split`. Also update the dimensions in
+// `to_update` to the positions in the splitted tensor. Splitting one dimension
+// multiple times is supported, and if this is the case, then the order of
+// `to_split` matters. All given dimensions are numbers before any split.
+TORCH_CUDA_CU_API void splitDims(
+    TensorView* tv,
+    std::vector<std::pair<size_t, size_t>> to_split, // (dim, size)
+    std::vector<size_t>& to_update);
+
+TORCH_CUDA_CU_API inline void splitDims(
+    TensorView* tv,
+    std::vector<std::pair<size_t, size_t>> to_split) { // (dim, size)
+  std::vector<size_t> unused;
+  splitDims(tv, std::move(to_split), unused);
+}
+
+// Merge all the given dimensions in `to_merge` into a single dimension. Also
+// update the dimensions in `to_update` to the positions in the merged tensor.
+// Returns the merged dimension. All given dimensions are numbers before any
+// merge.
+TORCH_CUDA_CU_API c10::optional<size_t> mergeDims(
+    TensorView* tv,
+    std::vector<size_t> to_merge,
+    std::vector<size_t>& to_update);
+
+TORCH_CUDA_CU_API inline c10::optional<size_t> mergeDims(
+    TensorView* tv,
+    std::vector<size_t> to_merge) {
+  std::vector<size_t> unused;
+  return mergeDims(tv, std::move(to_merge), unused);
+}
+
 // Merge all reduction to the right side and returns total number of
 // reduction axes. Don't merge is typically used for trivial reductions.
 size_t mergeReduction(

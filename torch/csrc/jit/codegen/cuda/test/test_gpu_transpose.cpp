@@ -828,6 +828,110 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMissingDim_CUDA) {
       &fusion, outputs, {input0, input1, input2}, {t6}, __LINE__, __FILE__);
 }
 
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTransposeSmall_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = cos(tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({1024, 2, 2}, options);
+
+  auto lparams = scheduleTranspose(&fusion, {input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.sin().transpose(1, 2).cos();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+}
+
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = cos(tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({64 * 1024 * 1024, 2, 2}, options);
+
+  auto lparams = scheduleTranspose(&fusion, {input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.sin().transpose(1, 2).cos();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+}
+
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = transpose(tv1, 0, 2);
+  auto tv3 = cos(tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({2, 64 * 1024 * 1024, 2}, options);
+
+  auto lparams = scheduleTranspose(&fusion, {input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.sin().transpose(0, 2).cos();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+}
+
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(8);
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = transpose(tv1, 4, 7);
+  auto tv3 = cos(tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({1024 * 1024, 2, 2, 2, 2, 2, 2, 2}, options);
+
+  auto lparams = scheduleTranspose(&fusion, {input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.sin().transpose(4, 7).cos();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

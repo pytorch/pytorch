@@ -1765,7 +1765,7 @@ void TensorDomain::split(
   resetDomains();
 }
 
-// Merge "axis" and "axis+1" into 1 dimension
+// Merge "axis_o" and "axis_i" into 1 dimension
 void TensorDomain::merge(int axis_o, int axis_i) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
   if (axis_o < 0)
