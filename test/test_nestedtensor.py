@@ -518,11 +518,8 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[0], x0)
         self.assertEqual(nt[-1], x1)
         grad_x0 = torch.randn((2, 5), device=device, dtype=dtype)
-        grad_x1 = torch.randn((3, 4), device=device, dtype=dtype)
-        grad_nt = self.random_nt([grad_x0, grad_x1])
-        nt.backward(grad_nt)
-        self.assertEqual(grad_x0.grad, grad_x0)
-        self.assertEqual(grad_x1.grad, grad_x1)
+        nt[0].backward(grad_x0)
+        self.assertEqual(nt.grad, torch.nested_tensor([grad_x0, torch.zeros((3, 4))]))
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
