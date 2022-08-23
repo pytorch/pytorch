@@ -46,6 +46,9 @@ jobs:
   # already there
   filter:
     runs-on: ubuntu-latest
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -63,7 +66,7 @@ jobs:
   build:
     needs: filter
     # Don't run on forked repos or empty test matrix unless the input test matrix itself is empty
-    if: github.repository_owner == 'pytorch' && (needs.filter.steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '')
+    if: github.repository_owner == 'pytorch' && (needs.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '')
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     outputs:
