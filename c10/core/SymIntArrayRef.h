@@ -81,9 +81,9 @@ class SymIntArrayRef final {
 
   static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
     for (size_t i = 0; i < array_ref.size(); ++i) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      TORCH_CHECK(
           SymInt::check_range(array_ref[i]),
-          "IntArrayRef contains int that cannot be representative as a SymInt",
+          "IntArrayRef contains an int that cannot be represented as a SymInt: ",
           array_ref[i]);
     }
     return SymIntArrayRef(
