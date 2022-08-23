@@ -93,7 +93,7 @@ bool SymInt::operator<(SymInt sci) const {
     return data_ < sci.data_;
   }
   auto res = normalize_symints(*this, sci);
-  return res[0]->eq(res[1])->bool_();
+  return res[0]->lt(res[1])->bool_();
 }
 
 void SymInt::operator*=(SymInt sci) {
