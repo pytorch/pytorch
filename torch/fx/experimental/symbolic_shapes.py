@@ -18,19 +18,6 @@ __all__ = [
 
 SYM_FUNCTION_MODE = None
 
-math_lib = torch.library.Library("math", "DEF")
-
-math_lib.define("mul(int a, int b) -> int")
-math_lib.define("eq(int a, int b) -> bool")
-math_lib.define("gt(int a, int b) -> bool")
-math_lib.define("lt(int a, int b) -> bool")
-
-math_lib.impl("mul", lambda a, b: a * b, "Undefined")
-math_lib.impl("eq", lambda a, b: a == b, "Undefined")
-math_lib.impl("gt", lambda a, b: a > b, "Undefined")
-math_lib.impl("lt", lambda a, b: a < b, "Undefined")
-
-
 # We don't bother with the metaclass as all of the dispatching logic happens
 # entirely from Python
 #
