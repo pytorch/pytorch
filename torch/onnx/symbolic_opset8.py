@@ -33,7 +33,7 @@ Updated operators:
 import warnings
 
 import torch
-from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 
 block_listed_operators = [
     "nonzero",
@@ -67,7 +67,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         output_size = symbolic_helper._maybe_get_const(output_size, "is")
         if symbolic_helper._is_value(output_size):
             return symbolic_helper._unimplemented(
@@ -200,7 +200,9 @@ def mm(g, self, other):
     # since beta = 0
     scalar_type = symbolic_helper._try_get_scalar_type(self, other)
     if scalar_type is None:
-        raise ValueError("mm can only operate on tensors with known types")
+        raise errors.SymbolicValueError(
+            "mm can only operate on tensors with known types", self
+        )
     zero_constant = g.op(
         "Constant",
         value_t=torch.tensor(

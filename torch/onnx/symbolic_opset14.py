@@ -71,6 +71,7 @@ def batch_norm(
             15,
             "All input tensors must have the same `dtype`."
             " Turn off Autocast or export using opset version 15.",
+            input,
         )
 
     symbolic_helper.check_training_mode(training, "batch_norm")
