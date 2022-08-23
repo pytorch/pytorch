@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/schema_info.h>
 
 #include <ATen/core/operator_name.h>
+#include <ATen/NestedTensorImpl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
@@ -1191,6 +1192,11 @@ void initJITBindings(PyObject* module) {
           "new_symint",
           [](py::object obj) -> c10::SymIntNode {
             return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
+          })
+      .def_static(
+          "new_nested_symint",
+          [](std::vector<int64_t> vals) -> c10::SymIntNode {
+            return c10::make_intrusive<at::native::NestedSymIntNodeImpl>(std::move(vals));
           })
       .def(
           "get_pyobj",
