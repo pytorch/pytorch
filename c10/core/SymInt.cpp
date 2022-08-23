@@ -4,7 +4,8 @@
 
 namespace c10 {
 
-std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
+#ifndef C10_MOBILE
+static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNode a, b;
   if (a_.is_symbolic())
     a = a_.toSymIntNodeImpl();
@@ -24,7 +25,6 @@ std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   return {a, b};
 }
 
-#ifndef C10_MOBILE
 SymIntNode SymInt::toSymIntNodeImpl() const {
   TORCH_CHECK(is_symbolic());
   return SymIntNode::reclaim_copy(toSymIntNodeImplUnowned());
@@ -35,6 +35,20 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
+}
+#else
+// this code should never be executed on mobile due to inlining of `is_symbolic`
+// which always returns `false` on mobile.
+// However, if we decide to strip off `SymIntNode` completely from mobile builds
+// We would need to stub these methods anyways
+c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
+  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
+}
+SymIntNode SymInt::toSymIntNodeImpl() const {
+  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
+}
+static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
+  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
 }
 #endif
 

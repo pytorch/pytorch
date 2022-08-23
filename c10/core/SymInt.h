@@ -89,15 +89,17 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
-#endif
-
   void release_() {
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
+#else
+  void release_() {}
+#endif
+
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   ~SymInt() {
     release_();
