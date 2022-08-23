@@ -6,6 +6,9 @@ description: |
   test configs matrix is returned untouched.
 
 inputs:
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
   test-matrix:
     required: true
     type: string
@@ -30,7 +33,7 @@ runs:
     - name: Select all requested test configurations
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       id: filter
       run: |
         .github/scripts/filter_test_configs.py \

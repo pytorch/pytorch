@@ -42,6 +42,7 @@ jobs:
         id: filter
         uses: ./.github/actions/filter-test-configs
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test_matrix }}
 
   test:
