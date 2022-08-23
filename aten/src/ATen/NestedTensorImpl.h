@@ -266,8 +266,11 @@ inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
 class TORCH_API NestedSymIntNodeImpl : public c10::SymIntNodeImpl {
   std::vector<int64_t> vals_;
 
+public:
   NestedSymIntNodeImpl(std::vector<int64_t> vals)
     : vals_(std::move(vals)) {}
+
+  ArrayRef<int64_t> vals() { return vals_; }
 };
 
 } // namespace native
