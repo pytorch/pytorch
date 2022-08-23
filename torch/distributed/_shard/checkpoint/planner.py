@@ -102,13 +102,15 @@ class SavePlanner(abc.ABC):
     Rewriting state_dict. This is the simplest way to extend the save process as it
     doesn't requite understanding the intrincacies of how SavePlan works:
 
-    >>> class RenamePlanner(DefaultSavePlanner)
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> class RenamePlanner(DefaultSavePlanner):
     >>>     def init(self, state_dict, is_coordinator):
     >>>         # prefix all keys with `foo_``
-    >>>         super().init(self, {"foo_" + k, v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
+    >>> # xdoctest: +SKIP("undefined vars")
     >>> class FP16Planner(DefaultSavePlanner):
     >>>     def create_local_plan(self):
     >>>         plan = super().create_local_plan()
@@ -122,6 +124,7 @@ class SavePlanner(abc.ABC):
 
     Using the global planning step to make central decisions that can't be made individually by each rank
 
+    >>> # xdoctest: +SKIP("undefined vars")
     >>> from itertools import islice
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
@@ -141,6 +144,7 @@ class SavePlanner(abc.ABC):
     accomplished by having each rank contribute their data items in the local plan and
     the global planner aggregate them:
 
+    >>> # xdoctest: +SKIP("undefined vars")
     >>> class SaveExtraDataPlanner(DefaultSavePlanner):
     >>>     def create_local_plan(self) -> SavePlan:
     >>>         plan = super().create_local_plan()
@@ -247,18 +251,20 @@ class LoadPlanner:
     to keep a reference to the original state_dict as load happens in place so
     we need to be able to perform it in place
 
-    >>> class RenamePlanner(DefaultLoadPlanner)
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> class RenamePlanner(DefaultLoadPlanner):
     >>>     def init(self, state_dict, metadata, is_coordinator):
     >>>         self.original_state_dict = state_dict
-    >>>         super().init(self, {"foo_" + k, v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
     >>>
-    >>>     def load_bytes(self, read_item, value);
+    >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
     >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value)
 
 
     Modifying resolve_tensor and commit_tensor to handle load time transformation.
 
+    >>> # xdoctest: +SKIP("undefined vars")
     >>> class MetaModelMaterialize(DefaultSavePlanner):
     >>>     def resolve_tensor(self, read_item):
     >>>         tensor = super().resolve_tensor(read_item)
