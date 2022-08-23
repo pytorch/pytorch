@@ -980,14 +980,16 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         const auto& input_tensor = input.toTensor();
         std::cout << "  " << input_tensor.scalar_type() << " "
                   << input.toTensor().sizes()
-                  << " (strides = " << input.toTensor().strides() << ")"
+                  << " (strides = " << input.toTensor().strides()
+                  << ", address = " << input.toTensor().data_ptr() << ")"
                   << std::endl;
       }
     }
     std::cout << "Outputs:" << std::endl;
     for (const auto& output : allocated_outputs) {
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
-                << " (strides = " << output.strides() << ")" << std::endl;
+                << " (strides = " << output.strides()
+                << ", address = " << output.data_ptr() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
     TORCH_INTERNAL_ASSERT(

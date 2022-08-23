@@ -1390,17 +1390,19 @@ std::vector<TensorView*> getInputsOutputsWithInnerDim(
 
   std::vector<TensorView*> vectorizable_tensors;
 
-  for (auto input_tv :
-       ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
-    if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {
-      vectorizable_tensors.push_back(input_tv);
-    }
-  }
-
+  // We put outputs in front of inputs because this would make the transpose
+  // scheduler prefer to use output instead of input as reference tensor.
   for (auto output_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->outputs())) {
     if (hasInnerDim(output_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(output_tv);
+    }
+  }
+
+  for (auto input_tv :
+       ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
+    if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {
+      vectorizable_tensors.push_back(input_tv);
     }
   }
 

@@ -126,13 +126,15 @@ class DomainMap : public pointwise_utils::DomainMap {
         auto group =
             scheduler_utils::getInputsOutputsWithInnerDim(tv, true, false);
         for (auto member_tv : group) {
-          TORCH_INTERNAL_ASSERT(
-              grouped.count(member_tv) == 0 || member_tv == tv,
-              "The group of ",
-              member_tv->toString(),
-              " is ambiguous. This is likely a bug.");
-          grouped.emplace(member_tv);
-          groups.back().emplace_back(member_tv);
+          if (grouped.count(member_tv) == 0) {
+            grouped.emplace(member_tv);
+            groups.back().emplace_back(member_tv);
+          } else if (member_tv != tv) {
+            // Ambiguous grouping. This should only happen at `canSchedule`, so
+            // we just return a null result which will tell the scheduler to
+            // reject the fusion
+            return {};
+          }
         }
       }
     }
@@ -229,15 +231,26 @@ void maybeBuildVirtualInnerDims(
       (merged_size2 < params.tile_size2)) {
     return; // no need to split
   }
-  // If one of them are not satisfied, this usually means that the satisfied one
-  // just merged in a large dim. We split this large dim, so that now we have
-  // two available dims to satisfy both virtual innermost dim.
+  // If one of them are not satisfied, there might be two cases:
+  // 1. The satisfied one just merged in a large dim. If this is the case, We
+  //    split this large dim, so that now we have two available dims to satisfy
+  //    both virtual innermost dim.
+  // 2. The satisfied one did not merge in anything. For example,
+  //    T0[I0{1024*1024}, I1{2}]
   int64_t large_dim;
   int64_t split_factor;
   if (merged_size1 < params.tile_size1) {
+    if (params.dims_merged_with_2.empty()) {
+      // case 2
+      return;
+    }
     large_dim = params.dims_merged_with_2.back();
     split_factor = ceilDiv(params.tile_size1, merged_size1);
   } else {
+    if (params.dims_merged_with_1.empty()) {
+      // case 2
+      return;
+    }
     large_dim = params.dims_merged_with_1.back();
     split_factor = ceilDiv(params.tile_size2, merged_size2);
   }
@@ -435,7 +448,6 @@ std::shared_ptr<TransposeParams> getTransposeHeuristics(
   auto max_unroll_factor_block =
       ceilDiv(params->tile_size1 * params->tile_size2, 32);
   max_unroll_factor = std::min(max_unroll_factor, max_unroll_factor_block);
-  max_unroll_factor = scheduler_utils::lastPow2(max_unroll_factor);
 
   // Compute maximum vectorize factor that can be used
   size_t vectorize_factor1 = max_unroll_factor;
@@ -456,15 +468,17 @@ std::shared_ptr<TransposeParams> getTransposeHeuristics(
     vectorize_factor2 = std::min(vectorize_factor2, tv_vectorize_factor);
   }
 
-  params->vectorize_factor1 =
-      std::min(static_cast<size_t>(max_unroll_factor), vectorize_factor1);
-  params->vectorize_factor2 =
-      std::min(static_cast<size_t>(max_unroll_factor), vectorize_factor2);
+  params->vectorize_factor1 = scheduler_utils::lastPow2(
+      std::min(static_cast<size_t>(max_unroll_factor), vectorize_factor1));
+  params->vectorize_factor2 = scheduler_utils::lastPow2(
+      std::min(static_cast<size_t>(max_unroll_factor), vectorize_factor2));
 
   params->lparams.bind(params->getThreadsPerBlock(), ParallelType::TIDx);
 
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Transpose Stats ========\n"
+              << "inputs: " << ir_utils::toString(fusion->inputs()) << "\n"
+              << "outputs: " << ir_utils::toString(fusion->outputs()) << "\n"
               << "num_elems: " << n_elems << "\n"
               << "n_input_tensors: " << n_input_tensors << "\n"
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"

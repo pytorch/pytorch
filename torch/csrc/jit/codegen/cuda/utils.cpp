@@ -169,7 +169,8 @@ auto parseEnableOptions() {
       {EnableOption::Complex, false},
       {EnableOption::KernelProfile, false},
       {EnableOption::LinearDecomposition, false},
-      {EnableOption::ConvDecomposition, false}};
+      {EnableOption::ConvDecomposition, false},
+      {EnableOption::TransposeScheduler, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
@@ -184,13 +185,16 @@ auto parseEnableOptions() {
         options_map[EnableOption::LinearDecomposition] = true;
       } else if (token == "conv_decomposition") {
         options_map[EnableOption::ConvDecomposition] = true;
+      } else if (token == "transpose_scheduler") {
+        options_map[EnableOption::TransposeScheduler] = true;
       } else {
         TORCH_CHECK(
             false,
-            "Invalid disable option: '",
+            "Invalid enable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tcomplex, kernel_profile");
+            "\tcomplex, kernel_profile, linear_decomposition,",
+            "conv_decomposition, transpose_scheduler");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

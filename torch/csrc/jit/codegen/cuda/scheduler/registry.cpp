@@ -1256,15 +1256,18 @@ class TransposeScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Not enabling this yet. Needs more validation.
-    return false;
-#if 0
+    if (!isOptionEnabled(EnableOption::TransposeScheduler)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "not enabled");
+      return false;
+    }
+
     // Temporarily disallow view in transpose scheduler
     // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
       scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No support for view op");
+          ScheduleHeuristic::Transpose, "No support for view op");
       return false;
     }
 
@@ -1293,7 +1296,6 @@ class TransposeScheduler : public SchedulerEntry {
     }
 
     return true;
-#endif
   }
 
   static bool canScheduleRunTime(
