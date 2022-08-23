@@ -95,7 +95,7 @@ jobs:
               ("11.6") { python3 -m pip3 install torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/cu116";
                        python3 ./test/smoke_test/smoke_test.py; }
                        ;;
-              ("11.7") { python3 -m pip3 install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cu117";
+              ("11.7") { python3 -m pip3 install --pre torch torchvision torchaudio --extra-index-url "https://download.pytorch.org/whl/nightly/cu117";
                        python3 ./test/smoke_test/smoke_test.py; }
                        ;;
              (*) echo "No binary available"
