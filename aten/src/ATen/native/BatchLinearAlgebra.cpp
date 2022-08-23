@@ -2001,6 +2001,7 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
   // Possible optimization: Compute the LU factorization of A^T if A is contiguous
   // Then we solve A^T X = B with adjoint=True
   // This saves a copy as A doesn't need to be copied into an F-contig matrix in lu_factor
+  // This optimization makes functorch's batching rule difficult. See NOTE [ solve_ex Batch Rule Contiguity ]
   const bool use_A_T = A.is_contiguous() && !A.is_complex();
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
