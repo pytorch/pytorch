@@ -304,6 +304,8 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
+    case ExprType::GroupedWelfordOp:
+      return "GroupedWelfordOp";
     case ExprType::LoadStoreOp:
       return "LoadStoreOp";
     case ExprType::MmaOp:
@@ -350,6 +352,8 @@ static const char* expr_type2string(ExprType t) {
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::GroupedGridWelford:
+      return "GroupedGridWelford";
     case ExprType::Swizzle2D:
       return "Swizzle2D";
     case ExprType::Swizzle2DInt:

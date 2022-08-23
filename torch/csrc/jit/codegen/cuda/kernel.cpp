@@ -137,6 +137,15 @@ class KernelIrScanner : private IrVisitor {
     }
   }
 
+  void handle(GroupedGridWelford* grid_welford) final {
+    summary_.has_welford = true;
+    summary_.has_grid_welford = true;
+    summary_.has_grid_reductions = true;
+    if (grid_welford->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
+  }
+
   void handle(GridBroadcast* grid_broadcast) final {
     summary_.has_cooperative_grid_reduction = true;
     handle(grid_broadcast->broadcast_op());

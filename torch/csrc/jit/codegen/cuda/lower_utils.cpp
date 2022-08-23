@@ -94,6 +94,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::GroupedWelfordOp ||
        expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
@@ -104,8 +105,10 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::ViewAsScalar ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
+       expr->getExprType().value() == ExprType::GroupedGridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||
-       expr->getExprType().value() == ExprType::GridWelford)) {
+       expr->getExprType().value() == ExprType::GridWelford ||
+       expr->getExprType().value() == ExprType::GroupedGridWelford)) {
     return true;
   }
   return false;

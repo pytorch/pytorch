@@ -1417,12 +1417,12 @@ WelfordResult Welford(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
+      tv, /*in var/avg/count */
+      FusionGuard::getCurFusion()->zeroVal(),
+      FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N, /*init var/avg/count */
-      tv,
-      FusionGuard::getCurFusion()->zeroVal(),
-      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
+      init_N); /*init var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }

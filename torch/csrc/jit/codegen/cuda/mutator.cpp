@@ -263,13 +263,50 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       out_avg,
       out_var,
       out_N,
-      init_avg,
-      init_var,
-      init_N,
       in_avg,
       in_var,
       in_N,
+      init_avg,
+      init_var,
+      init_N,
       wop->isAllreduce());
+}
+
+void OptOutMutator::mutate(GroupedWelfordOp* wop) {
+  bool is_same = true;
+
+  std::vector<WelfordTriplet> output_vals;
+  for (const auto& out : wop->outputVals()) {
+    auto maybe_mutated =
+        out.transform([&](Val* val) { return maybeMutated(val); });
+    is_same = is_same && maybe_mutated.sameAs(out);
+    output_vals.push_back(maybe_mutated);
+  }
+
+  std::vector<WelfordTriplet> input_vals;
+  for (const auto& inp : wop->inputVals()) {
+    auto maybe_mutated =
+        inp.transform([&](Val* val) { return maybeMutated(val); });
+    is_same = is_same && maybe_mutated.sameAs(inp);
+    input_vals.push_back(maybe_mutated);
+  }
+
+  std::vector<WelfordTriplet> init_vals;
+  for (const auto& init : wop->initVals()) {
+    auto maybe_mutated =
+        init.transform([&](Val* val) { return maybeMutated(val); });
+    is_same = is_same && maybe_mutated.sameAs(init);
+    init_vals.push_back(maybe_mutated);
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = wop->container();
+  container->removeExpr(wop);
+  IrBuilder::create<GroupedWelfordOp>(
+      container, output_vals, input_vals, init_vals, wop->isAllreduce());
 }
 
 void OptOutMutator::mutate(MmaOp* mma) {
@@ -509,6 +546,9 @@ void OptOutMutator::mutate(kir::GridBroadcast*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridWelford*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::GroupedGridWelford*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::AllocateFusedReduction*) {

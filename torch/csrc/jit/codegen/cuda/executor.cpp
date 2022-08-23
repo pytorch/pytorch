@@ -860,7 +860,13 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
           "what can be resident on the GPU at once. Need: ",
           launch_params_.gdimx() * launch_params_.gdimy() *
               launch_params_.gdimz(),
-          " but limited to ",
+          " (",
+          launch_params_.gdimx(),
+          " * ",
+          launch_params_.gdimy(),
+          " * ",
+          launch_params_.gdimz(),
+          ") but limited to ",
           num_blocks_per_SM,
           " * ",
           at::cuda::getDeviceProperties(options_.device.index())

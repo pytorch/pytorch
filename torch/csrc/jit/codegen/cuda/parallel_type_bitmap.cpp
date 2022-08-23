@@ -12,6 +12,7 @@ constexpr std::bitset<ParallelTypeBitmap::kNumParallelTypes>
 
 std::string ParallelTypeBitmap::toString() const {
   std::stringstream ss;
+  ss << "(";
   bool is_first = true;
   for (ParallelType pt : *this) {
     if (!is_first) {
@@ -20,6 +21,7 @@ std::string ParallelTypeBitmap::toString() const {
     ss << pt;
     is_first = false;
   }
+  ss << ")";
   return ss.str();
 }
 

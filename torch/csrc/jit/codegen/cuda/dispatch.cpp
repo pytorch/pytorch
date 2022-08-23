@@ -113,6 +113,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
+    case ExprType::GroupedWelfordOp:
+      ptr(handler)->handle(expr->as<GroupedWelfordOp>());
+      return;
     case ExprType::LoadStoreOp:
       ptr(handler)->handle(expr->as<LoadStoreOp>());
       return;
@@ -189,6 +192,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::GroupedGridWelford:
+      ptr(handler)->handle(expr->as<kir::GroupedGridWelford>());
       return;
     case ExprType::AllocateFusedReduction:
       ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
@@ -287,6 +293,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
+    case ExprType::GroupedWelfordOp:
+      ptr(handler)->handle(expr->as<GroupedWelfordOp>());
+      return;
     case ExprType::LoadStoreOp:
       ptr(handler)->handle(expr->as<LoadStoreOp>());
       return;
@@ -363,6 +372,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::GroupedGridWelford:
+      ptr(handler)->handle(expr->as<kir::GroupedGridWelford>());
       return;
     case ExprType::AllocateFusedReduction:
       ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
@@ -469,6 +481,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
       return;
+    case ExprType::GroupedWelfordOp:
+      ptr(mutator)->mutate(expr->as<GroupedWelfordOp>());
+      return;
     case ExprType::LoadStoreOp:
       ptr(mutator)->mutate(expr->as<LoadStoreOp>());
       return;
@@ -545,6 +560,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(mutator)->mutate(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::GroupedGridWelford:
+      ptr(mutator)->mutate(expr->as<kir::GroupedGridWelford>());
       return;
     case ExprType::AllocateFusedReduction:
       ptr(mutator)->mutate(expr->as<kir::AllocateFusedReduction>());
@@ -716,6 +734,9 @@ void OptOutConstDispatch::handle(const GroupedReductionOp* stmt) {
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const GroupedWelfordOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const LoadStoreOp* stmt) {
   unhandled(stmt);
 }
@@ -793,6 +814,9 @@ void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
 void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::GroupedGridWelford* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
@@ -858,6 +882,9 @@ void OptOutDispatch::handle(GroupedReductionOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(WelfordOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(GroupedWelfordOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(LoadStoreOp* stmt) {
@@ -935,6 +962,9 @@ void OptOutDispatch::handle(kir::GridBroadcast* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridWelford* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GroupedGridWelford* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {

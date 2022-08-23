@@ -415,12 +415,12 @@ struct SubstituteInExpr : public OptInDispatch {
         out_avg,
         out_var,
         out_N,
-        init_avg,
-        init_var,
-        init_N,
         in_avg,
         in_var,
         in_N,
+        init_avg,
+        init_var,
+        init_N,
         welford_expr->isAllreduce());
   }
 
@@ -782,29 +782,12 @@ Val* getReductionInitValOf(TensorView* tv) {
   if (auto rop = dynamic_cast<ReductionOp*>(def)) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
-    int output_idx = -1;
-    for (const auto i : c10::irange(grop->numExprs())) {
-      if (tv == grop->output(i)) {
-        output_idx = static_cast<int>(i);
-        break;
-      }
-    }
-    TORCH_INTERNAL_ASSERT(
-        output_idx >= 0,
-        "Matching output not found for GroupedReductionOp: ",
-        tv->toString(),
-        ". Defined by: ",
-        def->toString());
+    int output_idx = grop->getExprIndexOfOutput(tv);
     init = grop->initVal(output_idx);
   } else if (auto wop = dynamic_cast<WelfordOp*>(def)) {
-    if (tv == wop->outAvg()) {
-      init = wop->initAvg();
-    } else if (tv == wop->outVar()) {
-      init = wop->initVar();
-    } else {
-      TORCH_INTERNAL_ASSERT(tv == wop->outN());
-      init = wop->initN();
-    }
+    return wop->getInitValOfOutput(tv);
+  } else if (auto gwop = dynamic_cast<GroupedWelfordOp*>(def)) {
+    init = gwop->getInitValOfOutput(tv);
   } else if (auto mma = dynamic_cast<MmaOp*>(def)) {
     init = mma->init();
   }
@@ -817,7 +800,8 @@ Val* getReductionInitValOf(TensorView* tv) {
 bool isReductionOp(const Expr* expr) {
   // Note that GridReduction inherits ReductionOp
   return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
+      expr->isA<WelfordOp>() || expr->isA<GroupedWelfordOp>() ||
+      expr->isA<kir::GridWelford>() || expr->isA<kir::GroupedGridWelford>();
 }
 
 bool isReductionTvOp(const Expr* expr) {

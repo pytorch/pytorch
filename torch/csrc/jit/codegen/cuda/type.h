@@ -111,6 +111,7 @@ enum class ExprType {
   GroupedReductionOp,
   BroadcastOp,
   WelfordOp,
+  GroupedWelfordOp,
   MmaOp,
   TransposeOp,
   ExpandOp,
@@ -137,6 +138,7 @@ enum class ExprType {
   GroupedGridReduction,
   GridBroadcast,
   GridWelford,
+  GroupedGridWelford,
   AllocateFusedReduction
 };
 

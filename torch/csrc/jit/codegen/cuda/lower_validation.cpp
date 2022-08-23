@@ -1204,8 +1204,10 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
 
     TORCH_CHECK(
         tv->definition()->isA<ReductionOp>() ||
-            tv->definition()->isA<GroupedReductionOp>(),
-        "Invalid use of ParallelType::Group. Only ReductionOp and GroupedReductionOp are allowed. ",
+            tv->definition()->isA<GroupedReductionOp>() ||
+            tv->definition()->isA<WelfordOp>() ||
+            tv->definition()->isA<GroupedWelfordOp>(),
+        "Invalid use of ParallelType::Group. Only ReductionOp, GroupedReductionOp, WelfordOp and GroupedWelfordOp are allowed. ",
         tv->definition()->toString());
 
     // Convert ReductionOp to GroupedReductionOp
@@ -1237,6 +1239,36 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
           init_vals,
           outputs,
           inputs,
+          is_allreduce);
+    } else if (tv->definition()->isA<WelfordOp>()) {
+      // Convert WelfordOp to GroupedWelfordOp
+      auto wop = def->as<WelfordOp>();
+      auto is_allreduce = wop->isAllreduce();
+
+      TORCH_CHECK(
+          is_allreduce,
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for allreduce reductions: ",
+          wop->toString());
+
+      TORCH_CHECK(
+          tv->domain()->hasGridReduction(),
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for grid reductions: ",
+          wop->toString());
+
+      std::vector<WelfordTriplet> output_vals(
+          {{wop->outAvg(), wop->outVar(), wop->outN()}});
+      std::vector<WelfordTriplet> input_vals(
+          {{wop->inAvg(), wop->inVar(), wop->inN()}});
+      std::vector<WelfordTriplet> init_vals(
+          {{wop->initAvg(), wop->initVar(), wop->initN()}});
+      fusion->removeExpr(wop);
+      IrBuilder::create<GroupedWelfordOp>(
+          static_cast<IrContainer*>(fusion),
+          output_vals,
+          input_vals,
+          init_vals,
           is_allreduce);
     }
   }
