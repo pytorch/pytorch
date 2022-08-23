@@ -123,7 +123,7 @@ Tensor* FusionDefinition::defineTensor() {
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
   TORCH_CHECK(
-      recording_.size() <= max_length_,
+      (recording_.size() + 1) <= max_length_,
       "The fusion definition has exceeded ",
       max_length_,
       "operations.  The max_length for FusionDefintion's might need to be ",
