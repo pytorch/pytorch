@@ -26,6 +26,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
@@ -1259,12 +1260,10 @@ def unconvertible_ops(
     return graph, unsupported_ops
 
 
-def _setup_trace_module_map(model, export_modules_as_functions):
-    def __setup_trace_module_map():
-        trace_module_map = {_m: torch.typename(type(_m)) for _m in model.modules()}
-        torch.jit._trace._trace_module_map = trace_module_map
-        return trace_module_map
-
+def _setup_trace_module_map(
+    model: Union[torch.nn.Module, torch.jit.ScriptModule],
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]],
+) -> Set[str]:
     def __register_attribute_hook():
         attr_name = "_onnx_attrs"
 
@@ -1288,13 +1287,35 @@ def _setup_trace_module_map(model, export_modules_as_functions):
             m.register_forward_hook(_track_module_attributes_forward_hook)
             m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
+    def _unqualified_variable_name(qualified_name: str) -> str:
+        """
+        Parse qualified variable name and return the unqualified version.
+
+        Pure numeric atoms are considered inadequate, so this function will look past them,
+        and start from the first non-numeric atom.
+
+        Example:
+            >>> _unqualified_variable_name('__main__.Foo.bar')
+            'bar'
+            >>> _unqualified_variable_name('__main__.Foo.bar.0')
+            'bar.0'
+        """
+        name_atoms = qualified_name.split(".")
+        for i, atom in reversed(list(enumerate(name_atoms))):
+            if not atom.isnumeric():
+                return ".".join(name_atoms[i:])
+        return qualified_name
+
+    trace_module_map = {
+        _m: torch._C._jit_onnx_create_full_scope_name(
+            torch.typename(type(_m)), _unqualified_variable_name(_n)
+        )
+        for _n, _m in model.named_modules()
+    }
+    torch.jit._trace._trace_module_map = trace_module_map
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
-        trace_module_map = __setup_trace_module_map()
-        export_modules_as_functions = {v for k, v in trace_module_map.items()}
-    elif (
-        isinstance(export_modules_as_functions, set)
-        and len(export_modules_as_functions) > 0
-    ):
+        module_typenames = {torch.typename(type(module)) for module in trace_module_map}
+    elif isinstance(export_modules_as_functions, set) and export_modules_as_functions:
 
         def _find_typename(v):
             if isinstance(v, type):
@@ -1306,16 +1327,14 @@ def _setup_trace_module_map(model, export_modules_as_functions):
                     "Got `%s`." % (type(v).__name__)
                 )
 
-        trace_module_map = __setup_trace_module_map()
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
-        export_modules_as_functions = module_typenames
     else:
-        export_modules_as_functions = None
+        module_typenames = set()
 
-    if export_modules_as_functions:
+    if module_typenames:
         __register_attribute_hook()
 
-    return export_modules_as_functions
+    return module_typenames
 
 
 def _reset_trace_module_map():
@@ -1377,9 +1396,12 @@ def _export(
                 "This is because `opset_version` < 15 implies IR version < 8, which means "
                 "no local function support. "
             )
-        export_modules_as_functions = _setup_trace_module_map(
-            model, export_modules_as_functions
-        )
+
+        module_typenames_to_export_as_functions: Set[str] = set()
+        if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
+            module_typenames_to_export_as_functions = _setup_trace_module_map(
+                model, export_modules_as_functions
+            )
 
         if not operator_export_type:
             if _C_onnx._CAFFE2_ATEN_FALLBACK:
@@ -1438,10 +1460,12 @@ def _export(
 
             _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions:
+            if module_typenames_to_export_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = _C._jit_pass_onnx_function_extraction(
-                    graph, export_modules_as_functions, list(params_dict.keys())
+                    graph,
+                    module_typenames_to_export_as_functions,
+                    list(params_dict.keys()),
                 )
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
