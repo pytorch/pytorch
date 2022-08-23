@@ -18,9 +18,12 @@ from trymerge import (find_matching_merge_rule,
                       gh_get_team_members,
                       read_merge_rules,
                       validate_revert,
+                      filter_pending_checks,
+                      filter_failed_checks,
                       GitHubPR,
                       MergeRule,
                       MandatoryChecksMissingError,
+                      WorkflowCheckState,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -336,6 +339,22 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 79694)
         repo = DummyGitRepo()
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
+
+    def test_checks_filter(self) -> None:
+        checks = [
+            WorkflowCheckState(name="check0", status="SUCCESS", url="url0"),
+            WorkflowCheckState(name="check1", status="FAILURE", url="url1"),
+            WorkflowCheckState(name="check2", status="STARTUP_FAILURE", url="url2"),
+            WorkflowCheckState(name="check3", status=None, url="url3"),
+        ]
+
+        checks_dict = {check.name : check for check in checks}
+
+        pending_checks = filter_pending_checks(checks_dict)
+        failing_checks = filter_failed_checks(checks_dict)
+
+        self.assertListEqual(failing_checks, [checks[1], checks[2]])
+        self.assertListEqual(pending_checks, [checks[3]])
 
 if __name__ == "__main__":
     main()
