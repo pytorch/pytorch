@@ -88,6 +88,11 @@ class Model(torch.nn.Module):
 
 
 class TestFSDPExecOrder(FSDPTest):
+    
+    def setUp(self):
+        super().setUp()
+        dist.set_debug_level(dist.DebugLevel.INFO)
+
     @property
     def device(self):
         return torch.device("cuda")
