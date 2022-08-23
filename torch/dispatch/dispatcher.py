@@ -1,7 +1,6 @@
 import torch
 import torch._C as _C
 from torch.utils._pytree import tree_flatten
-from torch.overrides import has_torch_function
 
 """
 This is a dispatcher (in Python)

@@ -1,7 +1,6 @@
-from torch.dispatch.dispatcher import PyDispatcher, to_flat_tuple, has_torch_function, compute_keyset
-from torch._C import DispatchKey, DispatchKeySet
+from torch.dispatch.dispatcher import PyDispatcher, to_flat_tuple, compute_keyset
 from torch.nn.functional import handle_torch_function
-
+from torch.overrides import has_torch_function
 import torch._C as _C
 
 class PyOperator:
