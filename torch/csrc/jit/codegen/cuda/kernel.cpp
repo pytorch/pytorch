@@ -80,11 +80,9 @@ class KernelIrScanner : private IrVisitor {
     }
   }
 
-  void handle(UnaryOp* unary_op) final {
-    if (unary_op->getUnaryOpType() == UnaryOpType::RandLike) {
-      summary_.max_rng_offsets =
-          std::max<int>(summary_.max_rng_offsets, unary_op->getRNGOffset());
-    }
+  void handle(RNGOp* rng_op) final {
+    summary_.max_rng_offsets =
+        std::max<int>(summary_.max_rng_offsets, rng_op->getRNGOffset());
   }
 
   void handle(TensorIndex* tensor_index) final {

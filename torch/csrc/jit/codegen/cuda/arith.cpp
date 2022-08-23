@@ -358,6 +358,19 @@ Val* getMaximumValue(DataType v) {
 
 } // namespace
 
+// TENSOR FACTORIES
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out);
+  return out;
+}
+
 Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype) {
     return set(v1);
@@ -404,17 +417,6 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-
-  // TODO: We should add the following, but we need to go through schedulers
-  // and make sure all calls to "fusion->inputs" includes the output of RandLike
-  //
-  //  If rand like, there isn't a real dependency on the input value, so map it
-  //  to a dummy scalar. if
-  //
-  // (type == UnaryOpType::RandLike) {
-  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
-  // }
-
   Val* out = newValLike(v1, v1->getDataType().value());
   IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
@@ -469,28 +471,21 @@ NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
 
-Val* randlike(Val* v) {
-  TORCH_CHECK(
-      isFloatingPointType(v->dtype()),
-      "input must have floating point type, but got ",
-      v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
-}
-
 TensorView* randlike(TensorView* v) {
   TORCH_CHECK(
       isFloatingPointType(v->dtype()),
       "input must have floating point type, but got ",
       v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
+  std::vector<Val*> shape;
+  shape.reserve(v->getMaybeRFactorDomain().size());
+  for (auto id : v->getMaybeRFactorDomain()) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return rand(shape, v->dtype());
+}
+
+Val* randlike(Val* v) {
+  return randlike(v->as<TensorView>());
 }
 
 Val* bitwise_not(Val* v) {

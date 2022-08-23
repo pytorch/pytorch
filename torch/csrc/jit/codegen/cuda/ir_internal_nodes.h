@@ -58,23 +58,12 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
-  int getRNGOffset() const {
-    return rng_offset_;
-  }
-
-  void setRNGOffset(int val) {
-    rng_offset_ = val;
-  }
-
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
-  // TODO: pull RNG op out of Unary ops
-  // https://github.com/csarofeen/pytorch/pull/1892
-  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -108,6 +97,48 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   Val* const out_ = nullptr;
   Val* const lhs_ = nullptr;
   Val* const rhs_ = nullptr;
+};
+
+//! A specialization for random number generator (RNG) operations. RNG
+//! operations take in no tensor input and produce a single output.
+class TORCH_CUDA_CU_API RNGOp : public Expr {
+ public:
+  RNGOp(
+      IrBuilderPasskey,
+      RNGOpType type,
+      Val* out,
+      int rng_offset = 0,
+      Val* philox_index = nullptr);
+
+  RNGOp(const RNGOp* src, IrCloner* ir_cloner);
+
+  RNGOpType getRNGOpType() const {
+    return rng_op_type_;
+  }
+
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
+  Val* getPhiloxIndex() const {
+    return philox_index_;
+  }
+
+  void setPhiloxIndex(Val* index) {
+    philox_index_ = index;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const RNGOpType rng_op_type_;
+  int rng_offset_ = -1;
+  // The index used to feed philox's subsequence and component
+  Val* philox_index_ = nullptr;
 };
 
 //! Broadcast in to match out. is_broadcast_dims are relative to out. Where
@@ -1144,6 +1175,13 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
         hasExpandedExtent(),
         "Requested expanded extent, but none found on this dimension.");
     return expanded_extent_;
+  }
+
+  Val* getMaybeExpandedExtent() const {
+    if (hasExpandedExtent()) {
+      return expandedExtent();
+    }
+    return extent();
   }
 
   //! Dimension padding interface:

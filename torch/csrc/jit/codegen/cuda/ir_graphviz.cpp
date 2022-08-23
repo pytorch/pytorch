@@ -443,6 +443,16 @@ void IrGraphGenerator::handle(const TernaryOp* op) {
   addArc(op, op->out());
 }
 
+void IrGraphGenerator::handle(const RNGOp* op) {
+  // node
+  std::stringstream label;
+  label << op->getRNGOpType();
+  printExpr(op, label.str());
+
+  // inputs & outputs
+  addArc(op, op->output(0));
+}
+
 void IrGraphGenerator::handle(const BroadcastOp* op) {
   printExpr(op, "Broadcast");
   addArc(op->in(), op);

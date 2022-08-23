@@ -175,11 +175,13 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
     return inputs_;
   }
 
+  std::vector<Val*> inputsAndCreated();
+
   const auto& outputs() const {
     return outputs_;
   }
 
-  std::vector<Val*> getTerminatingOutputs();
+  std::vector<Val*> getTerminatingOutputs() const;
 
   // Aliasing output to input value, this is a WAR to allow inplace update on
   // input tensor.

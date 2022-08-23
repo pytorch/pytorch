@@ -39,6 +39,7 @@ class TensorView;
 class UnaryOp;
 class BinaryOp;
 class TernaryOp;
+class RNGOp;
 class ReductionOp;
 class WelfordOp;
 class BroadcastOp;

@@ -373,6 +373,18 @@ void Fusion::printMath(bool from_outputs_only) {
   std::cout << "}\n\n";
 }
 
+std::vector<Val*> Fusion::inputsAndCreated() {
+  auto result = inputs_;
+  for (auto expr : exprs()) {
+    if (expr->inputs().empty()) {
+      for (auto v : expr->outputs()) {
+        result.emplace_back(v);
+      }
+    }
+  }
+  return result;
+}
+
 void Fusion::printTransforms() {
   FUSER_PERF_SCOPE("Fusion::printTransforms");
 
@@ -531,14 +543,15 @@ Expr* Fusion::definition(const Val* val) const {
 
 // Indicate to kernel to set itself up to generate random numbers
 bool Fusion::isStochastic() {
-  for (auto expr : exprs())
-    if (expr->getExprType() == ExprType::UnaryOp)
-      if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
-        return true;
+  for (auto expr : exprs()) {
+    if (expr->getExprType() == ExprType::RNGOp) {
+      return true;
+    }
+  }
   return false;
 }
 
-std::vector<Val*> Fusion::getTerminatingOutputs() {
+std::vector<Val*> Fusion::getTerminatingOutputs() const {
   FUSER_PERF_SCOPE("getTerminatingOutputs");
 
   auto is_reachable_to_output = [](Val* val) {

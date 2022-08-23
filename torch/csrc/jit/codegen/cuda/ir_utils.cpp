@@ -186,11 +186,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto out =
         reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
     expr_ = IrBuilder::create<UnaryOp>(
-        unary_expr->container(),
-        unary_expr->getUnaryOpType(),
-        out,
-        in,
-        unary_expr->getRNGOffset());
+        unary_expr->container(), unary_expr->getUnaryOpType(), out, in);
   }
 
   void handle(BinaryOp* binary_expr) final {
@@ -225,6 +221,17 @@ struct SubstituteInExpr : public OptInDispatch {
         in1,
         in2,
         in3);
+  }
+
+  void handle(RNGOp* rng_expr) final {
+    auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
+                                                       : rng_expr->output(0);
+    expr_ = IrBuilder::create<RNGOp>(
+        rng_expr->container(),
+        rng_expr->getRNGOpType(),
+        out,
+        rng_expr->getRNGOffset(),
+        rng_expr->getPhiloxIndex());
   }
 
   void handle(ReductionOp* reduction_expr) final {
@@ -720,13 +727,29 @@ class ValReplacementMutator : private OptOutMutator {
     // would be a tensorview that doesn't get updated extents. Therefore, first
     // grab all leaves towards outputs and grab stmts from there.
     auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
-    for (auto stmt : stmts) {
+
+    // Some fusions, such as standalone randlike, can have disconnected DAG, so
+    // we need some mechanism to make sure our replacement set is as complete as
+    // possible
+    // TODO: I think we need a more general mechanism to support disconnected
+    // DAG
+    std::vector<Val*> more;
+    for (auto v : fusion->inputs()) {
+      if (std::find(stmts.begin(), stmts.end(), v) == stmts.end()) {
+        more.emplace_back(v);
+      }
+    }
+    auto more_stmts = StmtSort::getStmts(fusion, more, true);
+    more_stmts.insert(more_stmts.end(), stmts.begin(), stmts.end());
+
+    for (auto stmt : more_stmts) {
       mutate(stmt);
     }
   }
 
  private:
   using OptOutMutator::mutate;
+
   void mutate(Val* val) final {
     if (replacement_map_.find(val) == replacement_map_.end()) {
       return OptOutMutator::mutate(val);
@@ -875,8 +898,7 @@ struct ReplaceValInIndexVal : public OptInDispatch {
     auto inp = last_visited_val_;
     TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
     auto out = IrBuilder::create<Int>(c10::nullopt);
-    IrBuilder::create<UnaryOp>(
-        uop->getUnaryOpType(), out, inp, uop->getRNGOffset());
+    IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
     last_visited_val_ = out;
   }
 

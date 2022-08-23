@@ -191,8 +191,7 @@ UnaryOp::UnaryOp(
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
       out_{out},
-      in_{in},
-      rng_offset_(rng_offset) {
+      in_{in} {
   addOutput(out);
   addInput(in);
 }
@@ -201,8 +200,7 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       unary_op_type_(src->unary_op_type_),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)),
-      rng_offset_(src->rng_offset_) {}
+      in_(ir_cloner->clone(src->in_)) {}
 
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -290,6 +288,48 @@ bool TernaryOp::sameAs(const Statement* other) const {
   const auto other_op = other->as<TernaryOp>();
   if (getTernaryOpType() != other_op->getTernaryOpType())
     return false;
+  return Expr::sameAs(other);
+}
+
+RNGOp::RNGOp(
+    IrBuilderPasskey passkey,
+    RNGOpType type,
+    Val* out,
+    int rng_offset,
+    Val* philox_index)
+    : Expr(passkey, ExprType::RNGOp),
+      rng_op_type_(type),
+      rng_offset_(rng_offset),
+      philox_index_(philox_index) {
+  addOutput(out);
+}
+
+RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      rng_op_type_(src->rng_op_type_),
+      rng_offset_(src->rng_offset_) {}
+
+bool RNGOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<RNGOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<RNGOp>();
+  if (getRNGOpType() != other_op->getRNGOpType()) {
+    return false;
+  }
+  if (getRNGOffset() != other_op->getRNGOffset()) {
+    return false;
+  }
+  if ((philox_index_ == nullptr) != (other_op->philox_index_ == nullptr)) {
+    return false;
+  }
+  if ((philox_index_ != nullptr) &&
+      !philox_index_->sameAs(other_op->philox_index_)) {
+    return false;
+  }
   return Expr::sameAs(other);
 }
 

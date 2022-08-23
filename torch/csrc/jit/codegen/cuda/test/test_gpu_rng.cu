@@ -150,7 +150,7 @@ TEST_F(NVFuserTest, FusionRNGSimpleValidateWithCURand_CUDA) {
   tv2->split(0, 8);
   tv2->axis(0)->parallelize(ParallelType::TIDx);
 
-  tv0->computeAt(tv2, 1);
+  tv1->computeAt(tv2, 1);
 
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
   at::Tensor t0 = at::zeros({size}, options);

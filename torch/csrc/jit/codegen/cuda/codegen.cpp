@@ -706,34 +706,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     if (!print_inline_) {
-      if (op_type == UnaryOpType::RandLike) {
-        auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
-        auto index = genTensorIndex(uop->in()->as<kir::TensorIndex>());
-        int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
-        indent() << "nvfuser_index_t rng_subseq" << uop->name() << " = ("
-                 << index << ") / " << multiple << ";\n";
-        indent() << "nvfuser_index_t rng_component" << uop->name() << " = ("
-                 << index << ") % " << multiple << ";\n";
-        indent() << "nvfuser_index_t rng_offset" << uop->name() << " = "
-                 << uop->getRNGOffset() << ";\n";
-        indent() << "if (rng_subseq != rng_subseq" << uop->name()
-                 << " || rng_offset != rng_offset" << uop->name() << ") {\n";
-        indent() << "  rng_result = philox(philox_args.seed_, rng_subseq"
-                 << uop->name() << ", philox_offset / 4 + rng_offset"
-                 << uop->name() << ");\n";
-        indent() << "  rng_subseq = rng_subseq" << uop->name() << ";\n";
-        indent() << "  rng_offset = rng_offset" << uop->name() << ";\n";
-        indent() << "}\n";
-      }
-
       indent() << gen(uop->out());
       if (!uop->out()->isScalar() && !uop->in()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
       }
       code_ << " = ";
-    } else {
-      TORCH_INTERNAL_ASSERT(op_type != UnaryOpType::RandLike);
     }
 
     if (auto op = inline_op_str(op_type)) {
@@ -762,18 +740,41 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         }
       }
 
-      code_ << "(";
-      if (op_type == UnaryOpType::RandLike) {
-        code_ << "rng_result, rng_component" << uop->name();
-      } else {
-        code_ << gen(uop->in());
-      }
-      code_ << ")";
+      code_ << "(" << gen(uop->in()) << ")";
     }
 
     if (!print_inline_) {
       code_ << ";\n";
     }
+  }
+
+  void handle(const RNGOp* rop) final {
+    // TODO: TORCH_INTERNAL_ASSERT that the scheduler correctly creates an
+    // innermost ID of size 4 (float) or size 2 (double)?
+    auto out_tv = rop->output(0)->as<kir::TensorIndex>()->view();
+    auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
+    int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
+    indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = (" << index
+             << ") / " << multiple << ";\n";
+    indent() << "nvfuser_index_t rng_component" << rop->name() << " = ("
+             << index << ") % " << multiple << ";\n";
+    indent() << "nvfuser_index_t rng_offset" << rop->name() << " = "
+             << rop->getRNGOffset() << ";\n";
+    indent() << "if (rng_subseq != rng_subseq" << rop->name()
+             << " || rng_offset != rng_offset" << rop->name() << ") {\n";
+    indent() << "  rng_result = philox(philox_args.seed_, rng_subseq"
+             << rop->name() << ", philox_offset / 4 + rng_offset" << rop->name()
+             << ");\n";
+    indent() << "  rng_subseq = rng_subseq" << rop->name() << ";\n";
+    indent() << "  rng_offset = rng_offset" << rop->name() << ";\n";
+    indent() << "}\n";
+    auto op_type = rop->getRNGOpType();
+    indent() << gen(rop->output(0)) << " = " << op_type;
+    if (needFloatSuffix(op_type) &&
+        rop->output(0)->dtype() == DataType::Float) {
+      code_ << "f";
+    }
+    code_ << "(rng_result, rng_component" << rop->name() << ");\n";
   }
 
   std::string genBinaryOp(

@@ -104,6 +104,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::TernaryOp:
       ptr(handler)->handle(expr->as<TernaryOp>());
       return;
+    case ExprType::RNGOp:
+      ptr(handler)->handle(expr->as<RNGOp>());
+      return;
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
@@ -283,6 +286,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::TernaryOp:
       ptr(handler)->handle(expr->as<TernaryOp>());
+      return;
+    case ExprType::RNGOp:
+      ptr(handler)->handle(expr->as<RNGOp>());
       return;
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
@@ -471,6 +477,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::TernaryOp:
       ptr(mutator)->mutate(expr->as<TernaryOp>());
+      return;
+    case ExprType::RNGOp:
+      ptr(mutator)->mutate(expr->as<RNGOp>());
       return;
     case ExprType::ReductionOp:
       ptr(mutator)->mutate(expr->as<ReductionOp>());
@@ -725,6 +734,9 @@ void OptOutConstDispatch::handle(const BinaryOp* stmt) {
 void OptOutConstDispatch::handle(const TernaryOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const RNGOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ReductionOp* stmt) {
   unhandled(stmt);
 }
@@ -873,6 +885,9 @@ void OptOutDispatch::handle(BinaryOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(TernaryOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(RNGOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ReductionOp* stmt) {

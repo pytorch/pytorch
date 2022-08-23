@@ -91,6 +91,7 @@ bool isTvOp(const Expr* expr) {
       (expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
+       expr->getExprType().value() == ExprType::RNGOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
@@ -569,8 +570,7 @@ class ReplaceExprInput : private kir::ExprMutator {
       auto replacement = IrBuilder::create<UnaryOp>(
           node->getUnaryOpType(),
           node->out(),
-          replaced_inputs.value().at(node->in()),
-          node->getRNGOffset());
+          replaced_inputs.value().at(node->in()));
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -598,6 +598,11 @@ class ReplaceExprInput : private kir::ExprMutator {
           replaced_inputs.value().at(node->in3()));
       registerReplaceWithPredicate(node, replacement);
     }
+  }
+
+  void handle(RNGOp* node) final {
+    // RNGOp has no input
+    return;
   }
 
   void handle(ReductionOp* node) final {

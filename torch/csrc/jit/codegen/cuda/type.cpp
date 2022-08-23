@@ -296,6 +296,8 @@ static const char* expr_type2string(ExprType t) {
       return "BinaryOp";
     case ExprType::TernaryOp:
       return "TernaryOp";
+    case ExprType::RNGOp:
+      return "RNGOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
     case ExprType::GroupedReductionOp:
@@ -391,6 +393,10 @@ bool needFloatSuffix(UnaryOpType t) {
   }
 }
 
+bool needFloatSuffix(RNGOpType t) {
+  return true;
+}
+
 static const char* unary_op_type2string(UnaryOpType t) {
   switch (t) {
     case UnaryOpType::Abs:
@@ -443,8 +449,6 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "not";
     case UnaryOpType::Print:
       return "print";
-    case UnaryOpType::RandLike:
-      return "randLike";
     case UnaryOpType::Reciprocal:
       return "reciprocal";
     case UnaryOpType::Relu:
@@ -646,6 +650,16 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   return nullptr;
 }
 
+static const char* rng_op_type_inline_op2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 std::string stringifyBooleanOp(const BinaryOpType bopt) {
   switch (bopt) {
     case BinaryOpType::And:
@@ -671,6 +685,15 @@ static const char* ternary_op_type2string(TernaryOpType t) {
       return "where";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType");
+  }
+}
+
+static const char* rng_op_type2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected RNGOpType");
   }
 }
 
@@ -986,6 +1009,10 @@ std::ostream& operator<<(std::ostream& out, const TernaryOpType totype) {
   return out << ternary_op_type2string(totype);
 }
 
+std::ostream& operator<<(std::ostream& out, const RNGOpType rngtype) {
+  return out << rng_op_type2string(rngtype);
+}
+
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   return out << stringifyThread(ptype);
 }
@@ -1065,6 +1092,12 @@ TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
 
 c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   const char* str = binary_op_type_inline_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
+c10::optional<std::string> inline_op_str(const RNGOpType rngtype) {
+  const char* str = rng_op_type_inline_op2string(rngtype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
 }

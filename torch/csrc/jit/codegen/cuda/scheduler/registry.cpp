@@ -372,16 +372,16 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   // Iterate through all used exprs
   for (auto expr : fusion->exprs()) {
     TORCH_INTERNAL_ASSERT(
-        !expr->inputs().empty(), "unknown expr with zero input");
+        !expr->outputs().empty(), "unknown expr with zero output");
 
     // Each expr maps all its inputs and
     //  outputs to the same component
-    auto input0 = expr->inputs()[0];
+    auto output0 = expr->output(0);
     for (auto input : expr->inputs()) {
-      component_sets.mapEntries(input0, input);
+      component_sets.mapEntries(output0, input);
     }
     for (auto output : expr->outputs()) {
-      component_sets.mapEntries(input0, output);
+      component_sets.mapEntries(output0, output);
     }
   }
 

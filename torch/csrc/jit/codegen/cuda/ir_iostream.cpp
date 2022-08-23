@@ -393,6 +393,33 @@ void IrPrinter::handle(const TernaryOp* top) {
     os_ << ";\n";
 }
 
+void IrPrinter::handle(const RNGOp* rop) {
+  bool istvop = ir_utils::isTvOp(rop);
+  if (!print_inline_) {
+    indent();
+    os_ << rop->output(0);
+
+    // tensor operations tend to be long, break them up into multiple lines
+    if (istvop) {
+      os_ << "\n";
+      indent_size_++;
+      indent();
+    }
+
+    os_ << " = ";
+  } else {
+    checkInlineable(rop);
+  }
+
+  os_ << rop->getRNGOpType() << "()";
+
+  if (istvop)
+    indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
+}
+
 void IrPrinter::handle(const ReductionOp* rop) {
   indent() << rop->out() << "\n";
   indent() << "   = reduction( " << rop->in()

@@ -121,6 +121,11 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
 
+// TENSOR FACTORIES
+TORCH_CUDA_CU_API TensorView* rand(
+    const std::vector<Int*>& shape,
+    DataType dtype);
+
 // UNARY OPERATIONS
 // abs
 TORCH_CUDA_CU_API Val* abs(Val*);

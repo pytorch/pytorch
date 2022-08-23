@@ -136,7 +136,7 @@ void OptOutMutator::mutate(UnaryOp* uop) {
   auto container = uop->container();
   auto uop_type = uop->getUnaryOpType();
   container->removeExpr(uop);
-  IrBuilder::create<UnaryOp>(container, uop_type, out, in, uop->getRNGOffset());
+  IrBuilder::create<UnaryOp>(container, uop_type, out, in);
 }
 
 void OptOutMutator::mutate(BinaryOp* bop) {
@@ -169,6 +169,20 @@ void OptOutMutator::mutate(TernaryOp* top) {
   auto top_type = top->getTernaryOpType();
   container->removeExpr(top);
   IrBuilder::create<TernaryOp>(container, top_type, out, in1, in2, in3);
+}
+
+void OptOutMutator::mutate(RNGOp* rop) {
+  Val* out = maybeMutated(rop->output(0));
+
+  if (out == rop->output(0)) {
+    return;
+  }
+
+  auto container = rop->container();
+  auto rop_type = rop->getRNGOpType();
+  container->removeExpr(rop);
+  IrBuilder::create<RNGOp>(
+      container, rop_type, out, rop->getRNGOffset(), rop->getPhiloxIndex());
 }
 
 void OptOutMutator::mutate(ReductionOp* rop) {

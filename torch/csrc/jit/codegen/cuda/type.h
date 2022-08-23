@@ -107,6 +107,7 @@ enum class ExprType {
   UnaryOp,
   BinaryOp,
   TernaryOp,
+  RNGOp,
   ReductionOp,
   GroupedReductionOp,
   BroadcastOp,
@@ -169,7 +170,6 @@ enum class UnaryOpType {
   Log2,
   BitCast,
   Neg,
-  RandLike,
   Real,
   Reciprocal,
   Relu,
@@ -240,6 +240,10 @@ enum class BinaryOpType {
   And,
   Or,
   Xor
+};
+
+enum class RNGOpType {
+  Uniform,
 };
 
 // Return if output of operator should be a boolean
@@ -343,6 +347,7 @@ enum class SwizzleMode { NoSwizzle = 0, Data, Loop };
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
 bool needFloatSuffix(BinaryOpType t);
+bool needFloatSuffix(RNGOpType t);
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
@@ -359,6 +364,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const RNGOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
@@ -391,6 +397,7 @@ TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const RNGOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
 
