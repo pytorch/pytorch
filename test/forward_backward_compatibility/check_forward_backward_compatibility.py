@@ -123,6 +123,18 @@ ALLOW_LIST = [
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     ("aten::mps_linear", datetime.date(9999, 1, 1)),
     ("aten::_mps_linear", datetime.date(9999, 1, 1)),
+    ("aten::view_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::view_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::expand_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::expand_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::expand.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::narrow_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::narrow_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::view.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::new_empty.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::new_empty.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::zeros.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::zeros.SymInt_out", datetime.date(2022, 11, 30)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]

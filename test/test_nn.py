@@ -16934,6 +16934,7 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
         issue_24823_2()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/945")
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
