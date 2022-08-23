@@ -222,7 +222,11 @@ class TestExecutionGraph(TestCase):
     def payload(self, use_cuda=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
-            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            inf_val = float("inf")
+            neg_inf_val = float("-inf")
+            nan_val = float("nan")
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u),
+                                                         "hello", u, inf_val, neg_inf_val, nan_val)
             x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
@@ -231,6 +235,9 @@ class TestExecutionGraph(TestCase):
                 y = y.cuda()
             z = x + y + x * y + x * y
             z.backward(z)
+            gelu = nn.GELU()
+            m = torch.randn(2)
+            _ = gelu(m)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -311,6 +318,9 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        # Expected tensor object tuple size, in th form of:
+        # [tensor_id, storage_id, offset, numel, itemsize, device_str]
+        tensor_tuple_size = 6
         found_root_node = False
         for n in nodes:
             assert "name" in n
@@ -318,6 +328,9 @@ class TestExecutionGraph(TestCase):
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
+            # Check if tensor tuple representation size is correct.
+            if n["name"] == "## TEST 2 ##":
+                assert len(n["inputs"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
 
@@ -1164,7 +1177,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
-        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        ActiveProfilerType = torch._C._profiler.ActiveProfilerType
         self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
 
         # Autograd profiler
@@ -1234,17 +1247,17 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertIsInstance(
             node.parent.extra_fields,
-            torch._C._autograd._ExtraFields_PyCCall)
+            torch._C._profiler._ExtraFields_PyCCall)
 
         self.assertEqual(node.children[0].name(), "aten::empty")
         self.assertEqual(node.children[0].children[0].name(), "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
-            torch._C._autograd._ExtraFields_Allocation)
+            torch._C._profiler._ExtraFields_Allocation)
 
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
@@ -1259,9 +1272,10 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
 
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])

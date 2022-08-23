@@ -739,7 +739,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":torch_flatbuffer_all"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -1347,7 +1347,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":torch_flatbuffer_all",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
@@ -1633,7 +1633,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1660,7 +1659,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1687,21 +1685,29 @@ def define_buck_targets(
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
+        visibility = [
+            "{}:mobile_bytecode".format(ROOT),
+        ],
     )
 
+    # Users of this target will need to add third_party("flatbuffers-api") as a
+    # dep.
     fb_xplat_cxx_library(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
-        exported_deps = [
-            third_party("flatbuffers-api"),
+        # Avoid leaking implementation details by only exposing this header to
+        # the internals of the loader/serializer layer.
+        visibility = [
+            "{}:flatbuffer_loader".format(ROOT),
+            "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1715,14 +1721,13 @@ def define_buck_targets(
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         visibility = ["PUBLIC"],
         deps = [
+            ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":flatbuffer_loader",
-            ":mobile_bytecode",
             ":torch_mobile_train",
-            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1737,7 +1742,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1756,16 +1760,18 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
-        exported_deps = [
+        deps = [
             ":mobile_bytecode",
-            ":torch_mobile_deserialize",
             third_party("flatbuffers-api"),
+        ],
+        exported_deps = [
+            ":torch_mobile_deserialize",
             C10,
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
+        name = "flatbuffers_serializer_jit",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
@@ -1783,22 +1789,29 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":mobile_bytecode",
+            ":flatbuffers_serializer_mobile",
             ":torch_core",
             ":torch_mobile_module",
-            third_party("flatbuffers-api"),
             C10,
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "torch_flatbuffer_all",
+        name = "flatbuffers_jit",
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 

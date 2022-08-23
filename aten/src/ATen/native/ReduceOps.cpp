@@ -1079,16 +1079,12 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<Scal
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 Tensor& sum_out(const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
-Tensor& nansum_out(const Tensor& self, IntArrayRef dim,
+Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   // For integral types, use existing sum as
@@ -1107,7 +1103,7 @@ Tensor& nansum_out(const Tensor& self, IntArrayRef dim,
   return result;
 }
 
-Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
+Tensor nansum(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
@@ -1239,7 +1235,7 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
 // TODO(@heitorschueroff) implement custom kernels for nanmean
 Tensor& nanmean_out(
     const Tensor& self,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype,
     Tensor& result) {
@@ -1254,7 +1250,7 @@ Tensor& nanmean_out(
 
 Tensor nanmean(
     const Tensor& self,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
   TORCH_CHECK(
@@ -1729,25 +1725,31 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
 }
 
 std::tuple<Tensor, Tensor> var_mean(
-    const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::var_mean(self, /*dim=*/at::OptionalIntArrayRef(dim),
-                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+    const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  return at::var_mean(
+      self, /*dim=*/at::OptionalIntArrayRef(dim),
+      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(
-    const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std_mean(self, /*dim=*/at::OptionalIntArrayRef(dim),
-                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+    const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  return at::std_mean(
+      self, /*dim=*/at::OptionalIntArrayRef(dim),
+      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
+      keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
   return at::std_mean(
-      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
+      self, /*dim=*/c10::nullopt,
+      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
   return at::var_mean(
-      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
+      self, /*dim=*/c10::nullopt,
+      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
 std::tuple<Tensor&, Tensor&> var_mean_out(
@@ -1971,9 +1973,6 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   at::NoNamesGuard guard;
   TORCH_CHECK(self.device() == other.device(), "Cannot compare two tensors on "
               "different devices. Got: ", self.device(), " and ", other.device());
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   if (!self.is_same_size(other)) {
     return false;
   }
