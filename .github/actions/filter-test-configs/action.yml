@@ -19,18 +19,16 @@ outputs:
     description: True if the filtered test configs matrix is empty. False otherwise.
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
 
-defaults:
-  run:
-    shell: bash
-
 runs:
   using: composite
   steps:
     - name: Parse ref
+      shell: bash
       id: parse-ref
       run: .github/scripts/parse_ref.py
 
     - name: Select all requested test configurations
+      shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       id: filter
@@ -41,5 +39,6 @@ runs:
           --tag "${{ steps.parse-ref.outputs.tag }}"
 
     - name: Print the filtered test matrix
+      shell: bash
       run: |
         echo "${{ steps.filter.outputs.test-matrix }}"
