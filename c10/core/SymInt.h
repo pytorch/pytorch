@@ -63,6 +63,7 @@ class C10_API SymInt {
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
+    release_(); // release the current SymIntNode if any
     data_ = s.data_;
     if (s.is_symbolic())
       s.data_ = 0;
@@ -78,10 +79,14 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  ~SymInt() {
+  void release_() {
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
+  }
+
+  ~SymInt() {
+    release_();
   }
 
   int64_t expect_int() const {
