@@ -2886,6 +2886,76 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+def error_inputs_max_pool1d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for input tensor
+    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input
+    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input with stride=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
+                     error_regex='stride must be greater than zero, but got 0')
+
+    # error inputs for empty input with dilation=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                     error_regex='dilation must be greater than zero, but got 0')
+
+    # error inputs for invalied output size
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                     error_regex='Invalid computed output size: -4')
+
+    # error inputs when kernel_size=0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
+                     error_regex='kernel_size must be greater than zero')
+
+    # error inputs for strides > 0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
+                     error_regex='stride must be greater than zero')
+
+def error_inputs_max_pool2d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
+def error_inputs_max_pool3d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2901,6 +2971,71 @@ def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
 
     for input_shape, kwargs in cases:
         yield SampleInput(make_arg(input_shape), kwargs=kwargs)
+
+
+def complex_conv(fn, input_size, weight, grad_output, stride, padding, dilation, groups):
+    # conv(W, x, b) = conv(Wr, xr, br) - conv(Wi, xi, 0) + i(conv(Wi, xr, bi) + conv(Wr, xi, 0))
+    # a = conv(Wr, xr, br),
+    # b = conv(Wi, xi, 0),
+    # c = conv(Wr + Wi, xr + xi, br + bi)
+    # conv(W, x, b) = a - b + i(c - a - b)
+
+    grad_output_ = torch.view_as_real(grad_output)
+    grad_output_r = grad_output_[..., 0]
+    grad_output_i = grad_output_[..., 1]
+
+    weight_ = torch.view_as_real(weight)
+    weight_r = weight_[..., 0]
+    weight_i = weight_[..., 1]
+
+    a = fn(input_size, weight_r, grad_output_r, stride, padding, dilation, groups)
+    b = fn(input_size, weight_i, grad_output_i, stride, padding, dilation, groups)
+    c = fn(input_size, weight_r + weight_i, grad_output_r + grad_output_i, stride, padding, dilation, groups)
+
+    return (a - b) + 1j * (c - a - b)
+
+
+def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
+                       output_padding=0, dilation=1, groups=1,
+                       fn=None):
+    # Derivative of `conv` is `conv_transpose`.
+    # To verify the correctness of `conv_transpose`,
+    # we rely `torch.nn.grad` implementation (which is tested in test_nn.py)
+    # for floating dtypes.
+
+    assert fn is not None
+
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
+
+    # Input for `ref` is ndarray.
+    input, weight = torch.from_numpy(input), torch.from_numpy(weight)
+
+    is_batched = len(input.shape) == batched_dim_map[fn]
+    if not is_batched:
+        input = input.unsqueeze(0)
+
+    if bias is not None:
+        bias = torch.from_numpy(bias).unsqueeze(1)
+
+    grad_output = input
+    # Get the input shape for grad_fn.
+    conv_transpose_output = fn(grad_output.to('meta'), weight.to('meta'), None,
+                               stride=stride, padding=padding, output_padding=output_padding,
+                               groups=groups, dilation=dilation)
+    input_size = conv_transpose_output.shape
+
+    grad_fn = grad_fn_map[fn]
+    if weight.dtype.is_complex:
+        out = complex_conv(grad_fn, input_size, weight, grad_output, stride, padding, dilation, groups)
+    else:  # Floating
+        out = grad_fn(input_size, weight, grad_output, stride, padding, dilation, groups)
+
+    if bias is not None:
+        out = out + bias
+
+    return out.squeeze(0) if not is_batched else out
+
 
 def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3668,6 +3803,63 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
 
     for input_shape, kernel_size, kwargs in cases:
         yield SampleInput(make_arg(input_shape), args=(kernel_size,), kwargs=kwargs)
+
+def error_inputs_avg_pool1d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+def error_inputs_avg_pool2d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
+
+def error_inputs_avg_pool3d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
+
+    # error inputs for invalid input dimension
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 0}),
+                     error_regex='non-empty 4D or 5D')
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
@@ -4666,6 +4858,8 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(detach(x), args=(lb, ub)),
         SampleInput(detach(x), args=(detach(lb[0]), detach(ub[0]))),
         SampleInput(detach(x), args=(detach(lb[:, :1]),)),
+        SampleInput(detach(x), args=(None, ub)),
+        SampleInput(detach(x), args=(lb, None)),
     ]
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
@@ -10133,6 +10327,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_avg_pool1d,
            sample_inputs_func=sample_inputs_avgpool1d),
     OpInfo('nn.functional.avg_pool3d',
            aten_name='avg_pool3d',
@@ -10142,6 +10337,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_avg_pool3d,
            sample_inputs_func=sample_inputs_avgpool3d,
            skips=(
                # AssertionError: Tensor-likes are not close!
@@ -10179,23 +10375,41 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose1d),
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[
+           decorators=(
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestCommon', 'test_complex_half_reference_testing')
+           ),
            skips=(
+               # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.complex64,)),
+               # RuntimeError: UNSUPPORTED DTYPE: complex
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.float,)),
+               # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.int64,)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose2d',
@@ -10712,6 +10926,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
@@ -10778,6 +10993,7 @@ op_db: List[OpInfo] = [
                # to actually allocate memory
                DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
            ),
+           error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
@@ -10793,6 +11009,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -10809,6 +11026,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_max_pool3d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_unpool1d',
            aten_name='max_unpool1d',
