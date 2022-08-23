@@ -426,7 +426,7 @@ class PythonSignature:
             vararg_type = args[0].type
             if (
                 isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) == "int"
+                and str(vararg_type.elem) in ["int", "SymInt"]
                 and num_positionalargs == 1
             ):
                 have_vararg_version = True
@@ -898,7 +898,7 @@ def argument_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.int:
             ret = "_int"
         if t.name == BaseTy.SymInt:
-            ret = "SymInt"
+            ret = "Union[_int, SymInt]"
         elif t.name == BaseTy.float:
             ret = "_float"
         elif t.name == BaseTy.str:
@@ -1051,6 +1051,7 @@ def dispatch_lambda_args(
     cpp_args = cpp.arguments(
         arguments=schema.arguments,
         faithful=False,
+        symint=True,
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
@@ -1133,14 +1134,15 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     returns_without_annotation = tuple(
         map(lambda r: Return(r.name, r.type, None), f.func.returns)
     )
-    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
+    return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f"{f.func.name} returns unsupported type {return_str}")
     return return_str
 
 
 def cpp_dispatch_target(f: NativeFunction) -> str:
-    name = cpp.name(f.func)
+    symint = f.func.has_symint()
+    name = cpp.name(f.func, symint_overload=symint)
     if Variant.method in f.variants:
         return f"self.{name}"
     if Variant.function in f.variants:

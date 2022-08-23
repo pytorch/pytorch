@@ -85,8 +85,7 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
 // More details on the dispatcher can be found at http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/.
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("add.Tensor", &custom_add_Tensor);
-  m.impl("empty.memory_format", &custom_empty_memory_format);
-  m.impl("empty.SymInt", &custom_empty_symint);
+  m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
 }

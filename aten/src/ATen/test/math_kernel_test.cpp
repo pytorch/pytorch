@@ -119,7 +119,7 @@ TEST(MathKernelTest, NarrowCopy)  {
   for (const auto dim : c10::irange(3)) {
     const int64_t start = 1, length = 4;
     auto y_ref = x.narrow(dim, start, length);
-    auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
+    auto y_test = at::native::narrow_copy_dense(x, dim, c10::SymInt(start), c10::SymInt(length));
     ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
   }
 }

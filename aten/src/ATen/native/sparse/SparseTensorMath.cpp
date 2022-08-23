@@ -1402,7 +1402,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
   Tensor newi = at::empty({2, r_nnz}, kLong);
-  Tensor newv = native::zeros(
+  Tensor newv = at::zeros(
       {r_nnz},
       optTypeMetaToScalarType(values.options().dtype_opt()),
       values.options().layout_opt(),
