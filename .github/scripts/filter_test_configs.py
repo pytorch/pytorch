@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import re
 import json
 import os
@@ -8,10 +9,12 @@ from typing import Any, Dict, Set, List
 import yaml
 import warnings
 
-CIFLOW_PREFIX = "ciflow/"
+PREFIX = "test-config/"
+SUFFIX = "-only"
 
-# Same as shard names
-VALID_TEST_CONFIG_LABELS = {f"{CIFLOW_PREFIX}{label}" for label in {
+# Same as shard names but with the -only suffix to make it clear that
+# only that test config is run
+VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}{SUFFIX}" for label in {
     "backwards_compat",
     "crossref",
     "default",
@@ -70,10 +73,11 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
     as follows:
 
     If the PR has one or more labels as specified in the VALID_TEST_CONFIG_LABELS set, only
-    these test configs will be selected.  Note that regular ciflow labels like ciflow/trunk
-    don't count here, only test configs.
+    these test configs will be selected.  This also works with ciflow labels, for example,
+    if a PR has both ciflow/trunk and test-config/functorch-only, only trunk functorch builds
+    and tests will be run
 
-    If the PR has none of the ciflow label, all tests are run as usual.
+    If the PR has none of the test-config label, all tests are run as usual.
     """
 
     filtered_test_matrix: Dict[str, List[Any]] = {
@@ -85,21 +89,21 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         if not config_name:
             continue
 
-        label = f"{CIFLOW_PREFIX}{config_name.strip().lower()}"
+        label = f"{PREFIX}{config_name.strip()}{SUFFIX}"
         if label in labels:
             print(f"Select {config_name} because label {label} is presented in the pull request by the time the test starts")
             filtered_test_matrix["include"].append(entry)
 
     valid_test_config_labels = labels.intersection(VALID_TEST_CONFIG_LABELS)
 
-    if filtered_test_matrix["include"] or valid_test_config_labels:
+    if not filtered_test_matrix["include"] and not valid_test_config_labels:
+        # Found no valid label and the filtered test matrix is empty, return the same
+        # test matrix as before so that all tests can be run normally
+        return test_matrix
+    else:
         # When the filter test matrix contain matches or if a valid test config label
         # is found in the PR, return the filtered test matrix
         return filtered_test_matrix
-    else:
-        # Found no valid label, return the same test matrix as before so that all
-        # tests can be run normally
-        return test_matrix
 
 
 def main() -> None:
@@ -108,30 +112,44 @@ def main() -> None:
     # doesn't follow the strict JSON format, so we load it using yaml here for
     # its more relaxed syntax
     test_matrix = yaml.safe_load(args.test_matrix)
+
+    if test_matrix is None:
+        warnings.warn(f"Invalid test matrix input {args.test_matrix}, exiting")
+        # We handle invalid test matrix gracefully by marking it as empty
+        print("::set-output name=is-test-matrix-empty::True")
+        sys.exit(0)
+
     pr_number = args.pr_number
     tag = args.tag
 
-    # If the tag matches, we can get the PR number from it
-    tag_regex = re.compile(fr"^{CIFLOW_PREFIX}\w+/(?P<pr_number>\d+)$")
+    # If the tag matches, we can get the PR number from it, this is from ciflow
+    # workflow dispatcher
+    tag_regex = re.compile(r"^ciflow/\w+/(?P<pr_number>\d+)$")
 
-    if not pr_number and not tag:
-        # This can be none or empty like when the workflow is dispatched manually
-        filtered_test_matrix = test_matrix
+    if pr_number:
+        # If a PR number is set, query all the labels from that PR
+        labels = get_labels(int(pr_number))
+        # Then filter the test matrix and keep only the selected ones
+        filtered_test_matrix = filter(test_matrix, labels)
 
-    elif not pr_number:
+    elif tag:
         m = tag_regex.match(tag)
 
         if m:
             pr_number = m.group("pr_number")
+
+            # The PR number can also come from the tag in ciflow tag event
+            labels = get_labels(int(pr_number))
+            # Filter the test matrix and keep only the selected ones
+            filtered_test_matrix = filter(test_matrix, labels)
+
         else:
             # There is a tag but it isn't ciflow, so there is nothing left to do
             filtered_test_matrix = test_matrix
 
-    if pr_number:
-        # First, query all the labels from the pull requests
-        labels = get_labels(int(pr_number))
-        # Then filter the test matrix and keep only the selected ones
-        filtered_test_matrix = filter(test_matrix, labels)
+    else:
+        # No PR number, no tag, we can just return the test matrix as it is
+        filtered_test_matrix = test_matrix
 
     # Set the filtered test matrix as the output
     print(f"::set-output name=test-matrix::{json.dumps(filtered_test_matrix)}")

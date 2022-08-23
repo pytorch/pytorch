@@ -1,0 +1,43 @@
+name: Filter test configs matrix
+
+description: |
+  Apply filter to the test configs matrix to keep only entries specified
+  by the PR test-config labels. If no test-config label is set, the same
+  test configs matrix is returned untouched.
+
+inputs:
+  test-matrix:
+    required: true
+    type: string
+    description: JSON description of what test configs to run.
+
+outputs:
+  test-matrix:
+    description: The filtered test configs matrix.
+    type: string
+    value: ${{ steps.filter.outputs.test-matrix }}
+  is-test-matrix-empty:
+    description: True if the filtered test configs matrix is empty. False otherwise.
+    type: boolean
+    value: ${{ steps.filter.outputs.is-test-matrix-empty }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse ref
+      id: parse-ref
+      run: .github/scripts/parse_ref.py
+
+    - name: Select all requested test configurations
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      id: filter
+      run: |
+        .github/scripts/filter_test_configs.py \
+          --test-matrix "${{ inputs.test-matrix }}" \
+          --pr-number "${{ github.event.pull_request.number }}" \
+          --tag "${{ steps.parse-ref.outputs.tag }}"
+
+    - name: Print the filtered test matrix
+      run: |
+        echo "${{ steps.filter.outputs.test-matrix }}"

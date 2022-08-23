@@ -27,6 +27,8 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
   filter:
     runs-on: ubuntu-latest
     steps:
@@ -36,34 +38,18 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-
       - name: Select all requested test configurations
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         id: filter
-        run: |
-          .github/scripts/filter_test_configs.py \
-            --test-matrix "${{ inputs.test-matrix }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --tag "${{ steps.parse-ref.outputs.tag }}"
-
-      - name: Print the filtered test matrix
-        run: |
-          echo "${{ steps.filter.outputs.test-matrix }}"
-
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+        uses: ./.github/actions/filter-test-configs
+        with:
+          test-matrix: ${{ inputs.test_matrix }}
 
   test:
     needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && needs.filter.steps.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.steps.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:

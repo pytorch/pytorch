@@ -21,14 +21,6 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
-
-  linux-focal-py3_7-gcc7-test:
-    name: linux-focal-py3.7-gcc7
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_7-gcc7-build
-    with:
-      build-environment: linux-focal-py3.7-gcc7
-      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -39,6 +31,15 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
+
+  linux-focal-py3_7-gcc7-test:
+    name: linux-focal-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_7-gcc7-build
+    with:
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_7-gcc7-build.inputs.test-matrix }}
 
   linux-docs:
     name: linux-docs

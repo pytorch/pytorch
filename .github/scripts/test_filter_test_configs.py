@@ -4,7 +4,7 @@ import os
 import yaml
 import json
 from unittest import TestCase, main, mock
-from filter_test_configs import get_labels, filter, CIFLOW_PREFIX, VALID_TEST_CONFIG_LABELS
+from filter_test_configs import get_labels, filter, PREFIX, SUFFIX, VALID_TEST_CONFIG_LABELS
 import requests
 from requests.models import Response
 from typing import Any, Dict
@@ -39,7 +39,7 @@ class TestConfigFilter(TestCase):
         self.assertFalse(labels)
 
     def test_filter(self) -> None:
-        mocked_labels = {f"{CIFLOW_PREFIX}cfg", f"{CIFLOW_PREFIX}trunk", "cfg-no-ciflow"}
+        mocked_labels = {f"{PREFIX}cfg{SUFFIX}", "ciflow/trunk", "plain-cfg"}
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
@@ -47,9 +47,9 @@ class TestConfigFilter(TestCase):
                 "description": "No match, keep the same test matrix",
             },
             {
-                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg-no-ciflow"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "cfg-no-ciflow"}]}',
-                "description": "No match because there is no ciflow prefix, keep the same test matrix",
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "plain-cfg"}]}',
+                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "plain-cfg"}]}',
+                "description": "No match because there is no prefix or suffix, keep the same test matrix",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", shard: 1}]}',
@@ -63,15 +63,20 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_filter_with_valid_label(self) -> None:
-        mocked_labels = {f"{CIFLOW_PREFIX}cfg", f"{CIFLOW_PREFIX}trunk"}
-        VALID_TEST_CONFIG_LABELS.add(f"{CIFLOW_PREFIX}cfg")
+        mocked_labels = {f"{PREFIX}cfg{SUFFIX}", "ciflow/trunk"}
+        VALID_TEST_CONFIG_LABELS.add(f"{PREFIX}cfg{SUFFIX}")
 
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
                 "expected": '{"include": []}',
                 "description": "Found a valid label in the PR body, return the filtered test matrix",
-            }
+            },
+            {
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", shard: 1}]}',
+                "expected": '{"include": [{"config": "cfg", "shard": 1}]}',
+                "description": "Found a match, only keep that",
+            },
         ]
 
         for case in testcases:
