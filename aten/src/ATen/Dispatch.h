@@ -8,6 +8,10 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
+#ifdef __CUDACC__
+#include <cuda.h> // For CUDA_VERSION
+#endif
+
 #ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
 #else
@@ -72,10 +76,20 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   })
 #endif
 
+// Workaround for C10_UNUSED because CUDA 10.2 and below fails to handle unused
+// attribute in the type aliasing context. Keep name long and verbose to avoid
+// macro collisions.
+#if defined(__CUDACC__) && CUDA_VERSION < 11000
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
+#else
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
+#endif
+
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
   case enum_type: {                                           \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);              \
-    using HINT = c10::impl::ScalarTypeToCPPTypeT<enum_type>;  \
+    using HINT C10_UNUSED_DISPATCH_CUDA_WORKAROUND =          \
+        c10::impl::ScalarTypeToCPPTypeT<enum_type>;           \
     return __VA_ARGS__();                                     \
   }
 
