@@ -1071,8 +1071,8 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_allreduce(
-                        self, tensors, opts);
+                    std::vector<at::Tensor> non_const_tensors = tensors;
+                    return self->allreduce(non_const_tensors, opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1094,8 +1094,7 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_allreduce(
-                        self, xs, opts);
+                    return self->allreduce(xs, opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1118,8 +1117,7 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_allreduce(
-                        self, xs, opts);
+                    return self->allreduce(xs, opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1150,8 +1148,8 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce(
-                        self, tensors, opts);
+                    std::vector<at::Tensor> non_const_tensors = tensors;
+                    return self->reduce(non_const_tensors, opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1176,7 +1174,7 @@ Arguments:
                 if (op.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce(self, xs, opts);
+                    return self->reduce(xs, opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1304,8 +1302,14 @@ Arguments:
                 if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce_scatter(
-                        self, output_tensors, input_tensors, opts);
+                    std::vector<at::Tensor> non_const_output_tensors =
+                        output_tensors;
+                    std::vector<std::vector<at::Tensor>>
+                        non_const_input_tensors = input_tensors;
+                    return self->reduce_scatter(
+                        non_const_output_tensors,
+                        non_const_input_tensors,
+                        opts);
                   }
 #endif
                   TORCH_CHECK(
@@ -1332,8 +1336,7 @@ Arguments:
                 if (op.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
 #if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
                   if (self->getBackendName() == "nccl") {
-                    return ::c10d::ops::nccl_premulsum_reduce_scatter(
-                        self, outputs, inputs, opts);
+                    return self->reduce_scatter(outputs, inputs, opts);
                   }
 #endif
                   TORCH_CHECK(
