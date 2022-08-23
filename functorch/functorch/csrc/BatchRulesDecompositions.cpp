@@ -147,6 +147,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_norm);
   OP_DECOMPOSE(linalg_solve);
+  OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
   OP_DECOMPOSE(linalg_tensorinv);
