@@ -830,7 +830,7 @@ trace_ptr_t addKinetoEvents(
   passEventsToKineto(results, start_time_us, end_time_us);
 
   // In on demand mode kineto is directly controlled by other machinery.
-  if (config.state == ProfilerState::KINETO_ONDEMAND) {
+  if (config.global()) {
     return nullptr;
   }
 
