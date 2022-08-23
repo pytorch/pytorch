@@ -425,14 +425,14 @@ SchemaTypeParser::parseFakeAndRealType() {
       fake_value = c10::TypeFactory::create<ListType>(fake_value);
       real_value = c10::TypeFactory::create<ListType>(real_value);
       auto container = parseAliasAnnotation();
-        if (alias_info) {
-            if (!container) {
-                auto temp = AliasInfo();
-                temp.setIsWrite(alias_info->isWrite());
-                container = c10::optional<AliasInfo>(temp);
-            }
-            container->addContainedType(std::move(*alias_info));
+      if (alias_info) {
+        if (!container) {
+          auto temp = AliasInfo();
+          temp.setIsWrite(alias_info->isWrite());
+          container = c10::optional<AliasInfo>(temp);
         }
+        container->addContainedType(std::move(*alias_info));
+      }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
       fake_value = c10::OptionalType::get(fake_value);
