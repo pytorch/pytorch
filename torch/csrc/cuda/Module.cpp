@@ -35,6 +35,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <iostream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -527,13 +528,14 @@ struct Frame {
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
   ~StackContext() {
+    py::gil_scoped_acquire acquire;
     for (auto& f : frames) {
       Py_XDECREF((PyObject*)f.code);
     }
   }
-  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
     py::gil_scoped_acquire acquire;
-    auto r = std::make_unique<StackContext>();
+    auto r = std::make_shared<StackContext>();
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
     while (f) {
@@ -576,6 +578,26 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
+  std::unordered_map<StackContext*, py::list> cached_frames;
+  const auto get_frames = [&](StackContext* sc)  -> py::list {
+    auto it = cached_frames.find(sc);
+    if (it != cached_frames.end()) {
+      return it->second;
+    }
+    py::list frames;
+    for (auto& f : sc->frames) {
+      py::dict frame;
+      frame[filename_s] =
+          py::reinterpret_borrow<py::object>(f.code->co_filename);
+      frame[name_s] =
+          py::reinterpret_borrow<py::object>(f.code->co_name);
+      frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
+      frames.append(std::move(frame));
+    }
+    cached_frames.insert({sc, frames});
+    return frames;
+  };
+
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
     segmentDict[device_s] = segmentInfo.device;
@@ -604,18 +626,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[addr_s] = (int64_t)h->addr;
           history_entry[real_size_s] = h->real_size;
           if (h->context) {
-            py::list frames;
-            auto sc = (StackContext*)h->context.get();
-            for (auto& f : sc->frames) {
-              py::dict frame;
-              frame[filename_s] =
-                  py::reinterpret_borrow<py::object>(f.code->co_filename);
-              frame[name_s] =
-                  py::reinterpret_borrow<py::object>(f.code->co_name);
-              frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
-              frames.append(std::move(frame));
-            }
-            history_entry[frames_s] = std::move(frames);
+            history_entry[frames_s] = get_frames((StackContext*)h->context.get());
           }
           h = h->next.get();
           history.append(std::move(history_entry));
@@ -629,13 +640,58 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     return segmentDict;
   };
 
-  const std::vector<SegmentInfo>& snapshot =
-      c10::cuda::CUDACachingAllocator::snapshot();
-  py::list result;
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  py::list segments;
 
-  for (const auto& segmentInfo : snapshot) {
-    result.append(segmentInfoToDict(segmentInfo));
+  for (const auto& segmentInfo : snapshot.segments) {
+    segments.append(segmentInfoToDict(segmentInfo));
   }
+
+  py::list traces;
+  py::str action_s = "action";
+  py::str alloc_s = "alloc";
+  py::str free_s = "free";
+  py::str segment_alloc_s = "segment_alloc";
+  py::str segment_free_s = "segment_free";
+  py::str snapshot_s = "snapshot";
+  for (const auto& traceInfo : snapshot.device_traces) {
+    py::list trace;
+    for (const auto& te : traceInfo) {
+      py::dict trace_entry;
+      if (te.context_) {
+        // without further compression frames can get really large on dump
+        trace_entry[frames_s] = get_frames((StackContext*)te.context_.get());
+      }
+      if (te.action() != c10::cuda::CUDACachingAllocator::TraceEntry::SNAPSHOT) {
+        trace_entry[addr_s] = te.addr_;
+        trace_entry[size_s] = te.size();
+      }
+      switch (te.action()) {
+        case c10::cuda::CUDACachingAllocator::TraceEntry::ALLOC: {
+          trace_entry[action_s] = alloc_s;
+        } break;
+        case c10::cuda::CUDACachingAllocator::TraceEntry::FREE: {
+          trace_entry[action_s] = free_s;
+        } break;
+        case c10::cuda::CUDACachingAllocator::TraceEntry::SEGMENT_ALLOC: {
+          trace_entry[action_s] = segment_alloc_s;
+        } break;
+        case c10::cuda::CUDACachingAllocator::TraceEntry::SEGMENT_FREE: {
+          trace_entry[action_s] = segment_free_s;
+        } break;
+        case c10::cuda::CUDACachingAllocator::TraceEntry::SNAPSHOT: {
+          trace_entry[action_s] = snapshot_s;
+          trace_entry[total_size_s] = te.size();
+        } break;
+      }
+      trace.append(trace_entry);
+    }
+    traces.append(trace);
+  }
+
+  py::dict result;
+  result["segments"] = segments;
+  result["device_traces"] = traces;
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -650,6 +706,22 @@ PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
       THPUtils_typename(enabled));
   c10::cuda::CUDACachingAllocator::setContextRecorder(
       enabled == Py_True ? StackContext::gather : nullptr);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_attachOutOfMemoryObserver(PyObject* _unused, PyObject* observer) {
+  HANDLE_TH_ERRORS
+  Py_XINCREF(observer);
+  auto obs = [observer](int device) {
+    py::gil_scoped_acquire g;
+    PyObject* result = PyObject_CallFunction(observer, "i", device);
+    if (!result) {
+      throw py::error_already_set();
+    }
+    Py_XDECREF(result);
+  };
+  c10::cuda::CUDACachingAllocator::attachOutOfMemoryObserver(std::move(obs));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -914,6 +986,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_recordMemoryHistory,
      METH_O,
      nullptr},
+    {"_cuda_attach_out_of_memory_observer",
+     THCPModule_attachOutOfMemoryObserver,
+     METH_O,
+     nullptr},
+
 
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,

@@ -54,14 +54,14 @@ def _write_blocks(f, prefix, blocks):
 
 def segments(snapshot, format_flamegraph=format_flamegraph):
     f = io.StringIO()
-    for seg in snapshot:
+    for seg in snapshot['segments']:
         prefix = f'stream_{seg["stream"]};seg_{seg["address"]}'
         _write_blocks(f, prefix, seg['blocks'])
     return format_flamegraph(f.getvalue())
 
 def memory(snapshot, format_flamegraph=format_flamegraph):
     f = io.StringIO()
-    for seg in snapshot:
+    for seg in snapshot['segments']:
         prefix = f'stream_{seg["stream"]}'
         _write_blocks(f, prefix, seg['blocks'])
     return format_flamegraph(f.getvalue())
@@ -109,9 +109,9 @@ class Bytes:
 
 def stats(snapshot):
     result : Dict[str, Any] = {}
-    result['segments'] = len(snapshot)
+    result['segments'] = len(snapshot['segments'])
     result['total_size'] = Bytes(0)
-    for seg in snapshot:
+    for seg in snapshot['segments']:
         total_size = 0
         for b in seg['blocks']:
             if b['state'] not in result:
@@ -122,6 +122,58 @@ def stats(snapshot):
         result['total_size'] += total_size
     return result
 
+
+def segsum(data):
+    PAGE_SIZE = 1024*1024*20
+    segments = []
+    out = io.StringIO()
+    out.write("LARGE POOL SEGMENT SUMMARY\n")
+    out.write("(each line is a segment, each letter is 20MB, different letters for different tensors in the segment, * means multiple tensors in the 20MBs, ' ' means free)\n")
+    total_estimated = 0
+    all_size = 0
+    for seg in data['segments']:
+        all_size += seg['total_size']
+
+        all_ranges = []
+        boffset = 0
+        #active_size = sum(b['size'] for b in seg['blocks'] if b['state'] == 'active_allocated')
+        for b in seg['blocks']:
+            active =  b['state'] == 'active_allocated'
+            if 'history' in b:
+                # use the more accureate real_size to account for internal fragmenetation if we have it
+                for h in b['history']:
+                    if active or len(h['frames']) == 0:
+                        all_ranges.append((h['addr'] - seg['address'], h['real_size'], active))
+            else:
+                if active:
+                    all_ranges.append((boffset, b['size'], True))
+
+            boffset += b['size']
+        nseg = (seg['total_size'] - 1) // PAGE_SIZE + 1
+        occupied = [' ' for _ in range(nseg)]
+        frac = [0.0  for _ in range(nseg)]
+        active_size = 0
+        for i, (start_, size, active) in enumerate(all_ranges):
+            active_size += size
+            total_estimated += size
+            finish_ = (start_ + size)
+            start = start_ // PAGE_SIZE
+            finish = (finish_ - 1) // PAGE_SIZE + 1
+            m = chr( (ord('a' if active else 'A') + (i % 26)))
+            for j in range(start, finish):
+                s = max(start_, j*PAGE_SIZE)
+                e = min(finish_, (j+1)*PAGE_SIZE)
+                frac[j] += (e - s) / PAGE_SIZE
+                if occupied[j] != ' ':
+                    occupied[j] = '0123456789*'[int(frac[j]*10)]
+                else:
+                    occupied[j] = m
+        body = ''.join(occupied)
+        if seg['total_size'] > PAGE_SIZE:
+            out.write(f'[{body}] {Bytes(seg["total_size"])}, {Bytes(seg["total_size"] - active_size)} free\n')
+    out.write(f'total_estimated_active: {Bytes(total_estimated)}\n')
+    out.write(f'total_estimated_free: {Bytes(all_size - total_estimated)}\n')
+    return out.getvalue()
 
 if __name__ == "__main__":
     import os.path
@@ -165,24 +217,29 @@ if __name__ == "__main__":
 
     def _read(name):
         if name == '-':
-            return sys.stdin.buffer
+            f = sys.stdin.buffer
         else:
-            return open(name, 'rb')
+            f = open(name, 'rb')
+        data = pickle.load(f)
+        if isinstance(data, list): # segements only...
+            data = { 'segments': data, 'traces': [] }
+        return data
 
     def _write(name, data):
         with open(name, 'w') as f:
             f.write(data)
 
     if args.action == 'segments':
-        data = pickle.load(_read(args.input))
+        data = _read(args.input)
         _write(args.output, segments(data))
     elif args.action == 'memory':
-        data = pickle.load(_read(args.input))
+        data = _read(args.input)
         _write(args.output, memory(data))
     elif args.action == 'stats':
-        data = pickle.load(_read(args.input))
+        data = _read(args.input)
         pprint(stats(data))
+        print(segsum(data))
     elif args.action == 'compare':
-        before = pickle.load(_read(args.before))
-        after = pickle.load(_read(args.after))
+        before = _read(args.before)
+        after = _read(args.after)
         _write(args.output, compare(before, after))

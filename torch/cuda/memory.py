@@ -416,7 +416,7 @@ def memory_snapshot():
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()
+    return torch._C._cuda_memorySnapshot()['segments']
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
@@ -605,12 +605,12 @@ def _snapshot(device: Union[Device, int] = None):
 
 def _save_segment_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
-        snapshot = memory_snapshot()
+        snapshot = _snapshot()
     with open(filename, 'w') as f:
         f.write(_segments(snapshot))
 
 def _save_memory_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
-        snapshot = memory_snapshot()
+        snapshot = _snapshot()
     with open(filename, 'w') as f:
         f.write(_memory(snapshot))
