@@ -1286,9 +1286,8 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
 
     def test_sparse_tensors(self):
-        i = [[0, 1, 1],
-            [2, 0, 2]]
-        v =  [3, 4, 5]
+        i = [[0, 1, 1], [2, 0, 2]]
+        v = [3, 4, 5]
         s = torch.sparse_coo_tensor(i, v, (2, 3))
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
@@ -1306,7 +1305,11 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
 
         input_info = node.extra_fields.inputs
-        self.assertEqual(input_info.dtypes, ['long long', 'long long', 'Scalar'])
+        try:
+            self.assertEqual(input_info.dtypes, ['long long', 'long long', 'Scalar'])
+        except AssertionError:
+            # FIXME: Different systems have different names for int64t
+            self.assertEqual(input_info.dtypes, ['long', 'long', 'Scalar'])
 
         layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
         self.assertEqual(layout_info, [torch.sparse_coo, torch.sparse_coo, None])

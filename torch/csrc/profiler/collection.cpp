@@ -78,7 +78,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*layout_=*/layout);
 
     tensor_sizes_strides_.copy(sizes);
-    if(layout == at::kStrided) {
+    if (layout == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
@@ -106,7 +106,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             (void)_; // Suppress unused variable warning
             out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
-          if(md.layout_ == at::kStrided) {
+          if (md.layout_ == at::kStrided) {
             for (const auto _ : c10::irange(md.dim_)) {
               (void)_; // Suppress unused variable warning
               out.strides_.back().push_back(*tensor_size_strides_it++);
