@@ -554,6 +554,8 @@ torch_mobile_core = [
     # TODO: Remove this dependency
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
+    # TODO: This line needs to be uncommented to build mobile in OSS with flatbuffers
+    # "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
