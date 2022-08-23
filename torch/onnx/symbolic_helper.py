@@ -5,7 +5,7 @@ import inspect
 import sys
 import typing
 import warnings
-from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -567,7 +567,7 @@ def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
         _onnx_unsupported(f"{op}, {msg}", value)
 
 
-def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> None:
+def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of operator {op_name}. "
         f"Please feel free to request support or submit a pull request "
@@ -586,7 +586,7 @@ def _onnx_opset_unsupported(
     current_opset: int,
     supported_opset: int,
     value: Optional[_C.Value] = None,
-) -> None:
+) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
@@ -605,7 +605,7 @@ def _onnx_opset_unsupported_detailed(
     supported_opset: int,
     reason: str,
     value: Optional[_C.Value] = None,
-) -> None:
+) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
