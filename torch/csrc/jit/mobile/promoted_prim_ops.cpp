@@ -62,6 +62,11 @@ void sym_size(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();
   pack(stack, t.sym_sizes().vec());
 }
+void sym_size_int(Stack& stack) {
+  auto dim = pop(stack).toInt();
+  auto t = pop(stack).toTensor();
+  push(stack, t.sym_sizes()[dim]);
+}
 
 void sym_numel(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();

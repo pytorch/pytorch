@@ -1481,12 +1481,9 @@ class TestSingleOperation(unittest.TestCase):
                 z = self.conv2(x)
                 return z
 
-        # BasicBlock().forward(torch.rand(4, 2, 3, 4))
-
         ast_rewriter = RewritingTracer()
         graph = ast_rewriter.trace(BasicBlock())
         traced = GraphModule(ast_rewriter.root, graph, "gm")
-
 
         transformed = transform_all_constraints(traced)
 
@@ -1503,7 +1500,7 @@ class TestSingleOperation(unittest.TestCase):
         assert solver3.check() == z3.sat
 
         solver3.add(s22 != 0)
-        print(solver3.check())
+        assert solver3.check() == z3.unsat
 
     def test_conv_dyn(self):
 

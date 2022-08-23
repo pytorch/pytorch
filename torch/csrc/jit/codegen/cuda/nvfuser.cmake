@@ -45,7 +45,7 @@ foreach(src ${NVFUSER_RUNTIME_FILES})
   add_custom_command(
     COMMENT "Stringify NVFUSER runtime source file"
     OUTPUT ${dst}
-    DEPENDS ${src}
+    DEPENDS ${src} "${NVFUSER_STRINGIFY_TOOL}"
     COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
   )
   add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
