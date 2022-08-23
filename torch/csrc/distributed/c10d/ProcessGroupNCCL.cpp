@@ -1808,19 +1808,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  check_gpu_tensors_same_device(tensors);
-
-  // @lint-ignore CLANGTIDY
-  auto tensor = tensors.back();
-  RECORD_PARAM_COMMS(
-      rank_, // rank
-      "allreduce", // colName
-      tensor.numel(), // inSize
-      tensor.numel(), // outSize
-      tensor.scalar_type(), // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
-
   int dev_in_group = 0;
   return collective(
       tensors,
