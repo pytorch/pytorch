@@ -2367,7 +2367,15 @@ class TestDataLoader2_EventLoop(TestCase):
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
+    r"""
+    Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
+    """
+
     def test_shuffler_iterdatapipe(self):
+        r"""
+        Verify ``IterDataPipe.shuffle`` is controlled by ``DataLoader``
+        to generate different seeds deterministically per epoch.
+        """
         exp = list(range(100))
 
         def _create_dp(buffer_size):
