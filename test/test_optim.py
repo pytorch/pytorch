@@ -311,10 +311,9 @@ class TestOptim(TestCase):
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
 
-        for i in range(3):
+        for _ in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
-
             complex_opt.step()
             real_opt.step()
 
@@ -915,6 +914,13 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=2e-4, maximize=maximize),
                 constructor_accepts_maximize=True
+            )
+            self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, maximize=True)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
