@@ -14,12 +14,14 @@ inputs:
 outputs:
   test-matrix:
     description: The filtered test configs matrix.
-    type: string
     value: ${{ steps.filter.outputs.test-matrix }}
   is-test-matrix-empty:
     description: True if the filtered test configs matrix is empty. False otherwise.
-    type: boolean
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
+
+defaults:
+  run:
+    shell: bash
 
 runs:
   using: composite
