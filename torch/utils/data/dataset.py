@@ -108,6 +108,7 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
         [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> # xdoctest: +IGNORE_WANT("non deterministic")
@@ -116,7 +117,7 @@ class IterableDataset(Dataset[T_co]):
 
         >>> # With even more workers
         >>> # xdoctest: +IGNORE_WANT("non deterministic")
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12)))
         [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
@@ -161,7 +162,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 5, 4, 6]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
     def __iter__(self) -> Iterator[T_co]:
