@@ -124,16 +124,9 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 
 # AO Migration tests
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
+from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantized  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
-except ImportError:
-    pass
-
-try:
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRIndividualOps  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRMultipleOps  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
 
