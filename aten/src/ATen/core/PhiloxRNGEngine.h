@@ -12,6 +12,10 @@
 #include <cuda.h>
 #endif
 
+#ifdef SYCL_LANGUAGE_VERSION
+#include <sycl.hpp>
+#endif
+
 #include <ATen/core/Array.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -173,6 +177,9 @@ private:
                                     uint32_t *result_high) {
     #ifdef __CUDA_ARCH__
       *result_high = __umulhi(a, b);
+      return a*b;
+    #elif __SYCL_DEVICE_ONLY__
+      *result_high = sycl::mul_hi(a, b);
       return a*b;
     #else
       const uint64_t product = static_cast<uint64_t>(a) * b;
