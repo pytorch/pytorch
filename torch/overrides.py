@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo
+from torch.utils._mode_utils import _enable_mode_checks, _ModeInfo
 
 __all__ = [
     "get_ignored_functions",
@@ -1766,16 +1766,23 @@ def is_tensor_like(inp):
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
 
+_cur_torch_function_mode = []
+
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
         if isinstance(f, classmethod):
             raise RuntimeError("TorchFunctionMode's torch_function function " +
                                "should be a normal method not a class method")
-        inner = getattr(self, "inner", None)
 
-        with enable_torch_function_mode(inner):
-            return f(self, *args, **kwargs)
+        inner = _cur_torch_function_mode.pop() if len(_cur_torch_function_mode) > 0 else None
+
+        try:
+            with enable_torch_function_mode(inner):
+                return f(self, *args, **kwargs)
+        finally:
+            assert _get_torch_function_mode() is None
+            _cur_torch_function_mode.append(inner)
     return wrapped
 
 
@@ -1793,14 +1800,10 @@ def _wrap_torch_function(f):
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
-
-        * Adds an implicit ``inner`` kwarg to ``__init__``, to
-          allow the modes to be chained together to form a stack.
-
         * Reenables the inner mode, so that by default PyTorch API calls
           will compositionally proceed to the next mode on the stack.
 
-    The default behavior for the second bullet is important, as it is easy to
+    The default behavior for this is important, as it is easy to
     accidentally write ``__torch_function__`` implementations that are not
     compositional, and the wrapping here makes the obvious code do the
     right thing (aka, this is why there is a metaclass).
@@ -1852,19 +1855,14 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
 
     def __enter__(self):
         old = _get_torch_function_mode()
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
-        else:
-            self.inner = old
-            if old is None:
-                self.ancestors = set()
-            else:
-                self.ancestors = self.inner.ancestors.union({self.inner})
+        if self in _cur_torch_function_mode or self is old:
+            raise RuntimeError(f"{self} is already active in the mode stack")
+        _cur_torch_function_mode.append(old)
         _set_torch_function_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_function_mode(self.inner)
+        _set_torch_function_mode(_cur_torch_function_mode.pop() if len(_cur_torch_function_mode) > 0 else None)
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -1933,7 +1931,19 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
+    old = _get_torch_function_mode()
+    if old is mode:
+        yield mode
+        return
+
+    _enable_mode_checks(mode, mode_info=_TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
+
+    _set_torch_function_mode(mode)
+    try:
+        yield mode  # type: ignore[misc]
+    finally:
+        # for enable mode, the current mode _must_ have been None before
+        _set_torch_function_mode(old)
 
 class enable_reentrant_dispatch():
     def __enter__(self):

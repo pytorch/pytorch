@@ -3,10 +3,12 @@ from typing import Iterator, Set
 import functools
 
 import warnings
-from torch.utils._mode_utils import _enable_mode, _ModeInfo
+from torch.utils._mode_utils import _enable_mode_checks, _ModeInfo
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
+
+_cur_torch_dispatch_mode = []
 
 @dataclass
 class TorchDispatchModeInfo(_ModeInfo):
@@ -58,8 +60,19 @@ def enable_torch_dispatch_mode(mode, *, replace=None, ignore_preexisting=False) 
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
+    old = _get_torch_dispatch_mode()
+    if old is mode:
+        yield mode
+        return
 
-    return _enable_mode(mode, mode_info=TorchDispatchModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
+    _enable_mode_checks(mode, mode_info=TorchDispatchModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
+
+    _set_torch_dispatch_mode(mode)
+    try:
+        yield mode  # type: ignore[misc]
+    finally:
+        # for enable mode, the current mode _must_ have been None before
+        _set_torch_dispatch_mode(old)
 
 
 def _wrap_torch_dispatch(f):
@@ -68,10 +81,15 @@ def _wrap_torch_dispatch(f):
         if isinstance(f, classmethod):
             raise RuntimeError("TorchDispatchMode's torch_dispatch function " +
                                "should be a normal method not a class method")
-        inner = getattr(self, "inner", None)
+        inner = _cur_torch_dispatch_mode.pop() if len(_cur_torch_dispatch_mode) > 0 else None
 
-        with enable_torch_dispatch_mode(inner):
-            return f(self, *args, **kwargs)
+        try:
+            with enable_torch_dispatch_mode(inner):
+                return f(self, *args, **kwargs)
+        finally:
+            assert _get_torch_dispatch_mode() is None
+            _cur_torch_dispatch_mode.append(inner)
+
     return wrapped
 
 
@@ -90,15 +108,11 @@ def _wrap_torch_dispatch(f):
 
 class TorchDispatchModeMeta(type):
     """
-    Metaclass for :class:`TorchDispatchMode`; it does two things:
-
-        * Adds an implicit ``inner`` kwarg to ``__init__``, to
-          allow the modes to be chained together to form a stack.
-
+    Metaclass for :class:`TorchDispatchMode`; it:
         * Reenables the inner mode, so that by default PyTorch API calls
           will compositionally proceed to the next mode on the stack.
 
-    The default behavior for the second bullet is important, as it is easy to
+    The default behavior for this is important, as it is easy to
     accidentally write ``_wrap_torch_dispatch`` implementations that are not
     compositional, and the wrapping here makes the obvious code do the
     right thing (aka, this is why there is a metaclass).
@@ -139,28 +153,19 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
-    # Force metaclass to generate constructor at the base of the hierarchy
-    def __init__(self):
-        self.ancestors: Set[TorchDispatchMode]
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
     def __enter__(self):
         old = _get_torch_dispatch_mode()
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
-        else:
-            self.inner = old
-            if old is None:
-                self.ancestors = set()
-            else:
-                self.ancestors = self.inner.ancestors.union({self.inner})
+        if self in _cur_torch_dispatch_mode or self is old:
+            raise RuntimeError(f"{self} is already active in the mode stack")
+        _cur_torch_dispatch_mode.append(old)
         _set_torch_dispatch_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_dispatch_mode(self.inner)
+        _set_torch_dispatch_mode(_cur_torch_dispatch_mode.pop() if len(_cur_torch_dispatch_mode) > 0 else None)
 
     @classmethod
     def push(cls, *args, **kwargs):

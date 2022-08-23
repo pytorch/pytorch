@@ -7,7 +7,7 @@ from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
-from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
+from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
@@ -1168,15 +1168,52 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
-    def test_error_using_same_mode(self):
+    def test_error_with_same_mode(self):
+        # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
+
         class A(TorchDispatchMode):
             pass
 
-        x = A()
-        with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-                with x:
+        with A() as a:
+            with self.assertRaisesRegex(RuntimeError, "already active in the mode stack"):
+                with a:
                     pass
+
+    def test_error_mixing_with_enable(self):
+        class A(TorchDispatchMode):
+            pass
+
+        with A():
+            with self.assertRaisesRegex(ValueError,
+                                        "Attempted to enable_torch_dispatch_mode, but there is already an active mode"):
+                with enable_torch_dispatch_mode(A()):
+                    pass
+
+    def test_allow_mixing_enable_with(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.sub(args[0], args[1])
+
+        x = torch.tensor([3.])
+        with capture_logs(is_mode=True) as logs:
+            log_input("x", x)
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
+                with A():
+                    x + x
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten.sub.Tensor($0, $0)''')  # sub because A changed it before hitting logging
+
+    def test_error_on_same_mode(self):
+        # If the pushed mode isn't the outermost mode, we error
+        class A(TorchDispatchMode):
+            pass
+
+        with A() as reenabled:
+            with A():
+                with self.assertRaisesRegex(RuntimeError, "already active in the mode stack"):
+                    with reenabled:
+                        pass
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
@@ -1189,67 +1226,12 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with A():
                 x + x
 
-    def test_error_with_ancestor(self):
-        x = LoggingTensorMode()
-        with x:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-            with x:
-                pass
-
-    def test_find_outermost_mode(self):
-        self.assertIsNone(find_outermost_mode([None, None]))
-
-        x = LoggingTensorMode()
-        y = LoggingTensorMode()
-        z = LoggingTensorMode()
-        with x:
-            with y:
-                with z:
-                    pass
-
-        self.assertEqual(find_outermost_mode([x, y]), y)
-        self.assertEqual(find_outermost_mode([z, x]), z)
-        i = LoggingTensorMode()
-
-        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
-            find_outermost_mode([i, x, y, z])
-
-        k = LoggingTensorMode()
-        with k:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
-            find_outermost_mode([k, x, y, z])
-
     def test_all_same_mode(self):
         x = LoggingTensorMode()
         y = LoggingTensorMode()
         self.assertTrue(all_same_mode([x, x, x]))
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
-
-    def test_all_same_mode_scope(self):
-        x = LoggingTensorMode()
-        y = LoggingTensorMode()
-        z = LoggingTensorMode()
-        with x:
-            with y:
-                pass
-            with z:
-                pass
-
-        i = LoggingTensorMode()
-
-        self.assertTrue(all_same_mode_scope([x, y], y))
-        self.assertTrue(all_same_mode_scope([x, z], z))
-        self.assertFalse(all_same_mode_scope([x, y, z], y))
-        self.assertFalse(all_same_mode_scope([x, y, z], z))
-        self.assertFalse(all_same_mode_scope([x, y, i], y))
-
-        no_ancestor = LoggingTensorMode()
-        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
