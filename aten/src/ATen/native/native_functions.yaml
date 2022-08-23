@@ -2925,25 +2925,18 @@
   dispatch:
     CompositeImplicitAutograd: linear
     NestedTensorCPU, NestedTensorCUDA: nested_linear
+    MPS: _mps_linear
 
 - func: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: nested_linear_backward
+    MPS: mps_linear_backward
   autogen: linear_backward.out
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CompositeExplicitAutograd: linear_out
-
-# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
-# native_functions.yaml
-# https://github.com/pytorch/pytorch/issues/77394
-- func: _mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
-  python_module: nn
-  dispatch:
-    MPS: _mps_linear
-  autogen: _mps_linear.out
 
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -2965,21 +2958,6 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
-
-- func: _mps_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
-  dispatch:
-    MPS: _mps_linear_backward_input
-  autogen: _mps_linear_backward_input.out
-
-- func: _mps_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
-  dispatch:
-    MPS: _mps_linear_backward_weights
-  autogen: _mps_linear_backward_weights.out
-
-- func: mps_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    MPS: mps_linear_backward
-  autogen: mps_linear_backward.out
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
