@@ -94,7 +94,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # TODO: improve naming
             # TODO: lazily insert this into the graph only on first
             # use?  Maybe complicated and DCE is a better idea
-            set_proxy_slot(inner_s, tracer, torch.ops.aten.size(proxy, i))
+            set_proxy_slot(inner_s, tracer, torch.ops.aten.sym_size(proxy, i))
 
         # TODO: also do stride/numel
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
@@ -468,18 +468,8 @@ class ProxySymDispatchMode(SymDispatchMode):
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
         n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))
-        import operator
-        mapped = {
-            operator.mul: torch.ops.math.mul,
-            operator.eq: torch.ops.math.eq,
-            operator.gt: torch.ops.math.gt,
-            operator.lt: torch.ops.math.lt,
-        }
-        if func not in mapped:
-            print(func)
-            raise RuntimeError(f"Don't support {func} on symints")
 
-        n_out = self.tracer.create_node("call_function", mapped[func], n_args, n_kwargs)
+        n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
         assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
