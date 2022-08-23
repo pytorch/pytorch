@@ -278,9 +278,9 @@ class PassManager:
 
             # Run the set of passes on the graph module
             for i, fn in enumerate(self.passes):
-                if self.debug: 
+                if self.debug:
                     print(f"Running pass \'{fn.__name__}\'")
-                
+
                 try:
                     res = fn(module)
                 except Exception as e:
