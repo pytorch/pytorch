@@ -123,11 +123,11 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
     size_t size_at_dim = 0;
     for (const auto i : c10::irange(materialized.size())) {
       const Tensor& t = materialized[i];
+      all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
       if (!at::native::cat_should_skip_tensor(t)) {
         at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
         size_at_dim += t.size(dim);
         all_contiguous = all_contiguous && t.is_contiguous(memory_format);
-        all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
         all_same_sizes_and_stride = all_same_sizes_and_stride &&
             t.sizes() == materialized[valid].get().sizes() &&
             t.strides() == materialized[valid].get().strides();
@@ -2188,17 +2188,18 @@ std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
-  int64_t dim_size = self.size(dim);
-  int64_t num_splits = split_sizes.size();
-  std::vector<Tensor> splits(num_splits);
+  const int64_t dim_size = self.size(dim);
+  const int64_t num_splits = split_sizes.size();
   int64_t start_idx = 0;
 
+  std::vector<Tensor> splits;
+  splits.reserve(num_splits);
   for (const auto i : c10::irange(num_splits)) {
     auto length = split_sizes[i];
     TORCH_CHECK(length >= 0,
              "split_with_sizes expects split_sizes have only non-negative ",
              "entries, but got split_sizes=", split_sizes);
-    splits[i] = self.narrow(dim, start_idx, length);
+    splits.push_back(at::native::slice(self, dim, start_idx, start_idx + length, 1));
     start_idx += length;
   }
   TORCH_CHECK(start_idx == dim_size,
@@ -3249,7 +3250,7 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
-              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+              src, " dims) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());

@@ -2,7 +2,7 @@ import torch
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_flatten
 from torch.multiprocessing.reductions import StorageWeakRef
 
 import _operator
@@ -110,7 +110,8 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
     def propagate(self, *args):
         self.multi_output_view_nodes = {}
         self.node_counter = -1
-        with FakeTensorMode.push() as mode:
+
+        with FakeTensorMode(allow_meta=True) as mode:
             fake_args = [mode.from_tensor(a) for a in args]
             return super().run(*fake_args)
 
@@ -152,10 +153,12 @@ def _maybe_get_inplace_op(op):
         for f in inplace_overloads
         if _schemas_match(op._schema, f._schema)
     ]
-    # This is for sanity: if foo() and foo_() are both operators,
-    # we expect them to have compatible schemas.
-    # (This is asserted by codegen for ATen, but might not be true
-    # for other arbitrary operators).
+    # Just becuase foo() and foo_() are both existing operators,
+    # They aren't guaranteed to have compatible schemas.
+    # For example, pow.Scalar(Scalar self, Tensor exponent) has no valid inplace variant,
+    # Even though several overloads of pow_ exist.
+    if len(inplace_overloads_with_matching_schemas) == 0:
+        return None
     assert len(inplace_overloads_with_matching_schemas) == 1
     inplace_op = inplace_overloads_with_matching_schemas[0]
     return inplace_op
@@ -262,7 +265,7 @@ def reinplace(gm, *sample_args):
 
     Given a node "b = foo(a, ...)", the algorithm for re-inplacing is as follows:
 
-    (1) Check if foo has a mutating variant. If not, move to the next node.
+    (1a) Check if foo has a mutating variant. If not, move to the next node.
 
         Note that we ignore view ops (we don't bother to turn `as_strided()`
         into `as_strided_()`), as it complicates the algorithm and doesn't
@@ -270,6 +273,33 @@ def reinplace(gm, *sample_args):
 
         Currently, we also only check for an inplace op, `foo_`.
         Later, we should beef this up to check for out= or mutable ops.
+
+    (1b) Check that the self argument we're attempting to reinplace
+         has acceptable metadata to reinplace with.
+
+         For example, if we have:
+           a = torch.ones(1)
+           b = torch.ones(10)
+           out = torch.add(a, b)
+         We can't turn that into
+           a.add_(b)
+         Because that would require resizing "a".
+
+         Similarly, we can't convert torch.ge(a, b) into a.ge_(b),
+         beause that would require changing a's dtype (from e.g. float32 to bool).
+         Note that in this specific example, we could technically do better..
+
+         If we see the pattern:
+           a_1 = a.ge(b)
+           a_2 = aten._to_copy(a_1, a.dtype)
+         Then we this should be valid to completely re-inplace
+         (this is exactly what functionalization will emit when it sees a.ge_(b)).
+
+         This optimization is only really important for user programs
+         that directly use inplace comparison ops though.
+
+         We also cannot re-inplace on tensors that have overlapping memory,
+         e.g. torch.ones(1).expand(4, 4).add_(1)
 
     (2) Check if "a" is an alias of any of the program inputs.
 
@@ -419,7 +449,33 @@ def reinplace(gm, *sample_args):
             assert len(node.target._schema.arguments) > 0
             assert 'Tensor' in str(node.target._schema.arguments[0].type)
 
-            # Step 2: ensure that the op we're trying to re-inplace isn't a program input.
+            # Step 1b: Check that the self argument we're attempting to reinplace
+            # has the same size/stride as the output.
+            # For example, we shouldn't try to reinplace torch.add(scalar_tensor, larger_tensor)
+            # As it would require resizing scalar_tensor.
+            # (We could potentially swizzle this into larger_tensor.add_(scalar_tensor),
+            # this is probably an optimization to revisit later).
+            self_arg = node.args[0]
+            self_flattened, _ = tree_flatten(self_arg.meta['fake_result'])
+            node_flattened, _ = tree_flatten(node.meta['fake_result'])
+            assert len(self_flattened) == len(node_flattened)
+            self_has_wrong_metadata = False
+            for self_meta, node_meta in zip(self_flattened, node_flattened):
+                if self_meta.numel() != node_meta.numel():
+                    self_has_wrong_metadata = True
+                if self_meta.dtype != node_meta.dtype:
+                    self_has_wrong_metadata = True
+                # We also cannot re-inplace on tensors that have internal memory overlap.
+                # e.g. torch.ones(1).expand(4, 4).add_(1)
+                if torch._debug_has_internal_overlap(self_meta) == 1:
+                    self_has_wrong_metadata = True
+            # Here, we (optimistically) assume that a.resize(b) is valid to re-inplace,
+            # Since users should never really be calling the functional "torch.ops.aten.resize"
+            # op directly in their programs.
+            if self_has_wrong_metadata and node.target != torch.ops.aten.resize.default:
+                continue
+
+            # Step 2: ensure that the op we're trying to re-inplace isn't a program i
             self_arg = node.args[0]
             self_arg_name = self_arg.name
             self_arg_storage = StorageWeakRef(self_arg.meta['fake_result'].storage())
@@ -484,16 +540,29 @@ def reinplace(gm, *sample_args):
                     node_to_update.args = tuple(new_args)
                     node_to_update.kwargs = new_kwargs
 
-                    old_ref = StorageWeakRef(old.meta['fake_result'].storage())
-                    node_ref = StorageWeakRef(node_to_update.meta['fake_result'].storage())
-                    if old_ref == node_ref:
-                        # This will happen if we're updating a view op, e.g.
-                        # e.g. replacing
-                        #     x = view(old)
-                        #     x = view(new)
-                        # When that happens, we need to make sure to keep our
-                        # storage mapping up to date.
-                        new_ref = StorageWeakRef(new.meta['fake_result'].storage())
+                    old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
+                    node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
+
+                    old_res_storage = set(StorageWeakRef(x.storage()) for x in old_flattened_res if isinstance(x, FakeTensor))
+                    node_res_storage = set(StorageWeakRef(x.storage()) for x in node_flattened_res if isinstance(x, FakeTensor))
+
+                    # This will happen if we're updating a view op, e.g.
+                    # e.g. replacing
+                    #     x = view(old)
+                    #     x = view(new)
+                    # When that happens, we need to make sure to keep our
+                    # storage mapping up to date.
+                    #
+                    # We're checking for len(...) == 1 here because all view ops are guaranteed to return either a single tensor,
+                    # or multiple tensors that all share the same storage.
+                    # We can't just check equality because we might encounter FX nodes that return zero tensor outputs.
+                    if len(old_res_storage) == 1 and len(node_res_storage) == 1 and old_res_storage == node_res_storage:
+                        new_flattened_res, _ = tree_flatten(new.meta['fake_result'])
+                        new_res_storage = set(StorageWeakRef(x.storage()) for x in new_flattened_res if isinstance(x, FakeTensor))
+                        assert len(new_res_storage) == 1
+                        (old_ref,) = old_res_storage
+                        (new_ref,) = new_res_storage
+                        (node_ref,) = node_res_storage
                         # Technically, "old_ref" and all its aliases will remain
                         # in our mapping.
                         # That should be fine though, since we deleted "old"
