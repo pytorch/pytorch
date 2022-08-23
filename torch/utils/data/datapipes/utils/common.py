@@ -23,9 +23,9 @@ __all__ = [
 
 def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
     """
-    Checks that function used in a map style datapipe works with the input column
+    Checks that function used in a callable datapipe works with the input column
 
-    This simply ensures that the number of keyword or positional arguments matches
+    This simply ensures that the number of positional arguments matches
     the size of the input column. The function must not contain any non-default
     keyword-only arguments.
 
