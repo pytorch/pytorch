@@ -50,13 +50,12 @@ FusionDefinition::FusionDefinition(
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  Nvf::FusionGuard::setCurFusion(fusionManagerPtr()->fusionPtr());
+  Nvf::FusionGuard fg(fusionManagerPtr()->fusionPtr());
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
     (*functor)(*this);
   }
-  Nvf::FusionGuard::setCurFusion(nullptr);
 }
 
 FusionManager* FusionDefinition::fusionManagerPtr() const {
