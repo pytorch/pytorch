@@ -45,6 +45,8 @@ DifferentiableViewMeta::DifferentiableViewMeta(
     self_impl->set_version_counter(
         impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+    TORCH_INTERNAL_ASSERT(
+        backward_info_.value().base_.unsafeGetTensorImpl() != self_impl);
   }
   if (shared_view_info_) {
     TORCH_INTERNAL_ASSERT(
