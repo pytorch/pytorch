@@ -583,6 +583,17 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
 }
 
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(!) self)"
+      " -> Tensor");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  ASSERT_TRUE(selfAliasInfo->beforeSets().empty());
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_EQ(c10::toString(s), "at::foo(Tensor self) -> Tensor");
+}
+
 TEST(SchemaParserTest, BeforeAfterSets) {
   const auto s = parseSchema(
       "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"

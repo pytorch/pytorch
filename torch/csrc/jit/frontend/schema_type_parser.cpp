@@ -427,9 +427,8 @@ SchemaTypeParser::parseFakeAndRealType() {
       auto container = parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          auto temp = AliasInfo();
-          temp.setIsWrite(alias_info->isWrite());
-          container = c10::optional<AliasInfo>(temp);
+          container = c10::optional<AliasInfo>(AliasInfo());
+          container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
       }

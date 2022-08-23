@@ -828,11 +828,15 @@ void AliasDb::analyzeImpl(Node* node) {
 
     // Do sanity checks on the alias annotation
     TORCH_INTERNAL_ASSERT(
-        formal->containedTypes().size() == 0,
+        formal->containedTypes().size() <= 1,
         "Composite types for alias analysis not yet supported");
     TORCH_INTERNAL_ASSERT(
         !formal->isWildcardBefore(),
         "Doesn't make sense for a input value to begin as a wildcard");
+    if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
+      // Use the first containedType in alias info.
+      formal = &(formal->containedTypes()[0]);
+    }
 
     const auto& formalAlias = formal->beforeSet();
 
@@ -879,10 +883,13 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     TORCH_INTERNAL_ASSERT(
-        formal->containedTypes().size() == 0,
+        formal->containedTypes().size() <= 1,
         "Composite types for alias analysis not yet supported");
     TORCH_INTERNAL_ASSERT(formal->beforeSets() == formal->afterSets());
-
+    if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
+      // Use the first containedType in alias info.
+      formal = &(formal->containedTypes()[0]);
+    }
     if (formal->isWildcardBefore()) {
       TORCH_INTERNAL_ASSERT(
           formal->beforeSets().size() == 1,

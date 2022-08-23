@@ -167,9 +167,8 @@ struct SchemaParser {
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          auto temp = at::AliasInfo();
-          temp.setIsWrite(alias_info->isWrite());
-          container = c10::optional<at::AliasInfo>(temp);
+          container = c10::optional<at::AliasInfo>(at::AliasInfo());
+          container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
       }

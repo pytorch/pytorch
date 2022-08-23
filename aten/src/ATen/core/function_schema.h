@@ -555,10 +555,13 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     auto list = unopt_type->cast<c10::ListType>();
     out << list->getElementType()->str();
     if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
-      out << arg.alias_info()->containedTypes()[0] << "[]";
-    } else if (arg.N()) {
-      out << "[" << *arg.N() << "]";
+      out << arg.alias_info()->containedTypes()[0];
     }
+    std::string N = "";
+    if (arg.N()) {
+        N = std::to_string(*arg.N());
+    }
+    out << "[" << N << "]";
   } else {
     out << unopt_type->str();
   }
