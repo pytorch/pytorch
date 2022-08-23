@@ -307,6 +307,7 @@ at::Tensor evenly_distribute_backward(
     const at::Tensor& input,
     const at::Tensor& value);
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
