@@ -15,21 +15,37 @@ if(NOT __NCCL_INCLUDED)
     # this second replacement is needed when there are multiple archs
     string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
+    if("${CMAKE_GENERATOR}" MATCHES "Make")
+      # Recursive make with jobserver for parallelism
+      set(MAKE_COMMAND "$(MAKE)")
+    else()
+      if(DEFINED ENV{MAX_JOBS})
+        set(MAX_JOBS "$ENV{MAX_JOBS}")
+      else()
+        include(ProcessorCount)
+        ProcessorCount(NUM_HARDWARE_THREADS)
+        # Assume 2 hardware threads per cpu core
+        math(EXPR MAX_JOBS "${NUM_HARDWARE_THREADS} / 2")
+      endif()
+
+      # Parallel build with CPU load limit to avoid oversubscription
+      set(MAKE_COMMAND "make" "-j${MAX_JOBS}" "-l${MAX_JOBS}")
+    endif()
+
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
-        env
-        make
+        ${MAKE_COMMAND}
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
         "NVCC_GENCODE=${NVCC_GENCODE}"
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
-        BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
+      BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )
 
