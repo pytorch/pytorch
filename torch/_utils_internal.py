@@ -43,7 +43,8 @@ def resolve_library_path(path: str) -> str:
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
-TEST_MASTER_PORT = 29500
+# A random free port from 1024 to 65535 will be selected
+TEST_MASTER_PORT = 0
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
 # libtorch_global_deps, see Note [Global dependencies]
 USE_GLOBAL_DEPS = True
