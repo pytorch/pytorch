@@ -7,6 +7,7 @@ from torch.utils.data.datapipes.utils.common import (
     _check_unpickable_fn,
     _deprecation_warning,
     StreamWrapper,
+    validate_input_col
 )
 
 
@@ -69,6 +70,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         self.drop_empty_batches = drop_empty_batches
 
         self.input_col = input_col
+        validate_input_col(filter_fn, input_col)
 
     def _apply_filter_fn(self, data) -> bool:
         if self.input_col is None:
