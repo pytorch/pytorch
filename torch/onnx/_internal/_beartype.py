@@ -35,11 +35,16 @@ else:
 
         if GLOBALS.runtime_type_check is True:
             # Enable runtime type checking which errors on any type hint violation.
-            beartype = beartype_lib.beartype  # type: ignore[assignment]
+            def beartype(func: _T) -> _T:
+                """Wrapper for the beartype decorator."""
+                # Wrap the decorator to make the type consistent for mypy
+                return beartype_lib.beartype(func)  # type: ignore[call-overload]
+
         else:
             # GLOBALS.runtime_type_check is None, show warnings only.
 
-            def beartype_warn(func: _T) -> _T:
+            def beartype(func: _T) -> _T:
+                """Warn on type hint violation."""
 
                 if "return" in func.__annotations__:
                     # Remove the return type from the func function's
@@ -64,8 +69,6 @@ else:
                         return func(*args, **kwargs)  # type: ignore[operator] # noqa: B012
 
                 return _coerce_beartype_exceptions_to_warnings  # type: ignore[return-value]
-
-            beartype = beartype_warn
 
     except ImportError:
         # Beartype is not installed.
