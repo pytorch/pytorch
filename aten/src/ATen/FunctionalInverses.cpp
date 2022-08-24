@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <c10/core/SymIntArrayRef.h>
 namespace at {
 namespace functionalization {
 
@@ -145,7 +146,7 @@ Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor
     return at::functionalization::permute_copy_inverse(mutated_view, dims, reapply_views);
 }
 
-Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride) {
+Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
     // Note that I'm directly calling reshape(), and ignoring the strides.
     // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
     // Specifically, passing in the strides directly can get us into trouble in cases like:

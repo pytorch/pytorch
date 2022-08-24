@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <ATen/ops/_reshape_alias.h>
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/StringUtil.h>
@@ -1313,12 +1314,20 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   return self.reshape_symint(c10::SymIntArrayRef::fromIntArrayRef(proposed_shape));
 }
 
-Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+Tensor _reshape_alias(const Tensor& self, SymIntArrayRef sizes, SymIntArrayRef strides) {
   // This is only used by `reshape` in cases where it would otherwise have dispatched
   // to `view`. This removes the overhead of calling `view` which duplicates some of
   // the work that's already been done (`infer_size_dv` and `computeStride`).
 
-  return alias_with_sizes_and_strides(self, sizes, strides);
+  return alias_with_sizes_and_strides(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides));
+}
+
+Tensor _reshape_alias(const Tensor& self, at::IntArrayRef sizes, at::IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return at::_reshape_alias_symint(self, c10::SymIntArrayRef::fromIntArrayRef(sizes), c10::SymIntArrayRef::fromIntArrayRef(strides));
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -3631,8 +3640,8 @@ at::Tensor& permute_copy_out(const at::Tensor & self, at::IntArrayRef dims, at::
 }
 
 
-at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, at::Tensor & out) {
-  auto tmp = self._reshape_alias(size, stride);
+at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, at::Tensor & out) {
+  auto tmp = self._reshape_alias_symint(size, stride);
   out.copy_(tmp);
   return out;
 }

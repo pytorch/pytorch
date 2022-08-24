@@ -5,7 +5,7 @@
 #include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
-#include "c10/core/SymIntArrayRef.h"
+#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 
