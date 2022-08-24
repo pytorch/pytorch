@@ -19,6 +19,7 @@ def masked_tensor(data, mask, requires_grad=False):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> data = torch.arange(6).reshape(2,3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = masked_tensor(data, mask)
