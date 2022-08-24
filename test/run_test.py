@@ -671,6 +671,8 @@ def run_doctests(test_module, test_directory, options):
         'cuda': 0,
         'cuda1': 0,
         'qengine': 0,
+        'autograd_profiler': 0,
+        'cpp_ext': 0,
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -707,6 +709,12 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine']:
         os.environ['TORCH_DOCTEST_QENGINE'] = '1'
 
+    if enabled['autograd_profiler']:
+        os.environ['TORCH_DOCTEST_AUTOGRAD_PROFILER'] = '1'
+
+    if enabled['cpp_ext']:
+        os.environ['TORCH_DOCTEST_CPP_EXT'] = '1'
+
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
         'global_exec': r'\n'.join([
@@ -714,6 +722,7 @@ def run_doctests(test_module, test_directory, options):
             'import torch.nn.functional as F',
             'import torch',
         ]),
+        'analysis': 'static',  # set to "auto" to test doctests in compiled modules
         'style': 'google',
         'options': '+IGNORE_WHITESPACE',
     }

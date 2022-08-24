@@ -121,6 +121,7 @@ class profile(object):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         >>>     for _ in range(100):  # any normal python code, really!
@@ -453,6 +454,7 @@ class record_function(_ContextDecorator):
         non-distributed cases.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
@@ -578,6 +580,7 @@ class emit_itt(object):
 
     Example:
         >>> # xdoctest: +SKIP("Undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.autograd.profiler.emit_itt():
         ...     model(x)
 
@@ -646,6 +649,7 @@ class emit_nvtx(object):
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.cuda.profiler.profile():
         ...     model(x)  # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():
