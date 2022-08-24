@@ -4,8 +4,9 @@ The module returns a no-op decorator when the beartype library is not installed.
 """
 import functools
 import traceback
+import typing
 import warnings
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
@@ -74,5 +75,6 @@ else:
         # Beartype is not installed.
         beartype = _no_op_decorator
 
+typing.cast(Callable[[_T], _T], beartype)
 # Make sure that the beartype decorator is enabled whichever path we took.
 assert beartype is not None
