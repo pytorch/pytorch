@@ -3060,7 +3060,7 @@ def all_to_all_single(
         >>> scatter_list = list(input.chunk(world_size))
         >>> gather_list  = list(output.chunk(world_size))
         >>> for i in range(world_size):
-        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+        >>>     dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
 
         >>> # Another example with uneven split
         >>> input
@@ -3179,7 +3179,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         >>> scatter_list = input
         >>> gather_list  = output
         >>> for i in range(world_size):
-        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+        >>>     dist.scatter(gather_list[i], scatter_list if i == rank else [], src=i)
 
         >>> input
         tensor([0, 1, 2, 3, 4, 5])                                       # Rank 0

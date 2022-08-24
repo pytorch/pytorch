@@ -1052,8 +1052,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> # xdoctest: +SKIP("undefined variables")
             >>> ddp = torch.nn.parallel.DistributedDataParallel(model, pg)
             >>> with ddp.no_sync():
-            >>>   for input in inputs:
-            >>>     ddp(input).backward()  # no synchronization, accumulate grads
+            >>>     for input in inputs:
+            >>>         ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
 
         .. warning::
@@ -1561,11 +1561,11 @@ class DistributedDataParallel(Module, Joinable):
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
-            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
+            >>>     encoded_tensor = encode(bucket.buffer())  # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
-            >>>         decoded_tensor = decode(fut.value()[0]) # decode gradients
+            >>>         decoded_tensor = decode(fut.value()[0])  # decode gradients
             >>>         return decoded_tensor
             >>>     return fut.then(decode)
 

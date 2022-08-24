@@ -186,9 +186,11 @@ def _cuda_deserialize(obj, location):
         else:
             return obj.cuda(device)
 
+
 def _mps_deserialize(obj, location):
     if location == 'mps':
         return obj.mps()
+
 
 def _meta_deserialize(obj, location):
     if location == 'meta':
@@ -355,6 +357,7 @@ def _check_seekable(f) -> bool:
     except (io.UnsupportedOperation, AttributeError) as e:
         raise_err_msg(["seek", "tell"], e)
     return False
+
 
 def _check_dill_version(pickle_module) -> None:
     '''Checks if using dill as the pickle module, and if so, checks if it is the correct version.
@@ -753,7 +756,7 @@ def load(
         # Load all tensors onto GPU 1
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
+        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'})
         # Load tensor from io.BytesIO object
         >>> with open('tensor.pt', 'rb') as f:
         ...     buffer = io.BytesIO(f.read())
@@ -1080,12 +1083,14 @@ def _get_restore_location(map_location):
             return result
     return restore_location
 
+
 class StorageType():
     def __init__(self, name):
         self.dtype = _get_dtype_from_pickle_storage_type(name)
 
     def __str__(self):
         return f'StorageType(dtype={self.dtype})'
+
 
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)

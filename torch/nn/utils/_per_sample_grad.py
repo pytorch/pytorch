@@ -35,10 +35,10 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)
         >>> assert model.weight.grad_sample.shape == (5, 3, 4)
-        >>> assert model.weight.grad == None
+        >>> assert model.weight.grad is None
         >>> assert model.bias.shape == (3,)
         >>> assert model.bias.grad_sample.shape == (5, 3)
-        >>> assert model.bias.grad == None
+        >>> assert model.bias.grad is None
 
     An example using "mean" loss reduction. The grad_sample fields will be scaled by batch_size from what they would be
     if we ran the same code with loss_reduction="sum". This is because the mean at the end will scale all

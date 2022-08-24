@@ -192,7 +192,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
 
         Example::
             >>> def callback(fut):
-            ...     print(f"This will run after the future has finished.")
+            ...     print("This will run after the future has finished.")
             ...     print(fut.wait())
             >>> fut = torch.futures.Future()
             >>> fut.add_done_callback(callback)

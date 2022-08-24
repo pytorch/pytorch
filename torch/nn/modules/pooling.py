@@ -524,7 +524,7 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
+        >>> m(torch.tensor([[[1., 2, 3, 4, 5, 6, 7]]]))
         tensor([[[2., 4., 6.]]])
     """
 
@@ -688,7 +688,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> m = nn.AvgPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']

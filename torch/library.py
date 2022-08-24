@@ -79,7 +79,7 @@ class Library:
             >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
-            >>>    return self * (1 / other)
+            >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", "CPU")
         '''
         if not callable(fn):

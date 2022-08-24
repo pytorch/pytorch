@@ -393,7 +393,7 @@ def is_tensor(obj):
         obj (Object): Object to test
     Example::
 
-        >>> x=torch.tensor([1,2,3])
+        >>> x = torch.tensor([1, 2, 3])
         >>> torch.is_tensor(x)
         True
 

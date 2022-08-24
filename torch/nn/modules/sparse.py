@@ -68,7 +68,7 @@ class Embedding(Module):
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding(input)
         tensor([[[-0.0251, -1.6902,  0.7172],
@@ -84,7 +84,7 @@ class Embedding(Module):
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
-        >>> input = torch.LongTensor([[0,2,0,5]])
+        >>> input = torch.LongTensor([[0, 2, 0, 5]])
         >>> embedding(input)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.1535, -2.0309,  0.9315],
@@ -279,7 +279,7 @@ class EmbeddingBag(Module):
         >>> # an EmbeddingBag module containing 10 tensors of size 3
         >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
+        >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], dtype=torch.long)
         >>> offsets = torch.tensor([0,4], dtype=torch.long)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding_sum(input, offsets)

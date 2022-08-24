@@ -2167,7 +2167,7 @@ def embedding(
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.tensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0, 2, 0, 5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.5609,  0.5384,  0.8720],
@@ -2287,7 +2287,7 @@ def embedding_bag(
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([1,2,4,5,4,3,2,9])
+        >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
         >>> offsets = torch.tensor([0,4])
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
@@ -2616,7 +2616,7 @@ def ctc_loss(
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
         >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
-        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
