@@ -197,7 +197,7 @@ class TestPrims(TestCase):
             return torch.digamma(a)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a)
+            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
 
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
@@ -217,7 +217,7 @@ class TestPrims(TestCase):
             return torch.sigmoid(torch.digamma(a))
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a)
+            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_sigmoid = any(
@@ -507,6 +507,26 @@ class TestRefs(TestCase):
 
 
 instantiate_device_type_tests(TestRefs, globals())
+
+
+class TestDecomp(TestCase):
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_decomposition_type_promotion(self, device, dtype):
+        x = torch.rand(5, device=device).to(dtype)
+        y = torch.rand(5, device=device).to(dtype)
+
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
+        op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
+
+        with TorchRefsNvfuserCapabilityMode() as mode:
+            def fn(*arg):
+                return _is_func_unsupported_nvfuser(mode, op, arg, {})
+            assert(not fn(x, y, 0.3, False))
+
+
+instantiate_device_type_tests(TestDecomp, globals())
 
 
 if __name__ == "__main__":

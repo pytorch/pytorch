@@ -66,6 +66,25 @@ def torch_to_refs_map():
 
 
 @functools.lru_cache(None)
+def nvfuser_decomp_table():
+    """
+    decomposition table needed for nvfuser
+    """
+    def lower_to_copy(self, **kwargs):
+        if len(kwargs) == 1 and "dtype" in kwargs:
+            # note that prim here with decomposition table doesn't get dispatched to nvprim.
+            return torch.ops.nvprims.convert_element_type(self, kwargs["dtype"])
+        return NotImplemented
+
+    decomp_table = {
+        # AMP calls `to` in C++, which is not handled by torch mapping
+        torch.ops.aten._to_copy.default: lower_to_copy,
+    }
+
+    return decomp_table
+
+
+@functools.lru_cache(None)
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
