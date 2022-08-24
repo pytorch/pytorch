@@ -1664,7 +1664,7 @@ def to(
     memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
     if (copy == True or dtype != a.dtype) and memory_format == torch.preserve_format and non_blocking == False:
-        return torch.ops.nvprims.convert_element_type(a, kwargs["dtype"])
+        return torch.ops.nvprims.convert_element_type(a, dtype)
     return torch.Tensor.to(a, dtype, non_blocking, copy, memory_format)
 
 
