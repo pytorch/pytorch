@@ -1,11 +1,11 @@
 from collections import defaultdict, abc as container_abcs
-
 import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
 
+__all__ = ['Optimizer']
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
@@ -13,6 +13,18 @@ class _RequiredParameter(object):
         return "<required parameter>"
 
 required = _RequiredParameter()
+
+
+def _use_grad_for_differentiable(func):
+    def _use_grad(self, *args, **kwargs):
+        prev_grad = torch.is_grad_enabled()
+        try:
+            torch.set_grad_enabled(self.defaults['differentiable'])
+            ret = func(self, *args, **kwargs)
+        finally:
+            torch.set_grad_enabled(prev_grad)
+        return ret
+    return _use_grad
 
 
 class Optimizer(object):
@@ -58,6 +70,7 @@ class Optimizer(object):
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
+
     def __getstate__(self):
         return {
             'defaults': self.defaults,
@@ -68,6 +81,7 @@ class Optimizer(object):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
@@ -90,7 +104,11 @@ class Optimizer(object):
                                    self.__class__.__name__ +
                                    " but this instance was constructed with capturable=False.")
 
-            if (not self._warned_capturable_if_run_uncaptured) and self.defaults['capturable'] and (not capturing):
+            if (
+                (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
+                and self.defaults["capturable"]
+                and (not capturing)
+            ):
                 print("Warning: This instance was constructed with capturable=True, but step() " +
                       "is running without CUDA graph capture. If you never intend to graph-capture this " +
                       "instance, capturable=True can impair performance, and you should set capturable=False.")
@@ -254,7 +272,7 @@ class Optimizer(object):
         r"""Performs a single optimization step (parameter update).
 
         Args:
-            closure (callable): A closure that reevaluates the model and
+            closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
 
         .. note::
@@ -288,7 +306,7 @@ class Optimizer(object):
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not param.is_leaf:
+            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():

@@ -29,7 +29,9 @@ call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call %INSTALLER_DIR%\install_miniconda3.bat
+:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
+:: We just need to activate it here
+call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
@@ -147,12 +149,13 @@ python setup.py install --cmake && sccache --show-stats && (
     if not errorlevel 0 exit /b
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
+    python tools/stats/export_test_times.py
+    copy /Y ".pytorch-test-times.json" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
     :: Also save build/.ninja_log as an artifact
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
 
-sccache --show-stats | python tools/stats/sccache_stats_to_json.py > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server

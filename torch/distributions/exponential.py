@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Exponential']
 
 class Exponential(ExponentialFamily):
     r"""
@@ -12,6 +13,7 @@ class Exponential(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
         tensor([ 0.1046])

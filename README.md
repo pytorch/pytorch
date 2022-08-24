@@ -146,7 +146,7 @@ Commands to install binaries via Conda or pip wheels are on our website: [https:
 
 #### NVIDIA Jetson Platforms
 
-Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
+Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
 
 They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
 
@@ -379,6 +379,13 @@ You can then build the documentation by running `make <format>` from the
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
+
+> Note: if you installed `nodejs` with a different package manager (e.g.,
+`conda`) then `npm` will probably install a version of `katex` that is not
+compatible with your version of `nodejs` and doc builds will fail.
+A combination of versions that is known to work is `node@6.13.1` and
+`katex@0.13.18`. To install the latter with `npm` you can run
+```npm install -g katex@0.13.18```
 
 ### Previous Versions
 

@@ -67,12 +67,22 @@ class AppendOnlyList {
     return next_++;
   }
 
-  T* emplace_list(c10::ArrayRef<T> arg_list) {
-    // TODO: Optimize this frther at a future date
-    for (const auto& i : arg_list) {
-      emplace_back(i);
+  template <typename T0>
+  typename std::enable_if<
+      std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
+  copy(c10::ArrayRef<T0> src) {
+    int n = src.size();
+    if (C10_LIKELY(next_ + n <= end_)) {
+      std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
+      next_ += n;
+    } else {
+      // We could chunk this into several `memcpy`s, but because we expect this
+      // fallback to be infrequent (n << ChunkSize) the performance impact is
+      // negligible.
+      for (auto i : src) {
+        emplace_back(i);
+      }
     }
-    return next_;
   }
 
   void clear() {

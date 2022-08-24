@@ -15,6 +15,40 @@ import torch.nn as nn
 from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
 
 
+__all__ = [
+    "default_affine_fixed_qparams_observer",
+    "default_debug_observer",
+    "default_dynamic_quant_observer",
+    "default_fixed_qparams_range_0to1_observer",
+    "default_fixed_qparams_range_neg1to1_observer",
+    "default_float_qparams_observer",
+    "default_float_qparams_observer_4bit",
+    "default_histogram_observer",
+    "default_observer",
+    "default_per_channel_weight_observer",
+    "default_placeholder_observer",
+    "default_reuse_input_observer",
+    "default_symmetric_fixed_qparams_observer",
+    "default_weight_observer",
+    "get_observer_state_dict",
+    "load_observer_state_dict",
+    "per_channel_weight_observer_range_neg_127_to_127",
+    "weight_observer_range_neg_127_to_127",
+    "FixedQParamsObserver",
+    "HistogramObserver",
+    "MinMaxObserver",
+    "MovingAverageMinMaxObserver",
+    "MovingAveragePerChannelMinMaxObserver",
+    "NoopObserver",
+    "ObserverBase",
+    "PerChannelMinMaxObserver",
+    "PlaceholderObserver",
+    "RecordingObserver",
+    "ReuseInputObserver",
+    "UniformQuantizationObserverBase",
+]
+
+
 class _PartialWrapper(object):
     def __init__(self, p):
         self.p = p
@@ -49,6 +83,7 @@ def _with_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
         >>> foo_instance1 = foo_builder()
@@ -69,11 +104,12 @@ def _with_callable_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_callable_args = classmethod(_with_callable_args)
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
         >>> foo_instance1 = foo_builder()
-        >>> wait 50
+        >>> # wait 50
         >>> foo_instance2 = foo_builder()
         >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
         False

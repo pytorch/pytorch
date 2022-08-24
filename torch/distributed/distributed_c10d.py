@@ -39,6 +39,7 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -59,6 +60,11 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupUCC
+    ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
+except ImportError:
+    _UCC_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +92,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
 
 class Backend(object):
     """
-    An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+    An enum-like class of available backends: GLOO, NCCL, UCC, MPI, and other registered
     backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
@@ -105,6 +111,7 @@ class Backend(object):
     UNDEFINED = "undefined"
     GLOO = "gloo"
     NCCL = "nccl"
+    UCC = "ucc"
     MPI = "mpi"
     TCP = "tcp"
     _plugins: Dict[str, Callable] = {}
@@ -122,7 +129,7 @@ class Backend(object):
             )
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
 
@@ -145,9 +152,12 @@ class Backend(object):
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        assert not hasattr(Backend, name.upper()), (
-            f"{name.upper()} c10d backend already exist"
-        )
+        # Allow UCC plugin if Pytorch is not built with native support.
+        # TODO: remove this exception once UCC plugin is fully deprecated.
+        if (name != Backend.UCC or (name == Backend.UCC and is_ucc_available())):
+            assert not hasattr(Backend, name.upper()), (
+                f"{name.upper()} c10d backend already exist"
+            )
         assert name.upper() not in Backend._plugins, (
             f"{name.upper()} c10d backend creator function already exist"
         )
@@ -376,7 +386,7 @@ def _check_op(op):
 def _check_p2p_op_list(p2p_op_list):
     """
     Helper to check that the ``p2p_op_list`` is a list of P2POp instances and
-    all ops use the same backend.
+    all ops use the same group.
     """
     if not isinstance(p2p_op_list, list) or not all(
         isinstance(p2p_op, P2POp) for p2p_op in p2p_op_list
@@ -386,9 +396,9 @@ def _check_p2p_op_list(p2p_op_list):
             "to be of type ``torch.distributed.P2POp``."
         )
 
-    backend = get_backend(p2p_op_list[0].group)
-    if not all(backend == get_backend(p2p_op.group) for p2p_op in p2p_op_list):
-        raise RuntimeError("All groups need to use the same backend.")
+    group = p2p_op_list[0].group
+    if not all(group == p2p_op.group for p2p_op in p2p_op_list):
+        raise RuntimeError("All ops need to use the same group.")
 
 
 def is_mpi_available():
@@ -410,6 +420,13 @@ def is_gloo_available():
     Checks if the Gloo backend is available.
     """
     return _GLOO_AVAILABLE
+
+
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
 
 
 def is_initialized():
@@ -511,12 +528,13 @@ def init_process_group(
     Args:
         backend (str or Backend): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            and ``nccl``. This field should be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
+            ``nccl``, and ``ucc``. This field should be given as a lowercase
+            string (e.g., ``"gloo"``), which can also be accessed via
             :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
             multiple processes per machine with ``nccl`` backend, each process
             must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks.
+            between processes can result in deadlocks. ``ucc`` backend is
+            experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -547,6 +565,9 @@ def init_process_group(
             continue executing user code since failed async NCCL operations
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
+            For ``ucc``, blocking wait is supported similar to NCCL. However,
+            async error handling is done differently since with UCC we have
+            progress thread and not watch-dog thread.
         group_name (str, optional, deprecated): Group name.
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
@@ -682,7 +703,7 @@ def _new_process_group_helper(
     is_default_group = len(group_ranks) == 0
 
     backend = Backend(backend)
-    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
+    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL, ProcessGroupUCC]
     if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError(
@@ -766,6 +787,33 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
+            _pg_names[pg] = group_name
+        elif backend == Backend.UCC and is_ucc_available():
+            # TODO: once UCC plugin is fully deprecated, remove
+            # is_ucc_available() from above elif-condition and raise
+            # RuntimeError if is_ucc_available() returns false.
+
+            pg = ProcessGroupUCC(prefix_store, rank, world_size, timeout=timeout)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if get_debug_level() == DebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout,
+                    )
+            _pg_map[pg] = (Backend.UCC, store)
             _pg_names[pg] = group_name
         else:
             assert backend.upper() in Backend._plugins, (
@@ -1025,7 +1073,7 @@ class P2POp(object):
     ``batch_isend_irecv`` for point-to-point communications.
 
     Args:
-        op (callable): A function to send data to or receive data from a peer process.
+        op (Callable): A function to send data to or receive data from a peer process.
             The type of ``op`` is either ``torch.distributed.isend`` or
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
@@ -1049,14 +1097,14 @@ class P2POp(object):
 
 
 @contextlib.contextmanager
-def _batch_p2p_manager(backend):
-    if backend == Backend.NCCL:
-        ProcessGroupNCCL._group_start()
+def _coalescing_manager(group, reqs):
+    if group is None:
+        group = _get_default_group()
+    group._start_coalescing()
     try:
         yield
     finally:
-        if backend == Backend.NCCL:
-            ProcessGroupNCCL._group_end()
+        group._end_coalescing(reqs)
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -1064,7 +1112,7 @@ def batch_isend_irecv(p2p_op_list):
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
     Process each of the operations in ``p2p_op_list`` and return the corresponding
-    requests. NCCL and Gloo backend are currently supported.
+    requests. NCCL, Gloo, and UCC backend are currently supported.
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is
@@ -1077,6 +1125,7 @@ def batch_isend_irecv(p2p_op_list):
         op in the op_list.
 
     Examples:
+        >>> # xdoctest: +SKIP("no rank")
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
@@ -1099,9 +1148,9 @@ def batch_isend_irecv(p2p_op_list):
         involving only a subset of ranks of the ``group`` are allowed.
     """
     _check_p2p_op_list(p2p_op_list)
-    backend = get_backend(p2p_op_list[0].group)
+    group = p2p_op_list[0].group
     reqs = []
-    with _batch_p2p_manager(backend):
+    with _coalescing_manager(group, reqs):
         for p2p_op in p2p_op_list:
             op = p2p_op.op
             tensor = p2p_op.tensor
@@ -1290,6 +1339,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
@@ -1632,6 +1682,7 @@ def all_gather_object(object_list, obj, group=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> # Assumes world_size of 3.
@@ -1718,16 +1769,17 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
         >>> dist.gather_object(
-                gather_objects[dist.get_rank()],
-                output if dist.get_rank() == 0 else None,
-                dst=0
-            )
+        ...     gather_objects[dist.get_rank()],
+        ...     output if dist.get_rank() == 0 else None,
+        ...     dst=0
+        ... )
         >>> # On rank 0
         >>> output
         ['foo', 12, {1: 2}]
@@ -1823,6 +1875,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
@@ -1920,6 +1973,7 @@ def scatter_object_list(
         function with data you trust.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
@@ -2005,6 +2059,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
@@ -2074,6 +2129,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     Examples:
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
@@ -2515,6 +2571,7 @@ def all_to_all_single(
         `all_to_all_single` is experimental and subject to change.
 
     Examples:
+        >>> # xdoctest: +SKIP("Undefined rank")
         >>> input = torch.arange(4) + rank * 4
         >>> input
         tensor([0, 1, 2, 3])     # Rank 0
@@ -2630,6 +2687,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         `all_to_all` is experimental and subject to change.
 
     Examples:
+        >>> # xdoctest: +SKIP("Undefined rank")
         >>> input = torch.arange(4) + rank * 4
         >>> input = list(input.chunk(4))
         >>> input
@@ -2810,6 +2868,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
         ``None``.
 
     Example::
+        >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() != 1:
@@ -3067,6 +3126,7 @@ def new_subgroups(
 
     Examples:
         >>> # Create intra-machine subgroups.
+        >>> # xdoctest: +SKIP("need process group init")
         >>> cur_subgroup, subgroups = dist.new_subgroups()
         >>> # Allreduce within the machine.
         >>> rank = dist.get_rank()
@@ -3181,6 +3241,7 @@ def new_subgroups_by_enumeration(
 
     Examples:
         >>> # Create two subgroups, where each has 2 processes.
+        >>> # xdoctest: +SKIP("need process group init")
         >>> cur_subgroup, subgroups = dist.new_subgroups(ranks=[[0, 2], [1, 3]])
         >>> rank = dist.get_rank()
         >>> tensor = torch.ones(1, device=rank) * rank

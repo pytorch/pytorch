@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['NAdam', 'nadam']
 
 class NAdam(Optimizer):
     r"""Implements NAdam algorithm.
@@ -92,7 +93,7 @@ class NAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None

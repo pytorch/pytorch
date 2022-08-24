@@ -5,6 +5,7 @@ from .. import functional as F
 from torch import Tensor
 from ..common_types import _size_any_t
 
+__all__ = ['Fold', 'Unfold']
 
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing
@@ -90,6 +91,7 @@ class Fold(Module):
         where ``divisor`` is a tensor that depends only on the shape
         and dtype of the ``input``:
 
+        >>> # xdoctest: +SKIP
         >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
         >>> divisor = fold(unfold(input_ones))
 
@@ -231,6 +233,7 @@ class Unfold(Module):
         where ``divisor`` is a tensor that depends only on the shape
         and dtype of the ``input``:
 
+        >>> # xdoctest: +SKIP
         >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
         >>> divisor = fold(unfold(input_ones))
 
@@ -256,6 +259,7 @@ class Unfold(Module):
         >>> output.size()
         torch.Size([2, 30, 4])
 
+        >>> # xdoctest: +IGNORE_WANT
         >>> # Convolution is equivalent with Unfold + Matrix Multiplication + Fold (or view to output shape)
         >>> inp = torch.randn(1, 3, 10, 12)
         >>> w = torch.randn(2, 3, 4, 5)

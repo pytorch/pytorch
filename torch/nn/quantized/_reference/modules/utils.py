@@ -20,16 +20,22 @@ class ReferenceQuantizedModule(torch.nn.Module):
             zero_point_dtype = weight_qparams["zero_point"].dtype if \
                 isinstance(weight_qparams["zero_point"], torch.Tensor) else \
                 torch.int
-            self.register_buffer(
-                "weight_scale",
-                torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
-            self.register_buffer(
-                "weight_zero_point",
-                torch.tensor(weight_qparams["zero_point"], dtype=zero_point_dtype, device=device))
+            w_scale = weight_qparams["scale"]
+            w_scale_tensor = w_scale.clone().detach() \
+                if isinstance(w_scale, torch.Tensor) \
+                else torch.tensor(w_scale, dtype=torch.float, device=device)
+            self.register_buffer("weight_scale", w_scale_tensor)
+            w_zp = weight_qparams["zero_point"]
+            w_zp_tensor = w_zp.clone().detach() \
+                if isinstance(w_zp, torch.Tensor) \
+                else torch.tensor(w_zp, dtype=zero_point_dtype, device=device)
+            self.register_buffer("weight_zero_point", w_zp_tensor)
             if self.weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
-                self.register_buffer(
-                    "weight_axis",
-                    torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
+                w_axis = weight_qparams["axis"]
+                w_axis_tensor = w_axis.clone().detach() \
+                    if isinstance(w_axis, torch.Tensor) \
+                    else torch.tensor(w_axis, dtype=torch.int, device=device)
+                self.register_buffer("weight_axis", w_axis_tensor)
             else:
                 # added for TorchScriptability, not used
                 self.register_buffer(

@@ -4,10 +4,11 @@
 import os
 import ctypes
 import torch
+import unittest
 from typing import Tuple
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
+from torch.testing._internal.common_quantized import supported_qengines
 from torch.testing._internal.common_utils import TestCase, run_tests
-
 
 def qpt(t, scale, zero_point, dtype=torch.quint8):
     t = torch.tensor(t)
@@ -20,6 +21,8 @@ def nhwc(t):
     return t
 
 
+@unittest.skipUnless('qnnpack' in supported_qengines,
+                     "This Pytorch Build has not been built with or does not support QNNPACK")
 class TestNNAPI(TestCase):
 
     def setUp(self):

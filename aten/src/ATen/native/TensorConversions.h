@@ -20,5 +20,6 @@ bool to_will_alias(
 Tensor to_meta(const Tensor& tensor);
 c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor);
 std::vector<Tensor> to_meta(const at::TensorList& t_list);
+
 } // namespace native
 } // namespace at

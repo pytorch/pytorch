@@ -17,7 +17,8 @@ from functools import reduce, partial, wraps
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
-     make_fullrank_matrices_with_distinct_singular_values)
+     make_fullrank_matrices_with_distinct_singular_values,
+     freeze_rng_state, IS_ARM64)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -51,7 +52,7 @@ def setLinalgBackendsToDefaultFinally(fn):
             torch.backends.cuda.preferred_linalg_library('default')
     return _fn
 
-
+@unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
@@ -1496,12 +1497,13 @@ class TestLinalg(TestCase):
         S = 10
         error_test_cases = [
             # input size, p settings, dim, error type, error regex
-            ((S, ), ['fro', 'nuc'], None, RuntimeError, r'input tensor must be a matrix or a batch of matrices'),
+            ((S, ), ['fro', 'nuc'], None, RuntimeError, r'A must have at least 2 dimensions'),
             ((S, S), [3.5], None, RuntimeError, r'matrix_norm: Order 3.5 not supported'),
             ((S, S), [0], None, RuntimeError, r'matrix_norm: Order 0 not supported'),
             ((S, S), ['fail'], None, RuntimeError, r'matrix_norm: Order fail not supported'),
-            ((S, S), ['fro', 'nuc'], 0, RuntimeError, r'matrix_norm: dim must be a 2-tuple of ints'),
-            ((S, S), ['fro', 'nuc', 2], (0, 0), RuntimeError, r'Expected dims to be different'),
+            ((S, S), ['fro', 'nuc'], 0, RuntimeError, r'matrix_norm: dim must be a 2-tuple'),
+            ((S, S), ['fro', 'nuc', 2], (0, 0), RuntimeError, r'dims must be different'),
+            ((S, S), ['fro', 'nuc', 2], (-1, 1), RuntimeError, r'dims must be different'),
             ((S, S), ['fro', 'nuc', 2], (0, 4), IndexError, r'Dimension out of range'),
             ((S, ), [0], (4, ), IndexError, r'Dimension out of range'),
             ((S, ), [None], (0, 0), RuntimeError, r'dim 0 appears multiple times'),
@@ -1583,7 +1585,7 @@ class TestLinalg(TestCase):
         # Test only inputs for which torch.linalg.matrix_norm diverges from torch.linalg.norm
         A = make_tensor((2, 2, 2), dtype=dtype, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must be a matrix.*'):
+        with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must have at least 2 dimensions.*'):
             torch.linalg.matrix_norm(make_tensor((2,), dtype=dtype, device=device))
         with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm:.*must be a 2-tuple.*'):
             torch.linalg.matrix_norm(A, dim=(0,))
@@ -2856,7 +2858,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
     @skipCUDAIfRocm
-    @skipCUDAVersionIn([(11, 3), (11, 5), (11, 6)])  # https://github.com/pytorch/pytorch/issues/57482
+    @skipCUDAVersionIn([(11, 3), (11, 6), (11, 7)])  # https://github.com/pytorch/pytorch/issues/57482
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -3448,11 +3450,9 @@ class TestLinalg(TestCase):
             result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
             self.assertEqual(result, 2)  # there are 2 singular values above max(0.81, 1.5*0.81)
 
-    # CUDA 11.6 issue failure https://github.com/pytorch/pytorch/issues/75391
-    @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") == ["11", "6"], "There's a bug in CUDA 11.6")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipCUDAVersionIn([(11, 6), (11, 7)])  # https://github.com/pytorch/pytorch/issues/75391
     @dtypes(*floating_and_complex_types())
     def test_matrix_rank_empty(self, device, dtype):
         matrix_rank = torch.linalg.matrix_rank
@@ -4152,7 +4152,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
-    @skipCUDAVersionIn([(11, 3), (11, 5), (11, 6)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
+    @skipCUDAVersionIn([(11, 3), (11, 6), (11, 7)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -6189,6 +6189,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test([3, 4], [3, 3, 3])
         run_test([3, 4], [3, 3, 3, 3])
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64)
+    def test_linalg_matrix_exp_no_warnings(self, device, dtype):
+        # this tests https://github.com/pytorch/pytorch/issues/80948
+        with freeze_rng_state():
+            torch.manual_seed(42)
+            tens = 0.5 * torch.randn(10, 3, 3, dtype=dtype, device=device)
+            tens = (0.5 * (tens.transpose(-1, -2) + tens))
+            with warnings.catch_warnings(record=True) as w:
+                tens.imag = torch.matrix_exp(tens.imag)
+                self.assertFalse(len(w))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -6519,9 +6532,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.slogdet(a)
 
-        # slogdet requires the input to be of float, double, cfloat or cdouble types
         a = torch.randn(2, 2, device=device, dtype=torch.bfloat16)
-        with self.assertRaisesRegex(RuntimeError, r'of float, double, cfloat or cdouble types'):
+        with self.assertRaisesRegex(RuntimeError, r'Low precision dtypes not supported'):
             torch.linalg.slogdet(a)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -6535,16 +6547,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
-        # dtypes should be safely castable
-        sign_out = torch.empty_like(a).to(torch.int)
-        logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got sign with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
-
-        sign_out = torch.empty(0, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "but got logabsdet with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         # device should match
         if torch.cuda.is_available():

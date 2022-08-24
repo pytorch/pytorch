@@ -35,11 +35,12 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          output=$(python3 .github/scripts/print_latest_commits.py)
+          output=$(python3 .github/scripts/fetch_latest_green_commit.py)
           echo "::set-output name=latest_viable_sha::$output"
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch
+        if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
         run: |

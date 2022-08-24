@@ -2,10 +2,10 @@ name: update-commit-hashes
 
 on:
   schedule:
-    # Every day at 12:37am
-    # Choose a random time near midnight because it may be delayed if there are high loads
+    # Every day at 7:37am UTC = 12:27am PST
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
     # See https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
-    - cron: 37 0 * * *
+    - cron: 37 7 * * *
   workflow_dispatch:
 
 jobs:
