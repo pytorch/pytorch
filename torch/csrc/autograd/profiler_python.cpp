@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/profiler_python.h>
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <iostream>
@@ -394,7 +395,8 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD ThreadLocalResults* thread_local_results_;
+  PyObject_HEAD;
+  ThreadLocalResults* thread_local_results_;
 };
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
@@ -443,11 +445,16 @@ static PyTypeObject TraceContextType = {
 // ============================================================================
 // == Thread local cache ======================================================
 // ============================================================================
+class PythonTracer;
 struct ThreadLocalResults {
-  ThreadLocalResults(PyThreadState* thread_state, ValueCache* value_cache)
+  ThreadLocalResults(
+      PyThreadState* thread_state,
+      ValueCache* value_cache,
+      PythonTracer* active_tracer)
       : thread_state_{thread_state},
         ctx_{(TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0)},
-        value_cache_{value_cache} {
+        value_cache_{value_cache},
+        active_tracer_{active_tracer} {
     ctx_->thread_local_results_ = this;
   }
 
@@ -475,6 +482,7 @@ struct ThreadLocalResults {
   PyThreadState* thread_state_;
   TraceContext* ctx_;
   ValueCache* value_cache_;
+  PythonTracer* active_tracer_;
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
   AppendOnlyList<approx_time_t, BLOCK_SIZE> exit_times_;
   AppendOnlyList<approx_time_t, BLOCK_SIZE> c_exit_times_;
@@ -485,29 +493,30 @@ struct ThreadLocalResults {
 // ============================================================================
 class PythonTracer final : public python_tracer::PythonTracerBase {
  public:
+  PythonTracer(torch::profiler::impl::RecordQueue* queue);
+  ~PythonTracer() override;
+
   static int pyProfileFn(
       PyObject* obj,
       PyFrameObject* frame,
       int what,
       PyObject* arg);
 
-  static PythonTracer& singleton();
-  void start(torch::profiler::impl::RecordQueue* queue) override;
   void stop() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
       time_t end_time_ns) override;
-  void clear() override;
 
  private:
-  PythonTracer();
-
   void recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame);
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
       PyObject* arg);
+
+  std::atomic<bool> active_lock_{false};
+  bool active_{false};
 
   torch::profiler::impl::RecordQueue* queue_;
   PyCodeObject* module_call_code_;
@@ -516,20 +525,18 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   ValueCache value_cache_;
 };
 
-PythonTracer& PythonTracer::singleton() {
-  static PythonTracer singleton_;
-  return singleton_;
-}
+PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
+    : queue_(queue), module_call_code_(nnModuleCode()) {
+  TORCH_CHECK(queue_ != nullptr);
 
-PythonTracer::PythonTracer()
-    : queue_(nullptr), module_call_code_(nnModuleCode()) {}
-
-void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
-  TORCH_CHECK(queue_ == nullptr, "PythonTracer is already active")
-  TORCH_CHECK(
-      !thread_local_results_.size(),
-      "PythonTracer should not have active contexts");
-  queue_ = queue;
+  bool expected{false};
+  active_ = active_lock_.compare_exchange_strong(expected, true);
+  if (!active_) {
+    TORCH_WARN(
+        "There is already an active Python tracer. "
+        "Refusing to register profile functions.");
+    return;
+  }
 
   pybind11::gil_scoped_acquire gil;
 
@@ -556,7 +563,7 @@ void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
     PyThreadState* thread_state = thread_states[i];
     PyThreadState_Swap(thread_state);
 
-    thread_local_results_.emplace_back(thread_state, &value_cache_);
+    thread_local_results_.emplace_back(thread_state, &value_cache_, this);
     auto* ctx = thread_local_results_.back().ctx_;
 
     // When we begin profiling there are already frames on the Python
@@ -587,24 +594,26 @@ void PythonTracer::start(torch::profiler::impl::RecordQueue* queue) {
 };
 
 void PythonTracer::stop() {
-  TORCH_INTERNAL_ASSERT(queue_ != nullptr, "PythonTracer is not running.")
-  queue_ = nullptr;
-
   pybind11::gil_scoped_acquire gil;
+  if (active_) {
+    PyThreadState* initial_thread_state = PyThreadState_Get();
+    for (const auto& i : thread_local_results_) {
+      PyThreadState_Swap(i.thread_state_);
+      PyEval_SetProfile(nullptr, nullptr);
+    }
+    PyThreadState_Swap(initial_thread_state);
 
-  PyThreadState* initial_thread_state = PyThreadState_Get();
-  for (const auto& i : thread_local_results_) {
-    PyThreadState_Swap(i.thread_state_);
-    PyEval_SetProfile(nullptr, nullptr);
+    auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
+    active_ = false;
+    SOFT_ASSERT(!active_, "Failed to return python tracer lock.");
   }
-  PyThreadState_Swap(initial_thread_state);
 }
 
-void PythonTracer::clear() {
-  TORCH_CHECK(
-      queue_ == nullptr, "Cannot clear state while PythonTracer is active.");
-  thread_local_results_.clear();
-  value_cache_ = ValueCache();
+PythonTracer::~PythonTracer() {
+  if (active_) {
+    TORCH_WARN("`PythonTracer::stop()` was not called.");
+    stop();
+  }
 }
 
 void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
@@ -823,11 +832,11 @@ int PythonTracer::pyProfileFn(
       *reinterpret_cast<TraceContext*>(obj)->thread_local_results_;
   switch (what) {
     case PyTrace_CALL:
-      PythonTracer::singleton().recordPyCall(local_results, frame);
+      local_results.active_tracer_->recordPyCall(local_results, frame);
       break;
 
     case PyTrace_C_CALL:
-      PythonTracer::singleton().recordCCall(local_results, frame, arg);
+      local_results.active_tracer_->recordCCall(local_results, frame, arg);
       break;
 
     case PyTrace_EXCEPTION:
@@ -843,8 +852,9 @@ int PythonTracer::pyProfileFn(
   return 0;
 }
 
-python_tracer::PythonTracerBase& getTracer() {
-  return PythonTracer::singleton();
+std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
+    torch::profiler::impl::RecordQueue* queue) {
+  return std::make_unique<PythonTracer>(queue);
 }
 } // namespace
 } // namespace impl

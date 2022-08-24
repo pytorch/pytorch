@@ -457,7 +457,7 @@ RecordQueue::RecordQueue(
     std::set<ActivityType> activities)
     : id_(++queue_id_), config_{config}, activities_{activities} {
   if (tracePython()) {
-    python_tracer::PythonTracerBase::get().start(this);
+    python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
 }
 
@@ -492,8 +492,8 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 }
 
 void RecordQueue::stop() {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().stop();
+  if (python_tracer_) {
+    python_tracer_->stop();
   }
 }
 
@@ -951,13 +951,12 @@ RecordQueue::getRecords(
     }
   }
 
-  if (tracePython()) {
-    auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i :
-         tracer.getEvents(converter, python_enters, end_time_us * 1000)) {
+  if (python_tracer_) {
+    for (auto i : python_tracer_->getEvents(
+             converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
-    tracer.clear();
+    python_tracer_.reset();
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);

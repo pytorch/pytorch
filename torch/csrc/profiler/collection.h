@@ -487,6 +487,7 @@ class TORCH_API RecordQueue {
   ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
       sub_queues_;
   std::mutex sub_queue_mutex_;
+  std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
 
 } // namespace impl

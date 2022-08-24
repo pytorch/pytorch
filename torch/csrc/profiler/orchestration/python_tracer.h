@@ -44,20 +44,18 @@ struct CompressedEvent {
 };
 
 struct TORCH_API PythonTracerBase {
-  static PythonTracerBase& get();
+  static std::unique_ptr<PythonTracerBase> make(RecordQueue* queue);
   virtual ~PythonTracerBase() = default;
 
-  virtual void start(RecordQueue* queue) = 0;
   virtual void stop() = 0;
   virtual std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)> time_converter,
       std::vector<CompressedEvent>& enters,
       time_t end_time_ns) = 0;
-  virtual void clear() = 0;
 };
 
-using GetFn = PythonTracerBase& (*)();
-TORCH_API void registerTracer(GetFn get_tracer);
+using MakeFn = std::unique_ptr<PythonTracerBase> (*)(RecordQueue*);
+TORCH_API void registerTracer(MakeFn make_tracer);
 } // namespace python_tracer
 } // namespace impl
 } // namespace profiler
