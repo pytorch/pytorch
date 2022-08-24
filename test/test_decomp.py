@@ -23,6 +23,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import onlyCUDA
+from functorch.compile import memory_efficient_fusion
 
 import itertools
 import functools
@@ -503,6 +505,54 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @suppress_warnings
+    @onlyCUDA
+    def test_batch_norm_amp(self, device):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_self_conv1 = torch.nn.Conv2d(
+                    3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+                )
+                self.register_buffer("self_self_bn1_running_mean", torch.empty([64]))
+                self.register_buffer("self_self_bn1_running_var", torch.empty([64]))
+                self.self_self_bn1_weight = torch.nn.Parameter(torch.empty([64]))
+                self.self_self_bn1_bias = torch.nn.Parameter(torch.empty([64]))
+
+            def forward(self, x: torch.Tensor):
+                self_self_conv1 = self.self_self_conv1(x)
+                self_self_bn1_weight = self.self_self_bn1_weight
+                self_self_bn1_bias = self.self_self_bn1_bias
+                self_self_bn1_running_mean = self.self_self_bn1_running_mean
+                self_self_bn1_running_var = self.self_self_bn1_running_var
+                batch_norm = torch.nn.functional.batch_norm(
+                    self_self_conv1,
+                    self_self_bn1_running_mean,
+                    self_self_bn1_running_var,
+                    weight=self_self_bn1_weight,
+                    bias=self_self_bn1_bias,
+                    training=False,
+                    momentum=0.1,
+                    eps=1e-05,
+                )
+                return (batch_norm,)
+
+        inp = torch.ones([16, 3, 224, 224], dtype=torch.float32, device=device)
+
+        mod = MockModule().to(device=device)
+        ref = mod(inp)
+
+        aot_mod = memory_efficient_fusion(mod)
+
+        with torch.cuda.amp.autocast():
+            res = aot_mod(inp)
+            loss = res[0].sum()
+            loss.backward()
+
+        self.assertTrue(torch.allclose(ref, res))
 
 instantiate_device_type_tests(TestDecomp, globals())
 
