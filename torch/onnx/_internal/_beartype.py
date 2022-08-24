@@ -5,12 +5,15 @@ The module returns a no-op decorator when the beartype library is not installed.
 import functools
 import traceback
 import warnings
+from typing import TypeVar
 
 from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
 
+_T = TypeVar("_T")
 
-def _no_op_decorator(func):
+
+def _no_op_decorator(func: _T) -> _T:
     return func
 
 
@@ -32,18 +35,19 @@ else:
 
         if GLOBALS.runtime_type_check is True:
             # Enable runtime type checking which errors on any type hint violation.
-            beartype = beartype_lib.beartype
+            beartype = beartype_lib.beartype  # type: ignore[assignment]
         else:
             # GLOBALS.runtime_type_check is None, show warnings only.
 
-            def beartype_warn(func):
+            def beartype_warn(func: _T) -> _T:
+
                 if "return" in func.__annotations__:
                     # Remove the return type from the func function's
                     # annotations so that the beartype decorator does not complain
                     # about the return type.
                     del func.__annotations__["return"]
 
-                beartyped = beartype_lib.beartype(func)
+                beartyped = beartype_lib.beartype(func)  # type: ignore[assignment,call-overload]
 
                 @functools.wraps(beartyped)
                 def _coerce_beartype_exceptions_to_warnings(*args, **kwargs):
@@ -57,9 +61,9 @@ else:
                             stacklevel=2,
                         )
                     finally:
-                        return func(*args, **kwargs)
+                        return func(*args, **kwargs)  # type: ignore[operator] # noqa: B012
 
-                return _coerce_beartype_exceptions_to_warnings
+                return _coerce_beartype_exceptions_to_warnings  # type: ignore[return-value]
 
             beartype = beartype_warn
 
