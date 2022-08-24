@@ -1,51 +1,73 @@
 # Owner(s): ["oncall: profiler"]
 import collections
-import expecttest
 import gc
 import io
 import json
 import os
 import re
 import tempfile
-from typing import List, Optional
 import unittest
 from dataclasses import dataclass, field
+from typing import List, Optional
 
+import expecttest
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
-    TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
-from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
+from torch.autograd import (
+    _record_function_with_args_enter,
+    _record_function_with_args_exit,
+)
 from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
-    kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
-    _utils
+    _utils,
+    DeviceType,
+    ExecutionGraphObserver,
+    kineto_available,
+    profile,
+    ProfilerAction,
+    ProfilerActivity,
+    record_function,
+    supported_activities,
 )
-from torch.profiler._pattern_matcher import (Pattern, NamePattern,
-                                             ExtraCUDACopyPattern,
-                                             ForLoopIndexingPattern,
-                                             FP32MatMulPattern,
-                                             OptimizerSingleTensorPattern,
-                                             SynchronizedDataLoaderPattern,
-                                             GradNotSetToNonePattern,
-                                             Conv2dBiasFollowedByBatchNorm2dPattern,
-                                             MatMulDimInFP16Pattern,
-                                             report_all_anti_patterns)
+from torch.profiler._pattern_matcher import (
+    Conv2dBiasFollowedByBatchNorm2dPattern,
+    ExtraCUDACopyPattern,
+    ForLoopIndexingPattern,
+    FP32MatMulPattern,
+    GradNotSetToNonePattern,
+    MatMulDimInFP16Pattern,
+    NamePattern,
+    OptimizerSingleTensorPattern,
+    Pattern,
+    report_all_anti_patterns,
+    SynchronizedDataLoaderPattern,
+)
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    TemporaryDirectoryName,
+    TemporaryFileName,
+    TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 try:
     import psutil
+
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
 import pickle
+
+from torch._C._profiler import _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -1177,7 +1199,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
-        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        ActiveProfilerType = torch._C._profiler.ActiveProfilerType
         self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
 
         # Autograd profiler
@@ -1247,17 +1269,17 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertIsInstance(
             node.parent.extra_fields,
-            torch._C._autograd._ExtraFields_PyCCall)
+            torch._C._profiler._ExtraFields_PyCCall)
 
         self.assertEqual(node.children[0].name(), "aten::empty")
         self.assertEqual(node.children[0].children[0].name(), "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
-            torch._C._autograd._ExtraFields_Allocation)
+            torch._C._profiler._ExtraFields_Allocation)
 
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
@@ -1272,9 +1294,10 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
 
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
@@ -1300,6 +1323,41 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
         self.assertEqual(input_info.shapes, [[5, 5], [], []])
         self.assertEqual(input_info.ivalues, [None, None, alpha])
+
+    def test_nnmodule_params(self):
+
+        def flat_out_extrafields(nodes, out=None):
+            if out is None:
+                out = []
+            for node in nodes:
+                if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.module:
+                    if node.extra_fields.module.params:
+                        out.append(node.extra_fields.module)
+                flat_out_extrafields(node.children, out)
+            return out
+
+        class simpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 5)
+                self.fc2 = nn.Linear(5, 2)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = simpleNet()
+            out = net(inputs)
+
+        modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
+        self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
+
+        params = [p for module in modules for p in module.params]
+        expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
+        expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
+        self.assertEqual(expected, params, f"{expected} vs. {params}")
+
 
 
 @dataclass(frozen=True)
