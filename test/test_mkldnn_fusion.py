@@ -73,13 +73,13 @@ class TestMkldnnFusion(JitTestCase):
                     iC = 3 * groups
                     oC = 10 * groups
                     m = M(iC,
-                        oC,
-                        bias,
-                        kernel_size=(kernel_size, kernel_size),
-                        stride=2,
-                        padding=1,
-                        dilation=dilation,
-                        groups=groups).to(memory_format=memory_format)
+                          oC,
+                          bias,
+                          kernel_size=(kernel_size, kernel_size),
+                          stride=2,
+                          padding=1,
+                          dilation=dilation,
+                          groups=groups).to(memory_format=memory_format)
                     x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
                     graph = self._check_model(m, x, trace)
                     conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
@@ -126,7 +126,7 @@ class TestMkldnnFusion(JitTestCase):
 
             def forward(self, x):
                 res = self.conv(x)
-                return res            
+                return res
 
         for module, dim, memory_format in [
             [nn.Conv3d, 3, torch.contiguous_format],
@@ -144,14 +144,14 @@ class TestMkldnnFusion(JitTestCase):
             oC = 10 * groups
             dilation = 2
             m = M(module,
-                iC,
-                oC,
-                bias,
-                kernel_size=kernel_size,
-                stride=2,
-                padding=1,
-                dilation=dilation,
-                groups=groups).to(memory_format=memory_format)
+                  iC,
+                  oC,
+                  bias,
+                  kernel_size=kernel_size,
+                  stride=2,
+                  padding=1,
+                  dilation=dilation,
+                  groups=groups).to(memory_format=memory_format)
             input_sizes = [batch_size, iC, input_size, input_size]
             if dim == 3:
                 input_sizes.append(input_size)

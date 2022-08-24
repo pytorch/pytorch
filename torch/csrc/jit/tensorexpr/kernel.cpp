@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -346,10 +347,10 @@ bool isConv2d(const Node* node) {
     return false;
   }
 
-  if (stride.value().toIntList().size() != 2  ||
-      pad.value().toIntList().size()  != 2 ||
-      dilation.value().toIntList().size()  != 2 ||
-      output_padding.value().toIntList().size()  != 2) {
+  if (stride.value().toIntList().size() != 2 ||
+      pad.value().toIntList().size() != 2 ||
+      dilation.value().toIntList().size() != 2 ||
+      output_padding.value().toIntList().size() != 2) {
     GRAPH_DEBUG("Conv not 2d");
     return false;
   }
@@ -1653,6 +1654,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   deduceMemoryLayoutPolicy();
 
   // Fuse Conv with Eltwise Op
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph_);
   FuseConvWithEltwise(graph_);
 
   // Optimize the concatenation
