@@ -126,14 +126,12 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, 
-            false_graph_0, [[x_1]]);  pred_1 = true_graph_0 = false_graph_0 = None
+            conditional = functorch_experimental_ops_cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);  pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, 
-            false_graph_1, [[x_1, x_1]]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-            add = conditional + conditional_1;  conditional = conditional_1 = None
-            return add
+            conditional_1 = functorch_experimental_ops_cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            add_tensor = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+            return add_tensor
         """
         code = graph.code
         # Normalization hack, cause .code makes some weird whitespace

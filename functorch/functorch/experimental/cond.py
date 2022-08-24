@@ -5,6 +5,8 @@ from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.fx.experimental.proxy_tensor import track_tensor_tree
+
 
 """
 We're going to define a `cond` operation.
@@ -43,6 +45,25 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
 
+    true_outs = []
+    false_outs = []
+    for node in true_graph.graph.nodes:
+        if node.op == 'output':
+            true_outs.extend(node.args)
+
+    for node in false_graph.graph.nodes:
+        if node.op == 'output':
+            false_outs.extend(node.args)
+    
+    flat_true_outs, _ = pytree.tree_flatten(true_outs)
+    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    assert(len(flat_true_outs) == len(flat_false_outs))
+    
+    for i in range(0, len(flat_true_outs)):
+        true_out = flat_true_outs[i]
+        false_out = flat_false_outs[i]
+        assert(true_out.meta == false_out.meta)
+
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
     # I was not sure how to do that. This kinda simulates it.
@@ -62,36 +83,19 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    # This is not amazing.
-    # However, if we have nested operators that have a call_function
-    # in their graph that is not a torch op (ex: see conditional below, nested cond)
-    # we cannot get metadata for it from just looking at out vars.
-    # The reason is that an operation on the output of such an op is not
-    # evalauted as a torch.Tensor.
-    # So we execute the real true and false fn here and compare metadata
-    true_result = true_graph(operands)
-    false_result = false_graph(operands)
-
-    def recursive_compare_same(a, b):
-        assert(type(a) == type(b))
-        if isinstance(a, torch.Tensor):
-            assert(a.dtype == b.dtype)
-            assert(a.size() == b.size())
-            assert(a.stride() == b.stride())
-            assert(a.device == b.device)
-        elif isinstance(a, (list, tuple)):
-            assert(len(a) == len(b))
-            for i in range(0, len(a)):
-                recursive_compare_same(a[i], b[i])
-
-    recursive_compare_same(true_result, false_result)
-
     args = (pred, true_graph, false_graph, [operands])
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
 
-    return proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
+    out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
         name="conditional")
+    
+    if pred:
+        out = true_fn(*operands)
+    else:
+        out = false_fn(*operands)
+    
+    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
 def cond_dense(pred, true_fn, false_fn, operands):

@@ -375,7 +375,7 @@ void initDispatchBindings(PyObject* module) {
     .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
     .def("has", &c10::DispatchKeySet::has);
 
-  m.def("_dispatch_keyset_full_after", [](DispatchKey t) {
+  m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
   });
 
