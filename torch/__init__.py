@@ -969,3 +969,9 @@ if sys.executable != 'torch_deploy':
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
+
+# Enable CUDA Sanitizer
+if 'TORCH_CUDA_SANITIZER' in os.environ:
+    from torch._cuda_sanitizer import cuda_sanitizer
+    
+    __all__.append(cuda_sanitizer)
