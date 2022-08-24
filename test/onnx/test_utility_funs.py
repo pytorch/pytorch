@@ -50,6 +50,7 @@ class _BaseTestCase(common_utils.TestCase):
         input_names=None,
         dynamic_axes=None,
     ):
+        torch.onnx.utils._setup_trace_module_map(model, False)
         if training == torch.onnx.TrainingMode.TRAINING:
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
@@ -983,6 +984,61 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for ln_node in ln_nodes:
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
+
+    def test_node_scope(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
+                )
+                self.gelu1 = torch.nn.GELU()
+                self.gelu2 = torch.nn.GELU()
+                self.relu = N()
+
+            def forward(self, x, y, z):
+                res1 = self.gelu1(x)
+                res2 = self.gelu2(y)
+                for ln in self.lns:
+                    z = ln(z)
+                return res1 + res2, self.relu(z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+
+        model = M(3)
+        expected_scope_names = {
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.activation.GELU::gelu1",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.activation.GELU::gelu2",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.0",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.1",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.2",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.N::relu/"
+            "torch.nn.modules.activation.ReLU::relu",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::",
+        }
+
+        graph, _, _ = self._model_to_graph(
+            model, (x, y, z), input_names=[], dynamic_axes={}
+        )
+        for node in graph.nodes():
+            self.assertIn(node.scopeName(), expected_scope_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
