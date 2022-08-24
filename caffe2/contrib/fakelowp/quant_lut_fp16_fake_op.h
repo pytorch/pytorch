@@ -6,8 +6,10 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
 #include <emmintrin.h>
+#endif
 
 
 namespace caffe2 {

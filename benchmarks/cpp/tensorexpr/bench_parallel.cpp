@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/torch.h>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 namespace torch {
 namespace jit {

@@ -7,7 +7,9 @@
 #include <sleef.h>
 #elif defined(__GNUC__) || defined(__GNUG__)
 #include <sleef.h>
+#if defined(__x86_64__) || defined(__i386__)
 #include <vecintrin.h>
+#endif
 #endif
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>

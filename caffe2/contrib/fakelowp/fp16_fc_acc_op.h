@@ -18,7 +18,9 @@
 
 #include <fbgemm/FbgemmConvert.h>
 #include <fbgemm/FbgemmFP16.h>
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 #include "caffe2/contrib/fakelowp/fp16_gemm_utils.h"
 #include "caffe2/core/context.h"

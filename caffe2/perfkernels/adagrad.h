@@ -3,7 +3,9 @@
 #if defined(__AVX__) && !defined(__NVCC__) && \
     (defined(__x86_64__) || defined(_M_X64) || defined(__i386__))
 #define CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 #endif
 #include <c10/util/Half.h>
 #include <c10/util/irange.h>

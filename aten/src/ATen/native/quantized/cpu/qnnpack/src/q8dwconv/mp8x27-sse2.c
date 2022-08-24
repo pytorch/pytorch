@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 #include <math.h>
 #include <qnnpack/q8dwconv.h>

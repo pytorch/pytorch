@@ -9,7 +9,9 @@
 #include <assert.h>
 #include <stdint.h>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <emmintrin.h>
+#endif
 
 #include <fp16/bitcasts.h>
 #include <qnnpack/requantization-stubs.h>

@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <emmintrin.h>
+#endif
 
 #include <qnnpack/x8zip.h>
 

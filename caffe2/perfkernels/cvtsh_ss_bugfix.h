@@ -16,7 +16,9 @@
     defined(CAFFE2_INTERNAL_CLANG_NEED_FIX)
 
 #include <c10/util/Half.h>
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <emmintrin.h>
+#endif
 
 // This version of clang has a bug that _cvtsh_ss is not defined, see
 // https://reviews.llvm.org/D16177

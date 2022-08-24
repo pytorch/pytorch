@@ -8,7 +8,9 @@
 
 #pragma once
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 PYTORCH_QNNP_INLINE __m128i
 sub_zero_point(const __m128i va, const __m128i vzp) {

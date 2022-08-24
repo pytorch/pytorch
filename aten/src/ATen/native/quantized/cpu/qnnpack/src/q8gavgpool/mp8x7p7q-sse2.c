@@ -8,7 +8,9 @@
 
 #include <assert.h>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <emmintrin.h>
+#endif
 
 #include <qnnpack/q8gavgpool.h>
 

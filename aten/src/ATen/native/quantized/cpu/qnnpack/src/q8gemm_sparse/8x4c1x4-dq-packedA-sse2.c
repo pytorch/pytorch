@@ -6,7 +6,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 #include <qnnpack/q8gemm_sparse.h>
 #include <requantization/runtime-sse2.h>

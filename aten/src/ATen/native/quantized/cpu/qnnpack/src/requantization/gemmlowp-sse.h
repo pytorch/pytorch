@@ -10,7 +10,9 @@
 
 #include <limits.h>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 
 /*
  * The code below is adapted from Google's gemmlowp library.

@@ -1,6 +1,8 @@
 #pragma once
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <immintrin.h>
+#endif
 #include "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.h"
 #include "fp16_fma.h"
 #include "lengths_reducer_ops.h"
