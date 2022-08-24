@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 #include <functional>
+#include <string>
 
 namespace at {
 
