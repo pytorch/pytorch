@@ -3370,6 +3370,10 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+- func: _sparse_mm_2x4(Tensor A, Tensor B, Tensor C, int m, int n, int k, int iters, int gpu_index, int check_correctness, int end2end) -> Tensor
+  dispatch:
+    SparseCUDA: sparse_mm_2x4
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 

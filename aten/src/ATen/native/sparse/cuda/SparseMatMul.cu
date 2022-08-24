@@ -10,6 +10,9 @@
 #include <cuda_runtime.h>
 #include <type_traits>
 
+#include <cusparseLt.h>
+
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -49,6 +52,282 @@
 #if IS_CUSPARSE11_AVAILABLE()
 #include <library_types.h>
 #endif
+
+
+#define CHECK_CUDA(func)                                      \
+  {                                                           \
+    cudaError_t status = (func);                              \
+    if (status != cudaSuccess) {                              \
+      printf(                                                 \
+          "CUDA API failed at line %d with error: %s (%d)\n", \
+          __LINE__,                                           \
+          cudaGetErrorString(status),                         \
+          status);                                            \
+      return at::Tensor{};                                    \
+    }                                                         \
+  }
+
+#define CHECK_CUSPARSE(func)                                      \
+  {                                                               \
+    cusparseStatus_t status = (func);                             \
+    if (status != CUSPARSE_STATUS_SUCCESS) {                      \
+      printf(                                                     \
+          "CUSPARSE API failed at line %d with error: %s (%d)\n", \
+          __LINE__,                                               \
+          cusparseGetErrorString(status),                         \
+          status);                                                \
+      return at::Tensor{};                                        \
+    }                                                             \
+  }
+
+
+constexpr int EXIT_UNSUPPORTED = 2;
+constexpr float EPSILON = 0.01;
+
+
+namespace at {
+namespace native {
+
+at::Tensor sparse_mm_2x4(
+  const at::Tensor& A, const at::Tensor& B, const at::Tensor& C,
+  int m, int n, int k, int iters,
+  int gpu_index, int check_correctness,
+  int endtoend)
+{
+  CHECK_CUDA(cudaSetDevice(gpu_index));
+
+  int major_cc, minor_cc;
+  CHECK_CUDA(
+      cudaDeviceGetAttribute(&major_cc, cudaDevAttrComputeCapabilityMajor, 0))
+  CHECK_CUDA(
+      cudaDeviceGetAttribute(&minor_cc, cudaDevAttrComputeCapabilityMinor, 0))
+  if (!(major_cc == 8 && minor_cc == 0)) {
+    std::printf(
+        "\ncusparseLt is supported only on GPU devices with"
+        " compute capability == 8.0, current: %d.%d\n\n",
+        major_cc,
+        minor_cc);
+    return at::Tensor{};
+  }
+
+  auto order = CUSPARSE_ORDER_ROW;
+  auto opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  auto opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  auto type = CUDA_R_16F;
+  auto compute_type = CUSPARSE_COMPUTE_16F;
+
+  if (sizeof(float) == 4) {
+    type = CUDA_R_32F;
+    compute_type = CUSPARSE_COMPUTE_TF32_FAST;
+  } else if (sizeof(float) == 1) {
+    type = CUDA_R_8I;
+    compute_type = CUSPARSE_COMPUTE_32I;
+    opB = CUSPARSE_OPERATION_TRANSPOSE;
+  }
+
+  bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
+  bool isA_transposed = (opA != CUSPARSE_OPERATION_NON_TRANSPOSE);
+  bool isB_transposed = (opB != CUSPARSE_OPERATION_NON_TRANSPOSE);
+  auto num_A_rows = A.size(0);
+  auto num_A_cols = A.size(1);
+  auto num_B_rows = B.size(0);
+  auto num_B_cols = B.size(1);
+  auto num_C_rows = A.size(0);
+  auto num_C_cols = B.size(1);
+  unsigned alignment = 16;
+  auto lda = (is_rowmajor) ? num_A_cols : num_A_rows;
+  auto ldb = (is_rowmajor) ? num_B_cols : num_B_rows;
+  auto ldc = (is_rowmajor) ? num_C_cols : num_C_rows;
+  auto A_height = (is_rowmajor) ? num_A_rows : num_A_cols;
+  auto B_height = (is_rowmajor) ? num_B_rows : num_B_cols;
+  auto C_height = (is_rowmajor) ? num_C_rows : num_C_cols;
+  auto A_size = A_height * lda * sizeof(float);
+  auto B_size = B_height * ldb * sizeof(float);
+  auto C_size = C_height * ldc * sizeof(float);
+  auto hA = A.data_ptr();
+  auto hB = B.data_ptr();
+  auto hC = C.data_ptr();
+  // T *hA, *hB, *hC;
+  // CHECK_CUDA(cudaMallocHost((void**)&hA, A_size));
+  // CHECK_CUDA(cudaMallocHost((void**)&hB, B_size));
+  // CHECK_CUDA(cudaMallocHost((void**)&hC, C_size));
+  float alpha = 1.0f;
+  float beta = 0.0f;
+
+  //--------------------------------------------------------------------------
+  // Device memory management
+  float *dA, *dB, *dC, *dD, *dA_compressed;
+  CHECK_CUDA(cudaMalloc((void**)&dA, A_size))
+  CHECK_CUDA(cudaMalloc((void**)&dB, B_size))
+  CHECK_CUDA(cudaMalloc((void**)&dC, C_size))
+  dD = dC;
+
+  CHECK_CUDA(cudaMemcpy(dA, hA, A_size, cudaMemcpyHostToDevice))
+  CHECK_CUDA(cudaMemcpy(dB, hB, B_size, cudaMemcpyHostToDevice))
+  CHECK_CUDA(cudaMemcpy(dC, hC, C_size, cudaMemcpyHostToDevice))
+  //--------------------------------------------------------------------------
+  cusparseLtHandle_t handle;
+  cusparseLtMatDescriptor_t matA, matB, matC;
+  cusparseLtMatmulDescriptor_t matmul;
+  cusparseLtMatmulAlgSelection_t alg_sel;
+  cusparseLtMatmulPlan_t plan;
+  cudaStream_t stream = nullptr;
+  CHECK_CUSPARSE(cusparseLtInit(&handle))
+  // matrix descriptor initilization
+  CHECK_CUSPARSE(cusparseLtStructuredDescriptorInit(
+      &handle,
+      &matA,
+      num_A_rows,
+      num_A_cols,
+      lda,
+      alignment,
+      type,
+      order,
+      CUSPARSELT_SPARSITY_50_PERCENT))
+  CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
+      &handle, &matB, num_B_rows, num_B_cols, ldb, alignment, type, order))
+  CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
+      &handle, &matC, num_C_rows, num_C_cols, ldc, alignment, type, order))
+  // matmul, algorithm selection, and plan initilization
+  CHECK_CUSPARSE(cusparseLtMatmulDescriptorInit(
+      &handle, &matmul, opA, opB, &matA, &matB, &matC, &matC, compute_type))
+  CHECK_CUSPARSE(cusparseLtMatmulAlgSelectionInit(
+      &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT))
+  int alg = 0;
+  CHECK_CUSPARSE(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg, sizeof(alg)))
+  size_t workspace_size, compressed_size;
+  CHECK_CUSPARSE(
+      cusparseLtMatmulGetWorkspace(&handle, &plan, &workspace_size))
+
+  CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
+      &handle, &plan, &matmul, &alg_sel, workspace_size))
+  //--------------------------------------------------------------------------
+  // Prune the A matrix (in-place) and check the correcteness
+  CHECK_CUSPARSE(cusparseLtSpMMAPrune2(
+      &handle, &matA, 1, opA, dA, dA, CUSPARSELT_PRUNE_SPMMA_TILE, stream))
+
+  int *is_valid;
+  CHECK_CUDA(cudaMalloc((void**)&is_valid, sizeof(int)))
+  CHECK_CUSPARSE(
+      cusparseLtSpMMAPruneCheck2(&handle, &matA, 1, opA, dA, is_valid, stream))
+  int h_is_valid = 0;
+  CHECK_CUDA(cudaMemcpy(&h_is_valid, is_valid, sizeof(int), cudaMemcpyDeviceToHost))
+  CHECK_CUDA(cudaFree(is_valid))
+
+  if (h_is_valid != 0) {
+    std::printf(
+        "!!!! The matrix has been pruned in a wrong way. "
+        "cusparseLtMatmul will not provided correct results\n");
+    return at::Tensor{};
+  }
+
+  // Measure time with CUDA events
+  cudaEvent_t t_start, t_stop;
+  CHECK_CUDA(cudaEventCreate(&t_start));
+  CHECK_CUDA(cudaEventCreate(&t_stop));
+
+  float t_min_ms = 1e+10f;
+  float t_max_ms = 0.0f;
+  float t_avg_ms = 0.0f;
+  float t_cur_ms = 0.0f;
+
+  //--------------------------------------------------------------------------
+  // Compress the A matrix
+  CHECK_CUSPARSE(
+      cusparseLtSpMMACompressedSize2(&handle, &matA, &compressed_size))
+  CHECK_CUDA(cudaMalloc((void**)&dA_compressed, compressed_size))
+
+  CHECK_CUSPARSE(
+    cusparseLtSpMMACompress2(&handle, &matA, 1, opA, dA, dA_compressed, stream))
+
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Perform the matrix multiplication
+  void* d_workspace = nullptr;
+  int num_streams = 0;
+  cudaStream_t* streams = nullptr;
+
+  // Warmup
+  CHECK_CUSPARSE(cusparseLtMatmul(
+      &handle,
+      &plan,
+      &alpha,
+      dA_compressed,
+      dB,
+      &beta,
+      dC,
+      dD,
+      d_workspace,
+      streams,
+      num_streams))
+
+  for (int i = 0; i < iters; ++i) {
+    cudaEventRecord(t_start);
+
+    if (endtoend) {
+      CHECK_CUSPARSE(
+        cusparseLtSpMMACompress2(&handle, &matA, 1, opA, dA, dA_compressed, stream))
+    }
+
+    CHECK_CUSPARSE(cusparseLtMatmul(
+        &handle,
+        &plan,
+        &alpha,
+        dA_compressed,
+        dB,
+        &beta,
+        dC,
+        dD,
+        d_workspace,
+        streams,
+        num_streams))
+
+    cudaEventRecord(t_stop);
+    cudaEventSynchronize(t_stop);
+    cudaEventElapsedTime(&t_cur_ms, t_start, t_stop);
+
+    t_min_ms = (t_cur_ms <= t_min_ms) ? t_cur_ms : t_min_ms;
+    t_max_ms = (t_cur_ms >= t_max_ms) ? t_cur_ms : t_max_ms;
+    t_avg_ms += t_cur_ms;
+  }
+  t_avg_ms /= (float)iters;
+
+  // Print effective GFLOP/s
+  double num_gflop = (double)m * double(n) * double(k) * 2.0 / 1e+9;
+  double max_gflops = num_gflop / (double)t_min_ms * 1e+3;
+  double min_gflops = num_gflop / (double)t_max_ms * 1e+3;
+  double avg_gflops = num_gflop / (double)t_avg_ms * 1e+3;
+  std::cout << m << "," << n << "," << k << ",";
+  std::cout << min_gflops << "," << max_gflops << "," << avg_gflops << std::endl;
+
+  // Help dump the profiler stats
+  cudaDeviceSynchronize();
+
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // destroy plan and handle
+  CHECK_CUSPARSE(cusparseLtMatmulPlanDestroy(&plan))
+  CHECK_CUSPARSE(cusparseLtDestroy(&handle))
+  //--------------------------------------------------------------------------
+  // device result check
+  // matrix A has been pruned
+  CHECK_CUDA(cudaMemcpy(hA, dA, A_size, cudaMemcpyDeviceToHost))
+  CHECK_CUDA(cudaMemcpy(hC, dC, C_size, cudaMemcpyDeviceToHost))
+
+  // device memory deallocation
+  CHECK_CUDA(cudaFree(dA_compressed))
+  CHECK_CUDA(cudaFree(dA))
+  CHECK_CUDA(cudaFree(dB))
+  CHECK_CUDA(cudaFree(dC))
+  CHECK_CUDA(cudaFreeHost(hA))
+  CHECK_CUDA(cudaFreeHost(hB))
+  CHECK_CUDA(cudaFreeHost(hC))
+
+  return C;
+}
+
+} // at
+} // native
+
 
 namespace at {
 namespace native {
