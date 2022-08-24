@@ -622,12 +622,9 @@
   self: grad * (result + 1)
   result: auto_element_wise
 
-- name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, self.sizes())
-  result: auto_linear
-
-- name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
+# TODO: this derivative is not SymInt safe, need sum_to support
+- name: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, self.sym_sizes())
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -1738,14 +1735,9 @@
   # linear
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
-- name: view(Tensor(a) self, int[] size) -> Tensor(a)
+# TODO: this derivative is not SymInt safe, need reshape_symint
+- name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
-  result: auto_linear
-
-- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
-  # TODO: add proper double backward for view.SymInt
-  # by SymIntizing `reshape`
-  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
   result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
