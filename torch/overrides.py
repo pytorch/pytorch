@@ -48,6 +48,7 @@ __all__ = [
     "wrap_torch_function",
     "enable_reentrant_dispatch",
     "get_buffer",
+    "redispatch_function",
 ]
 
 @functools.lru_cache(None)
