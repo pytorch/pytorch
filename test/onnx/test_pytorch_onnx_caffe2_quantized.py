@@ -201,7 +201,7 @@ class TestQuantizedOps(common_utils.TestCase):
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(
+                res = torch.ao.nn.quantized.functional.interpolate(
                     self.quant1(x), size=[6, 8], mode="nearest"
                 )
                 return self.dequant(res)

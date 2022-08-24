@@ -186,11 +186,8 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 }
 
 Tensor expand_symint_batching_rule(const Tensor& self, SymIntArrayRef psize, bool implicit) {
-  return self.expand(asIntArrayRefSlow(psize), implicit);
-}
-
-Tensor sum_symint_batching_rule(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return input_t.sum(c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
+  // TODO: properly support this
+  return expand_batching_rule(self, asIntArrayRefSlow(psize), implicit);
 }
 
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -473,7 +470,8 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor view_symint_batching_rule(const Tensor& self, c10::SymIntArrayRef size) {
-  return self.view(asIntArrayRefSlow(size));
+  // TODO: properly support this
+  return view_batching_rule(self, asIntArrayRefSlow(size));
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
@@ -1013,6 +1011,7 @@ Tensor new_empty_symint_batching_rule(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  // TODO: properly support this
   return new_empty_batching_rule(self, asIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
@@ -1100,7 +1099,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
-  m.impl("sum.SymInt", sum_symint_batching_rule);
   m.impl("is_complex", native::is_complex);
 
   // inplace operations
@@ -1114,8 +1112,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
-  m.impl("expand", expand_batching_rule);
-  m.impl("expand.SymInt", expand_symint_batching_rule);
+  m.impl("expand", expand_symint_batching_rule);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
   m.impl("movedim.intlist", movedim_batching_rule);
   m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
@@ -1143,8 +1140,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
-  m.impl("view", view_batching_rule);
-  m.impl("view.SymInt", view_symint_batching_rule);
+  m.impl("view", view_symint_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
 
   // clamp operations
@@ -1282,8 +1278,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
-  m.impl("new_empty", new_empty_batching_rule);
-  m.impl("new_empty.SymInt", new_empty_symint_batching_rule);
+  m.impl("new_empty", new_empty_symint_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 

@@ -1,22 +1,28 @@
 import dataclasses
 import typing
 import unittest
-from typing import Dict
+from collections import defaultdict
+from typing import Dict, List
 
 import torchgen.model
+
+import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
 from torchgen.gen import (
     get_native_function_declarations,
     get_native_function_schema_registrations,
+    LineLoader,
 )
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
     DispatchKey,
+    Location,
     NativeFunction,
     OperatorName,
 )
+from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
 
 
@@ -249,21 +255,36 @@ TORCH_LIBRARY(custom, m) {
 };""",
         )
 
-    def test_3_namespaces_schema_registration_code_invalid(self) -> None:
+    def test_3_namespaces_schema_registration_code_valid(self) -> None:
         custom2_native_function, _ = torchgen.model.NativeFunction.from_yaml(
             {"func": "custom2::func() -> bool"},
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
-        with self.assertRaises(AssertionError):
-            get_native_function_schema_registrations(
-                native_functions=[
-                    DEFAULT_NATIVE_FUNCTION,
-                    self.custom_native_function,
-                    custom2_native_function,
-                ],
-                schema_selector=self.selector,
-            )
+        (
+            aten_registrations,
+            custom_registrations,
+        ) = get_native_function_schema_registrations(
+            native_functions=[
+                DEFAULT_NATIVE_FUNCTION,
+                self.custom_native_function,
+                custom2_native_function,
+            ],
+            schema_selector=self.selector,
+        )
+        self.assertEqual(aten_registrations, ['m.def("func() -> bool", {});\n'])
+        self.assertEqual(
+            custom_registrations,
+            """
+TORCH_LIBRARY(custom, m) {
+  m.def("func() -> bool", {});
+
+};
+TORCH_LIBRARY(custom2, m) {
+  m.def("func() -> bool", {});
+
+};""",
+        )
 
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):
@@ -293,6 +314,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 dispatch_key=k,
                 use_out_as_primary=True,
                 external=False,
+                symint=False,
                 device_guard=False,
                 index=backend_indices[k],
             )
@@ -325,6 +347,66 @@ TORCH_API bool kernel_1();
 } // namespace at
         """
         self.assertEqual("\n".join(declaration), target)
+
+
+# Test for native_function_generation
+class TestNativeFunctionGeneratrion(unittest.TestCase):
+    def setUp(self) -> None:
+        self.native_functions: List[NativeFunction] = []
+        self.backend_indices: Dict[
+            DispatchKey, Dict[OperatorName, BackendMetadata]
+        ] = defaultdict(dict)
+        yaml_entry = """
+- func: op(Tensor self) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: op
+  autogen: op.out
+        """
+        es = yaml.load(yaml_entry, Loader=LineLoader)
+        self.one_return_func, m = NativeFunction.from_yaml(
+            es[0], loc=Location(__file__, 1), valid_tags=set()
+        )
+
+        BackendIndex.grow_index(self.backend_indices, m)
+
+        self.two_returns_func, two_returns_backend_index = NativeFunction.from_yaml(
+            {
+                "func": "op_2() -> (Tensor, Tensor)",
+                "dispatch": {"CPU": "kernel_1"},
+                "autogen": "op_2.out",
+            },
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
+        BackendIndex.grow_index(self.backend_indices, two_returns_backend_index)
+
+    def test_functional_variant_autogen_out_variant(self) -> None:
+        native_functions = [self.one_return_func]
+        add_generated_native_functions(native_functions, self.backend_indices)
+        self.assertEqual(len(native_functions), 2)
+        self.assertEqual(
+            str(native_functions[1].func),
+            "op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)",
+        )
+        op_name = native_functions[1].func.name
+        backend_metadata = self.backend_indices[DispatchKey.CompositeExplicitAutograd][
+            op_name
+        ]
+        self.assertEqual(backend_metadata.kernel, "op_out")
+
+    def test_functional_variant_autogen_out_variant_two_returns(self) -> None:
+        native_functions = [self.two_returns_func]
+        add_generated_native_functions(native_functions, self.backend_indices)
+        self.assertEqual(len(native_functions), 2)
+        self.assertEqual(
+            str(native_functions[1].func),
+            "op_2.out(*, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
+        )
+        op_name = native_functions[1].func.name
+        backend_metadata = self.backend_indices[DispatchKey.CompositeExplicitAutograd][
+            op_name
+        ]
+        self.assertEqual(backend_metadata.kernel, "op_2_out")
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()

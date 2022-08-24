@@ -955,7 +955,7 @@ Conv2dPackedContext::Conv2dPackedContext(
   const auto method = determine_method(
       weight.sizes(), stride, padding, dilation, groups, transposed, quantized);
 
-  packed_.reserve(14);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(
       convert(pack_weights(weight, transposed, quantized, method)));
   packed_.emplace_back(
@@ -977,37 +977,35 @@ Conv2dPackedContext::Conv2dPackedContext(
   packed_.emplace_back(method);
   packed_.emplace_back(weight.sizes().vec());
 
-  unpacked_.reserve(11);
-  unpacked_.emplace_back(weight);
-  unpacked_.emplace_back(bias);
-  unpacked_.emplace_back(stride_arg.vec());
-  unpacked_.emplace_back(padding_arg.vec());
-  unpacked_.emplace_back(dilation_arg.vec());
-  unpacked_.emplace_back(transposed);
-  unpacked_.emplace_back(quantized);
-  unpacked_.emplace_back(output_padding_arg.vec());
-  unpacked_.emplace_back(groups);
-  unpacked_.emplace_back(output_min);
-  unpacked_.emplace_back(output_max);
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+    unpacked_.emplace_back(stride_arg.vec());
+    unpacked_.emplace_back(padding_arg.vec());
+    unpacked_.emplace_back(dilation_arg.vec());
+    unpacked_.emplace_back(transposed);
+    unpacked_.emplace_back(quantized);
+    unpacked_.emplace_back(output_padding_arg.vec());
+    unpacked_.emplace_back(groups);
+    unpacked_.emplace_back(output_min);
+    unpacked_.emplace_back(output_max);
+  }
 }
 
 Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
   return Conv2dPackedContext(
-      unpacked.get(0).toTensor(), // weight
-      unpacked.get(1).isTensor() ? unpacked.get(1).toTensor()
-                                 : c10::optional<Tensor>(), // bias
-      unpacked.get(2).toIntVector(), // stride
-      unpacked.get(3).toIntVector(), // padding
-      unpacked.get(4).toIntVector(), // dilation
-      unpacked.get(5).toBool(), // transposed
-      unpacked.get(6).toBool(), // quantized
-      unpacked.get(7).toIntVector(), // output_padding
-      unpacked.get(8).toInt(), // groups
-      unpacked.get(9).isScalar() ? unpacked.get(8).toScalar()
-                                 : c10::optional<Scalar>(), // output_min
-      unpacked.get(10).isScalar() ? unpacked.get(9).toScalar()
-                                  : c10::optional<Scalar>() // output_max
-  );
+      unpacked.get(Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::Bias),
+      unpacked.get(Unpacked::Stride).toIntVector(),
+      unpacked.get(Unpacked::Padding).toIntVector(),
+      unpacked.get(Unpacked::Dilation).toIntVector(),
+      unpacked.get(Unpacked::isTransposed).toBool(),
+      unpacked.get(Unpacked::isQuantized).toBool(),
+      unpacked.get(Unpacked::OutputPadding).toIntVector(),
+      unpacked.get(Unpacked::Groups).toInt(),
+      get_optional_scalar(unpacked, Unpacked::OutputMin),
+      get_optional_scalar(unpacked, Unpacked::OutputMax));
 }
 
 c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
@@ -1088,22 +1086,38 @@ Tensor run_conv2d_context(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
-  const vTensor& packed_v_weight = convert(conv_context->get_val(0).toTensor());
-  const vTensor& packed_v_bias = convert(conv_context->get_val(1).toTensor());
-  const auto packed_filter = conv_context->get_val(2).toIntVector();
-  const auto packed_stride = conv_context->get_val(3).toIntVector();
-  const auto packed_padding = conv_context->get_val(4).toIntVector();
-  const auto packed_output_padding = conv_context->get_val(5).toIntVector();
-  const auto packed_dilation = conv_context->get_val(6).toIntVector();
-  const auto transposed = conv_context->get_val(7).toBool();
-  const auto quantized = conv_context->get_val(8).toBool();
-  /* const auto groups = conv_context->get_val(9).toInt(); */
-  const float packed_output_min =
-      safe_downcast<float>(conv_context->get_val(10).toDouble());
-  const float packed_output_max =
-      safe_downcast<float>(conv_context->get_val(11).toDouble());
-  const Conv2dMethod method_ = (Conv2dMethod)conv_context->get_val(12).toInt();
-  const auto unpacked_filter = conv_context->get_val(13).toIntVector();
+  const vTensor& packed_v_weight = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
+  const vTensor& packed_v_bias = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
+  const auto packed_filter =
+      conv_context->get_val(Conv2dPackedContext::Packed::FilterSizes)
+          .toIntVector();
+  const auto packed_stride =
+      conv_context->get_val(Conv2dPackedContext::Packed::Stride).toIntVector();
+  const auto packed_padding =
+      conv_context->get_val(Conv2dPackedContext::Packed::Padding).toIntVector();
+  const auto packed_output_padding =
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputPadding)
+          .toIntVector();
+  const auto packed_dilation =
+      conv_context->get_val(Conv2dPackedContext::Packed::Dilation)
+          .toIntVector();
+  const auto transposed =
+      conv_context->get_val(Conv2dPackedContext::Packed::isTransposed).toBool();
+  const auto quantized =
+      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
+  const float packed_output_min = safe_downcast<float>(
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());
+  const float packed_output_max = safe_downcast<float>(
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputMax).toDouble());
+  const Conv2dMethod method_ =
+      (Conv2dMethod)conv_context
+          ->get_val(Conv2dPackedContext::Packed::ConvMethod)
+          .toInt();
+  const auto unpacked_filter =
+      conv_context->get_val(Conv2dPackedContext::Packed::WeightSizes)
+          .toIntVector();
 
   TORCH_CHECK(
       usable(input, quantized),
@@ -1204,6 +1218,7 @@ Tensor run_tconv2d_context(
   return run_conv2d_context(input_arg, conv_context);
 }
 
+// TODO: this can probably be consolidated with the other run method
 Tensor run_qconv2d_context(
     const Tensor& input_arg,
     double scale,
@@ -1214,22 +1229,36 @@ Tensor run_qconv2d_context(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
-  const vTensor& packed_v_weight = convert(conv_context->get_val(0).toTensor());
-  const vTensor& packed_v_bias = convert(conv_context->get_val(1).toTensor());
-  const auto packed_filter = conv_context->get_val(2).toIntVector();
-  const auto packed_stride = conv_context->get_val(3).toIntVector();
-  const auto packed_padding = conv_context->get_val(4).toIntVector();
-  const auto packed_output_padding = conv_context->get_val(5).toIntVector();
-  const auto packed_dilation = conv_context->get_val(6).toIntVector();
-  /* const auto transposed = conv_context->get_val(7).toBool(); */
-  const auto quantized = conv_context->get_val(8).toBool();
-  /* const auto groups = conv_context->get_val(9).toInt(); */
-  const float packed_output_min =
-      safe_downcast<float>(conv_context->get_val(10).toDouble());
-  const float packed_output_max =
-      safe_downcast<float>(conv_context->get_val(11).toDouble());
-  const Conv2dMethod method_ = (Conv2dMethod)conv_context->get_val(12).toInt();
-  const auto unpacked_filter = conv_context->get_val(13).toIntVector();
+  const vTensor& packed_v_weight = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
+  const vTensor& packed_v_bias = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
+  const auto packed_filter =
+      conv_context->get_val(Conv2dPackedContext::Packed::FilterSizes)
+          .toIntVector();
+  const auto packed_stride =
+      conv_context->get_val(Conv2dPackedContext::Packed::Stride).toIntVector();
+  const auto packed_padding =
+      conv_context->get_val(Conv2dPackedContext::Packed::Padding).toIntVector();
+  const auto packed_output_padding =
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputPadding)
+          .toIntVector();
+  const auto packed_dilation =
+      conv_context->get_val(Conv2dPackedContext::Packed::Dilation)
+          .toIntVector();
+  const auto quantized =
+      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
+  const float packed_output_min = safe_downcast<float>(
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());
+  const float packed_output_max = safe_downcast<float>(
+      conv_context->get_val(Conv2dPackedContext::Packed::OutputMax).toDouble());
+  const Conv2dMethod method_ =
+      (Conv2dMethod)conv_context
+          ->get_val(Conv2dPackedContext::Packed::ConvMethod)
+          .toInt();
+  const auto unpacked_filter =
+      conv_context->get_val(Conv2dPackedContext::Packed::WeightSizes)
+          .toIntVector();
 
   TORCH_CHECK(
       usable(input, quantized),
@@ -1372,19 +1401,17 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
   const c10::impl::GenericList unpacked_ = conv_context_.unpack();
 
+  TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+
   return Conv2dOpContext::State(
-      unpacked_.get(0).toTensor(), // weight
-      unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor()
-                                  : c10::optional<Tensor>(), // bias
-      unpacked_.get(2).toIntVector(), // stride
-      unpacked_.get(3).toIntVector(), // padding
-      unpacked_.get(4).toIntVector(), // dilation
-      unpacked_.get(7).toInt(), // groups
-      unpacked_.get(8).isScalar() ? unpacked_.get(8).toScalar()
-                                  : c10::optional<Scalar>(), // output_min
-      unpacked_.get(9).isScalar() ? unpacked_.get(9).toScalar()
-                                  : c10::optional<Scalar>() // output_max
-  );
+      unpacked_.get(Conv2dPackedContext::Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked_, Conv2dPackedContext::Unpacked::Bias),
+      unpacked_.get(Conv2dPackedContext::Unpacked::Stride).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::Padding).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::Dilation).toIntVector(),
+      unpacked_.get(Conv2dPackedContext::Unpacked::Groups).toInt(),
+      get_optional_scalar(unpacked_, Conv2dPackedContext::Unpacked::OutputMin),
+      get_optional_scalar(unpacked_, Conv2dPackedContext::Unpacked::OutputMax));
 }
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
