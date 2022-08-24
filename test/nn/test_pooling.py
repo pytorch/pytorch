@@ -1428,7 +1428,6 @@ torch.cuda.synchronize()
         imgs_ = F.adaptive_avg_pool2d(imgs, (Oh, Ow))
         imgs_ = F.adaptive_max_pool2d(imgs, (Oh, Ow))
 
-
         Id, Ih, Iw, Od, Oh, Ow = 3, 5873, 3693, 3, 3527, 2219
         imgs = torch.randint(low=0, high=256, size=(3, Id, Ih, Iw), dtype=torch.float)
         imgs_ = F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
