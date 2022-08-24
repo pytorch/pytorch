@@ -186,12 +186,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
   return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty_symint_cpu(c10::SymIntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  return at::native::empty_cpu(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
-Tensor empty(
+Tensor empty_names(
     IntArrayRef size,
     c10::optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
@@ -219,9 +214,12 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-Tensor& empty_out(IntArrayRef size,
+Tensor& empty_out(SymIntArrayRef sym_size,
     c10::optional<c10::MemoryFormat> optional_memory_format,
     Tensor& result) {
+  // TODO: support empty_out properly (I was forced to change this immediately
+  // with empty so that empty/empty.out had the same type signature)
+  auto size = c10::asIntArrayRefSlow(sym_size);
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -389,17 +387,6 @@ Tensor empty_like_quantized(
 }
 
 Tensor new_empty(
-    const Tensor& self,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt
-    ) {
-  return self.new_empty_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
-}
-
-Tensor new_empty_symint(
     const Tensor& self,
     SymIntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
@@ -1090,15 +1077,7 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  return at::zeros_symint(c10::SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory);
-}
-
-Tensor zeros_symint(SymIntArrayRef size,
+Tensor zeros(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1123,8 +1102,17 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
-Tensor& zeros_out(IntArrayRef size, Tensor& result) {
+Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
+  result.sparse_resize_and_clear_(size, size.size(), 0.);
+  return result;
+}
+
+Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
+  auto size = c10::asIntArrayRefSlow(sym_size);
   if (result.is_sparse()) {
+    // TODO: I think this branch should be dead, but we don't have an easy
+    // way to cover all sparse kernels with zeros_sparse_out, so retain this
+    // for now
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
   } else {

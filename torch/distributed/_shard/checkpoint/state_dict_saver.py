@@ -61,7 +61,7 @@ def _prepare(
     metadata = Metadata(state_dict_metadata={})
     tensor_write_requests: List[TensorWriteRequest] = []
     bytes_write_requests: List[BytesWriteRequest] = []
-    storage_key_to_fqn: Dict[str, str] = dict()
+    storage_key_to_fqn: Dict[str, str] = {}
 
     storage_md = {}
 
