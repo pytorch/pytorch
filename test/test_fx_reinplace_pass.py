@@ -30,6 +30,7 @@ class TestReinplacePass(TestCase):
 
 
 def forward(self, x_1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(x_1);  x_1 = None
     add_tensor = torch.ops.aten.add_.Tensor(clone_default, 1)
     return clone_default
@@ -56,6 +57,7 @@ def forward(self, x_1):
 
 
 def forward(self, x_1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(x_1);  x_1 = None
     view_default = torch.ops.aten.view.default(clone_default, [-1])
     add_tensor = torch.ops.aten.add.Tensor(clone_default, 1);  clone_default = None
@@ -82,6 +84,7 @@ def forward(self, x_1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     add_tensor = torch.ops.aten.add.Tensor(clone_default, 1)
     ge_tensor = torch.ops.aten.ge.Tensor(add_tensor, clone_default);  add_tensor = clone_default = None
@@ -105,6 +108,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     expand_default = torch.ops.aten.expand.default(clone_default, [4, 4]);  clone_default = None
     add_tensor = torch.ops.aten.add.Tensor(expand_default, 1);  expand_default = None
@@ -143,6 +147,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     view_default = torch.ops.aten.view.default(clone_default, [-1])
     view_default_1 = torch.ops.aten.view.default(clone_default, [-1])
@@ -180,6 +185,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
     select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
@@ -217,6 +223,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
     select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
@@ -253,6 +260,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
     select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
@@ -286,6 +294,7 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
+    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
     slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
     select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
@@ -318,6 +327,7 @@ def forward(self, a__1):
 
 
 def forward(self):
+    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros)
     add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, 1);  diagonal_default = None
@@ -341,6 +351,7 @@ def forward(self):
 
 
 def forward(self):
+    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([4, 4, 4], device = device(type='cpu'), pin_memory = False)
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
     slice_tensor = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)

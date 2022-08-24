@@ -517,6 +517,9 @@ class CodeGen(object):
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
+        if not verbose:
+            body.append('# To see more debug info, please use `graph_module.print_readable()`\n')
+
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one

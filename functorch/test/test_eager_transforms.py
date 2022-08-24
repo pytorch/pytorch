@@ -3177,6 +3177,7 @@ class TestFunctionalize(TestCase):
 
 
 def forward(self, x_1, indices_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     index_tensor = torch.ops.aten.index.Tensor(x_1, [indices_1]);  x_1 = indices_1 = None
     return index_tensor
     """)
@@ -3246,6 +3247,7 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
@@ -3266,6 +3268,7 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     transpose_copy_int = torch.ops.aten.transpose_copy.int(x_1, 1, 0);  x_1 = None
     return transpose_copy_int
     """)
@@ -3287,6 +3290,7 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4])
@@ -3314,6 +3318,7 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
@@ -3340,6 +3345,7 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_default = torch.ops.aten.view.default(x_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
@@ -3362,6 +3368,7 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     _tensor_constant0 = self._tensor_constant0
     return _tensor_constant0
     """)
@@ -3382,6 +3389,7 @@ def forward(self) -> torch.Tensor:
 
 
 def forward(self, a_1, b_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     index_tensor = torch.ops.aten.index.Tensor(a_1, [b_1]);  a_1 = b_1 = None
     return index_tensor
     """)
@@ -3400,6 +3408,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
 
 
 def forward(self, a_1, b_1) -> torch.Tensor:
+    # To see more debug info, please use `graph_module.print_readable()`
     unbind_int = torch.ops.aten.unbind.int(b_1);  b_1 = None
     getitem = unbind_int[0]
     getitem_1 = unbind_int[1];  unbind_int = None
@@ -3420,6 +3429,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
 
 
 def forward(self, x_1):
+    # To see more debug info, please use `graph_module.print_readable()`
     resize_default = torch.ops.aten.resize.default(x_1, [10])
     fill_scalar = torch.ops.aten.fill.Scalar(resize_default, 2);  resize_default = None
     resize__default = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None

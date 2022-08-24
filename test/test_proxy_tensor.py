@@ -311,6 +311,7 @@ class TestGenericProxyTensor(TestCase):
 
 
 def forward(self, x_1):
+    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
     return copy__default
@@ -710,6 +711,7 @@ class TestSymbolicTracing(TestCase):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
+    # To see more debug info, please use `graph_module.print_readable()`
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
