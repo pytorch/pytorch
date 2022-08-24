@@ -84,8 +84,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
 // ----------------------------------------------------------------------------
 // -- Profiler base class -----------------------------------------------------
 // ----------------------------------------------------------------------------
-/*explicit*/ ProfilerStateBase::ProfilerStateBase(
-    const ProfilerConfig& config)
+/*explicit*/ ProfilerStateBase::ProfilerStateBase(const ProfilerConfig& config)
     : c10::MemoryReportingInfoBase(), config_(config) {}
 
 ProfilerStateBase::~ProfilerStateBase() {
@@ -135,8 +134,7 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
   return out;
 }
 
-void ProfilerStateBase::setCallbackHandle(
-    at::CallbackHandle handle) {
+void ProfilerStateBase::setCallbackHandle(at::CallbackHandle handle) {
   if (handle_) {
     at::removeCallback(handle_);
     SOFT_ASSERT(
