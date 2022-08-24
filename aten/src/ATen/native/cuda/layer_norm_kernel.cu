@@ -684,7 +684,7 @@ void LayerNormKernelImplInternal(
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value) &&
+  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= 1ULL << std::numeric_limits<float>::digits && N % num_vec_elems == 0 &&
   can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
