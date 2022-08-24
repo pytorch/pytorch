@@ -1043,14 +1043,20 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = ("Refusing to merge as mandatory check(s) " +
-                                 checks_to_str(failed_checks) + f" failed for rule {rule_name}")
+                reject_reason = (
+                    f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
+                    + f"Refusing to merge as mandatory check(s) {checks_to_str(failed_checks)} failed for "
+                    + f"rule {rule_name}."
+                )
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
-                reject_reason += f" are pending/not yet run for rule {rule_name}"
+                reject_reason = (
+                    f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
+                    + f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)} are pending/not yet run for "
+                    + f"rule {rule_name}."
+                )
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
@@ -1323,7 +1329,7 @@ def main() -> None:
         msg += f"\nReason: {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
-            msg += f"\nRaised by {run_url}"
+            msg += f"\nRaised by [workflow job]({run_url})"
         if args.land_checks:
             msg += get_land_check_troubleshooting_message()
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
