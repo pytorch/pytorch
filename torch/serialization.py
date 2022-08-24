@@ -29,6 +29,21 @@ MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
 PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
+__all__ = [
+    'SourceChangeWarning',
+    'mkdtemp',
+    'register_package',
+    'check_module_version_greater_or_equal',
+    'validate_cuda_device',
+    'location_tag',
+    'default_restore_location',
+    'normalize_storage_type',
+    'storage_to_tensor_type',
+    'save',
+    'load',
+    'StorageType',
+]
+
 class SourceChangeWarning(Warning):
     pass
 
