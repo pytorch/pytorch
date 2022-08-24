@@ -439,10 +439,11 @@ class CodeGen(object):
 
                         if idx + 1 < len(lines):
                             matches = pattern.match(lines[idx].strip())
-                            file = matches.group(1)
-                            lineno = matches.group(2)
-                            lineage = f'File: {file}:{lineno}'
-                            summary_lines.append(lineage)
+                            if matches:
+                                file = matches.group(1)
+                                lineno = matches.group(2)
+                                lineage = f'File: {file}:{lineno}'
+                                summary_lines.append(lineage)
 
                             code = f"code: {lines[idx + 1].strip()}"
                             summary_lines.append(code)
