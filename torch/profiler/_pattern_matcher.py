@@ -9,7 +9,7 @@ import torch
 from torch.profiler import profile
 import torch.utils.benchmark as benchmark
 from torch.profiler._utils import index_of_first_match
-from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
+from torch._C._profiler import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
 
@@ -176,6 +176,24 @@ class ExtraCUDACopyPattern(Pattern):
         # TODO: We should also check tensor identities
         if event.name() != "aten::to":
             return False
+        to_event = event
+        if not event.children:
+            return False
+        event = event.children[-1]
+        if event.name() != "aten::_to_copy":
+            return False
+        if not event.children:
+            return False
+        event = event.children[-1]
+        if event.name() != "aten::copy_":
+            return False
+        # aten::copy_ should have the first 2 args dtype the same
+        dtypes = input_dtypes(event)
+        if len(dtypes) < 2:
+            return False
+        if dtypes[0] != dtypes[1]:
+            return False
+        event = to_event
         # Up one level
         event = event.parent
         if event is None:
@@ -609,7 +627,7 @@ def report_all_anti_patterns(prof,
     report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),
-        ForLoopIndexingPattern(prof, should_benchmark),
+        # ForLoopIndexingPattern(prof, should_benchmark),
         FP32MatMulPattern(prof, should_benchmark),
         OptimizerSingleTensorPattern(prof, should_benchmark),
         SynchronizedDataLoaderPattern(prof, should_benchmark),

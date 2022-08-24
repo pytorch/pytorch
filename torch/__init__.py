@@ -14,7 +14,6 @@ import sys
 import platform
 import textwrap
 import ctypes
-import warnings
 import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -319,6 +318,7 @@ def set_default_tensor_type(t):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
         torch.float32
         >>> torch.set_default_tensor_type(torch.DoubleTensor)
@@ -355,6 +355,7 @@ def set_default_dtype(d):
                                   Either torch.float32 or torch.float64.
 
     Example:
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> # initial default for floating point is torch.float32
         >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
@@ -494,6 +495,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
+        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...

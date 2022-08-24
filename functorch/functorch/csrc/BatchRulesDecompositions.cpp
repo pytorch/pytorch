@@ -128,8 +128,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(hstack);
   OP_DECOMPOSE(index_select_backward);
   OP_DECOMPOSE(inner);
-  OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(inverse);
+  OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
   OP_DECOMPOSE(layer_norm);
@@ -137,15 +137,24 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linalg_cond);
+  OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
+  OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_inv);
   OP_DECOMPOSE(linalg_matmul);
+  OP_DECOMPOSE(linalg_matrix_norm);
+  OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
   OP_DECOMPOSE(linalg_multi_dot);
+  OP_DECOMPOSE(linalg_norm);
+  OP_DECOMPOSE(linalg_solve);
+  OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
+  OP_DECOMPOSE(linalg_tensorinv);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
+  OP_DECOMPOSE(matrix_power);
   OP_DECOMPOSE2(max, other );
   OP_DECOMPOSE(max_pool1d_with_indices);
   OP_DECOMPOSE(max_pool2d);
@@ -225,6 +234,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(vsplit, int);
   OP_DECOMPOSE2(vsplit, array);
   OP_DECOMPOSE(vstack);
+  OP_DECOMPOSE2(where, ScalarOther);
+  OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE(orgqr);
   OP_DECOMPOSE2(unflatten, int);
   OP_DECOMPOSE(_convolution_double_backward);
@@ -243,6 +254,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(pad);
   OP_DECOMPOSE(_pad_circular);
+  OP_DECOMPOSE(t_);
+  OP_DECOMPOSE(swapdims_);
+  OP_DECOMPOSE(swapaxes_);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);

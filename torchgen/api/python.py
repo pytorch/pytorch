@@ -426,7 +426,7 @@ class PythonSignature:
             vararg_type = args[0].type
             if (
                 isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) == "int"
+                and str(vararg_type.elem) in ["int", "SymInt"]
                 and num_positionalargs == 1
             ):
                 have_vararg_version = True
@@ -666,12 +666,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
             # Is it desired to keep '?' for simple_type with new style dispatcher?
             return "Tensor?"
         elem = argument_type_str(t.elem, simple_type=simple_type)
-        if elem == "Layout":
-            # TODO: fix this special case in PythonArgParser?
-            return "Layout"
-        else:
-            return f"{elem}?"
-
+        return f"{elem}?"
     elif isinstance(t, ListType):
         size = t.size if not simple_type else None
         if str(t.elem) == "bool":
@@ -801,7 +796,7 @@ def signature_from_schema(
         tensor_options_args.append(
             PythonArgument(
                 name="dtype",
-                type=BaseType(BaseTy.ScalarType),
+                type=OptionalType(BaseType(BaseTy.ScalarType)),
                 default="None",
                 default_init=(
                     "self.scalar_type()"
@@ -825,19 +820,22 @@ def signature_from_schema(
         tensor_options_args.append(
             PythonArgument(
                 name="device",
-                type=BaseType(BaseTy.Device),
+                type=OptionalType(BaseType(BaseTy.Device)),
                 default="None",
                 default_init=(
                     "self.device()"
                     if is_like_or_new_function
-                    else topt_default_init("device")
+                    else (
+                        topt_default_init("device")
+                        or "torch::tensors::get_default_device()"
+                    )
                 ),
             )
         )
         tensor_options_args.append(
             PythonArgument(
                 name="pin_memory",
-                type=BaseType(BaseTy.bool),
+                type=OptionalType(BaseType(BaseTy.bool)),
                 default="False",
                 default_init=None,
             )
@@ -845,7 +843,7 @@ def signature_from_schema(
         tensor_options_args.append(
             PythonArgument(
                 name="requires_grad",
-                type=BaseType(BaseTy.bool),
+                type=OptionalType(BaseType(BaseTy.bool)),
                 default="False",
                 default_init=None,
             )
@@ -900,7 +898,7 @@ def argument_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.int:
             ret = "_int"
         if t.name == BaseTy.SymInt:
-            ret = "SymInt"
+            ret = "Union[_int, SymInt]"
         elif t.name == BaseTy.float:
             ret = "_float"
         elif t.name == BaseTy.str:
@@ -1053,6 +1051,7 @@ def dispatch_lambda_args(
     cpp_args = cpp.arguments(
         arguments=schema.arguments,
         faithful=False,
+        symint=True,
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
@@ -1135,14 +1134,15 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     returns_without_annotation = tuple(
         map(lambda r: Return(r.name, r.type, None), f.func.returns)
     )
-    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
+    return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f"{f.func.name} returns unsupported type {return_str}")
     return return_str
 
 
 def cpp_dispatch_target(f: NativeFunction) -> str:
-    name = cpp.name(f.func)
+    symint = f.func.has_symint()
+    name = cpp.name(f.func, symint_overload=symint)
     if Variant.method in f.variants:
         return f"self.{name}"
     if Variant.function in f.variants:
@@ -1193,8 +1193,20 @@ def cpp_dispatch_exprs(
 # unexpected and/or unsupported cases which the old codegen rejects.
 # For certain cases it is intentionally more restrictive than necessary,
 # e.g.: it doesn't accepts doublelist with definite size.
-def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
-    if has_default and str(t) not in ("ScalarType", "Device", "Layout?"):
+def arg_parser_unpack_method(
+    t: Type, default: Optional[str], default_init: Optional[str]
+) -> str:
+    has_default_init = default_init is not None
+    if has_default_init and str(t) not in (
+        "ScalarType?",
+        "ScalarType",
+        "Device",
+        "Device?",
+        "Layout",
+        "Layout?",
+        "bool",
+        "bool?",
+    ):
         raise RuntimeError(f"type '{t}' does not supported unpacking with default")
 
     if isinstance(t, BaseType):
@@ -1208,54 +1220,37 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             # These unpack methods line up with their schema names
             return t.name.name.lower()
         elif t.name == BaseTy.ScalarType:
-            return "scalartypeWithDefault" if has_default else "scalartype"
+            return "scalartypeWithDefault" if has_default_init else "scalartype"
         elif t.name == BaseTy.Device:
-            return "deviceWithDefault" if has_default else "device"
+            return "deviceWithDefault" if has_default_init else "device"
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
             return "toSymInt"
         elif t.name == BaseTy.bool:
-            return "toBool"
+            return "toBoolWithDefault" if has_default_init else "toBool"
         elif t.name == BaseTy.float:
             return "toDouble"
         elif t.name == BaseTy.str:
             return "stringView"
         elif t.name == BaseTy.Layout:
-            return "layout"
+            return "layoutWithDefault" if has_default_init else "layout"
+        elif t.name == BaseTy.MemoryFormat:
+            return "memoryformat"
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == "Tensor":
             return "optionalTensor"
-
-        elif isinstance(t.elem, BaseType):
-            if t.elem.name in [
-                BaseTy.ScalarType,
-                BaseTy.Scalar,
-                BaseTy.int,
-                BaseTy.bool,
-                BaseTy.float,
-                BaseTy.str,
-            ]:
-                # Regular cases: append 'Optional' to elem's unpacking method
-                return arg_parser_unpack_method(t.elem, False) + "Optional"
-            elif t.elem.name == BaseTy.MemoryFormat:
-                return "memoryformatOptional"
-            elif t.elem.name == BaseTy.Generator:
-                return "generator"
-            elif t.elem.name == BaseTy.Layout:
-                return "layoutWithDefault" if has_default else "layoutOptional"
-            elif t.elem.name == BaseTy.Device:
-                return "deviceWithDefault" if has_default else "deviceOptional"
-
-        elif isinstance(t.elem, ListType):
-            if str(t.elem.elem) == "int":
-                # accept definite size
-                return "intlistOptional"
-            elif str(t.elem) == "float[]":
-                return "doublelistOptional"
-            elif str(t.elem) == "Dimname[]":
-                return "toDimnameListOptional"
+        elif str(t.elem) == "Generator":
+            return "generator"
+        elif str(t.elem) == "Dimname[]":
+            return "toDimnameListOptional"
+        elif not has_default_init and default in (None, "None", "c10::nullopt"):
+            # If default is None: append 'Optional' to elem's unpacking method
+            return arg_parser_unpack_method(t.elem, None, None) + "Optional"
+        else:
+            # Otherwise, load as underlying type with default
+            return arg_parser_unpack_method(t.elem, default, default_init)
 
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
@@ -1288,7 +1283,9 @@ def arg_parser_output_expr(
     arg_index: int, a: PythonArgument
 ) -> PythonArgParserOutputExpr:
     has_default = a.default_init is not None
-    unpack_method = arg_parser_unpack_method(a.type, has_default)
+    unpack_method = arg_parser_unpack_method(
+        t=a.type, default=a.default, default_init=a.default_init
+    )
     default = f", {a.default_init}" if has_default else ""
     expr = f"_r.{unpack_method}({arg_index}{default})"
 
@@ -1313,11 +1310,11 @@ def arg_parser_output_exprs(
 
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
-    "dtype": "ScalarType",
-    "device": "Device",
+    "dtype": "ScalarType?",
+    "device": "Device?",
     "layout": "Layout?",
-    "pin_memory": "bool",
-    "requires_grad": "bool",
+    "pin_memory": "bool?",
+    "requires_grad": "bool?",
 }
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
@@ -1330,7 +1327,7 @@ def dispatch_lambda_exprs(
     arg_parser_outputs = arg_parser_output_exprs(ps, f)
     lambda_args = dispatch_lambda_args(ps, f)
     inits: List[str] = []
-    lambda_args_exprs: Dict[str, str] = dict()
+    lambda_args_exprs: Dict[str, str] = {}
 
     has_toptions = has_tensor_options(f)
 
