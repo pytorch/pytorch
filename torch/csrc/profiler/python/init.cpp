@@ -175,6 +175,7 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo");
 
+  py::class_<ExtraFields<EventType::OutOfMemory>>(m, "_ExtraFields_OutOfMemory");
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
