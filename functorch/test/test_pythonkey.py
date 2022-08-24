@@ -348,8 +348,10 @@ class TestAOTAutograd(AOTTestCase):
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):
         device = "cuda"
+
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
