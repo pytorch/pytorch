@@ -833,7 +833,8 @@ void AliasDb::analyzeImpl(Node* node) {
     TORCH_INTERNAL_ASSERT(
         !formal->isWildcardBefore(),
         "Doesn't make sense for a input value to begin as a wildcard");
-    // This is a special case where we have alias info before [] but not after, such as `Tensor(a!)[]`
+    // This is a special case where we have alias info before [] but not after,
+    // such as `Tensor(a!)[]`
     if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
       // Use the first containedType in alias info.
       formal = &(formal->containedTypes()[0]);
