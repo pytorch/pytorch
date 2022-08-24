@@ -36,7 +36,7 @@ class C10_API SymInt {
   /*implicit*/ SymInt(int64_t d) : data_(d) {
     TORCH_CHECK(!is_symbolic());
   };
-  SymInt() = default;
+  SymInt() : data_(0) {}
 
   // unchecked c-tor accepting raw `data_`
   SymInt(Unchecked, int64_t d) : data_(d) {}
@@ -63,6 +63,7 @@ class C10_API SymInt {
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
+    release_(); // release the current SymIntNode if any
     data_ = s.data_;
     if (s.is_symbolic())
       s.data_ = 0;
@@ -78,10 +79,14 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  ~SymInt() {
+  void release_() {
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
+  }
+
+  ~SymInt() {
+    release_();
   }
 
   int64_t expect_int() const {
