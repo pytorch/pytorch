@@ -1426,13 +1426,11 @@ class FullyShardedDataParallel(nn.Module):
     def _unshard(
         self,
         handles: List[FlatParamHandle],
-        prepare_gradient: bool,
     ) -> None:
         """
-        Unshards the handles in ``handles``. If ``prepare_gradient``, then
-        prepares each ``FlatParameter`` 's ``.grad`` attribute for the backward
-        pass. If the handles are in :meth:`summon_full_params` and are using
-        mixed precision, then they are forced to full precision.
+        Unshards the handles in ``handles``. If the handles are in
+        :meth:`summon_full_params` and are using mixed precision, then they are
+        forced to full precision.
 
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
@@ -1441,7 +1439,7 @@ class FullyShardedDataParallel(nn.Module):
             for handle in handles:
                 handle.pre_unshard()
                 handle.unshard()
-                handle.post_unshard(prepare_gradient)
+                handle.post_unshard()
 
     def _reshard(
         self,  # unused
@@ -1873,14 +1871,9 @@ class FullyShardedDataParallel(nn.Module):
         out = self._get_handles_to_prefetch(current_handles_key)
         if out is not None:
             handles_to_prefetch, current_training_state = out
-            prepare_gradient = (
-                current_training_state in (
-                    HandleTrainingState.PRE_BACKWARD, HandleTrainingState.POST_BACKWARD
-                )
-            )
             # Prefetch the next set of parameters without synchronizing to
             # allow the sync to happen as late as possible to maximize overlap
-            self._unshard(handles_to_prefetch, prepare_gradient)
+            self._unshard(handles_to_prefetch)
             self._handles_prefetched[handles_to_prefetch] = True
 
     def _get_handles_to_prefetch(
@@ -2627,7 +2620,7 @@ class FullyShardedDataParallel(nn.Module):
         """Unshards parameters in the pre-forward including logic for forward
         prefetching."""
         handles_key = tuple(handles)
-        self._unshard(handles, False)
+        self._unshard(handles)
         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
     def _post_forward(
@@ -2843,7 +2836,7 @@ class FullyShardedDataParallel(nn.Module):
             handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
-        self._unshard(self._handles, False)
+        self._unshard(self._handles)
         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         if rank0_only and self.rank != 0:
@@ -2988,7 +2981,7 @@ class FullyShardedDataParallel(nn.Module):
 
                 params_prefetched = self._handles_prefetched.get(_handles_key, False)
                 if not params_prefetched:
-                    self._unshard(_handles, True)
+                    self._unshard(_handles)
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
                 # TODO (awgu): This is not necessarily the best place to reset
@@ -2996,6 +2989,8 @@ class FullyShardedDataParallel(nn.Module):
                 # guaranteed to only run once per iteration.
                 self._handles_prefetched.pop(_handles_key, None)
                 self._prefetch_handles(_handles_key)
+                for handle in self._handles:
+                    handle.prepare_gradient()
                 self._pre_backward_hook_has_run[_handles_key] = True
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:

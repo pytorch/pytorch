@@ -731,62 +731,64 @@ class FlatParamHandle:
             : unsharded_size.numel()
         ].view(unsharded_size)
 
-    def post_unshard(self, prepare_gradient: bool):
+    def post_unshard(self):
         """
         Runs the post-unshard logic. This includes freeing the low precision
-        shard if needed and preparing the gradient for the pre-backward if
-        ``prepare_gradient`` and a gradient exists.
+        shard if needed.
         """
         if self._uses_param_mixed_precision and self.uses_sharded_strategy:
             self._free_low_precision_sharded_param()
-        if prepare_gradient:
-            p_assert(
-                self._training_state
-                in (HandleTrainingState.PRE_BACKWARD, HandleTrainingState.IDLE),
-                "Expects to be in `PRE_BACKWARD` or `IDLE` (if prefetching)",
-            )
-            # Prepare for backward gradient computation by saving and clearing
-            # any existing sharded gradient in `.grad` to enable computing an
-            # unsharded gradient
-            flat_param = self.flat_param
-            if flat_param.grad is not None and (
-                flat_param.grad.size() != flat_param._unsharded_size
-                or flat_param.grad.device != flat_param.device  # grad on CPU
-            ):
-                self._check_on_compute_device(self.flat_param)
-                grad_offloaded = flat_param.grad.device != self.device
-                p_assert(
-                    not grad_offloaded or self._config.offload_params,
-                    f"Expects the sharded gradient to be on {self.device} "
-                    f"but got {flat_param.grad.device}",
-                )
-                prev_iter_synced_gradients = (
-                    flat_param.grad.size()
-                    == flat_param._local_shard.size()  # type: ignore[attr-defined]
-                )
-                if prev_iter_synced_gradients:
-                    # TODO (awgu): Gradient accumulation outside `no_sync()`
-                    # does not work with CPU offloading. The issue should be
-                    # that, in the post-backward hook, we cannot do an addition
-                    # between a CPU tensor (the existing sharded gradient) and
-                    # a GPU tensor (the new sharded gradient).
-                    if not grad_offloaded:
-                        flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
-                else:
-                    padded_unsharded_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
-                    p_assert(
-                        flat_param.grad.size() == padded_unsharded_size,
-                        "Expects `.grad` to be the unsharded gradient in "
-                        f"`no_sync()` with size {padded_unsharded_size} "
-                        f"but got size {flat_param.grad.size()}",
-                    )
-                flat_param.grad = None
         self._check_on_compute_device(self.flat_param)
 
     def _free_low_precision_sharded_param(self):
         """Frees the low precision sharded flattened parameter."""
         self._check_low_precision_shard()
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
+
+    def prepare_gradient(self):
+        """
+        Prepares the gradient for the backward computation by saving and
+        clearing any existing sharded gradient in ``.grad`` to enable computing
+        a new unsharded gradient.
+        """
+        p_assert(
+            self._training_state
+            in (HandleTrainingState.PRE_BACKWARD, HandleTrainingState.IDLE),
+            "Expects to be in `PRE_BACKWARD` or `IDLE` (if prefetching)",
+        )
+        flat_param = self.flat_param
+        if flat_param.grad is not None and (
+            flat_param.grad.size() != flat_param._unsharded_size
+            or flat_param.grad.device != flat_param.device  # grad on CPU
+        ):
+            self._check_on_compute_device(self.flat_param)
+            grad_offloaded = flat_param.grad.device != self.device
+            p_assert(
+                not grad_offloaded or self._config.offload_params,
+                f"Expects the sharded gradient to be on {self.device} "
+                f"but got {flat_param.grad.device}",
+            )
+            prev_iter_synced_gradients = (
+                flat_param.grad.size()
+                == flat_param._local_shard.size()  # type: ignore[attr-defined]
+            )
+            if prev_iter_synced_gradients:
+                # TODO (awgu): Gradient accumulation outside `no_sync()`
+                # does not work with CPU offloading. The issue should be
+                # that, in the post-backward hook, we cannot do an addition
+                # between a CPU tensor (the existing sharded gradient) and
+                # a GPU tensor (the new sharded gradient).
+                if not grad_offloaded:
+                    flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
+            else:
+                padded_unsharded_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
+                p_assert(
+                    flat_param.grad.size() == padded_unsharded_size,
+                    "Expects `.grad` to be the unsharded gradient in "
+                    f"`no_sync()` with size {padded_unsharded_size} "
+                    f"but got size {flat_param.grad.size()}",
+                )
+            flat_param.grad = None
 
     @contextlib.contextmanager
     def to_cpu(self):
