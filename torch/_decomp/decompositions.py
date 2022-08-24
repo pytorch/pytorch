@@ -143,7 +143,7 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
     return torch.where(
         (self > -3.0) & (self < 3.0),
         grad_output * (1.0 / 6.0),
-        grad_output.new_zeros(()),
+        0.0,
     )
 
 
@@ -152,17 +152,13 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
-    return torch.where(
-        (self <= min_val) | (self >= max_val), grad_output.new_zeros(()), grad_output
-    )
+    return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
 @register_decomposition(aten.hardshrink_backward)
 @pw_cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where(
-        (self >= -lambd) & (self <= lambd), grad_out.new_zeros(()), grad_out
-    )
+    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
 
 
 @register_decomposition(aten.hardswish)
@@ -176,7 +172,7 @@ def hardswish(self: Tensor) -> Tensor:
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
         self < -3,
-        grad_output.new_zeros(()),
+        0.0,
         torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
@@ -184,7 +180,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @register_decomposition(aten.threshold_backward)
 @pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
-    return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
+    return torch.where(self <= threshold, 0.0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -251,9 +247,7 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 @register_decomposition(aten.softshrink_backward)
 def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    return torch.where(
-        (self >= -lambd) & (self <= lambd), grad_output.new_zeros(()), grad_output
-    )
+    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
 
 
 @register_decomposition(aten.prelu_backward)
@@ -269,9 +263,7 @@ def prelu_backward(
     for _ in range(2, grad_output.dim()):
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
-    weight_grad_collector = torch.where(
-        self > 0, grad_output.new_zeros(()), self * grad_output
-    )
+    weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
     out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
@@ -651,7 +643,7 @@ def logit_backward(
         return torch.where(
             torch.logical_and(self >= lo, self <= hi),
             grad_output / (self * (1.0 - self)),
-            self.new_zeros(()),
+            0.0,
         )
     else:
         return torch.where(
@@ -1237,11 +1229,14 @@ def cudnn_batch_norm_backward(
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
     dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
 
+    # NB: these no-op views force this operator to return a
+    # fresh TensorImpl, which is important for autograd to
+    # work correctly (assert will fail if you don't do it)
     if self.dim() <= 1:
-        return self
+        return self.view(self.shape)
 
     if dim0 == dim1:
-        return self
+        return self.view(self.shape)
     perm = list(range(self.dim()))
     perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
     return torch.permute(self, perm)
