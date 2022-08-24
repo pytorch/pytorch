@@ -112,7 +112,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         )
 
         st = sharded_tensor.zeros(spec, 4, 4, dtype=torch.float64)
-        mapping = dict()
+        mapping = {}
 
         (_, md, storage_md) = _prepare_sharded_tensor_write("fqn", st, "tensor", mapping)
 
@@ -173,7 +173,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
 class TestStorageKeys(TestCase):
     def test_create_key_handles_collision(self):
-        keys = dict()
+        keys = {}
         key0 = _create_storage_key(keys, "foo")
         key1 = _create_storage_key(keys, "foo")
         self.assertNotEqual(key0, key1)
