@@ -657,7 +657,7 @@ def sanitize_pytest_xml(xml_file: str):
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IS_CI:
-        print(json.dumps(os.environ, indent=2))
+        print(json.dumps(dict(os.environ), indent=2))
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
             with open(SLOW_TESTS_FILE, 'r') as fp:
