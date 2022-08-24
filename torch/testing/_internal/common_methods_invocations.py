@@ -1484,9 +1484,9 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
     cases = [
-        ([3], 3, dict()),
-        ([10], 3, dict()),
-        ([3, 10], 3, dict()),
+        ([3], 3, {}),
+        ([10], 3, {}),
+        ([3, 10], 3, {}),
         ([3], 3, dict(replacement=False)),
         ([3], 3, dict(replacement=True)),
         ([3, 4], 4, dict(replacement=True)),
@@ -3160,6 +3160,19 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ), kwargs=kwargs)
 
 
+def error_inputs_conv2d(opinfo, device, **kwargs):
+    msg = "should be the same"
+    weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
+    input = torch.randint(high=10, size=(2, 4, 4), device=device)
+    bias = torch.rand((3,), dtype=torch.float32, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+    weight = torch.rand(size=(3, 2, 3, 3), device=device, dtype=torch.float64)
+    input = torch.rand(size=(2, 4, 4), device=device, dtype=torch.float64)
+    bias = torch.rand((3,), dtype=torch.complex128, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3203,20 +3216,6 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
-
-    # Test mixed dtypes
-
-    # (int, int, X)
-    weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
-    input = torch.randint(high=10, size=(2, 4, 4), device=device)
-    bias = make_arg((3,))
-    yield SampleInput(input, args=(weight, bias))
-
-    # (float, float, X)
-    weight = torch.rand(size=(3, 2, 3, 3), device=device, requires_grad=requires_grad, dtype=torch.float64)
-    input = torch.rand(size=(2, 4, 4), device=device, requires_grad=requires_grad, dtype=torch.float64)
-    bias = make_arg((3,))
-    yield SampleInput(input, args=(weight, bias))
 
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -3780,7 +3779,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, kwargs
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 9), (3,), dict()),
+        ((2, 3, 9), (3,), {}),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
         ((2, 3, 9), (3,), dict(stride=(1,), padding=(1,), ceil_mode=False, count_include_pad=True)),
@@ -3799,7 +3798,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 3, 4, 4), (2, 2, 2), dict()),
+        ((2, 3, 3, 4, 4), (2, 2, 2), {}),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
         ((1, 2, 5, 5, 5), (2, 3, 4), dict(stride=(1, 2, 2), padding=(0, 1, 2), ceil_mode=True,
@@ -5086,7 +5085,7 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     shapes2d = ((L, M),)
     shapes3d = ((L, M, S),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 > dim2 is allowed
@@ -5121,7 +5120,7 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
     shapes2d = ((M, L),)
     shapes3d = ((M, S, L),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 == dim2 is not allowed
@@ -5207,10 +5206,10 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
     reductions = ("mean", "sum", "none")
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        (shape, dict()),
-        ((*shape, 1), dict()),
-        ((*shape, 1, 2), dict()),
-        ((*shape, 1, 2, 3), dict()),
+        (shape, {}),
+        ((*shape, 1), {}),
+        ((*shape, 1, 2), {}),
+        ((*shape, 1, 2, 3), {}),
         *[(shape, dict(reduction=reduction)) for reduction in reductions],
         *[
             (
@@ -9384,25 +9383,6 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
-    OpInfo('inverse',
-           op=torch.inverse,
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', '.test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', '.test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-           )),
     OpInfo('isin',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
@@ -10528,6 +10508,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
+           error_inputs_func=error_inputs_conv2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
