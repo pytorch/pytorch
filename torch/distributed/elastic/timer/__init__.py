@@ -41,3 +41,4 @@ complete, then the worker process is killed and the agent retries the worker gro
 
 from .api import TimerClient, TimerRequest, TimerServer, configure, expires  # noqa: F401
 from .local_timer import LocalTimerClient, LocalTimerServer  # noqa: F401
+from .file_based_local_timer import FileTimerClient, FileTimerServer, FileTimerRequest  # noqa: F401
