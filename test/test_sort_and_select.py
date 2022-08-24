@@ -357,7 +357,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
-    @skipIfTorchDynamo("Dynamo cant handle while with random randrange")
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/982")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
