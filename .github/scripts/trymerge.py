@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import base64
-import json5 as json
+import json
 import os
 import re
 import time
