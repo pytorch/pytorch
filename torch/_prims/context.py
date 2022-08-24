@@ -70,6 +70,7 @@ def nvfuser_decomp_table():
     """
     decomposition table needed for nvfuser
     """
+
     def lower_to_copy(self, **kwargs):
         if len(kwargs) == 1 and "dtype" in kwargs:
             # note that prim here with decomposition table doesn't get dispatched to nvprim.
