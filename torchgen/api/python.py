@@ -1327,7 +1327,7 @@ def dispatch_lambda_exprs(
     arg_parser_outputs = arg_parser_output_exprs(ps, f)
     lambda_args = dispatch_lambda_args(ps, f)
     inits: List[str] = []
-    lambda_args_exprs: Dict[str, str] = dict()
+    lambda_args_exprs: Dict[str, str] = {}
 
     has_toptions = has_tensor_options(f)
 
