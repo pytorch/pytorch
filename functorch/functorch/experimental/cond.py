@@ -90,13 +90,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
         name="conditional")
 
-    # We could get an out tensor by running the real ops
-    # But to avoid running real code in tracing, we just use a dummy tensor.
-    # if pred:
-    #     out = true_fn(*operands)
-    # else:
-    #     out = false_fn(*operands)
-    out = torch.zeros([])
+    if pred:
+        out = true_fn(*operands)
+    else:
+        out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
