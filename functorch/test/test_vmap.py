@@ -3210,6 +3210,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
+        xfail('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
@@ -3223,12 +3224,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
+        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        skip('linalg.eigh', ''),  # silent incorrectness; Flaky but is likely a real problem
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
 
@@ -3303,7 +3304,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.matrix_rank', 'hermitian'),
         xfail('linalg.pinv'),
         xfail('linalg.pinv', 'hermitian'),
-        xfail('linalg.solve'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
@@ -3333,7 +3333,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.ihfftn'),
         xfail('allclose'),
         xfail('argwhere'),
-        xfail('linalg.cross'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
@@ -3401,7 +3400,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('special.chebyshev_polynomial_u'),
         xfail('special.modified_bessel_k1'),
         xfail('segment_reduce', 'offsets'),
-        xfail('linalg.solve_ex', ''),
         xfail('special.bessel_j1'),
         xfail('logspace', ''),
         xfail('empty', ''),
@@ -3501,6 +3499,28 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
+                                  postprocess_fn=compute_A)
+
+    def test_linalg_eigh(self, device):
+        # linalg_svd returns two tensors, (Q, L).
+        # Given the same input, it may return different tensors,
+        # because the eig decomposition isn't unique.
+        # To test that eigh is correct, we multiply
+        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # output from a for-loop.
+        def compute_A(out):
+            L, Q = out
+            n = Q.shape[-1]
+            diag_L = L.new_zeros(*L.shape[:-1], n, n)
+            diag_L.diagonal(offset=0, dim1=-2, dim2=-1).copy_(L)
+            Qh = Q.transpose(-2, -1).conj()
+            return Q @ diag_L @ Qh
+
+        opinfos = [op for op in op_db if op.name == 'linalg.eigh']
+        assert len(opinfos) > 0
+
+        for op in opinfos:
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
 
     def test_conv_double_backward(self, device):
@@ -3792,6 +3812,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
