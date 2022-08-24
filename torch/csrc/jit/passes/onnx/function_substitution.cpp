@@ -9,7 +9,7 @@ namespace jit {
 
 namespace {
 
-const std::string top_module_variable_name = "";
+const std::string kTopModuleVariableName = "";
 
 std::string TidyClassNameFromTorchScript(
     const c10::optional<c10::QualifiedName>& class_name) {
@@ -69,9 +69,9 @@ ScopePtr ForwardCallScope(Graph& graph, Node* call_node) {
   const std::string& method_name = call_node->s(attr::name);
   if (method_name == "forward") {
     const auto type = call_node->input(0)->type()->expect<c10::NamedType>();
-    const auto class_name = TidyClassNameFromTorchScript(type->name());
-    const auto variable_name = GetCallNodeVariableName(call_node);
-    const auto scope_name =
+    const std::string class_name = TidyClassNameFromTorchScript(type->name());
+    const std::string variable_name = GetCallNodeVariableName(call_node);
+    const std::string scope_name =
         onnx::ONNXScopeName::createFullScopeName(class_name, variable_name);
     return graph.current_scope()->push(Symbol::scope(scope_name));
   }
@@ -173,7 +173,7 @@ ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
   if (auto top_module_type = graph.inputs().at(0)->type()->cast<ClassType>()) {
     auto scope_name = ::torch::jit::onnx::ONNXScopeName::createFullScopeName(
         TidyClassNameFromTorchScript(top_module_type->name()),
-        top_module_variable_name);
+        kTopModuleVariableName);
     return graph.current_scope()->push(Symbol::scope(scope_name));
   }
   return graph.current_scope();

@@ -207,8 +207,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       return self;
     }
 
-    if (fbgemm_copy_transpose_valid(self, src) && src.dtype() == self.dtype() &&
-      (src.dtype() == at::kFloat || src.dtype() == at::kBFloat16)) {
+    if (fbgemm::fbgemmSupportedCPU() && fbgemm_copy_transpose_valid(self, src) &&
+      src.dtype() == self.dtype() && (src.dtype() == at::kFloat || src.dtype() == at::kBFloat16)) {
       fbgemm_copy_transpose_same_type(self, src);
       return self;
     }
