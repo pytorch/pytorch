@@ -1598,11 +1598,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # In tracing, None outputs are removed. In scripting they're kept but
-    # we don't know Optional.elem_type, so we can't construct a valid Optional.
+    # Outputs that are always None are removed.
+    # We don't know Optional.elem_type, so we can't construct a valid Optional.
     # Tests for Optional outputs (control flow with None in one branch,
     # not-None in another) are in test_pytorch_onnx_no_runtime.py.
-    @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
