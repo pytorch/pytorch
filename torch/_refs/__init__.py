@@ -1665,7 +1665,7 @@ def to(
 ) -> TensorLikeType:
     if (copy == True or dtype != a.dtype) and memory_format == torch.preserve_format and non_blocking == False:
         return torch.ops.nvprims.convert_element_type(a, dtype)
-    return torch.Tensor.to(a, dtype, non_blocking, copy, memory_format = memory_format)
+    return torch.ops.aten.to(a, dtype, non_blocking, copy, memory_format = memory_format)
 
 
 #
