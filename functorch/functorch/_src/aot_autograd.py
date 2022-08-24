@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -59,6 +60,70 @@ def preserve_rng_state():
             torch.cuda.set_rng_state(cuda_rng_state)
 
 
+# Set up hooks so that during backward the fx's stack_trace is properly set
+callback_set = False
+
+
+def setup_stacktrace_preservation_hooks(roots: List):
+    def iter_graph(roots):
+        if not roots:
+            return
+        seen = set()
+        q = collections.deque()
+        for node in roots:
+            if node is not None:
+                seen.add(node)
+                q.append(node)
+
+        while q:
+            node = q.popleft()
+            for fn, _idx in node.next_functions:
+                if fn in seen or fn is None:
+                    continue
+                seen.add(fn)
+                q.append(fn)
+
+            yield node
+
+    def get_callback(saved_stack_):
+        def callback():
+            global callback_set
+            fx_traceback.set_stack_trace(saved_stack_)
+            callback_set = False
+
+        return callback
+
+    def get_prehook(stack_):
+        def prehook(grad_output):
+            global callback_set
+
+            if not callback_set:
+                torch.autograd.variable.Variable._execution_engine.queue_callback(
+                    get_callback(fx_traceback.format_stack())
+                )
+                callback_set = True
+
+            fx_traceback.set_stack_trace(stack_)
+
+        return prehook
+
+    def get_posthook(special_stack_):
+        def posthook(grad_input, grad_output):
+            fx_traceback.set_stack_trace(special_stack_)
+
+        return posthook
+
+    for node in iter_graph(roots):
+        forward_node_stack = node.metadata.get("traceback_", [])
+        node.register_prehook(get_prehook(forward_node_stack))
+
+        special_stack = forward_node_stack.copy()
+        special_stack.append(
+            "Gradient addition node due to mulitple use of tensor around:"
+        )
+        node.register_hook(get_posthook(special_stack))
+
+
 def create_joint_forward_backward(fn):
     def joint_forward_backward(
         primals: List[Any], tangents: List[Any]
@@ -82,15 +147,19 @@ def create_joint_forward_backward(fn):
             if isinstance(out, Tensor) and out.requires_grad:
                 needed_outs.append(out)
                 needed_tangents.append(tangent)
+
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            backward_out = torch.autograd.grad(
-                needed_outs,
-                grad_primals,
-                grad_outputs=needed_tangents,
-                allow_unused=True,
-            )
+            with fx_traceback.override_stack_trace():
+                backward_out = torch.autograd.grad(
+                    needed_outs,
+                    grad_primals,
+                    grad_outputs=needed_tangents,
+                    allow_unused=True,
+                )
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -115,7 +184,8 @@ def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
 
-graph_being_compiled: str = None
+# This is a list since looking forward, we can have this arbitrarily nested.
+graph_being_compiled: List[str] = []
 nth_graph: int = 0
 model_name: str = "model"
 
@@ -125,23 +195,30 @@ def set_model_name(name):
     model_name = name
 
 
-def get_graph_being_compiled() -> str:
+def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+    return list(graph_being_compiled), model_name, nth_graph
+
+
+def get_aot_graph_name() -> str:
     """
     Returns the name of the graph being compiled.
     """
     global model_name, graph_being_compiled, nth_graph
-    return f"{model_name}_{graph_being_compiled}_{nth_graph}"
+    return f"{model_name}_{'_'.join(graph_being_compiled)}_{nth_graph}"
+
+
+get_graph_being_compiled = get_aot_graph_name
 
 
 @contextmanager
 def track_graph_compiling(graph_name, increment_index=False):
     global graph_being_compiled
-    graph_being_compiled = graph_name
+    graph_being_compiled = [graph_name]
     yield
     if increment_index:
         global nth_graph
         nth_graph += 1
-    graph_being_compiled = None
+    graph_being_compiled = []
 
 
 def make_boxed_func(f):
@@ -195,7 +272,7 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
-    with track_graph_compiling("forward"):
+    with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
@@ -231,14 +308,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
     if config.debug_joint:
-        print(fx_g.code)
+        print("====== Joint graph ======")
+        fx_g.print_readable()
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
         if config.debug_graphs:
-            print(fw_module.code, bw_module.code)
+            print("====== Forward graph ======")
+            fw_module.print_readable()
+            print("====== Backward graph ======")
+            bw_module.print_readable()
 
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
@@ -735,8 +816,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace():
-                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
