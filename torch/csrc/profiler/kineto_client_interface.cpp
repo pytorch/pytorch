@@ -1,6 +1,8 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
+
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/orchestration/observer.h>
 
 namespace torch {
 namespace profiler {
@@ -45,7 +47,10 @@ class LibKinetoClient : public libkineto::ClientInterface {
   }
 
   void stop() override {
-    (void)disableProfiler();
+    if (ProfilerStateBase::pop(/*global=*/true) ||
+        ProfilerStateBase::pop(/*global=*/false)) {
+      TORCH_WARN("LibKinetoClient preempted another profiler.");
+    }
   }
 
  private:
