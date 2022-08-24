@@ -63,6 +63,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
+    const auto layout = t.layout();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
@@ -74,10 +75,13 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*device_index_*/ t.device().index(),
         /*dtype=*/t.scalar_type(),
         /*dim_=*/(uint32_t)dim,
-        /*layout_=*/t.layout());
+        /*layout_=*/layout);
 
     tensor_sizes_strides_.copy(sizes);
-    tensor_sizes_strides_.copy(t.strides());
+    if (layout == at::kStrided) {
+      // Only Strided layout tensors have strides
+      tensor_sizes_strides_.copy(t.strides());
+    }
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
@@ -102,9 +106,11 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             (void)_; // Suppress unused variable warning
             out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.strides_.back().push_back(*tensor_size_strides_it++);
+          if (md.layout_ == at::kStrided) {
+            for (const auto _ : c10::irange(md.dim_)) {
+              (void)_; // Suppress unused variable warning
+              out.strides_.back().push_back(*tensor_size_strides_it++);
+            }
           }
           out.tensor_metadata_.emplace_back(md);
           out.ivalues_.emplace_back();
