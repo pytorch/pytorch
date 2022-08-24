@@ -21,15 +21,6 @@ ${HalfHeader}
 ${BFloat16Header}
 ${RandHeader}
 
-__host__ __device__ float __int_as_float(int a)
-{
-  union {int a; float b;} u;
-
-  u.a = a;
-
-  return u.b;
-}
-
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
