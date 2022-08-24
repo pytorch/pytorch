@@ -1,7 +1,9 @@
 import torch
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
-from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.backend_config.observation_type import ObservationType
+from torch.ao.quantization.backend_config import (
+    get_native_backend_config,
+    ObservationType,
+)
 from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern,
@@ -84,7 +86,7 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
     we can refactor this after we convert the path for fbgemm/qnnpack fully to the
     new path, this is not exposed to backend developers
     """
-    pattern_to_quantize_handlers = dict()
+    pattern_to_quantize_handlers = {}
     for pattern, config in backend_config.configs.items():
         observation_type = config.observation_type
         dtype_configs = config.dtype_configs
@@ -108,7 +110,7 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
 # TODO: move this to torch/ao/quantization/backend_config/utils.py
 def get_fusion_pattern_to_fuse_handler_cls(
         backend_config: BackendConfig) -> Dict[Pattern, Callable]:
-    fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = dict()
+    fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
     for pattern, config in backend_config.configs.items():
         if config.fuser_method is not None:
             # TODO: is this logic right?

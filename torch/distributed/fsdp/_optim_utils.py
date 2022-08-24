@@ -1,7 +1,9 @@
+import collections
 import copy
 import functools
 from typing import (
     Any,
+    cast,
     Dict,
     Iterable,
     Iterator,
@@ -15,11 +17,19 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 from torch.distributed.fsdp.flat_param import (
     FlatParameter,
     FlatParamHandle,
+)
+from torch.distributed._shard.sharded_tensor import (
+    ShardedTensor
+)
+from torch.distributed.fsdp._shard_utils import (
+    _create_chunk_sharded_tensor,
+    _gather_state_dict,
 )
 
 
@@ -77,6 +87,7 @@ def _unflatten_optim_state(
     flat_param_state: Dict[str, Any],
     fsdp_module,
     to_save: bool,
+    shard_state: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
@@ -104,10 +115,16 @@ def _unflatten_optim_state(
     consolidated_state = _communicate_optim_state(
         flat_param, flat_param_state, fsdp_module, to_save,
     )
-    unflat_param_state = _unflatten_communicated_optim_state(
-        flat_param,
-        consolidated_state,
-    ) if to_save else []
+    unflat_param_state = (
+        _unflatten_communicated_optim_state(
+            fsdp_module,
+            flat_param,
+            consolidated_state,
+            shard_state,
+        )
+        if to_save or shard_state
+        else []
+    )
     return unflat_param_state
 
 
@@ -174,8 +191,10 @@ def _communicate_optim_state(
 
 
 def _unflatten_communicated_optim_state(
+    fsdp_module,
     flat_param: FlatParameter,
     state: _ConsolidatedOptimState,
+    shard_state: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the communicated optimizer state (given by ``tensor_state``,
@@ -209,7 +228,17 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            unflat_state_param[state_name] = next(views)
+            optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
+            if shard_state:
+                optim_state = _create_chunk_sharded_tensor(
+                    optim_state,
+                    fsdp_module.rank,
+                    fsdp_module.world_size,
+                    torch.cuda.device_count(),
+                    fsdp_module.process_group,
+                )
+            unflat_state_param[state_name] = optim_state
+
         # Add zero-dimension tensor state: take the target rank's value
         for state_name, zero_dim_tensor in zero_dim_tensor_state.items():
             unflat_state_param[state_name] = zero_dim_tensor
@@ -220,8 +249,8 @@ def _unflatten_communicated_optim_state(
     return unflat_param_state
 
 
-def _flatten_full_optim_state_dict(
-    full_optim_state_dict: Dict[str, Any],
+def _flatten_optim_state_dict(
+    optim_state_dict: Dict[str, Any],
     model: torch.nn.Module,
     shard_state: bool,
 ) -> Dict[str, Any]:
@@ -234,10 +263,10 @@ def _flatten_full_optim_state_dict(
     Returns:
         Dict[str, Any]: The flattened optimizer state dict.
     """
-    full_osd = full_optim_state_dict
-    if "state" not in full_osd or "param_groups" not in full_osd:
+    unflat_osd = optim_state_dict
+    if "state" not in unflat_osd or "param_groups" not in unflat_osd:
         raise ValueError(
-            "`full_optim_state_dict` must have the keys \"state\" and "
+            "`optim_state_dict` must have the keys \"state\" and "
             "\"param_groups\" to be a valid optimizer state dict"
         )
     flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
@@ -245,7 +274,7 @@ def _flatten_full_optim_state_dict(
 
     # Construct the "state" part
     flat_osd_state: Dict[_OptimStateKey, Any] = {}
-    full_osd_state = full_osd["state"]
+    unflat_osd_state = unflat_osd["state"]
     for param, unflat_param_names in param_to_unflat_param_names.items():
         if isinstance(param, FlatParameter):  # flatten FSDP parameters' states
             assert param in flat_param_to_fsdp_module, \
@@ -253,7 +282,7 @@ def _flatten_full_optim_state_dict(
                 f"param: {param}"
             fsdp_module = flat_param_to_fsdp_module[param]
             flat_state = _flatten_optim_state(
-                full_osd_state, unflat_param_names, fsdp_module, param,
+                unflat_osd_state, unflat_param_names, fsdp_module, param,
                 shard_state,
             )
             key = _OptimStateKey(tuple(unflat_param_names), True)
@@ -261,17 +290,17 @@ def _flatten_full_optim_state_dict(
         else:  # do not flatten non-FSDP parameters' states
             assert len(unflat_param_names) == 1
             unflat_param_name = unflat_param_names[0]
-            if unflat_param_name not in full_osd_state:
+            if unflat_param_name not in unflat_osd_state:
                 # The state dict may not have an entry for a parameter if it
                 # was not passed into the optimizer (e.g. if it is not an
                 # FSDP-managed parameter)
                 continue
             key = _OptimStateKey(tuple(unflat_param_names), False)
-            flat_osd_state[key] = copy.copy(full_osd_state[unflat_param_name])
+            flat_osd_state[key] = copy.copy(unflat_osd_state[unflat_param_name])
 
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's `optim_input`
-    flat_osd_param_groups = copy.deepcopy(full_osd["param_groups"])
+    flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
     return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
 
 
@@ -326,8 +355,11 @@ def _flatten_optim_state(
     # There may still be some unflattened parameters with state and some
     # without
     unflat_param_states = [
-        unflat_osd_state[unflat_param_name]
-        if unflat_param_name in unflat_osd_state else None
+        _gather_state_dict(
+            unflat_osd_state[unflat_param_name], pg=fsdp_module.process_group
+        )
+        if unflat_param_name in unflat_osd_state
+        else None
         for unflat_param_name in unflat_param_names
     ]
     # Check that the unflattened parameters have the same state names
@@ -971,3 +1003,165 @@ def _get_unflat_to_flat_param_ids(
 
 def _is_zero_dim_tensor(x: Any) -> bool:
     return torch.is_tensor(x) and x.dim() == 0
+
+
+def _optim_state_dict(
+    model: torch.nn.Module,
+    optim: torch.optim.Optimizer,
+    optim_input: Optional[Union[
+        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+    ]] = None,
+    rank0_only: bool = True,
+    shard_state: bool = False,
+    group: Optional[dist.ProcessGroup] = None,
+) -> Dict[str, Any]:
+    """
+    Consolidates the optimizer state and returns it as a :class:`dict`
+    following the convention of :meth:`torch.optim.Optimizer.state_dict`,
+    i.e. with keys ``"state"`` and ``"param_groups"``.
+    The flattened parameters in ``FSDP`` modules contained in ``model``
+    are mapped back to their unflattened parameters.
+
+    Args:
+        model (torch.nn.Module): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance) whose parameters
+            were passed into the optimizer ``optim``.
+        optim (torch.optim.Optimizer): Optimizer for ``model`` 's
+            parameters.
+        optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+            Input passed into the optimizer ``optim`` representing either a
+            :class:`list` of parameter groups or an iterable of parameters;
+            if ``None``, then this method assumes the input was
+            ``model.parameters()``. (Default: ``None``)
+        rank0_only (bool): If ``True``, saves the populated :class:`dict`
+            only on rank 0; if ``False``, saves it on all ranks. (Default:
+            ``True``)
+        shard_state (bool): If ``True``, shard and distribute all
+            non-zero-dimension states.
+
+    Returns:
+        Dict[str, Any]: A :class:`dict` containing the optimizer state for
+        ``model`` 's original unflattened parameters and including keys
+        "state" and "param_groups" following the convention of
+        :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
+        then nonzero ranks return an empty :class:`dict`.
+    """
+    osd = optim.state_dict()
+    osd_state, osd_param_groups = osd["state"], osd["param_groups"]
+    rank = dist.get_rank(group)
+    to_save = not rank0_only or (rank == 0 or shard_state)
+    fsdp_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
+    fsdp_osd_state = fsdp_osd["state"] if to_save else None
+
+    # Construct the local mapping between unflattened parameter names
+    # (`_OptimStateKey`s) and parameter IDs and broadcast rank 0's mapping
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = \
+        FSDP._get_param_to_unflat_param_names(model)
+    flat_param_id_to_param: List[torch.nn.Parameter] = \
+        _get_param_id_to_param(model, optim_input)
+    optim_state_key_to_flat_param_id: Dict[_OptimStateKey, int] = {}  # local
+    r0_flat_param_id_to_optim_state_key: Dict[int, _OptimStateKey] = (
+        collections.OrderedDict()  # rank 0
+    )
+    for flat_param_id, param in enumerate(flat_param_id_to_param):
+        # Do not include parameters without state to avoid empty mappings
+        # just like in normal `torch.optim.Optimizer.state_dict()`
+        if flat_param_id not in osd_state:
+            continue
+        optim_state_key = _OptimStateKey(
+            unflat_param_names=tuple(param_to_unflat_param_names[param]),
+            is_flat_param=isinstance(param, FlatParameter),
+        )
+        if rank == 0:
+            r0_flat_param_id_to_optim_state_key[flat_param_id] = optim_state_key
+        optim_state_key_to_flat_param_id[optim_state_key] = flat_param_id
+    key_obj_list: List[Optional[Dict[int, _OptimStateKey]]] = (
+        [r0_flat_param_id_to_optim_state_key] if rank == 0 else [None]
+    )
+    dist.broadcast_object_list(key_obj_list, src=0, group=group)
+    assert key_obj_list[0] is not None
+    r0_flat_param_id_to_optim_state_key = key_obj_list[0]
+
+    # Ensure that all ranks have at least the optimizer states needed by
+    # rank 0's optimizer
+    missing_keys: List[_OptimStateKey] = []
+    for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
+        if r0_optim_state_key not in optim_state_key_to_flat_param_id:
+            # A parameter from rank 0's optimizer does not exist for this
+            # rank's optimizer
+            missing_keys.append(r0_optim_state_key)
+            continue
+        flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
+        assert flat_param_id >= 0 and flat_param_id < len(flat_param_id_to_param), \
+            "Check the `flat_param_id_to_param` construction"
+    device = torch.device("cuda", torch.cuda.current_device())
+    num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
+    dist.all_reduce(num_missing, group=group)
+    if num_missing.item() > 0:
+        obj_list = [None for _ in range(dist.get_world_size(group))]
+        dist.all_gather_object(obj_list, missing_keys, group=group)
+        error_msg = (
+            "FSDP currently requires each rank to have at least the "
+            "optimizer states needed by rank 0's optimizer but some ranks "
+            "are missing some of those states"
+        )
+        for rank, keys in enumerate(obj_list):
+            keys = cast(List[_OptimStateKey], keys)
+            if len(keys) > 0:
+                error_msg += (
+                    f"\nRank {rank} is missing states for the parameters: "
+                    f"{[key.unflat_param_names for key in keys]}"
+                )
+        raise RuntimeError(error_msg)
+
+    # Iterate in rank 0's flattened parameter ID order to ensure aligned
+    # all-gathers across ranks
+    flat_param_to_fsdp_module = _get_flat_param_to_fsdp_module(model)
+    for r0_optim_state_key in r0_flat_param_id_to_optim_state_key.values():
+        flat_param_id = optim_state_key_to_flat_param_id[r0_optim_state_key]
+        param = flat_param_id_to_param[flat_param_id]
+        if r0_optim_state_key.is_flat_param:
+            fsdp_module = flat_param_to_fsdp_module[param]
+            unflat_state = _unflatten_optim_state(
+                cast(FlatParameter, param),
+                osd_state[flat_param_id],
+                fsdp_module,
+                to_save,
+                shard_state
+            )
+            if to_save:
+                assert len(unflat_state) == len(r0_optim_state_key.unflat_param_names)
+                for unflat_param_name, unflat_param_state in zip(
+                    r0_optim_state_key.unflat_param_names, unflat_state,
+                ):
+                    fsdp_osd_state[unflat_param_name] = unflat_param_state
+        elif to_save:
+            assert len(r0_optim_state_key.unflat_param_names) == 1
+            unflat_param_name = r0_optim_state_key.unflat_param_names[0]
+            fsdp_osd_state[unflat_param_name] = copy.copy(osd_state[flat_param_id])
+            for state_name, value in fsdp_osd_state[unflat_param_name].items():
+                if torch.is_tensor(value):
+                    fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
+
+    if not to_save:
+        return {}
+
+    # Handle the "param_groups" part of the optimizer state dict
+    fsdp_osd_param_groups = fsdp_osd["param_groups"]  # alias
+    for flat_param_group in osd_param_groups:
+        unflat_param_group = copy.deepcopy(flat_param_group)
+        param_group_params = [
+            flat_param_id_to_param[flat_param_id]
+            for flat_param_id in flat_param_group["params"]
+        ]
+        nested_unflat_param_names = [
+            param_to_unflat_param_names[param]
+            for param in param_group_params
+        ]
+        unflat_param_group["params"] = [
+            unflat_param_name
+            for unflat_param_names in nested_unflat_param_names
+            for unflat_param_name in unflat_param_names
+        ]  # flatten the list of lists
+        fsdp_osd_param_groups.append(unflat_param_group)
+    return fsdp_osd

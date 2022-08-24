@@ -684,6 +684,7 @@ Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vecto
   return cvtfp32_bf16(o1, o2);
 }
 
+template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
 #pragma unroll
@@ -697,6 +698,7 @@ inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   }
 }
 
+template <>
 inline void convert(const float* src, BFloat16* dst, int64_t n) {
   int64_t i;
   for (i = 0; i + Vectorized<BFloat16>::size() <= n; i += Vectorized<BFloat16>::size()) {
@@ -711,6 +713,7 @@ inline void convert(const float* src, BFloat16* dst, int64_t n) {
   }
 }
 
+template <>
 inline void convert(const double* src, BFloat16* dst, int64_t n) {
   auto load_float = [](const double *src) -> __m256 {
     // Load one float vector from an array of doubles
