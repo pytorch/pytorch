@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -558,6 +559,37 @@ TEST(SchemaParserTest, Futures) {
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
+}
+
+TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(a!) self, Tensor(b!)[] out)"
+      " -> ()");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  const AliasInfo* outAliasInfo = s.arguments().at(1).alias_info();
+  ASSERT_TRUE(
+      selfAliasInfo->beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_TRUE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->beforeSets().empty());
+  ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
+
+  auto containedType = outAliasInfo->containedTypes()[0];
+
+  ASSERT_TRUE(containedType.isWrite());
+  ASSERT_TRUE(
+      containedType.beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
+}
+
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
 TEST(SchemaParserTest, BeforeAfterSets) {
