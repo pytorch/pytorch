@@ -17,6 +17,22 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
   }
 }
 
+FunctionSchema FunctionSchema::cloneWithRealTypes() const {
+  auto cloneWithRealTypes = [](const Argument& a) {
+    return a.cloneWithType(a.real_type());
+  };
+  std::vector<Argument> new_arguments, new_returns;
+  std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
+  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), cloneWithRealTypes);
+  return FunctionSchema(
+    name(),
+    overload_name(),
+    std::move(new_arguments),
+    std::move(new_returns),
+    is_vararg(),
+    is_varret());
+}
+
 bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
   if (!lhs || !rhs) {
     return false;
