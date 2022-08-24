@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+import torch._C_flatbuffer
 
 from torch.ao.quantization import (
     default_dynamic_qconfig,
@@ -22,12 +23,13 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 
-from torch.jit.mobile import _load_for_lite_interpreter
+from torch.jit.mobile import _load_for_lite_interpreter, LiteScriptModule
 
 from torch.testing import FileCheck
 from torch.utils import bundled_inputs as bundled_inputs
 
 import io
+from typing import Dict
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
@@ -437,6 +439,13 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertFalse(m.find_method("reset_observers_forward"))
             output = m(*inputs)
             self.assertTrue(torch.allclose(ref_output, output))
+
+            # Now serialize to flabuffer and load from fb and check
+            dict: Dict[str, str] = {}
+            bytes = torch._C_flatbuffer._save_mobile_module_to_bytes(m._c, dict)
+            m = LiteScriptModule(torch._C_flatbuffer._load_mobile_module_from_bytes(bytes))
+            fb_output = m(*inputs)
+            self.assertTrue(torch.allclose(ref_output, fb_output))
 
         model.eval()
         inputs = model.get_example_inputs()

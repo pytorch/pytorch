@@ -68,6 +68,7 @@ void Module::unsafeRemoveMethod(const std::string& basename) {
       break;
     }
   }
+  object_->type()->unsafeRemoveMethod(basename);
   cu_->unsafeRemoveFunction(i);
 }
 
@@ -82,6 +83,7 @@ void Module::unsafeCopyMethod(
       tobe_copied_name.prefix(), new_method_name);
   std::unique_ptr<Function> new_fn = std::make_unique<Function>(
       qualified_method_name, to_be_copied.get_code(), to_be_copied.getSchema());
+  object_->type()->addMethod(new_fn.get());
   cu_->register_function(std::move(new_fn));
 }
 
