@@ -188,8 +188,6 @@ void initPythonBindings(PyObject* module) {
         return s.funcname_.str();
       });
 
-  py::class_<NNModuleInfo>(m, "_NNModuleInfo");
-
   py::class_<ExtraFields<EventType::OutOfMemory>>(
       m, "_ExtraFields_OutOfMemory");
 
