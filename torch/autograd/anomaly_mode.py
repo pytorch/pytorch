@@ -75,9 +75,10 @@ class detect_anomaly(object):
         self.prev = torch.is_anomaly_enabled()
         self.check_nan = check_nan
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
-        warnings.warn('Anomaly Detection has been enabled. '
-                      'This mode will increase the runtime '
-                      'and should only be enabled for debugging.', stacklevel=2)
+        if check_nan:
+            warnings.warn('Anomaly Detection has been enabled with check_nan=True. '
+                        'This mode will increase the runtime '
+                        'and should only be enabled for debugging.', stacklevel=2)
 
     def __enter__(self) -> None:
         torch.set_anomaly_enabled(True, self.check_nan)
