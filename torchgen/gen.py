@@ -1252,6 +1252,8 @@ def compute_registration_declarations(
         # TODO: What exactly is the semantics of the 'dispatch' field?
         "dispatch": str(
             {k for k, v in backend_indices.items() if v.has_kernel(f)}
+            != {DispatchKey.CompositeImplicitAutograd}
+            and {k for k, v in backend_indices.items() if v.has_kernel(f)}
             != {
                 DispatchKey.CompositeImplicitAutograd,
                 DispatchKey.CompositeImplicitAutogradNestedTensor,

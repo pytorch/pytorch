@@ -46,8 +46,14 @@ bool isBackendDispatchKey(DispatchKey t) {
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to [math_dispatch_keyset x full_backend_mask]
-constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
+    autograd_dispatch_keyset |
+    // See Note [NestedTensor Not Included in Backend Keys]
+    // The caveat to that note is that nested_tensor is a special case
+    // where we would like to support composite implicit kernels but not
+    // explicit kernels therefore we manually add the key to the
+    // math_dispatch_keyset
+    DispatchKeySet{DispatchKey::NestedTensor};
 
 constexpr DispatchKeySet nested_dispatch_keyset =
     DispatchKeySet(

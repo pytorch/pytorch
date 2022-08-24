@@ -691,7 +691,7 @@ Tensor clone_nested(
   auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
   auto self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||
-  (memory_format == c10::MemoryFormat::Contiguous && nested_tensor_impl_is_contiguous(self_ptr))) {
+  (memory_format == c10::MemoryFormat::Contiguous && self.is_contiguous())) {
     const Tensor& buffer = self_ptr->get_buffer(),
         sizemat = self_ptr->get_nested_size_tensor(),
         stridemat = self_ptr->get_nested_stride_tensor();

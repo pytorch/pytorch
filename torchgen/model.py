@@ -660,9 +660,8 @@ class NativeFunction:
                     )
                     if (
                         dispatch_key is DispatchKey.CompositeImplicitAutograd
-                        or dispatch_key
-                        is DispatchKey.CompositeImplicitAutogradNestedTensor
-                    ) and v == cpp.name(func):
+                        and v == cpp.name(func)
+                    ):
                         redundant_composite_implicit_autograd = True
 
             assert not (len(dispatch) == 1 and redundant_composite_implicit_autograd), (
@@ -2577,10 +2576,7 @@ class NativeFunctionsViewGroup:
     def composite(self) -> bool:
         # We currently assert that the "group" is consistent.
         # If the view op is composite, then its view_inplace op is too.
-        return (
-            self.view.has_composite_implicit_autograd_kernel
-            or self.view.has_composite_implicit_autograd_nested_tensor_kernel
-        )
+        return self.view.has_composite_implicit_autograd_kernel
 
 
 def gets_generated_view_copy(f: NativeFunction) -> bool:
@@ -2589,10 +2585,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
         return False
     # We don't need to bother generating copy variants for CompositeImplicitAutograd ops,
     # because we can let them decompose into base view ops.
-    if (
-        f.has_composite_implicit_autograd_kernel
-        or f.has_composite_implicit_autograd_nested_tensor_kernel
-    ):
+    if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
     if "inplace_view" in f.tags:
