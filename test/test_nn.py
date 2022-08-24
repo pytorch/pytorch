@@ -50,7 +50,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
-    ctcloss_reference, new_module_tests, single_batch_reference_fn
+    ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import expectedFailureXLA, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
@@ -12499,21 +12499,6 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_module_empty_input(self, module, inp, check_size=True, inference=False):
-        if not inference:
-            inp.requires_grad_(True)
-        out = module(inp)
-        if not inference:
-            gO = torch.rand_like(out)
-            out.backward(gO)
-        if check_size:
-            self.assertEqual(out.size(), inp.size())
-        if not inference:
-            for p in module.parameters():
-                if p.requires_grad:
-                    self.assertEqual(p.grad, torch.zeros_like(p.grad))
-            self.assertEqual(inp.grad, torch.zeros_like(inp))
-
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
             _inp.requires_grad_(True)
@@ -13911,10 +13896,10 @@ class TestNNDeviceType(NNTestCase):
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
         inp = torch.randn(0, 4, 2, 2, device=device)
-        self._test_module_empty_input(mod, inp)
+        _test_module_empty_input(self, mod, inp)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_module_empty_input(mod, inp)
+                _test_module_empty_input(self, mod, inp)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -14019,7 +14004,7 @@ class TestNNDeviceType(NNTestCase):
                 (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
                 (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
                 (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
-            self._test_module_empty_input(mod, inp, check_size=False)
+            _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
             mod = torch.nn.ReplicationPad1d(2)
@@ -14150,7 +14135,7 @@ class TestNNDeviceType(NNTestCase):
                 if not training:
                     encoder_layer = encoder_layer.eval()
                     with torch.no_grad():
-                        self._test_module_empty_input(encoder_layer, input, check_size=False, inference=True)
+                        _test_module_empty_input(self, encoder_layer, input, check_size=False, inference=True)
                     if batch_first and not TEST_WITH_CROSSREF:
                         with torch.no_grad():
                             # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
@@ -14159,12 +14144,12 @@ class TestNNDeviceType(NNTestCase):
                             with self.assertRaisesRegex(
                                     AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
                                 nt = torch.nested_tensor([], device=device)
-                                self._test_module_empty_input(encoder_layer, nt, check_size=False, inference=True)
+                                _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
                             nt = torch.nested_tensor([torch.rand(0, 512, device=device)], device=device)
-                            self._test_module_empty_input(encoder_layer, nt, check_size=False, inference=True)
+                            _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
                 else:
-                    self._test_module_empty_input(encoder_layer, input, check_size=False)
+                    _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
@@ -14174,7 +14159,7 @@ class TestNNDeviceType(NNTestCase):
             input = torch.rand(*input_shape, device=device)
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6).to(device)
-            self._test_module_empty_input(transformer_encoder, input, check_size=False)
+            _test_module_empty_input(self, transformer_encoder, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
@@ -14213,7 +14198,7 @@ class TestNNDeviceType(NNTestCase):
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
                 (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
                 (torch.nn.ReflectionPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
-            self._test_module_empty_input(mod, inp, check_size=False)
+            _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
             mod = torch.nn.ReflectionPad1d(2)
@@ -14255,7 +14240,7 @@ class TestNNDeviceType(NNTestCase):
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
         inp = torch.ones(0, 5, 24, 24, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad3d_large(self, device):
@@ -14309,7 +14294,7 @@ class TestNNDeviceType(NNTestCase):
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
-        self._test_module_empty_input(unfold, inp, check_size=False)
+        _test_module_empty_input(self, unfold, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
             inp = torch.randn(3, 0, 3, 4, device=device)
@@ -14387,10 +14372,10 @@ class TestNNDeviceType(NNTestCase):
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device)
-        self._test_module_empty_input(mod, inp)
+        _test_module_empty_input(self, mod, inp)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_module_empty_input(mod, inp)
+                _test_module_empty_input(self, mod, inp)
 
         self.assertEqual(mod.running_mean, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.running_var, torch.tensor([1., 1, 1], device=device))
@@ -14402,7 +14387,7 @@ class TestNNDeviceType(NNTestCase):
         in_channels = 0
         mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2, dtype=dtype).to(device)
         inp = torch.randn(2, 0, 15, device=device, dtype=dtype)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
             inp = torch.randn(2, 1, 0, device=device)
@@ -14410,7 +14395,7 @@ class TestNNDeviceType(NNTestCase):
 
         mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
         inp = torch.randn(2, 0, 50, 100, device=device, dtype=dtype)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
             inp = torch.randn(2, 1, 40, 0, device=device)
@@ -14418,7 +14403,7 @@ class TestNNDeviceType(NNTestCase):
 
         mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
         inp = torch.randn(2, 0, 50, 20, 40, device=device, dtype=dtype)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
             inp = torch.randn(2, 1, 50, 0, 40, device=device)
@@ -14427,26 +14412,26 @@ class TestNNDeviceType(NNTestCase):
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_module_empty_input(mod, inp, check_size=False)
+                _test_module_empty_input(self, mod, inp, check_size=False)
 
     def test_group_convTranspose_empty(self, device):
         mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_module_empty_input(mod, inp, check_size=False)
+                _test_module_empty_input(self, mod, inp, check_size=False)
 
     def test_convTranspose_empty(self, device):
         mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_module_empty_input(mod, inp, check_size=False)
+                _test_module_empty_input(self, mod, inp, check_size=False)
 
     @onlyCUDA
     @largeTensorTest('16GB')
@@ -14459,7 +14444,7 @@ class TestNNDeviceType(NNTestCase):
     def test_linear_empty(self, device):
         mod = torch.nn.Linear(7, 7).to(device)
         inp = torch.randn(0, 7, device=device)
-        self._test_module_empty_input(mod, inp)
+        _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
         if self.device_type != 'cuda':  # cuda throws device assert for invalid data
@@ -17685,41 +17670,22 @@ class TestNNDeviceType(NNTestCase):
             test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
             test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
 
-    def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
-        # fp32 compute
-        input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
-        if scale_factor is not None:
-            input1 = (torch.rand(inp_dims, dtype=torch.bfloat16, device=device) * scale_factor).float().requires_grad_()
-        out1 = op(input1)
-        grad_input1 = torch.randn_like(out1, device=device)
-        out1.backward(grad_input1)
-
-        # bfloat16 compute
-        op_bfp16 = op.bfloat16()
-        input2 = input1.detach().bfloat16().requires_grad_()
-        grad_input2 = grad_input1.bfloat16()
-        out2 = op_bfp16(input2)
-        out2.backward(grad_input2)
-
-        self.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
-        self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
-
     @onlyCUDA
     def test_activations_bfloat16(self, device):
-        self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.ELU(), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.Softplus(), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.Hardshrink(), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.Softshrink(), device, inp_dims=(5), prec=1e-2)
-        self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.ELU(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.Softplus(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.Hardshrink(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.Softshrink(), device, inp_dims=(5), prec=1e-2)
+        _test_bfloat16_ops(self, torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyNativeDeviceTypes
     def test_softmax_bfloat16(self, device):
         for dim in [0, 1, 2, 3]:
-            self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
+            _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
             # test softmax with large input value which casues exp() to overflow
-            self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
+            _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
