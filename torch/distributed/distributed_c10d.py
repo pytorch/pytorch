@@ -117,9 +117,9 @@ class Backend(object):
     MPI = "mpi"
     TCP = "tcp"
 
-    BackendPlugin = namedtuple("BackendPlugin", ["creator_fn", "extended_api"])
+    _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
-    _plugins: Dict[str, BackendPlugin] = {}
+    _plugins: Dict[str, _BackendPlugin] = {}
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -172,7 +172,7 @@ class Backend(object):
         )
 
         setattr(Backend, name.upper(), name.upper())
-        Backend._plugins[name.upper()] = Backend.BackendPlugin(func, extended_api)
+        Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
