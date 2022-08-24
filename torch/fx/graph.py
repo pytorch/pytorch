@@ -416,6 +416,8 @@ class CodeGen(object):
             useful for debugging.
             """
             nonlocal prev_stacktrace
+            pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+
             if node.op not in {'placeholder', 'output'}:
                 if node.stack_trace:
                     if node.stack_trace != prev_stacktrace:
@@ -436,8 +438,14 @@ class CodeGen(object):
                             summary_lines.append(', '.join(context_lines))
 
                         if idx + 1 < len(lines):
-                            summary_lines.append(lines[idx].strip())  # lineage
-                            summary_lines.append(lines[idx + 1].strip())  # code snippet
+                            matches = pattern.match(lines[idx].strip())
+                            file = matches.group(1)
+                            lineno = matches.group(2)
+                            lineage = f'File: {file}:{lineno}'
+                            summary_lines.append(lineage)
+
+                            code = f"code: {lines[idx + 1].strip()}"
+                            summary_lines.append(code)
 
                         summary_str = ', '.join(summary_lines)
                         body.append(f'\n# {summary_str}\n')
