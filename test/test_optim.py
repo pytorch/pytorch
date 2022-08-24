@@ -331,7 +331,7 @@ class TestOptim(TestCase):
         optim1 = optimizer_constructor([a1])
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
-        for i in range(10):
+        for _ in range(10):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
@@ -871,6 +871,14 @@ class TestOptim(TestCase):
                     lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+            self._test_complex_2d(lambda param: optimizer(param, centered=True))
+            self._test_complex_2d(lambda param: optimizer(param, momentum=0.1))
+            self._test_complex_2d(lambda param: optimizer(param, maximize=True))
+            self._test_complex_optimizer(lambda param: optimizer([param]))
+            self._test_complex_optimizer(lambda param: optimizer([param], centered=True))
+            self._test_complex_optimizer(lambda param: optimizer([param], momentum=0.1))
+            self._test_complex_optimizer(lambda param: optimizer([param], maximize=True))
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
