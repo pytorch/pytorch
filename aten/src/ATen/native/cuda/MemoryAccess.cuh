@@ -95,7 +95,7 @@ struct multi_outputs_store_helper {
 
 struct LoadWithoutCast {
   template<typename scalar_t>
-  __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
+  __device__ scalar_t load(char *base_ptr, uint32_t offset, int /*arg*/) {
     return c10::load(reinterpret_cast<scalar_t *>(base_ptr) + offset);
   }
 };
@@ -248,7 +248,7 @@ struct vectorized {
 
   __device__ vectorized(data_t data) : data(data) {}
 
-  __device__ inline constexpr bool check_inbounds(int thread_work_elem) {
+  __device__ inline constexpr bool check_inbounds(int /*thread_work_elem*/) {
     return true;
   }
 
@@ -362,7 +362,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits /*_*/) {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input

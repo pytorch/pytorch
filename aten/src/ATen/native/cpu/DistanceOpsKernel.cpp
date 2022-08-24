@@ -90,7 +90,7 @@ struct Dist {
   // Zero norm
   template<typename data_t>
   struct zdist_calc {
-    static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
+    static inline data_t map(const data_t& diff, const data_t& /*p*/) { return min(ceil(abs(diff)), 1); }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
   };
@@ -98,7 +98,7 @@ struct Dist {
   // One norm
   template<typename data_t>
   struct odist_calc {
-    static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
+    static inline data_t map(const data_t& diff, const data_t& /*p*/) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t /*dist*/, const Vec& /*p*/) { return Vec(grad) * sign(diff); }
@@ -117,10 +117,10 @@ struct Dist {
   template<typename data_t>
   struct tdist_calc {
     // TODO This can probably use fused add multiply to get better perf
-    static inline data_t map(const data_t& diff, const data_t& p) { return diff * diff; }
+    static inline data_t map(const data_t& diff, const data_t& /*p*/) { return diff * diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::sqrt(agg); }
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : Vec(grad) * diff / Vec(dist); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return std::sqrt(agg); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& /*p*/) { return dist == 0.0 ? Vec(0) : Vec(grad) * diff / Vec(dist); }
   };
 
   // General p norm
@@ -135,9 +135,9 @@ struct Dist {
   // Inf norm
   template<typename data_t>
   struct idist_calc {
-    static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
+    static inline data_t map(const data_t& diff, const data_t& /*p*/) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return max(agg, up); }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
@@ -390,7 +390,7 @@ struct Dist {
   }
 
   template <typename F>
-  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
+  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t /*r1*/, int64_t /*r2*/, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 

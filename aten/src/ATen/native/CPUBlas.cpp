@@ -421,7 +421,7 @@ void gemm_batched(
   }
 
   c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
+      [&](auto /*_*/) {
         internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
         if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
           gemm_batched_mkl_impl(
@@ -431,7 +431,7 @@ void gemm_batched(
               transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
         }
       },
-      [&](auto _) {
+      [&](auto /*_*/) {
         gemm_batched_generic(
             transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
       }
@@ -469,7 +469,7 @@ void gemm_batched_with_stride(
   }
 
   c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
+      [&](auto /*_*/) {
         internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
         if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
           c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
@@ -490,7 +490,7 @@ void gemm_batched_with_stride(
               b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
         }
       },
-      [&](auto _) {
+      [&](auto /*_*/) {
         gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
                                          a, lda, batch_stride_a, b, ldb, batch_stride_b,
                                          beta, c, ldc, batch_stride_c);

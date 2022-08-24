@@ -48,7 +48,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
 template <bool ReLUFused = false>
 Tensor qcat_nhwc_kernel(
     const c10::List<Tensor>& qxs,
-    int64_t dim,
+    int64_t /*dim*/,
     double scale,
     int64_t zero_point) {
   const at::Tensor& qx0 = qxs[0];
@@ -1563,7 +1563,7 @@ void do_avg_pool_nhwc_on_AVX_n(
     int hend,
     int wstart,
     int wend,
-    int dsize,
+    int /*dsize*/,
     int hsize,
     int wsize,
     int csize) {
@@ -2087,10 +2087,10 @@ template <typename T>
 int64_t do_quantized_bilinear_on_AVX_n(
     const typename T::underlying*& pos1,
     typename T::underlying*& pos2,
-    int64_t input_height,
+    int64_t /*input_height*/,
     int64_t input_width,
-    int64_t output_height,
-    int64_t output_width,
+    int64_t /*output_height*/,
+    int64_t /*output_width*/,
     int64_t channels,
     int32_t output_zero_point,
     int32_t input_zero_point,
