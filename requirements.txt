@@ -11,3 +11,4 @@ six
 types-dataclasses
 typing_extensions
 sympy
+json5==0.9.5 # required to parse JSON files with comments like merge_rules.json
