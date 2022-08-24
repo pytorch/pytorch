@@ -647,7 +647,7 @@ class emit_nvtx(object):
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
         >>> with torch.cuda.profiler.profile():
-        ...     model(x) # Warmup CUDA memory allocator and profiler
+        ...     model(x)  # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():
         ...         model(x)
 

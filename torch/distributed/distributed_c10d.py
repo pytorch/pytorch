@@ -1940,6 +1940,7 @@ def _tensor_to_object(tensor, tensor_size):
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
 
+
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
     # Gate PG wrapper check on Gloo availability.
@@ -1953,6 +1954,7 @@ def _check_for_nccl_backend(group):
         is_nccl_available() and
         pg.name() == Backend.NCCL
     )
+
 
 @exception_handler
 def all_gather_object(object_list, obj, group=None):

@@ -2288,7 +2288,7 @@ def embedding_bag(
         >>> embedding_matrix = torch.rand(10, 3)
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
-        >>> offsets = torch.tensor([0,4])
+        >>> offsets = torch.tensor([0, 4])
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
@@ -2297,7 +2297,7 @@ def embedding_bag(
         >>> # example with padding_idx
         >>> embedding_matrix = torch.rand(10, 3)
         >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
-        >>> offsets = torch.tensor([0,4])
+        >>> offsets = torch.tensor([0, 4])
         >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
