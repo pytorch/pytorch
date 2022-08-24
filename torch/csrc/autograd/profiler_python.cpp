@@ -1,5 +1,9 @@
 #include <torch/csrc/autograd/profiler_python.h>
 
+#include <ATen/core/TensorBase.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
+#include <c10/util/StringUtil.h>
 #include <cstdint>
 #include <deque>
 #include <iostream>
@@ -17,6 +21,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/util.h>
@@ -182,9 +187,11 @@ template <>
 struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
   using ephemeral_t = PyFrameObject*;
+  using info_t =
+      std::pair<PyModuleCls, std::vector<std::pair<std::string, void*>>>;
   struct cache_t {
     c10::optional<CodeLocation> module_forward_;
-    ska::flat_hash_map<PyModuleSelf, PyModuleCls> modules_;
+    ska::flat_hash_map<PyModuleSelf, info_t> modules_and_params_;
     ska::flat_hash_map<PyModuleCls, at::StringView> module_cls_names_;
   };
   static constexpr EventType event_type = EventType::PyCall;
@@ -280,16 +287,30 @@ void ValueCache::store<CallType::PyModuleCall>(
     const PyModuleCallKey& key,
     Config<CallType::PyModuleCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
-  if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
+  if (C10_UNLIKELY(
+          cache.modules_and_params_.find(key) ==
+          cache.modules_and_params_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
       auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
       TORCH_INTERNAL_ASSERT(code.get() == nnModuleCode());
       cache.module_forward_ = PyCallKey(frame);
       store<CallType::PyCall>(*cache.module_forward_, no_ephemeral_t());
     }
+
+    py::dict params = py::handle((PyObject*)key).attr("_parameters");
+    std::vector<std::pair<std::string, void*>> params_;
+    for (auto& it : params) {
+      auto t = it.second.ptr();
+      if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(t)) {
+        auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
+        if (storage) {
+          params_.emplace_back(it.first.cast<std::string>(), storage->data());
+        }
+      }
+    }
     auto cls_handle = py::handle((PyObject*)key).attr("__class__");
     auto cls = PyModuleCls(cls_handle.ptr());
-    cache.modules_[key] = cls;
+    cache.modules_and_params_[key] = make_pair(cls, params_);
 
     if (cache.module_cls_names_.find(cls) == cache.module_cls_names_.end()) {
       cache.module_cls_names_[cls] =
@@ -303,9 +324,15 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
     const PyModuleCallKey& key) const {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   TORCH_INTERNAL_ASSERT(cache.module_forward_.has_value());
-  auto cls = cache.modules_.at(key);
+  auto cls = cache.modules_and_params_.at(key).first;
   auto fwd = std::get<CallType::PyCall>(state_).at(*cache.module_forward_);
-  return {fwd, NNModuleInfo{key, cls, cache.module_cls_names_.at(cls)}};
+  return {
+      fwd,
+      NNModuleInfo{
+          key,
+          cls,
+          cache.module_cls_names_.at(cls),
+          cache.modules_and_params_.at(key).second}};
 }
 
 template <>
@@ -495,7 +522,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void stop() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)> time_converter,
-      std::vector<python_tracer::CompressedEvent>& enters) override;
+      std::vector<python_tracer::CompressedEvent>& enters,
+      time_t end_time_ns) override;
   void clear() override;
 
  private:
@@ -666,8 +694,9 @@ class PostProcess {
   PostProcess(
       std::function<time_t(approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
-      const ValueCache& value_cache)
-      : time_converter_{time_converter} {
+      const ValueCache& value_cache,
+      time_t end_time_ns)
+      : end_time_{end_time_ns}, time_converter_{time_converter} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);
@@ -714,6 +743,12 @@ class PostProcess {
       std::vector<python_tracer::CompressedEvent>& enters,
       std::vector<std::shared_ptr<Result>>& out) {
     using stack_t = std::vector<std::shared_ptr<Result>>;
+    auto pop = [](stack_t& stack, time_t t) {
+      TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
+      c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+      stack.pop_back();
+    };
+
     ska::flat_hash_map<size_t, stack_t> stacks;
     auto& state = get_state<E>();
     for (const auto& enter : enters) {
@@ -721,12 +756,9 @@ class PostProcess {
       if (fields_it != state.fields_.end()) {
         while (!state.exits_.empty() &&
                state.exits_.top().t_ < enter.enter_t_) {
-          auto& stack = stacks[state.exits_.top().python_tid_];
-          TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
-          c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ =
-              state.exits_.top().t_;
+          auto& exit = state.exits_.top();
+          pop(stacks[exit.python_tid_], exit.t_);
           state.exits_.pop();
-          stack.pop_back();
         }
         out.push_back(Result::create(
             enter.enter_t_,
@@ -735,6 +767,13 @@ class PostProcess {
             fields_it->second));
 
         stacks[fields_it->second.python_tid_].push_back(out.back());
+      }
+    }
+
+    // Handle events which were still running when profiling ended.
+    for (auto& i : stacks) {
+      while (!i.second.empty()) {
+        pop(i.second, end_time_);
       }
     }
   }
@@ -750,6 +789,7 @@ class PostProcess {
     return std::get < E == EventType::PyCall ? 0 : 1 > (state_);
   }
 
+  time_t end_time_;
   std::function<time_t(approx_time_t)> time_converter_;
   std::tuple<State<EventType::PyCall>, State<EventType::PyCCall>> state_;
 };
@@ -778,9 +818,11 @@ struct PythonIDVisitor {
 
 std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     std::function<time_t(approx_time_t)> time_converter,
-    std::vector<python_tracer::CompressedEvent>& enters) {
+    std::vector<python_tracer::CompressedEvent>& enters,
+    time_t end_time_ns) {
   value_cache_.trimPrefixes();
-  PostProcess post_process(time_converter, thread_local_results_, value_cache_);
+  PostProcess post_process(
+      time_converter, thread_local_results_, value_cache_, end_time_ns);
   auto out = post_process.run(enters);
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
