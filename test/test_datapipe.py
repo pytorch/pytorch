@@ -1591,8 +1591,8 @@ class TestFunctionalIterDataPipe(TestCase):
         # Serialization Test
         from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 
-        def _serialization_helper(buffer_size):
-            shuffler_dp = input_dp.shuffle(buffer_size=buffer_size)
+        def _serialization_helper(bs):
+            shuffler_dp = input_dp.shuffle(buffer_size=bs)
             it = iter(shuffler_dp)
             for _ in range(2):
                 next(it)
@@ -1601,7 +1601,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
             exp = list(it)
             shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
-            self.assertEqual(exp, list(shuffler_dp_copy), f"Failed Shuffler serialization test with {buffer_size=}")
+            self.assertEqual(exp, list(shuffler_dp_copy))
 
         buffer_sizes = [2, 5, 15]
         for bs in buffer_sizes:
@@ -1840,13 +1840,16 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(10, len(shuffler_dp))
 
         # Serialization Test
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+
         shuffler_dp = input_dp1.shuffle()
         it = iter(shuffler_dp)
-        exp = []
         for _ in range(2):
-            exp.append(next(it))
+            next(it)
         shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
-        exp.extend(list(it))
+
+        exp = list(it)
+        shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
         self.assertEqual(exp, list(shuffler_dp_copy))
 
     def test_map_mapdatapipe(self):

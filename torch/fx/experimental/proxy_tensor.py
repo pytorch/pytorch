@@ -94,7 +94,8 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # TODO: improve naming
             # TODO: lazily insert this into the graph only on first
             # use?  Maybe complicated and DCE is a better idea
-            set_proxy_slot(inner_s, tracer, proxy.size(i))
+            set_proxy_slot(inner_s, tracer, torch.ops.aten.sym_size(proxy, i))
+
         # TODO: also do stride/numel
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
@@ -467,6 +468,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
         n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))
+
         n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
@@ -562,7 +564,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         # todo: Figure out a more informative name for symints
         def wrap_fake_symbolic(x, sym_shape):
             if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device)
+                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta", requires_grad=x.requires_grad), x.device)
                 return val
             return x
 
