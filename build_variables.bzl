@@ -556,6 +556,8 @@ torch_mobile_core = [
     # TODO: Remove this dependency
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
+    # TODO: This line needs to be uncommented to build mobile in OSS with flatbuffers
+    # "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
@@ -900,6 +902,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/passes/onnx/onnx_log.cpp",
+    "torch/csrc/jit/passes/onnx/naming.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
