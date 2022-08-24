@@ -1648,8 +1648,16 @@ class TestTorchFunctionRedispatchOps(TestCase):
 
         for sample in op.sample_inputs(device=device, dtype=dtype):
             wrapped = sample.transform(wrap)
+
             expect = op(sample.input, *sample.args, **sample.kwargs)
             actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
+
+            # Allow non-deterministic ops more wiggle-room
+            if op.gradcheck_nondet_tol > 0:
+                with torch._C.DisableTorchFunction():
+                    diff = (expect - actual).abs()
+                    if (diff < op.gradcheck_nondet_tol).all():
+                        continue
 
             with torch._C.DisableTorchFunction():
                 self.assertEqual(expect, actual)
