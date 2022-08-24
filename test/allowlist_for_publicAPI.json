@@ -386,6 +386,7 @@
     "GradBucket",
     "HashStore",
     "Logger",
+    "namedtuple",
     "Optional",
     "PrefixStore",
     "ProcessGroup",
@@ -419,6 +420,38 @@
     "backward",
     "get_gradients"
   ],
+<<<<<<< HEAD
+=======
+  "torch.distributed.distributed_c10d": [
+    "AllToAllOptions",
+    "AllreduceCoalescedOptions",
+    "AllreduceOptions",
+    "BarrierOptions",
+    "BroadcastOptions",
+    "Callable",
+    "DebugLevel",
+    "Dict",
+    "GatherOptions",
+    "namedtuple",
+    "Optional",
+    "PrefixStore",
+    "ProcessGroup",
+    "ProcessGroupGloo",
+    "ReduceOp",
+    "ReduceOptions",
+    "ReduceScatterOptions",
+    "ScatterOptions",
+    "Store",
+    "Tuple",
+    "Union",
+    "get_debug_level",
+    "register_rendezvous_handler",
+    "rendezvous",
+    "timedelta",
+    "ProcessGroupMPI",
+    "ProcessGroupNCCL"
+  ],
+>>>>>>> resolving non conforming public API errors
   "torch.distributed.elastic.events": [
     "Dict",
     "Enum",
