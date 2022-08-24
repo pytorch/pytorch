@@ -1,8 +1,9 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
+__all__ = ['RMSprop', 'rmsprop']
 
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.
@@ -61,11 +62,14 @@ class RMSprop(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     """
 
     def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0,
-                 centered=False, foreach: Optional[bool] = None):
+                 centered=False, foreach: Optional[bool] = None, maximize: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -78,7 +82,8 @@ class RMSprop(Optimizer):
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
         defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered,
-                        weight_decay=weight_decay, foreach=foreach)
+                        weight_decay=weight_decay, foreach=foreach, maximize=maximize,
+                        differentiable=differentiable)
         super(RMSprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -87,13 +92,15 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
             group.setdefault('foreach', None)
+            group.setdefault('maximize', False)
+            group.setdefault('differentiable', False)
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -127,13 +134,15 @@ class RMSprop(Optimizer):
                         state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if group['centered']:
                         state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
                 square_avgs.append(state['square_avg'])
 
                 if group['momentum'] > 0:
                     momentum_buffer_list.append(state['momentum_buffer'])
                 if group['centered']:
                     grad_avgs.append(state['grad_avg'])
+
+                if group['differentiable'] and isinstance(state['step'], Tensor):
+                    raise RuntimeError('`step` can\'t be a tensor')
 
                 state['step'] += 1
 
@@ -149,7 +158,9 @@ class RMSprop(Optimizer):
                     weight_decay=group['weight_decay'],
                     momentum=group['momentum'],
                     centered=group['centered'],
-                    foreach=group['foreach'])
+                    foreach=group['foreach'],
+                    maximize=group["maximize"],
+                    differentiable=group["differentiable"])
 
         return loss
 
@@ -162,6 +173,8 @@ def rmsprop(params: List[Tensor],
             # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
             # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
             foreach: bool = None,
+            maximize: bool = False,
+            differentiable: bool = False,
             *,
             lr: float,
             alpha: float,
@@ -195,7 +208,9 @@ def rmsprop(params: List[Tensor],
          eps=eps,
          weight_decay=weight_decay,
          momentum=momentum,
-         centered=centered)
+         centered=centered,
+         maximize=maximize,
+         differentiable=differentiable)
 
 
 def _single_tensor_rmsprop(params: List[Tensor],
@@ -209,10 +224,13 @@ def _single_tensor_rmsprop(params: List[Tensor],
                            eps: float,
                            weight_decay: float,
                            momentum: float,
-                           centered: bool):
+                           centered: bool,
+                           maximize: bool,
+                           differentiable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         square_avg = square_avgs[i]
 
         if weight_decay != 0:
@@ -223,9 +241,14 @@ def _single_tensor_rmsprop(params: List[Tensor],
         if centered:
             grad_avg = grad_avgs[i]
             grad_avg.mul_(alpha).add_(grad, alpha=1 - alpha)
-            avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_().add_(eps)
+            avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_()
         else:
-            avg = square_avg.sqrt().add_(eps)
+            avg = square_avg.sqrt()
+
+        if differentiable:
+            avg = avg.add(eps)
+        else:
+            avg = avg.add_(eps)
 
         if momentum > 0:
             buf = momentum_buffer_list[i]
@@ -246,10 +269,17 @@ def _multi_tensor_rmsprop(params: List[Tensor],
                           eps: float,
                           weight_decay: float,
                           momentum: float,
-                          centered: bool):
+                          centered: bool,
+                          maximize: bool,
+                          differentiable: bool):
 
     if len(params) == 0:
         return
+
+    assert not differentiable, "_foreach ops don't support autograd"
+
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)

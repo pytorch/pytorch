@@ -1,6 +1,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/CallOnce.h>
 
 #include <cstddef>
 #include <memory>
@@ -13,8 +14,8 @@ namespace detail {
 const HIPHooksInterface& getHIPHooks() {
   static std::unique_ptr<HIPHooksInterface> hip_hooks;
 #if !defined C10_MOBILE
-  static std::once_flag once;
-  std::call_once(once, [] {
+  static c10::once_flag once;
+  c10::call_once(once, [] {
     hip_hooks = HIPHooksRegistry()->Create("HIPHooks", HIPHooksArgs{});
     if (!hip_hooks) {
       hip_hooks =

@@ -140,9 +140,11 @@ Shape Node::computeShape(const std::function<Shape()>& shape_fn) {
 const std::vector<Output>& Node::operands() const {
   return operands_as_outputs_;
 }
+
 const Output& Node::operand(size_t i) const {
   return operands_as_outputs_.at(i);
 }
+
 const Output& Node::nullable_operand(size_t i) const {
   // We use kNullOutput instead of kNullValue here to avoid implicit casting,
   // which would prevent this method from returning a reference.
@@ -163,7 +165,7 @@ std::string Node::ToString() const {
 }
 
 void Node::AddOperand(NodePtr node, size_t index) {
-  CHECK_LT(index, node->num_outputs());
+  TORCH_CHECK_LT(index, node->num_outputs());
   operands_.push_back(node);
   operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }

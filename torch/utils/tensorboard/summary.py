@@ -20,6 +20,9 @@ from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
+__all__ = ['hparams', 'scalar', 'histogram_raw', 'histogram', 'make_histogram', 'image', 'image_boxes', 'draw_boxes',
+           'make_image', 'video', 'make_video', 'audio', 'custom_scalars', 'text', 'pr_curve_raw', 'pr_curve', 'compute_curve',
+           'mesh']
 
 logger = logging.getLogger(__name__)
 
@@ -568,12 +571,11 @@ def audio(tag, tensor, sample_rate=44100):
     import wave
 
     fio = io.BytesIO()
-    wave_write = wave.open(fio, "wb")
-    wave_write.setnchannels(1)
-    wave_write.setsampwidth(2)
-    wave_write.setframerate(sample_rate)
-    wave_write.writeframes(array.data)
-    wave_write.close()
+    with wave.open(fio, "wb") as wave_write:
+        wave_write.setnchannels(1)
+        wave_write.setsampwidth(2)
+        wave_write.setframerate(sample_rate)
+        wave_write.writeframes(array.data)
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(

@@ -1,15 +1,17 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load(
-    ":pt_defs.oss.bzl",
+    ":pt_ops.bzl",
     "pt_operator_library",
-    "get_pt_ops_deps",
 )
 load(":buckbuild.bzl",
     "define_buck_targets",
+    "get_pt_operator_registry_dict",
 )
 
+# define shared buck targets
 define_buck_targets()
 
+# define OSS only targets
 cxx_library(
     name = "pthreadpool",
     srcs = ['caffe2/utils/threadpool/pthreadpool.cc', 'caffe2/utils/threadpool/pthreadpool_impl.cc', 'caffe2/utils/threadpool/pthreadpool-cpp.cc', 'caffe2/utils/threadpool/thread_pool_guard.cpp', 'caffe2/utils/threadpool/ThreadPool.cc'],
@@ -76,21 +78,17 @@ cxx_library(
 
 pt_operator_library(
     name = "torch_mobile_ops_full_dev",
-    check_decl = False,
     include_all_operators = True,
 )
 
 cxx_library(
-    name = "torch_mobile_all_ops",
-    visibility = ["PUBLIC"],
-    deps = get_pt_ops_deps(
+    name = "pt_ops_full",
+    **get_pt_operator_registry_dict(
         name = "pt_ops_full",
-        train = False,
         deps = [
             ":torch_mobile_ops_full_dev",
         ],
-        enable_flatbuffer = False,
-    ),
+    )
 )
 
 cxx_binary(
@@ -118,7 +116,7 @@ cxx_binary(
     ],
     deps = [
         ":torch_mobile_core",
-        ":torch_mobile_all_ops",
+        ":pt_ops_full",
         "//c10:c10",
     ],
 )

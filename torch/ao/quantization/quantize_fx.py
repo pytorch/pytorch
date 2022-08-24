@@ -1,16 +1,16 @@
-import copy
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 import warnings
 
 import torch
 from torch.fx import GraphModule
-from torch.fx._symbolic_trace import Tracer
-from torch.fx.node import Target, Node, Argument
-from torch.nn.intrinsic import _FusedModule
+from .fx.tracer import QuantizationTracer
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
-from .backend_config import get_tensorrt_backend_config_dict  # noqa: F401
+from .backend_config import (  # noqa: F401
+    BackendConfig,
+    get_tensorrt_backend_config,
+)
 from .fx.graph_module import ObservedGraphModule
 from .fx.custom_config import (
     ConvertCustomConfig,
@@ -19,6 +19,7 @@ from .fx.custom_config import (
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
+from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
@@ -51,7 +52,7 @@ def _fuse_fx(
     graph_module: GraphModule,
     is_qat: bool,
     fuse_custom_config: Union[FuseCustomConfig, Dict[str, Any], None] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
     r""" Internal helper function to fuse modules in preparation for quantization
 
@@ -60,7 +61,7 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     return fuse(
-        graph_module, is_qat, fuse_custom_config, backend_config_dict)  # type: ignore[operator]
+        graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
 
 class Scope(object):
@@ -118,76 +119,19 @@ class ScopeContextManager(object):
         return
 
 
-class QuantizationTracer(Tracer):
-    def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
-    ):
-        super().__init__()
-        self.skipped_module_names = skipped_module_names
-        self.skipped_module_classes = skipped_module_classes
-        # NB: initialized the module_type of top level module to None
-        # we are assuming people won't configure the model with the type of top level
-        # module here, since people can use "" for global config
-        # We can change this if there is a use case that configures
-        # qconfig using top level module type
-        self.scope = Scope("", None)
-        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
-        self.record_stack_traces = True
-
-    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
-        return (
-            (
-                m.__module__.startswith("torch.nn")
-                and not isinstance(m, torch.nn.Sequential)
-            )
-            or module_qualified_name in self.skipped_module_names
-            or type(m) in self.skipped_module_classes
-            or isinstance(m, _FusedModule)
-        )
-
-    def call_module(
-        self,
-        m: torch.nn.Module,
-        forward: Callable[..., Any],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-    ) -> Any:
-        module_qualified_name = self.path_of_module(m)
-        # Creating scope with information of current module
-        # scope will be restored automatically upon exit
-        with ScopeContextManager(self.scope, m, module_qualified_name):
-            return super().call_module(m, forward, args, kwargs)
-
-    def create_node(
-        self,
-        kind: str,
-        target: Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
-    ) -> Node:
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)
-        self.node_name_to_scope[node.name] = (
-            self.scope.module_path,
-            self.scope.module_type,
-        )
-        return node
-
-
 def _prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     is_qat: bool,
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
     is_standalone_module: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `qconfig_mapping`, `prepare_custom_config`, `equalization_config`:
+      `model`, `qconfig_mapping`, `prepare_custom_config`, `_equalization_config`:
       see docs for :func:`~torch.ao.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
@@ -198,8 +142,8 @@ forward graph of the parent module,
     """
     if prepare_custom_config is None:
         prepare_custom_config = PrepareCustomConfig()
-    if equalization_config is None:
-        equalization_config = QConfigMapping()
+    if _equalization_config is None:
+        _equalization_config = QConfigMapping()
 
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
@@ -207,20 +151,13 @@ forward graph of the parent module,
             "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
-    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
-
     # swap FloatFunctional with FXFloatFunctional
     _swap_ff_with_fxff(model)
 
-    # symbolically trace the model
-    if not is_standalone_module:
-        # standalone module and custom module config are applied in top level module
-        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
-        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
-        skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-
+    skipped_module_names, skipped_module_classes = \
+        get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
     preserved_attributes = prepare_custom_config.preserved_attributes
+    # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
@@ -230,7 +167,7 @@ forward graph of the parent module,
         graph_module,
         is_qat,
         fuse_custom_config,
-        backend_config_dict)
+        backend_config)
     prepared = prepare(
         graph_module,
         qconfig_mapping,
@@ -238,8 +175,8 @@ forward graph of the parent module,
         tracer.node_name_to_scope,
         example_inputs=example_inputs,
         prepare_custom_config=prepare_custom_config,
-        equalization_config=equalization_config,
-        backend_config_dict=backend_config_dict,
+        _equalization_config=_equalization_config,
+        backend_config=backend_config,
         is_standalone_module=is_standalone_module,
     )  # type: ignore[operator]
 
@@ -254,7 +191,7 @@ def _prepare_standalone_module_fx(
     is_qat: bool,
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -284,7 +221,7 @@ def _prepare_standalone_module_fx(
         is_qat,
         example_inputs,
         prepare_custom_config,
-        backend_config_dict=backend_config_dict,
+        backend_config=backend_config,
         is_standalone_module=True,
     )
 
@@ -292,7 +229,7 @@ def _prepare_standalone_module_fx(
 def fuse_fx(
     model: torch.nn.Module,
     fuse_custom_config: Union[FuseCustomConfig, Dict[str, Any], None] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
     Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
@@ -329,7 +266,7 @@ def fuse_fx(
         preserved_attributes = set(fuse_custom_config.preserved_attributes)
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    return _fuse_fx(graph_module, False, fuse_custom_config, backend_config_dict)
+    return _fuse_fx(graph_module, False, fuse_custom_config, backend_config)
 
 
 def prepare_fx(
@@ -337,8 +274,8 @@ def prepare_fx(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> ObservedGraphModule:
     r""" Prepare a model for post training static quantization
 
@@ -360,6 +297,9 @@ def prepare_fx(
               .set_module_name("module2", qconfig2) \
               .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
 
+
+          The precedence of different settings:
+          set_global < set_object_type < set_module_name_regex < set_module_name < set_module_name_object_type_order
       * `example_inputs`: (required) Example inputs for forward function of the model
 
       * `prepare_custom_config`: customization configuration for quantization tool.
@@ -369,9 +309,9 @@ def prepare_fx(
 
               prepare_custom_config = PrepareCustomConfig() \
                   .set_standalone_module_name("module1", qconfig_mapping, example_inputs, \
-                      child_prepare_custom_config, backend_config_dict) \
+                      child_prepare_custom_config, backend_config) \
                   .set_standalone_module_class(MyStandaloneModule, qconfig_mapping, example_inputs, \
-                      child_prepare_custom_config, backend_config_dict) \
+                      child_prepare_custom_config, backend_config) \
                   .set_float_to_observed_mapping(FloatCustomModule, ObservedCustomModule) \
                   .set_non_traceable_module_names(["module2", "module3"]) \
                   .set_non_traceable_module_classes([NonTraceableModule1, NonTraceableModule2]) \
@@ -379,9 +319,9 @@ def prepare_fx(
                   .set_output_quantized_indexes([0]) \
                   .set_preserved_attributes(["attr1", "attr2"])
 
-      * `equalization_config`: config for specifying how to perform equalization on the model
+      * `_equalization_config`: config for specifying how to perform equalization on the model
 
-      * `backend_config_dict`: a dictionary that specifies how operators are quantized
+      * `backend_config`: config that specifies how operators are quantized
          in a backend, this includes how the operaetors are observed,
          supported fusion patterns, how quantize/dequantize ops are
          inserted, supported dtypes etc. The structure of the dictionary is still WIP
@@ -393,19 +333,105 @@ def prepare_fx(
     Example::
 
         import torch
-        from torch.ao.quantization import get_default_qconfig
+        from torch.ao.quantization import get_default_qconfig_mapping
         from torch.ao.quantization import prepare_fx
 
-        float_model.eval()
-        qconfig = get_default_qconfig('fbgemm')
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Submodule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x) + x
+                return x
+
+        # initialize a floating point model
+        float_model = M().eval()
+
+        # define calibration function
         def calibrate(model, data_loader):
             model.eval()
             with torch.no_grad():
                 for image, target in data_loader:
                     model(image)
 
-        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # qconfig is the configuration for how we insert observers for a particular
+        # operator
+        # qconfig = get_default_qconfig("fbgemm")
+        # Example of customizing qconfig:
+        # qconfig = torch.ao.quantization.QConfig(
+        #    activation=MinMaxObserver.with_args(dtype=torch.qint8),
+        #    weight=MinMaxObserver.with_args(dtype=torch.qint8))
+        # `activation` and `weight` are constructors of observer module
+
+        # qconfig_mapping is a collection of quantization configurations, user can
+        # set the qconfig for each operator (torch op calls, functional calls, module calls)
+        # in the model through qconfig_mapping
+        # the following call will get the qconfig_mapping that works best for models
+        # that target "fbgemm" backend
+        qconfig_mapping = get_default_qconfig_mapping("fbgemm")
+
+        # We can customize qconfig_mapping in different ways.
+        # e.g. set the global qconfig, which means we will use the same qconfig for
+        # all operators in the model, this can be overwritten by other settings
+        # qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # e.g. quantize the linear submodule with a specific qconfig
+        # qconfig_mapping = QConfigMapping().set_module_name("linear", qconfig)
+        # e.g. quantize all nn.Linear modules with a specific qconfig
+        # qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+        # for a more complete list, please see the docstring for :class:`torch.ao.quantization.QConfigMapping`
+        # argument
+
+        # example_inputs is a tuple of inputs, that is used to infer the type of the
+        # outputs in the model
+        # currently it's not used, but please make sure model(*example_inputs) runs
         example_inputs = (torch.randn(1, 3, 224, 224),)
+
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        # `prepare_fx` inserts observers in the model based on qconfig_mapping and
+        # backend_config. If the configuration for an operator in qconfig_mapping
+        # is supported in the backend_config (meaning it's supported by the target
+        # hardware), we'll insert observer modules according to the qconfig_mapping
+        # otherwise the configuration in qconfig_mapping will be ignored
+        #
+        # Example:
+        # in qconfig_mapping, user sets linear module to be quantized with quint8 for
+        # activation and qint8 for weight:
+        # qconfig = torch.ao.quantization.QConfig(
+        #     observer=MinMaxObserver.with_args(dtype=torch.quint8),
+        #     weight=MinMaxObserver.with-args(dtype=torch.qint8))
+        # Note: current qconfig api does not support setting output observer, but
+        # we may extend this to support these more fine grained control in the
+        # future
+        #
+        # qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+        # in backend config, linear module also supports in this configuration:
+        # weighted_int8_dtype_config = DTypeConfig(
+        #   input_dtype=torch.quint8,
+        #   output_dtype=torch.quint8,
+        #   weight_dtype=torch.qint8,
+        #   bias_type=torch.float)
+
+        # linear_pattern_config = BackendPatternConfig(torch.nn.Linear) \
+        #    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+        #    .add_dtype_config(weighted_int8_dtype_config) \
+        #    ...
+
+        # backend_config = BackendConfig().set_backend_pattern_config(linear_pattern_config)
+        # `prepare_fx` will check that the setting requested by suer in qconfig_mapping
+        # is supported by the backend_config and insert observers and fake quant modules
+        # in the model
         prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)
         # Run calibration
         calibrate(prepared_model, sample_inference_data)
@@ -417,8 +443,8 @@ def prepare_fx(
         False,  # is_qat
         example_inputs,
         prepare_custom_config,
-        equalization_config,
-        backend_config_dict,
+        _equalization_config,
+        backend_config,
     )
 
 
@@ -427,7 +453,7 @@ def prepare_qat_fx(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> ObservedGraphModule:
     r""" Prepare a model for quantization aware training
 
@@ -436,7 +462,7 @@ def prepare_qat_fx(
       * `qconfig_mapping`: see :func:`~torch.ao.quantization.prepare_fx`
       * `example_inputs`: see :func:`~torch.ao.quantization.prepare_fx`
       * `prepare_custom_config`: see :func:`~torch.ao.quantization.prepare_fx`
-      * `backend_config_dict`: see :func:`~torch.ao.quantization.prepare_fx`
+      * `backend_config`: see :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
       A GraphModule with fake quant modules (configured by qconfig_mapping), ready for
@@ -445,19 +471,75 @@ def prepare_qat_fx(
     Example::
 
         import torch
-        from torch.ao.quantization import get_default_qat_qconfig
+        from torch.ao.quantization import get_default_qat_qconfig_mapping
         from torch.ao.quantization import prepare_fx
 
-        qconfig = get_default_qat_qconfig('fbgemm')
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Submodule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x) + x
+                return x
+
+        # initialize a floating point model
+        float_model = M().train()
+        # (optional, but preferred) load the weights from pretrained model
+        # float_model.load_weights(...)
+
+        # define the training loop for quantization aware training
         def train_loop(model, train_data):
             model.train()
             for image, target in data_loader:
                 ...
 
-        float_model.train()
-        qconfig_mapping = QConfigMapping().set_global(qconfig)
-        prepared_model = prepare_fx(float_model, qconfig_mapping)
-        # Run calibration
+        # qconfig is the configuration for how we insert observers for a particular
+        # operator
+        # qconfig = get_default_qconfig("fbgemm")
+        # Example of customizing qconfig:
+        # qconfig = torch.ao.quantization.QConfig(
+        #    activation=FakeQuantize.with_args(observer=MinMaxObserver.with_args(dtype=torch.qint8)),
+        #    weight=FakeQuantize.with_args(observer=MinMaxObserver.with_args(dtype=torch.qint8)))
+        # `activation` and `weight` are constructors of observer module
+
+        # qconfig_mapping is a collection of quantization configurations, user can
+        # set the qconfig for each operator (torch op calls, functional calls, module calls)
+        # in the model through qconfig_mapping
+        # the following call will get the qconfig_mapping that works best for models
+        # that target "fbgemm" backend
+        qconfig_mapping = get_default_qat_qconfig("fbgemm")
+
+        # We can customize qconfig_mapping in different ways, please take a look at
+        # the doctring for :func:`~torch.ao.quantization.prepare_fx` for different ways
+        # to configure this
+
+        # example_inputs is a tuple of inputs, that is used to infer the type of the
+        # outputs in the model
+        # currently it's not used, but please make sure model(*example_inputs) runs
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        # `prepare_qat_fx` inserts observers in the model based on qconfig_mapping and
+        # backend_config, if the configuration for an operator in qconfig_mapping
+        # is supported in the backend_config (meaning it's supported by the target
+        # hardware), we'll insert fake_quantize modules according to the qconfig_mapping
+        # otherwise the configuration in qconfig_mapping will be ignored
+        # see :func:`~torch.ao.quantization.prepare_fx` for a detailed explanation of
+        # how qconfig_mapping interacts with backend_config
+        prepared_model = prepare_qat_fx(float_model, qconfig_mapping, example_inputs)
+        # Run training
         train_loop(prepared_model, train_loop)
 
     """
@@ -468,7 +550,7 @@ def prepare_qat_fx(
         True,  # is_qat
         example_inputs,
         prepare_custom_config,
-        backend_config_dict=backend_config_dict,
+        backend_config=backend_config,
     )
 
 
@@ -479,7 +561,7 @@ def _convert_fx(
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
-    backend_config_dict: Dict[str, Any] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -501,7 +583,7 @@ def _convert_fx(
         is_standalone_module,
         _remove_qconfig_flag=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
-        backend_config_dict=backend_config_dict,
+        backend_config=backend_config,
     )
 
     preserved_attributes = convert_custom_config.preserved_attributes
@@ -512,11 +594,10 @@ def _convert_fx(
 
 def convert_fx(
     graph_module: GraphModule,
-    is_reference: bool = False,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
-    qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
-    backend_config_dict: Dict[str, Any] = None,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a quantized model
 
@@ -550,7 +631,7 @@ def convert_fx(
                 .set_object_type(torch.nn.functional.linear, qconfig_from_prepare)
                 .set_module_name("foo.bar", None)  # skip quantizing module "foo.bar"
 
-         * `backend_config_dict`: A configuration for the backend which describes how
+         * `backend_config`: A configuration for the backend which describes how
             operators should be quantized in the backend, this includes quantization
             mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
             observer placement for each operators and fused operators. Detailed
@@ -562,17 +643,78 @@ def convert_fx(
     Example::
 
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
+        # convert_fx converts a calibrated/trained model to a quantized model for the
+        # target hardware, this includes converting the model first to a reference
+        # quantized model, and then lower the reference quantized model to a backend
+        # Currently, the supported backends are fbgemm (onednn), qnnpack (xnnpack) and
+        # they share the same set of quantized operators, so we are using the same
+        # lowering procedure
+        #
+        # backend_config defines the corresponding reference quantized module for
+        # the weighted modules in the model, e.g. nn.Linear
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
         quantized_model = convert_fx(prepared_model)
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
     return _convert_fx(
         graph_module,
-        is_reference,
-        convert_custom_config,
+        is_reference=False,
+        convert_custom_config=convert_custom_config,
         _remove_qconfig=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
-        backend_config_dict=backend_config_dict,
+        backend_config=backend_config,
+    )
+
+
+def convert_to_reference_fx(
+    graph_module: GraphModule,
+    convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
+    _remove_qconfig: bool = True,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+) -> torch.nn.Module:
+    r""" Convert a calibrated or trained model to a reference quantized model,
+    see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md for more details,
+    reference quantzied model is a standard representation of a quantized model provided
+    by FX Graph Mode Quantization, it can be further lowered to run on the target
+    hardware, like accelerators
+
+    Args:
+        * `graph_module`: A prepared and calibrated/trained model (GraphModule)
+
+        * `convert_custom_config`: custom configurations for convert function.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+        * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
+
+        * `qconfig_mapping`: config for specifying how to convert a model for quantization.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+         * `backend_config`: A configuration for the backend which describes how
+            operators should be quantized in the backend. See
+            :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+    Return:
+        A reference quantized model (GraphModule)
+
+    Example::
+
+        # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        reference_quantized_model = convert_to_reference_fx(prepared_model)
+
+    """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_to_reference_fx")
+    return _convert_fx(
+        graph_module,
+        is_reference=True,
+        convert_custom_config=convert_custom_config,
+        _remove_qconfig=_remove_qconfig,
+        qconfig_mapping=qconfig_mapping,
+        backend_config=backend_config,
     )
 
 

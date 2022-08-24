@@ -43,7 +43,8 @@ class BaseSparsifier(abc.ABC):
 
     Example::
 
-        >>> config = [{'tensor_fqn': 'layer1.weight', {'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
+        >>> # xdoctest: +SKIP("Can't instantiate abstract class BaseSparsifier with abstract method update_mask")
+        >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
@@ -140,8 +141,10 @@ class BaseSparsifier(abc.ABC):
             module = stack.pop()
             for name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
+                    module_fqn = module_to_fqn(model, child)
+                    assert isinstance(module_fqn, str)  # for mypy
                     self.config.append(
-                        {"tensor_fqn": module_to_fqn(model, child) + ".weight"}
+                        {"tensor_fqn": module_fqn + ".weight"}
                     )
                 else:
                     stack.append(child)
@@ -231,6 +234,7 @@ class BaseSparsifier(abc.ABC):
                             to save in the `sparse_params`
 
         Examples:
+            >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
             >>> sparsifier.squash_mask()
             >>> hasattr(model.submodule1, 'sparse_params')

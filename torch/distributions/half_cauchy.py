@@ -7,6 +7,7 @@ from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['HalfCauchy']
 
 class HalfCauchy(TransformedDistribution):
     r"""
@@ -17,6 +18,7 @@ class HalfCauchy(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = HalfCauchy(torch.tensor([1.0]))
         >>> m.sample()  # half-cauchy distributed with scale=1
         tensor([ 2.3214])

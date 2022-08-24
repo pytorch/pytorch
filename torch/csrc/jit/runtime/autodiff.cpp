@@ -389,7 +389,7 @@ bool outputRequiresGrad(Value* output) {
 static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto& graph = *grad_desc.f;
   // note: reverse_node is intentionally not inserted to avoid
-  // accidentally acting on it (e.g. in elminate dead code),
+  // accidentally acting on it (e.g. in eliminate dead code),
   // std::cout << *reverse_node << to view its state.
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();

@@ -1338,19 +1338,19 @@ ToArgs extract_to_args(ProcessedNode* p_node) {
     const auto& other = p_node->Input(1).toTensor();
     result.dtype = other.scalar_type();
     result.layout = other.layout();
-    DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
   } else {
     const auto& self = p_node->Input(0).toTensor();
     result.dtype = p_node->Input(1).toOptional<at::ScalarType>();
     result.layout = self.layout();
     // Static runtime only works with CPU tensors; don't need to read this.
-    DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
     result.know_to_will_alias = has_constant_non_tensor_dtype_and_flags &&
         (!result.dtype.has_value() ||
          result.dtype.value() == self.dtype().toScalarType());
   }
   if (has_memory_format) {
-    DCHECK_EQ(p_node->num_inputs(), 5);
+    TORCH_DCHECK_EQ(p_node->num_inputs(), 5);
     result.memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
     result.know_to_will_alias = result.know_to_will_alias &&
         (result.memory_format.value_or(c10::MemoryFormat::Preserve) ==
@@ -1633,6 +1633,36 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+namespace {
+
+std::vector<std::int64_t> permute_output_sizes(
+    c10::IntArrayRef self_sizes,
+    c10::IntArrayRef dims) {
+  const auto nDim = dims.size();
+  TORCH_CHECK(
+      self_sizes.size() == nDim,
+      "permute input and output tensors must have the same rank, got input rank=",
+      self_sizes.size(),
+      "; output rank=",
+      nDim);
+  std::vector<bool> dims_seen(nDim, false);
+  std::vector<std::int64_t> output_sizes;
+  output_sizes.reserve(nDim);
+  for (size_t i = 0; i < nDim; ++i) {
+    auto dim = c10::maybe_wrap_dim(dims[i], nDim);
+    TORCH_CHECK(
+        !dims_seen[dim],
+        "permute dims must be unique, found duplicate dim=",
+        dim);
+
+    output_sizes.push_back(self_sizes[dim]);
+    dims_seen[dim] = true;
+  }
+  return output_sizes;
+}
+
+} // namespace
+
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
 REGISTER_OPERATOR_FUNCTOR(
@@ -1649,6 +1679,29 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out = p_node->Output(0).toTensor();
         at::native::reshape_copy_out(out, self, proposed_shape, true);
+      };
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::permute_copy,
+    sr_permute_copy,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto dims = p_node->Input(1).toDimVector();
+
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(self);
+        }
+        auto& output = p_node->Output(0).toTensor();
+        at::native::resize_(
+            output, permute_output_sizes(self.sizes(), dims), c10::nullopt);
+        at::native::permute_copy_out(self, dims, output);
       };
     });
 
@@ -1691,10 +1744,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     };
   }
   if (n->matches(torch::schema(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const at::Tensor& self = p_node->Input(0).toTensor();
-      auto dim = p_node->Input(1).toIntList().vec();
+      auto dim = p_node->Input(1).toDimVector();
       auto keepdim = p_node->Input(2).toBool();
       auto dtype = p_node->Input(3).toOptional<at::ScalarType>();
       if (p_node->Output(0).isNone()) {
@@ -1712,7 +1765,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+          "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto dim = p_node->Input(1).toDimVector();
