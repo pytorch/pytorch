@@ -6,11 +6,8 @@ import functools
 import traceback
 import warnings
 
+from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
-
-
-class CallHintViolationWarning(UserWarning):
-    pass
 
 
 def _no_op_decorator(func):
@@ -56,7 +53,7 @@ else:
                         # Fall back to the original function if the beartype hint is violated.
                         warnings.warn(
                             traceback.format_exc(),
-                            category=CallHintViolationWarning,
+                            category=errors.CallHintViolationWarning,
                             stacklevel=2,
                         )
                     finally:
