@@ -29,6 +29,9 @@ MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
 PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
+FILE_LIKE = Union[str, os.PathLike, BinaryIO, IO[bytes]],
+MAP_LOCATION = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+
 __all__ = [
     'SourceChangeWarning',
     'mkdtemp',
@@ -367,7 +370,7 @@ def _check_dill_version(pickle_module) -> None:
 
 def save(
     obj: object,
-    f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
+    f: FILE_LIKE,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True
@@ -646,8 +649,8 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
 
 def load(
-    f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
-    map_location: Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]] = None,
+    f: FILE_LIKE,
+    map_location: MAP_LOCATION = None,
     pickle_module: Any = pickle,
     **pickle_load_args: Any
 ) -> Any:

@@ -14,6 +14,7 @@ from typing import Callable, Dict, Optional, Union, Any
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
+from torch.serialization import MAP_LOCATION
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
@@ -666,7 +667,7 @@ def _legacy_zip_load(filename, model_dir, map_location):
 def load_state_dict_from_url(
     url: str,
     model_dir: Optional[str] = None,
-    map_location: Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]] = None,
+    map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
     file_name: Optional[str] = None
