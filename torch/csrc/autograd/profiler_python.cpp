@@ -632,7 +632,7 @@ void PythonTracer::stop() {
 
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
-    SOFT_ASSERT(!active_, "Failed to return python tracer lock.");
+    SOFT_ASSERT(lock_returned, "Failed to return python tracer lock.");
   }
 }
 
