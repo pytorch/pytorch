@@ -19,7 +19,7 @@ def _no_op_decorator(func: _T) -> _T:
 
 
 if GLOBALS.runtime_type_check is False:
-    beartype = _no_op_decorator
+    _wrapped_beartype = _no_op_decorator
 else:
     try:
         import beartype as beartype_lib  # type: ignore[import]
@@ -36,7 +36,7 @@ else:
 
         if GLOBALS.runtime_type_check is True:
             # Enable runtime type checking which errors on any type hint violation.
-            def beartype(func: _T) -> _T:
+            def _wrapped_beartype(func: _T) -> _T:
                 """Wrapper for the beartype decorator."""
                 # Wrap the decorator to make the type consistent for mypy
                 return beartype_lib.beartype(func)  # type: ignore[call-overload]
@@ -44,7 +44,7 @@ else:
         else:
             # GLOBALS.runtime_type_check is None, show warnings only.
 
-            def beartype(func: _T) -> _T:
+            def _wrapped_beartype(func: _T) -> _T:
                 """Warn on type hint violation."""
 
                 if "return" in func.__annotations__:
@@ -73,8 +73,9 @@ else:
 
     except ImportError:
         # Beartype is not installed.
-        beartype = _no_op_decorator
+        _wrapped_beartype = _no_op_decorator
 
-typing.cast(Callable[[_T], _T], beartype)
 # Make sure that the beartype decorator is enabled whichever path we took.
-assert beartype is not None
+assert _wrapped_beartype is not None
+# Force cast to Callable to avoid mypy error.
+beartype = typing.cast(Callable[[_T], _T], _wrapped_beartype)
