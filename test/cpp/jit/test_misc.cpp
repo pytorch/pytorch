@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -571,7 +572,7 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
       std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
   ASSERT_TRUE(selfAliasInfo->isWrite());
 
-  ASSERT_FALSE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->isWrite());
   ASSERT_TRUE(outAliasInfo->beforeSets().empty());
   ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
 
@@ -584,14 +585,11 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
 }
 
 TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
-  const auto s = parseSchema(
-      "at::foo(Tensor(!) self)"
-      " -> Tensor");
-  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
-  ASSERT_TRUE(selfAliasInfo->beforeSets().empty());
-  ASSERT_TRUE(selfAliasInfo->isWrite());
-
-  ASSERT_EQ(c10::toString(s), "at::foo(Tensor self) -> Tensor");
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
 TEST(SchemaParserTest, BeforeAfterSets) {
