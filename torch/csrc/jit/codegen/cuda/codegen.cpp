@@ -754,10 +754,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     auto out_tv = rop->output(0)->as<kir::TensorIndex>()->view();
     auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
     int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
-    indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = (" << index
-             << ") / " << multiple << ";\n";
-    indent() << "nvfuser_index_t rng_component" << rop->name() << " = ("
-             << index << ") % " << multiple << ";\n";
+    indent() << "nvfuser_index_t linear_index" << rop->name() << " = " << index
+             << ";\n";
+    indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = linear_index"
+             << rop->name() << " / " << multiple << ";\n";
+    indent() << "nvfuser_index_t rng_component" << rop->name()
+             << " = linear_index" << rop->name() << " % " << multiple << ";\n";
     indent() << "nvfuser_index_t rng_offset" << rop->name() << " = "
              << rop->getRNGOffset() << ";\n";
     indent() << "if (rng_subseq != rng_subseq" << rop->name()

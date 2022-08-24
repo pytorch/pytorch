@@ -204,6 +204,10 @@ bool isScalarOp(const Expr* expr) {
 }
 
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (expr->isA<kir::BlockSync>()) {
+    return true;
+  }
+
   if (!isTvOp(expr)) {
     return false;
   }

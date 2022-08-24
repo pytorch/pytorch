@@ -109,6 +109,9 @@ class DomainMap : public pointwise_utils::DomainMap {
     decltype(input_tvs)* tv_filtered_groups[2] = {&output_tvs, &input_tvs};
     for (auto tv_filtered_group : tv_filtered_groups) {
       for (auto tv : *tv_filtered_group) {
+        if (tv->isFusionInput() && tv->uses().empty()) {
+          continue;
+        }
         if (grouped.count(tv) > 0) {
           continue;
         }
@@ -653,7 +656,7 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
     if (inner_most_pos2_in_ref1 > inner_most_pos1_in_ref1) {
       inner_most_pos2_in_ref1--;
     }
-    if (!merged2.has_value() && *merged2 > inner_most_pos1_in_ref1) {
+    if (merged2.has_value() && *merged2 > inner_most_pos1_in_ref1) {
       (*merged2)--;
     }
     reference1->merge(*merged1, inner_most_pos1_in_ref1);

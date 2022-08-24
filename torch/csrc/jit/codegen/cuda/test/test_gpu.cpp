@@ -25512,6 +25512,49 @@ TEST_F(NVFuserTest, FusionSizeDependentData_CUDA) {
       executor_cache.fusion(), cg_outputs, {a}, {a + 123}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionPredicateUnshare_CUDA) {
+  // https://github.com/csarofeen/pytorch/issues/1926
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion->addOutput(tv2);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  for (auto tv : {tv1, tv2}) {
+    tv->split(0, 4);
+    tv->reorder({{1, -1}});
+    tv->split(1, 8);
+    tv->merge(0);
+    tv->split(0, 1);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::Unswitch);
+  }
+  tv1->merge(2);
+  tv2->reorder({{2, 3}});
+  tv2->merge(2);
+  for (auto tv : {tv1, tv2}) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  InlinePropagator propagator(tv2, -1, ComputeAtMode::MostInlined);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({5, 5}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto out = cg_outputs[0];
+
+  testValidate(fusion, {out}, {t0}, {t0}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
