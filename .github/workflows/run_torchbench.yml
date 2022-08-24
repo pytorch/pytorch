@@ -74,7 +74,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          python3 -c "import torch; torch.rand((4, 4), device='cuda')"
+          # python3 -c "import torch; torch.rand((4, 4), device='cuda')"
           CUDA_LAUNCH_BLOCKING=1 python3 pytorch/.github/scripts/run_torchbench.py \
                   --pr-body "$PR_BODY_FILE" \
                   run \
