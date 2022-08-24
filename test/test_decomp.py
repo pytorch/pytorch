@@ -24,12 +24,13 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import onlyCUDA
-from functorch.compile import memory_efficient_fusion
 
 import itertools
 import functools
 from functools import partial
 import unittest
+
+from torch.fx.experimental.proxy_tensor import make_fx
 
 aten = torch.ops.aten
 
@@ -517,10 +518,10 @@ class TestDecomp(TestCase):
                 self.self_self_conv1 = torch.nn.Conv2d(
                     3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
                 )
-                self.register_buffer("self_self_bn1_running_mean", torch.empty([64]))
-                self.register_buffer("self_self_bn1_running_var", torch.empty([64]))
-                self.self_self_bn1_weight = torch.nn.Parameter(torch.empty([64]))
-                self.self_self_bn1_bias = torch.nn.Parameter(torch.empty([64]))
+                self.register_buffer("self_self_bn1_running_mean", torch.ones([64]))
+                self.register_buffer("self_self_bn1_running_var", torch.ones([64]))
+                self.self_self_bn1_weight = torch.nn.Parameter(torch.ones([64]))
+                self.self_self_bn1_bias = torch.nn.Parameter(torch.ones([64]))
 
             def forward(self, x: torch.Tensor):
                 self_self_conv1 = self.self_self_conv1(x)
@@ -543,16 +544,26 @@ class TestDecomp(TestCase):
         inp = torch.ones([16, 3, 224, 224], dtype=torch.float32, device=device)
 
         mod = MockModule().to(device=device)
-        ref = mod(inp)
 
-        aot_mod = memory_efficient_fusion(mod)
+        # Test that autocast works
+        def fn(x):
+            with torch.cuda.amp.autocast():
+                out = mod(x)
+                loss = out[0].sum()
+                loss.backward()
+                return out
 
-        with torch.cuda.amp.autocast():
-            res = aot_mod(inp)
-            loss = res[0].sum()
-            loss.backward()
+        # Get golden output
+        ref = fn(inp)
 
-        self.assertTrue(torch.allclose(ref, res))
+        # make_fx and new output
+        cudnn_batch_norm_decomp = torch._decomp.get_decompositions({aten.cudnn_batch_norm})
+        aot_fn = make_fx(fn, decomposition_table=cudnn_batch_norm_decomp)(inp)
+        res = aot_fn(inp)
+
+        # Check accuracy
+        self.assertTrue(torch.allclose(ref[0], res[0]))
+
 
 instantiate_device_type_tests(TestDecomp, globals())
 
