@@ -7,6 +7,8 @@ from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restor
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
+_PYTHON_DISPATCH_TRACE_OFFSET = -2
+
 
 @dataclass
 class TorchDispatchModeInfo(_ModeInfo):
