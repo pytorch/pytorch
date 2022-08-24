@@ -2424,8 +2424,11 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
                     dl._iterator = None
                 del dl
 
-
     def test_shuffler_mapdatapipe(self):
+        r"""
+        Verify ``MapDataPipe.shuffle`` is controlled by ``DataLoader``
+        to generate different seeds deterministically per epoch.
+        """
         exp = list(range(100))
 
         # Test Deterministic
