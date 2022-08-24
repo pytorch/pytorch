@@ -108,7 +108,7 @@ def get_disabled_tests(
     dirpath: str, filename: str = DISABLED_TESTS_FILE
 ) -> Optional[Dict[str, Any]]:
     def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
-        disabled_test_from_issues = dict()
+        disabled_test_from_issues = {}
         for item in the_response["items"]:
             title = item["title"]
             key = "DISABLED "
