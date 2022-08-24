@@ -5276,7 +5276,7 @@
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
   autogen: _transform_bias_rescale_qkv.out
 
-- func: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
+- func: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask
   autogen: _nested_tensor_from_mask.out
