@@ -168,6 +168,7 @@ __all__ = [
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
     "item",  # TODO: add OpInfo
+    "to",
     #
     # Reduction ops
     #
@@ -1652,6 +1653,19 @@ def item(a: TensorLikeType) -> NumberType:
     # See https://github.com/pytorch/pytorch/issues/78071
     number_type = utils.dtype_to_type(a.dtype)
     return number_type(prims.item(a))
+
+
+#@register_decomposition(torch.ops.aten.to)
+def to(
+    a: TensorLikeType,
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    if (copy == True or dtype != a.dtype) and memory_format == torch.preserve_format and non_blocking == False:
+        return torch.ops.nvprims.convert_element_type(self, kwargs["dtype"])
+    return torch.Tensor.to(a, dtype, non_blocking, copy, memory_format)
 
 
 #

@@ -49,6 +49,7 @@ def torch_to_refs_map():
         torch.Tensor.new_ones: torch._refs.new_ones,
         torch.Tensor.fill_: torch._refs.fill_,
         torch.Tensor.zero_: torch._refs.zero_,
+        torch.Tensor.to: torch._refs.to,
         # TODO: Should these methods be mapped some other way?
         torch.Tensor.copy_: torch._prims.copy_to,
         torch.Tensor.resize: torch._prims.resize,
