@@ -871,13 +871,12 @@ class FullyShardedDataParallel(nn.Module):
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
             ``load_state_dict`` in a memory efficient way. See documentation for
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
-        all_gather_issue_limit (Optional[int]): If this is not ``None`` and
-            the sharding strategy is ``FULL_SHARD``, this represents the
-            maximum number of actively issued all-gathers. When this limit is
-            reached, FSDP blocks the CPU thread to ensure that some FSDP
-            parameters are freed before issuing further all-gathers. (Default:
-            ``None``)
-
+        allow_over_all_gather (bool): If ``True``, then FSDP allows the CPU
+            thread to schedule all-gathers without any extra synchronization.
+            If ``False``, then FSDP explicitly synchronizes the CPU thread to
+            prevent too many in-flight all-gathers. This ``bool`` only affects
+            the sharded strategies that schedule all-gathers.
+            TODO (awgu): Explain the implications on GPU memory.
     """
     def __init__(
         self,
@@ -892,7 +891,7 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
-        all_gather_issue_limit: Optional[int] = None,
+        allow_over_all_gather: bool = True,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -907,7 +906,7 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fn=param_init_fn,
                 device_id=device_id,
                 sync_module_states=sync_module_states,
-                all_gather_issue_limit=all_gather_issue_limit,
+                allow_over_all_gather=allow_over_all_gather,
             )
             return
 
@@ -937,7 +936,7 @@ class FullyShardedDataParallel(nn.Module):
                 "param_init_fn": param_init_fn,
                 "device_id": device_id,
                 "sync_module_states": sync_module_states,
-                "all_gather_issue_limit": all_gather_issue_limit,
+                "allow_over_all_gather": allow_over_all_gather,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -947,7 +946,8 @@ class FullyShardedDataParallel(nn.Module):
         self.training_state = TrainingState_.IDLE
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
-        self.all_gather_issue_limit = all_gather_issue_limit
+        self.allow_over_all_gather = allow_over_all_gather
+        self._max_num_inflight_all_gathers = 2  # empirically chosen
         if self.world_size == 1:
             # World size of 1 is functionally equivalent to `NO_SHARD`
             sharding_strategy = ShardingStrategy.NO_SHARD
@@ -1449,8 +1449,8 @@ class FullyShardedDataParallel(nn.Module):
         unsharded flattened parameter on the compute device.
         """
         if (
-            self.all_gather_issue_limit is not None
-            and len(self._free_events) >= self.all_gather_issue_limit
+            not self.allow_over_all_gather
+            and len(self._free_events) >= self._max_num_inflight_all_gathers
         ):
             # Synchronize the current stream to block the CPU thread and
             # prevent it from over-all-gathering
@@ -1482,7 +1482,7 @@ class FullyShardedDataParallel(nn.Module):
             free_unsharded_flat_params,
         ):
             handle.reshard(free_unsharded_flat_param)
-            if self.all_gather_issue_limit is not None and free_unsharded_flat_param:
+            if not self.allow_over_all_gather and free_unsharded_flat_param:
                 free_event = torch.cuda.Event()
                 free_event.record()
                 self._free_events.append(free_event)
@@ -1726,6 +1726,7 @@ class FullyShardedDataParallel(nn.Module):
         self._exec_order_data.init(self, self.process_group)
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
+        inconsistent_allow_over_all_gather = False
         for fsdp_module in self.fsdp_modules(self):
             if fsdp_module is not self:
                 # Relax the assert for non-root FSDP instances in case the
@@ -1738,11 +1739,21 @@ class FullyShardedDataParallel(nn.Module):
                 fsdp_module._is_root = False
                 fsdp_module._streams = self._streams
                 fsdp_module._exec_order_data = self._exec_order_data
+                if fsdp_module.allow_over_all_gather != self.allow_over_all_gather:
+                    # Prefer the root's value
+                    inconsistent_allow_over_all_gather = True
+                    fsdp_module.allow_over_all_gather = self.allow_over_all_gather
                 fsdp_module._free_events = self._free_events
                 fsdp_module._handles_prefetched = self._handles_prefetched
                 fsdp_module._need_pre_backward_unshard = self._need_pre_backward_unshard
                 for handle in fsdp_module._handles:
                     fsdp_module._init_param_attributes(handle)
+        if inconsistent_allow_over_all_gather:
+            warnings.warn(
+                "Found inconsistent `allow_over_all_gather` values across "
+                f"FSDP instances on rank {self.rank}. Using the root FSDP's "
+                f"value of {self.allow_over_all_gather} for all instances."
+            )
 
     # TODO (awgu): Move this to the `FlatParamHandle` class later
     @torch.no_grad()
