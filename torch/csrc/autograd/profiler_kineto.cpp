@@ -558,8 +558,7 @@ void enableProfiler(
 
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-      config.global());
+      config.state == ProfilerState::KINETO_GPU_FALLBACK || config.global());
   TORCH_CHECK(
       !activities.empty(), "No activities specified for Kineto profiler");
 
