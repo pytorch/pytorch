@@ -89,8 +89,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     zero_points = {static_cast<int32_t>(weight.q_zero_point())};
   } else if (qtype == c10::kPerChannelAffine) {
     TORCH_CHECK(
-        !transpose,
-        "Per Channel Quantization is currently disabled for transposed conv");
+        !transpose || groups == 1,
+        "Per Channel Quantization for ConvTranspose is only supported for 'groups=1'.");
     zero_points.resize(output_channels);
     for (const auto i : c10::irange(output_channels)) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
@@ -270,7 +270,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   auto weight_contig = weight.contiguous(
       kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast
                        : c10::MemoryFormat::ChannelsLast3d);
-  const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
+  const bool is_per_channel = (
+    weight_contig.qscheme() == at::kPerChannelAffine ||
+    weight_contig.qscheme() == at::kPerChannelSymmetric);
   auto kernel_dim = kSpatialDim == 2
       ? std::vector<int64_t>{kernel_h, kernel_w}
       : std::vector<int64_t>{kernel_d, kernel_h, kernel_w};
@@ -373,8 +375,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
   } else if (qtype == c10::kPerChannelAffine) {
     TORCH_CHECK(
-        !transpose,
-        "Per Channel Quantization is currently disabled for transposed conv");
+        !transpose || groups == 1,
+        "Per Channel Quantization for ConvTranspose is only supported for 'groups=1'.");
     wgt_zero_points.resize(output_channels);
     wgt_scales.resize(output_channels);
     for (int i = 0; i < output_channels; ++i) {

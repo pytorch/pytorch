@@ -4747,7 +4747,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
     @override_qengines
     def test_qconv_transpose1d(
             self,
@@ -4767,12 +4768,14 @@ class TestQuantizedConv(TestCase):
             W_zero_point,
             Y_scale,
             Y_zero_point,
-            use_bias):
+            use_bias,
+            use_channelwise):
         if not qengine_is_qnnpack():
             return  # Currently only the QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         assume(o_pad < stride and o_pad < dilation)
+        assume(not use_channelwise or groups == 1)
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -4811,7 +4814,7 @@ class TestQuantizedConv(TestCase):
                 output_channels_per_group, groups, kernels, strides, pads, o_pads,
                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, use_relu=False,
-                use_channelwise=False, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
+                use_channelwise=use_channelwise, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
             # check that this doesn't error
             test_conv = torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
@@ -4864,7 +4867,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
     @override_qengines
     @unittest.skip(
         "this is broken without changes to any relevant code, "
@@ -4892,7 +4896,8 @@ class TestQuantizedConv(TestCase):
             W_zero_point,
             Y_scale,
             Y_zero_point,
-            use_bias):
+            use_bias,
+            use_channelwise):
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         # ONEDNN does not support output paddings
@@ -4900,6 +4905,7 @@ class TestQuantizedConv(TestCase):
             return
         assume(o_pad_h < stride_h and o_pad_h < dilation)
         assume(o_pad_w < stride_w and o_pad_w < dilation)
+        assume(not use_channelwise or groups == 1)
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -4937,7 +4943,7 @@ class TestQuantizedConv(TestCase):
                 output_channels_per_group, groups, kernels, strides, pads, o_pads,
                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, use_relu=False,
-                use_channelwise=False, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
+                use_channelwise=use_channelwise, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
             # check that this doesn't error
             test_conv = torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
@@ -4994,7 +5000,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
     @override_qengines
     @unittest.skip(
         "this is broken without changes to any relevant code, "
@@ -5027,7 +5034,8 @@ class TestQuantizedConv(TestCase):
             W_zero_point,
             Y_scale,
             Y_zero_point,
-            use_bias):
+            use_bias,
+            use_channelwise):
         if qengine_is_qnnpack():
             return  # QNNPACK doesn't support this
         # ONEDNN doesn't support output paddings
@@ -5036,6 +5044,7 @@ class TestQuantizedConv(TestCase):
         assume(o_pad_t < stride_t or o_pad_t < dilation)
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
+        assume(not use_channelwise or groups == 1)
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups

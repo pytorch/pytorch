@@ -407,8 +407,10 @@ def assert_valid_qconfig(qconfig: Optional[QConfig],
             isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
             isinstance(example_observer, torch.ao.quantization.MovingAveragePerChannelMinMaxObserver)
         )
-        assert not is_per_channel, \
-            'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
+        # assert not is_per_channel, \
+        #     'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
+        if is_per_channel:
+            warnings.warn("Per channel weight observer is still being evaluated for ConvTranspose.")
 
 # TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
