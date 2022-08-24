@@ -42,7 +42,12 @@ from torchgen.utils import assert_never
 # some more nominal types
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # If it's a value type, do the value type translation
-    r = cpp.valuetype_type(t, binds=binds)
+    # NB: structured kernels ALWAYS have symint off, since they involve actual
+    # kernels that require real ints.  The one exception is the
+    # CompositeExplicitAutograd and the meta function (which could
+    # hypothetically be SymInt), but for simplicity we plan for these to just
+    # be handled in Python
+    r = cpp.valuetype_type(t, symint=False, binds=binds)
     if r is not None:
         return r
 
