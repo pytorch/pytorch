@@ -849,7 +849,9 @@ def gen_variable_type_func(
             if not fn.info:
                 key = "Default"
                 type_definition = METHOD_DEFINITION.substitute(
-                    return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                    return_type=cpp.returns_type(
+                        f.func.returns, symint=True
+                    ).cpp_type(),
                     type_wrapper_name=type_wrapper_name(f, key),
                     type_definition_body=emit_body(fn, key),
                     formals=formals,
@@ -860,7 +862,9 @@ def gen_variable_type_func(
             else:
                 for key, _ in fn.info.items():
                     type_definition = METHOD_DEFINITION.substitute(
-                        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                        return_type=cpp.returns_type(
+                            f.func.returns, symint=True
+                        ).cpp_type(),
                         type_wrapper_name=type_wrapper_name(f, key),
                         type_definition_body=emit_body(fn, key),
                         formals=formals,
@@ -913,7 +917,7 @@ def emit_body(
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
+        cpp_type = cpp.argument_type(a, binds=a.name, symint=True).cpp_type()
 
         if not is_differentiable(a.name, a.type, info):
             return None
@@ -1204,6 +1208,7 @@ def emit_body(
             api_name=cpp.name(
                 f.func,
                 faithful_name_for_out_overloads=True,
+                symint_overload=f.func.has_symint(),
             ),
             unpacked_args=[dispatch_key_set] + list(unpacked_args),
         )
@@ -1285,7 +1290,7 @@ def emit_body(
             for i, (ret, ret_name) in enumerate(
                 zip(f.func.returns, cpp.return_names(f))
             ):
-                noref_cpp_type = cpp.return_type(ret).remove_const_ref()
+                noref_cpp_type = cpp.return_type(ret, symint=True).remove_const_ref()
                 if noref_cpp_type == BaseCType(tensorT):
                     if aliased_arg_name is not None:
                         assert (

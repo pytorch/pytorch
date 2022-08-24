@@ -449,7 +449,7 @@ thread_event_lists disableProfilerLegacy(
 
   auto state_ptr = static_cast<ProfilerLegacyThreadLocalState*>(state.get());
   TORCH_CHECK(
-      state_ptr && state_ptr->config().disabled(),
+      state_ptr && !state_ptr->config().disabled(),
       "Can't disable profiler when it's not running");
 
   if (cleanupTLSState) {

@@ -170,7 +170,6 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
-
 def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
@@ -239,6 +238,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
         shutil.move(extracted_repo, repo_dir)  # rename the repo
 
     return repo_dir
+
 
 def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo, calling_fn="load"):
     hub_dir = get_dir()
@@ -522,11 +522,11 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
     Example:
         >>> # from a github repo
         >>> repo = 'pytorch/vision'
-        >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
+        >>> model = torch.hub.load(repo, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
         >>> # from a local directory
         >>> path = '/some/local/path/pytorch/vision'
         >>> # xdoctest: +SKIP
-        >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
+        >>> model = torch.hub.load(path, 'resnet50', weights='ResNet50_Weights.DEFAULT')
     """
     source = source.lower()
 
@@ -558,9 +558,9 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
         a single model with corresponding pretrained weights.
 
     Example:
+        >>> # xdoctest: +SKIP("stub local path")
         >>> path = '/some/local/path/pytorch/vision'
-        >>> # xdoctest: +SKIP
-        >>> model = _load_local(path, 'resnet50', pretrained=True)
+        >>> model = _load_local(path, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
     """
     sys.path.insert(0, hubconf_dir)
 
@@ -587,6 +587,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             Default: True
 
     Example:
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
 
     """
