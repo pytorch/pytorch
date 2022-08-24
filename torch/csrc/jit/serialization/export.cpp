@@ -57,26 +57,30 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
+const static int kMainOpsetVersion = 17;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 17> kOpsetVersionToIRVersion = {
-    kInvalidOpsetVersion,
-    3,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    3,
-    3,
-    3,
-    3,
-    4,
-    5,
-    6,
-    7,
-    7,
-    7,
-    8,
-    8};
+constexpr static std::array<int64_t, kMainOpsetVersion + 1>
+    kOpsetVersionToIRVersion = {
+        kInvalidOpsetVersion,
+        3, // opset 1
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        3, // opset 5
+        3, // opset 6
+        3, // opset 7
+        3, // opset 8
+        4, // opset 9
+        5, // opset 10
+        6, // opset 11
+        7, // opset 12
+        7, // opset 13
+        7, // opset 14
+        8, // opset 15
+        8, // opset 16
+        8, // opset 17
+};
 
 std::string getNodeStackTraceString(const Node* n) {
   return n->sourceRange().str();
@@ -1370,7 +1374,7 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   onnx::checker::check_model(model);
   onnx::shape_inference::InferShapes(model);
   // full check including strict shape inference check
-  // Notice that onnx::checker::check_model doesn't
+  // Note: onnx::checker::check_model doesn't
   // include non-strict model onnx::shape_inference::InferShapes(model).
   // That's why we need to write another onnx::checker::check_model(model,
   // full_check) here.
@@ -1379,7 +1383,11 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
       onnx::checker::check_model(model, full_check);
     } catch (const onnx::InferenceError& ex) {
       TORCH_WARN(
-          "This is an invalid ONNX model with failed ONNX shape type inference. It is not executable by ONNXRUNTIME platform. More detail: ",
+          "The exported ONNX model failed ONNX shape inference."
+          "The model will not be executable by the ONNX Runtime."
+          "If this is unintended and you believe there is a bug,"
+          "please report an issue at https://github.com/pytorch/pytorch/issues."
+          "Error reported by the ONNX checker: ",
           ex.what());
     }
   }
