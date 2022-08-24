@@ -320,9 +320,6 @@ bool mkldnnPrepackedLinearIsSupportedJit(const torch::jit::Node* node) {
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
 
-  // TODO: skip bias check when bias is None
-  auto const& bias = getTensorInfoJit(node->input(2));
-
   // Everything should be statically known.
   if (!input || !weight) {
     GRAPH_DEBUG(
