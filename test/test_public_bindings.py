@@ -87,7 +87,7 @@ class TestPublicBindings(TestCase):
             "DictType",
             "DisableTorchFunction",
             "DispatchKey",
-            "DispatchKeySet"
+            "DispatchKeySet",
             "dtype",
             "EnumType",
             "ErrorReport",
