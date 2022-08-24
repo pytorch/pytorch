@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: profiler"]
 import collections
-from itertools import permutations
 import expecttest
 import gc
 import io

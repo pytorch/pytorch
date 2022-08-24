@@ -71,9 +71,10 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tensor_metadata_.emplace_back(
         /*UNSAFE_tensor_impl_ptr_*/ t.unsafeGetTensorImpl(),
 
-        // This needs to be the start of the allocated data block (and not offset by some storage offset)
-        // in order for the logic in the function to calculate the unique_tensor_id to be correct.
-        /*unique_tensor_id_*/ (size_t) t.storage().data(),
+        // This needs to be the start of the allocated data block (and not
+        // offset by some storage offset) in order for the logic in the function
+        // to calculate the unique_tensor_id to be correct.
+        /*unique_tensor_id_*/ (size_t)t.storage().data(),
 
         /*device_type_*/ t.device().type(),
         /*device_index_*/ t.device().index(),
@@ -543,7 +544,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
   r->finished_ = true;
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
-  }
+}
 
 static constexpr const char* indexKey = "Profiler Event Index";
 
@@ -802,7 +803,7 @@ class TransferEvents {
             }
           },
           [](const auto&) {}));
-}
+    }
 
     // Set TIDs now that we have established lineage.
     for (auto& e : results_.get()) {
@@ -880,12 +881,11 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
         auto tensor_impl = metadata->UNSAFE_tensor_impl_ptr_;
 
         // This holds the storage pointer until we update it
-        void* data_ptr = (void*) metadata->unique_tensor_id_;
+        void* data_ptr = (void*)metadata->unique_tensor_id_;
         if (!tensor_impl || !data_ptr) {
           continue;
         }
-        if (valid_storage_impls.find(data_ptr) ==
-            valid_storage_impls.end()) {
+        if (valid_storage_impls.find(data_ptr) == valid_storage_impls.end()) {
           cur_unique_tensor_id++;
           valid_storage_impls.insert(data_ptr);
           unique_tensor_map[tensor_impl] = {data_ptr, cur_unique_tensor_id};
