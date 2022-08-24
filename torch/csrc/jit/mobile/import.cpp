@@ -696,16 +696,43 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  deserializer.deserialize_only_extra(device, extra_files);
+
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<FileAdapter> rai =
+          std::make_unique<FileAdapter>(filename);
+      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      BytecodeDeserializer deserializer(std::move(reader));
+      deserializer.deserialize_only_extra(device, extra_files);
+      break;
+    }
+    case FileFormat::FlatbufferFileFormat: {
+      // TODO: the current flatbuffers implementation will always load the
+      // whole module including the extra files. Ideally it should be
+      // possible to just get the extra files given data
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_file_content(filename.c_str());
+      if (load_flatbuffer_bytes != nullptr) {
+        load_flatbuffer_bytes(data, size, device, &extra_files);
+      } else {
+        TORCH_CHECK(
+            false,
+            "Flatbuffer input file but the build hasn't enabled flatbuffer");
+      }
+      break;
+    }
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 namespace mobile {
