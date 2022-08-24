@@ -60,6 +60,10 @@ void FusionManager::createFusionCacheEntry(RecordFunctor* rec) {
       "Cannot create a cache entryfrom a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
 
+  // Copying the record owned by the FusionDefinition that calls this function
+  // so the cache owns a copy when the FusionDefinition gets destroyed rather
+  // than managing a shared pointer that would  only share with
+  // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
   fusion_cache_ptr_->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec);
@@ -80,6 +84,10 @@ void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
       "fusions.  The max_fusions for the FusionManager might need to be ",
       "increased if the max number is not being exceeded due to an error.");
 
+  // Copying the record owned by the FusionDefinition that calls this function
+  // so the cache owns a copy when the FusionDefinition gets destroyed rather
+  // than managing a shared pointer that would  only share with
+  // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
   fusion_cache_ptr_->record_hash_map[rec] =
       std::make_unique<FusionCacheEntry>(new_rec, true);

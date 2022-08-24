@@ -52,6 +52,7 @@ struct RecordFunctor {
         name_(std::move(_name)),
         record_type_(_record_type) {}
   virtual ~RecordFunctor() = default;
+  //! Allows for copying of Child Class objects with RecordFunctor pointers.
   virtual RecordFunctor* clone() = 0;
 
   //! The base class is placing the type, outputs, and args hashed as follows:
@@ -99,7 +100,7 @@ struct RecordFunctor {
 
   //! Abstraction for an operation to build this record's nvFuser Fusion IR
   //! piece if the recording has a cache miss.
-  virtual void operator()(FusionDefinition& fd) {}
+  virtual void operator()(FusionDefinition& fd) = 0;
 
   //! The base print function when printing Record for a given FusionDefinition
   //! in python formated code.
@@ -185,7 +186,7 @@ struct OpRecord : RecordFunctor {
             RecordType::Op),
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new OpRecord(*this);
   }
 
@@ -285,7 +286,7 @@ struct BroadcastOpRecord : RecordFunctor {
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastOpRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new BroadcastOpRecord(*this);
   }
 
@@ -448,7 +449,7 @@ struct CastOpRecord : RecordFunctor {
         fusion_op_(fusion_op),
         dtype_(dtype) {}
   virtual ~CastOpRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new CastOpRecord(*this);
   }
 
@@ -513,7 +514,7 @@ struct ConstantRecord : RecordFunctor {
             RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new ConstantRecord(*this);
   }
 
@@ -563,7 +564,7 @@ struct ConstantRecord : RecordFunctor {
 struct EndRecord : RecordFunctor {
   EndRecord() : RecordFunctor({}, {}, "end", RecordType::End) {}
   virtual ~EndRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new EndRecord(*this);
   }
 
@@ -602,7 +603,7 @@ struct TensorRecord : RecordFunctor {
         contiguous_info_(std::move(_contiguous_info)),
         dtype_(_dtype) {}
   virtual ~TensorRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new TensorRecord(*this);
   }
 
@@ -721,7 +722,7 @@ struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<State> _args)
       : RecordFunctor(std::move(_args), {}, "add_output", RecordType::Output) {}
   virtual ~OutputRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new OutputRecord(*this);
   }
 
@@ -779,7 +780,7 @@ struct ReductionOpRecord : RecordFunctor {
         keep_dim_(keep_dim),
         dtype_(dtype) {}
   virtual ~ReductionOpRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new ReductionOpRecord(*this);
   }
 
@@ -883,7 +884,7 @@ struct ScalarRecord : RecordFunctor {
             RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new ScalarRecord(*this);
   }
 
@@ -941,7 +942,7 @@ struct ScalarRecord : RecordFunctor {
 struct StartRecord : RecordFunctor {
   StartRecord() : RecordFunctor({}, {}, "start", RecordType::Start) {}
   virtual ~StartRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new StartRecord(*this);
   }
 
@@ -981,7 +982,7 @@ struct VarianceOpRecord : RecordFunctor {
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~VarianceOpRecord() = default;
-  virtual RecordFunctor* clone() {
+  virtual RecordFunctor* clone() final {
     return new VarianceOpRecord(*this);
   }
 
