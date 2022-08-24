@@ -10,7 +10,7 @@ from itertools import permutations, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, slowTest)
+    (TestCase, run_tests, skipIfTorchDynamo, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -357,6 +357,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("Dynamo cant handle while with random randrange")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)
