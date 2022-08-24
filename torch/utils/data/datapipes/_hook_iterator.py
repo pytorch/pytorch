@@ -8,7 +8,7 @@ import torch.autograd
 class _SnapshotState(Enum):
     r"""
     These are the snapshotting-related states that IterDataPipes can be in.
-    `NotStarted` - allows you to restore a snapshot and create an iterator without reset
+    `NotStarted` - allows you to restore a snapshot and create an iterator with reset
     `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
     `Iterating` - can restore, will reset if you create a new iterator
     """
