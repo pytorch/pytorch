@@ -1655,6 +1655,7 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
+@register_decomposition(torch.ops.aten.to)
 def to(
     a: TensorLikeType,
     dtype: torch.dtype,
