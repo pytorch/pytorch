@@ -18,20 +18,14 @@ struct RecordFunctor;
 //! FusionManager that is organized as a prefix tree.
 
 struct TORCH_CUDA_CU_API FusionCacheEntry {
-  FusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
-  FusionCacheEntry();
+  FusionCacheEntry(RecordFunctor* rec, bool _is_terminal = false);
 
   //! An entry's primary data is the record it holds
-  std::shared_ptr<RecordFunctor> record;
+  std::unique_ptr<RecordFunctor> record;
   //! A hash map of the children for the current node.
   //! The hash map hashs a pointer to a RecordFunctor because
-  //! the hash function is virtual.  Also, a shared_ptr is used
-  //! to own the pointer because the original owner of a pointer,
-  //! a FusionDefintion, can't be relied upon to hold
-  //! hold the record over the lifetime of the FusionManager.
-  std::unordered_map<
-      std::shared_ptr<RecordFunctor>,
-      std::unique_ptr<FusionCacheEntry>>
+  //! the hash function is virtual.
+  std::unordered_map<RecordFunctor*, std::unique_ptr<FusionCacheEntry>>
       record_hash_map;
 
   //! This boolean indicates a leaf node with a cached nvFuser Fusion
@@ -106,16 +100,16 @@ class TORCH_CUDA_CU_API FusionManager {
   //! Queries the current cache entry to see if a record matches one of its
   //! children
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
-      std::shared_ptr<RecordFunctor>& rec) const;
+      RecordFunctor* rec) const;
   //! Creates a child node for the current cache entry
-  void createFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
+  void createFusionCacheEntry(RecordFunctor* rec);
   //! Creates a child node for the current cache entry that is terminal
-  void createTerminalFusionCacheEntry(std::shared_ptr<RecordFunctor>& rec);
+  void createTerminalFusionCacheEntry(RecordFunctor* rec);
   //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
   //! Traverses the cache from the current entry to the child associated
   //! with the record given.
-  void traverseFusionCache(std::shared_ptr<RecordFunctor>& rec);
+  void traverseFusionCache(RecordFunctor* rec);
 
  private:
   //! Gives a pointer to the FusionExecutorCache associated with the
@@ -131,8 +125,6 @@ class TORCH_CUDA_CU_API FusionManager {
   size_t max_fusions_;
   //! The current number of fusions in the cache.
   size_t num_fusions_;
-  //! A dummy record for start of the fusion cache tree.
-  std::shared_ptr<RecordFunctor> start_record_;
   //! The top of the prefix tree used to start a cache look up of a given
   //! fusion definition.
   std::unique_ptr<FusionCacheEntry> fusion_cache_start_;

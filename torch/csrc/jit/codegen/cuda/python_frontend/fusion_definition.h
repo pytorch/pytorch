@@ -136,10 +136,10 @@ class TORCH_CUDA_CU_API FusionDefinition {
   FusionManager* fusion_manager_;
 
   //! Holds an End Record
-  std::shared_ptr<RecordFunctor> end_record_;
+  std::unique_ptr<RecordFunctor> end_record_;
 
   //! A vector of record operations in the FusionDefintion
-  std::vector<std::shared_ptr<RecordFunctor>> recording_;
+  std::vector<std::unique_ptr<RecordFunctor>> recording_;
   //! A vector of state recorded in the FusionDefinition
   std::vector<State> recording_state_;
 

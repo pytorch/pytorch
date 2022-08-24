@@ -52,6 +52,7 @@ struct RecordFunctor {
         name_(std::move(_name)),
         record_type_(_record_type) {}
   virtual ~RecordFunctor() = default;
+  virtual RecordFunctor* clone() = 0;
 
   //! The base class is placing the type, outputs, and args hashed as follows:
   //! | 63 - 56 | 55 - 48 | 47 ----------- 32 | 32 ------------------------  0 |
@@ -184,6 +185,9 @@ struct OpRecord : RecordFunctor {
             RecordType::Op),
         fusion_op_(fusion_op) {}
   virtual ~OpRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new OpRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 -------------------------------------  0 |
@@ -281,6 +285,9 @@ struct BroadcastOpRecord : RecordFunctor {
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
   virtual ~BroadcastOpRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new BroadcastOpRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 -------------- 16 | 15 --------------  0 |
@@ -441,6 +448,9 @@ struct CastOpRecord : RecordFunctor {
         fusion_op_(fusion_op),
         dtype_(dtype) {}
   virtual ~CastOpRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new CastOpRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 --- 24 | 23 --------------------------  0 |
@@ -503,6 +513,9 @@ struct ConstantRecord : RecordFunctor {
             RecordType::Constant),
         value_(val) {}
   virtual ~ConstantRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new ConstantRecord(*this);
+  }
 
   //! Going to start out hashing nothing extra since hashing a complex number
   //! seems complicated.  Initially, the thought was to simply static cast the
@@ -550,6 +563,9 @@ struct ConstantRecord : RecordFunctor {
 struct EndRecord : RecordFunctor {
   EndRecord() : RecordFunctor({}, {}, "end", RecordType::End) {}
   virtual ~EndRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new EndRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 ---------------------------------------  0 |
@@ -586,6 +602,9 @@ struct TensorRecord : RecordFunctor {
         contiguous_info_(std::move(_contiguous_info)),
         dtype_(_dtype) {}
   virtual ~TensorRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new TensorRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 --- 24 | 23 --------- 12 | 11 ---------  0 |
@@ -702,6 +721,9 @@ struct OutputRecord : RecordFunctor {
   OutputRecord(std::vector<State> _args)
       : RecordFunctor(std::move(_args), {}, "add_output", RecordType::Output) {}
   virtual ~OutputRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new OutputRecord(*this);
+  }
 
   //! Nothing extra necessary in hash
   //! Child specific hash function in lower 32 bits.
@@ -757,6 +779,9 @@ struct ReductionOpRecord : RecordFunctor {
         keep_dim_(keep_dim),
         dtype_(dtype) {}
   virtual ~ReductionOpRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new ReductionOpRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 -- 28 | 27 --- 20 | 19 -----------------  0 |
@@ -858,6 +883,9 @@ struct ScalarRecord : RecordFunctor {
             RecordType::Scalar),
         dtype_(dtype) {}
   virtual ~ScalarRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new ScalarRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 ---------------------------------------  0 |
@@ -913,6 +941,9 @@ struct ScalarRecord : RecordFunctor {
 struct StartRecord : RecordFunctor {
   StartRecord() : RecordFunctor({}, {}, "start", RecordType::Start) {}
   virtual ~StartRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new StartRecord(*this);
+  }
 
   //! Child specific hash function in lower 32 bits.
   //! | 31 ---------------------------------------  0 |
@@ -950,6 +981,9 @@ struct VarianceOpRecord : RecordFunctor {
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~VarianceOpRecord() = default;
+  virtual RecordFunctor* clone() {
+    return new VarianceOpRecord(*this);
+  }
 
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
@@ -1033,21 +1067,16 @@ namespace std {
 using namespace nvfuser;
 
 template <>
-struct hash<std::shared_ptr<RecordFunctor>> {
-  size_t operator()(const std::shared_ptr<RecordFunctor>& p) const {
+struct hash<RecordFunctor*> {
+  size_t operator()(const RecordFunctor* p) const {
     TORCH_CHECK(p, "The RecordFunctor Pointer for hashing is null!");
     return p->hash();
   }
 };
 template <>
-struct equal_to<std::shared_ptr<RecordFunctor>>
-    : public binary_function<
-          std::shared_ptr<RecordFunctor>,
-          std::shared_ptr<RecordFunctor>,
-          bool> {
-  bool operator()(
-      const std::shared_ptr<RecordFunctor>& p,
-      const std::shared_ptr<RecordFunctor>& q) const {
+struct equal_to<RecordFunctor*>
+    : public binary_function<RecordFunctor*, RecordFunctor*, bool> {
+  bool operator()(const RecordFunctor* p, const RecordFunctor* q) const {
     TORCH_CHECK(
         p,
         "The RecordFunctor Pointer on the lhs of an equality check is null!");

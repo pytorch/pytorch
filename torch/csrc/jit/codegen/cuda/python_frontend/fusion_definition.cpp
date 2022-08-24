@@ -71,13 +71,14 @@ FusionDefinition* FusionDefinition::enter() {
 }
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
-  auto cache_entry = fusionManagerPtr()->lookupFusionCacheEntry(end_record_);
+  auto cache_entry =
+      fusionManagerPtr()->lookupFusionCacheEntry(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    fusionManagerPtr()->createTerminalFusionCacheEntry(end_record_);
-    fusionManagerPtr()->traverseFusionCache(end_record_);
+    fusionManagerPtr()->createTerminalFusionCacheEntry(end_record_.get());
+    fusionManagerPtr()->traverseFusionCache(end_record_.get());
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
@@ -92,7 +93,7 @@ void FusionDefinition::exit() {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
-    fusionManagerPtr()->traverseFusionCache(end_record_);
+    fusionManagerPtr()->traverseFusionCache(end_record_.get());
   }
 }
 
@@ -129,7 +130,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
   auto cache_entry =
-      fusionManagerPtr()->lookupFusionCacheEntry(recording_.back());
+      fusionManagerPtr()->lookupFusionCacheEntry(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
@@ -144,9 +145,9 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
-    fusionManagerPtr()->createFusionCacheEntry(recording_.back());
+    fusionManagerPtr()->createFusionCacheEntry(recording_.back().get());
   }
-  fusionManagerPtr()->traverseFusionCache(recording_.back());
+  fusionManagerPtr()->traverseFusionCache(recording_.back().get());
 }
 
 void FusionDefinition::addInput(Nvf::Val* input) {

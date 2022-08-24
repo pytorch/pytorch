@@ -33,31 +33,31 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
 
   // Check that cache methods all assert when presented with a null record.
   {
-    std::shared_ptr<RecordFunctor> null_record(nullptr);
+    std::unique_ptr<RecordFunctor> null_record(nullptr);
 
     try {
-      auto bad_cache_entry_ptr = fm->lookupFusionCacheEntry(null_record);
+      auto bad_cache_entry_ptr = fm->lookupFusionCacheEntry(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fm->traverseFusionCache(null_record);
+      fm->traverseFusionCache(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fm->createFusionCacheEntry(null_record);
+      fm->createFusionCacheEntry(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fm->createTerminalFusionCacheEntry(null_record);
+      fm->createTerminalFusionCacheEntry(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
@@ -67,23 +67,24 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   // Check that cache methods act appropriately when presenting a new
   // record to an empty cache.
   {
-    std::shared_ptr<RecordFunctor> test_record(new TensorRecord(
+    std::unique_ptr<RecordFunctor> test_record(new TensorRecord(
         {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
 
     // Check Methods prior to adding an entry to the cache
 
     // Cache Lookup should not succeed becase no records are in the cache
     try {
-      auto empty_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      auto empty_cache_entry_ptr =
+          fm->lookupFusionCacheEntry(test_record.get());
       ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
       SUCCEED();
-    } catch (...) {
-      FAIL() << "Unexpected assert during cache lookup!";
+    } catch (const std::exception& e) {
+      FAIL() << "Unexpected assert during cache lookup!" << e.what();
     }
 
     // Traversal of the cache should fail because there is nothing to traverse
     try {
-      fm->traverseFusionCache(test_record);
+      fm->traverseFusionCache(test_record.get());
       FAIL() << "Expected the cache traversal to fail!";
     } catch (...) {
       SUCCEED();
@@ -92,31 +93,31 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     // Add a cache entry and check methods
 
     try {
-      fm->createFusionCacheEntry(test_record);
+      fm->createFusionCacheEntry(test_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert on Cache Entry creation!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on Cache Entry creation!" << e.what();
     }
 
     try {
-      auto cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      auto cache_entry_ptr = fm->lookupFusionCacheEntry(test_record.get());
       ASSERT_FALSE(cache_entry_ptr == c10::nullopt);
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert on cache lookup!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on cache lookup!" << e.what();
     }
 
     try {
-      fm->traverseFusionCache(test_record);
+      fm->traverseFusionCache(test_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert during Cache Traverse!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
     }
 
     // Try to add terminal cache entry with a record that is not of End Type.
 
     try {
-      fm->createTerminalFusionCacheEntry(test_record);
+      fm->createTerminalFusionCacheEntry(test_record.get());
       FAIL() << "Terminal Cache Entries should only accept EndRecords!";
     } catch (...) {
       SUCCEED();
@@ -124,30 +125,32 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
 
     // Add a terminal cache entry and check methods
 
-    std::shared_ptr<RecordFunctor> end_record(new EndRecord());
+    std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      fm->createTerminalFusionCacheEntry(end_record);
+      fm->createTerminalFusionCacheEntry(end_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert on Terminal Cache Entry creation!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on Terminal Cache Entry creation!"
+             << e.what();
     }
 
     try {
-      fm->traverseFusionCache(end_record);
+      fm->traverseFusionCache(end_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert while traversing to a Terminal Entry!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert while traversing to a Terminal Entry!"
+             << e.what();
     }
 
     try {
-      auto no_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record);
+      auto no_cache_entry_ptr = fm->lookupFusionCacheEntry(test_record.get());
       FAIL() << "Expected an assert from a terminal entry!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fm->traverseFusionCache(test_record);
+      fm->traverseFusionCache(test_record.get());
       FAIL() << "Expected an assert from a terminal entry!";
     } catch (...) {
       SUCCEED();
@@ -157,8 +160,9 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
       auto ptr = fm->fusionPtr();
       ASSERT_FALSE(ptr == nullptr);
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert occurred while getting fusion ptr!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert occurred while getting fusion ptr!"
+             << e.what();
     }
   }
 
@@ -166,58 +170,59 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   try {
     fm->resetFusionCachePtr();
     SUCCEED();
-  } catch (...) {
-    FAIL() << "Did not properly set cache to pointer to top of tree!";
+  } catch (const std::exception& e) {
+    FAIL() << "Did not properly set cache to pointer to top of tree!"
+           << e.what();
   }
 
   // Check that cache methods act appropriately when presenting a new
   // record to a cache with 1 fusion.
   {
-    std::shared_ptr<RecordFunctor> cached_record(new TensorRecord(
+    std::unique_ptr<RecordFunctor> cached_record(new TensorRecord(
         {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
-    std::shared_ptr<RecordFunctor> new_record(
+    std::unique_ptr<RecordFunctor> new_record(
         new ScalarRecord({State(1, StateType::Scalar)}, Nvf::DataType::Float));
 
     try {
-      auto hit_cache_entry = fm->lookupFusionCacheEntry(cached_record);
+      auto hit_cache_entry = fm->lookupFusionCacheEntry(cached_record.get());
       ASSERT_FALSE(hit_cache_entry == c10::nullopt);
       SUCCEED();
-    } catch (...) {
-      FAIL() << "Cache lookup unexpectedly asserted!";
+    } catch (const std::exception& e) {
+      FAIL() << "Cache lookup unexpectedly asserted!" << e.what();
     }
 
     try {
-      fm->traverseFusionCache(cached_record);
+      fm->traverseFusionCache(cached_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "Fusion cache traverse unexpectedly asserted!";
+    } catch (const std::exception& e) {
+      FAIL() << "Fusion cache traverse unexpectedly asserted!" << e.what();
     }
 
     try {
-      auto miss_cache_entry = fm->lookupFusionCacheEntry(new_record);
+      auto miss_cache_entry = fm->lookupFusionCacheEntry(new_record.get());
       ASSERT_TRUE(miss_cache_entry == c10::nullopt);
       SUCCEED();
-    } catch (...) {
-      FAIL() << "Cache lookup unexpectedly asserted!";
+    } catch (const std::exception& e) {
+      FAIL() << "Cache lookup unexpectedly asserted!" << e.what();
     }
 
     try {
-      fm->createFusionCacheEntry(new_record);
+      fm->createFusionCacheEntry(new_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "An unexpected assert on Cache Entry creation!";
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on Cache Entry creation!" << e.what();
     }
 
     try {
-      fm->traverseFusionCache(new_record);
+      fm->traverseFusionCache(new_record.get());
       SUCCEED();
-    } catch (...) {
-      FAIL() << "Fusion cache traverse unexpectedly asserted!";
+    } catch (const std::exception& e) {
+      FAIL() << "Fusion cache traverse unexpectedly asserted!" << e.what();
     }
 
-    std::shared_ptr<RecordFunctor> end_record(new EndRecord());
+    std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      fm->createTerminalFusionCacheEntry(end_record);
+      fm->createTerminalFusionCacheEntry(end_record.get());
       FAIL() << "Expected the cache to assert because it is full!";
     } catch (...) {
       SUCCEED();
