@@ -646,7 +646,7 @@ inline IValue argumentToIValue(
     py::handle object) {
   const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.type(), argument.N());
+    return toIValue(object, argument.real_type(), argument.N());
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
@@ -852,8 +852,7 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl())
-                            : py::cast(si.expect_int());
+    return py::cast(si);
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

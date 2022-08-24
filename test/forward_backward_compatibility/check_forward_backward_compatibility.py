@@ -47,6 +47,7 @@ ALLOW_LIST = [
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
+    ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -78,6 +79,14 @@ ALLOW_LIST = [
     ("aten::linalg_slogdet.out", datetime.date(2022, 8, 1)),
     ("aten::_linalg_solve", datetime.date(2022, 10, 1)),
     ("aten::_linalg_solve.solution", datetime.date(2022, 10, 1)),
+    ("aten::linalg_inv_ex", datetime.date(2022, 10, 1)),
+    ("aten::linalg_inv_ex.inverse", datetime.date(2022, 10, 1)),
+    ("aten::linalg_inv", datetime.date(2022, 10, 1)),
+    ("aten::linalg_inv.out", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_inv_out_helper.functional", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_inv_out_helper.out", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_inv_out_helper_", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -119,6 +128,21 @@ ALLOW_LIST = [
     ("aten::nanmean.out", datetime.date(2022, 8, 30)),
     ("aten::nansum", datetime.date(2022, 8, 30)),
     ("aten::nansum.out", datetime.date(2022, 8, 30)),
+    ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::mps_linear", datetime.date(9999, 1, 1)),
+    ("aten::_mps_linear", datetime.date(9999, 1, 1)),
+    ("aten::view_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::view_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::expand_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::expand_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::expand.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::narrow_copy.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::narrow_copy.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::view.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::new_empty.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::new_empty.SymInt_out", datetime.date(2022, 11, 30)),
+    ("aten::zeros.SymInt", datetime.date(2022, 11, 30)),
+    ("aten::zeros.SymInt_out", datetime.date(2022, 11, 30)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
@@ -306,7 +330,7 @@ if __name__ == "__main__":
         default="schemas.txt",
     )
     args = parser.parse_args()
-    existing_schema_dict = dict()
+    existing_schema_dict = {}
     slist = []
     with open(args.existing_schemas, "r") as f:
         while True:

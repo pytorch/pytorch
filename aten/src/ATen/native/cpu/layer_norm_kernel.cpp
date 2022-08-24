@@ -53,9 +53,9 @@ void LayerNormKernelImplInternal(
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T_ACC mean_val;
-      T_ACC rstd_val;
-      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
+      T mean_val;
+      T rstd_val;
+      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T_ACC scale = rstd_val;
       const T_ACC bias = -rstd_val * mean_val;
