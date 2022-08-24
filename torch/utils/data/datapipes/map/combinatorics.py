@@ -1,7 +1,6 @@
 import random
 
 import torch
-from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 from typing import Iterator, List, Optional, TypeVar
 
@@ -52,7 +51,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._enabled = True
         self._seed = None
         self._rng = random.Random()
-        self._rng_state = self._rng.getstate()
         self._shuffled_indices: List = self.indices
 
     def set_shuffle(self, shuffle=True):
@@ -68,16 +66,16 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             for idx in self.indices:
                 yield self.datapipe[idx]
         else:
-            for idx in self._shuffled_indices:
+            while self._shuffled_indices:
+                idx = self._shuffled_indices.pop()
                 yield self.datapipe[idx]
 
     def reset(self) -> None:
         if self._enabled and self._seed is None:
             self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
         self._rng.seed(self._seed)
-        self._rng_state = self._rng.getstate()
-        self._shuffled_indices = self._rng.sample(self.indices, len(self.indices))
         self._seed = None
+        self._shuffled_indices = self._rng.sample(self.indices, len(self.indices))
 
     def __len__(self) -> int:
         return len(self.datapipe)
@@ -90,11 +88,10 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.indices,
             self._enabled,
             self._seed,
-            self._rng_state,
+            self._rng.getstate(),
             self._shuffled_indices,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            self._snapshot_state,
         )
         return state
 
@@ -104,16 +101,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.indices,
             self._enabled,
             self._seed,
-            self._rng_state,
+            rng_state,
             self._shuffled_indices,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            self._snapshot_state,
         ) = state
         self._rng = random.Random()
-        self._rng.setstate(self._rng_state)
-        if self._snapshot_state == _SnapshotState.Iterating:
-            self._snapshot_state = _SnapshotState.Restored
+        self._rng.setstate(rng_state)
 
 
 MapDataPipe.register_datapipe_as_function("shuffle", ShufflerIterDataPipe)

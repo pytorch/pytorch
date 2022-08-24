@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/naming.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
@@ -225,7 +226,12 @@ void initONNXBindings(PyObject* module) {
               out << std::endl;
             }
           },
-          "Write `args` to the previously specified ONNX log stream.");
+          "Write `args` to the previously specified ONNX log stream.")
+      .def(
+          "_jit_onnx_create_full_scope_name",
+          ::torch::wrap_pybind_function(
+              ::torch::jit::onnx::ONNXScopeName::createFullScopeName),
+          "Create a full scope name from class name and variable name.");
 
   m.def(
       "_check_onnx_proto",
