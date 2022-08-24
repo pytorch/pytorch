@@ -812,10 +812,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace(), torch.autograd.detect_anomaly(
-                    check_nan=False
-                ):
-                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
