@@ -32,9 +32,11 @@ class _InternalGlobals:
         self.onnx_shape_inference: bool = True
 
         # Internal feature flags
-        self.runtime_type_check: bool = (
-            os.getenv("TORCH_ONNX_RUNTIME_TYPE_CHECK") == "1"
-        )
+        self.runtime_type_check: Optional[bool] = None
+        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "1":
+            self.runtime_type_check = True
+        elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "0":
+            self.runtime_type_check = False
 
     @property
     def training_mode(self):
