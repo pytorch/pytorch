@@ -155,23 +155,22 @@ def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
 
-def proxy_call(proxy_mode, func_overload, args, kwargs=None):
+def proxy_call(proxy_mode, func, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
 
-    func = func_overload.overloadpacket
-    if func_overload in CURRENT_DECOMPOSITION_TABLE:
+    if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode.restore():
-            r = CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
+            r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
             if r is not NotImplemented:
                 return r
 
     # Some of these are not "real" aten ops and will fail if we
     # call _dispatch_has_kernel_for_dispatch_key on them.
     # This list is probably incomplete
-    if func_overload not in [torch.ops.aten.size.default]:
+    if func not in [torch.ops.aten.size.default]:
         with proxy_mode.restore():
-            r = func_overload.decompose(*args, **kwargs)
+            r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
                 return r
 
@@ -189,14 +188,14 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         and pytree.tree_all_only(SymInt, lambda _: False, (args, kwargs))
     )
 
-    if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
+    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
         if all_constant:
             const_args, const_kwargs = pytree.tree_map_only(
                 _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
             )
             with maybe_disable_fake_tensor_mode():
-                return func_overload(*const_args, **const_kwargs)
+                return func(*const_args, **const_kwargs)
         raise RuntimeError(
             "It appears that you're trying to get value out of a tracing tensor - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
@@ -207,16 +206,16 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         fetch_symint_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
-    proxy_out = func_overload(*proxy_args, **proxy_kwargs)
+    proxy_out = func(*proxy_args, **proxy_kwargs)
 
     # Kind of a hacky way to test if an op is in-place or not
-    if func.__name__[-1] == "_" and func.__name__[0] != "_":
+    if func.overloadpacket.__name__[-1] == "_" and func.overloadpacket.__name__[0] != "_":
         # This makes DCE marginally less likely to DCE inplace operations.
         # It is not strictly necessary
         args[0].proxy = proxy_out
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
-    out = func_overload(*args, **kwargs)
+    out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -244,7 +243,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     constant = None
     # NB: do NOT include factories as constants
     if (
-        torch.Tag.nondeterministic_seeded not in func_overload.tags  # type: ignore[attr-defined]
+        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
         and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
@@ -253,7 +252,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
             const_args, const_kwargs = pytree.tree_map_only(
                 _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
             )
-            constant = func_overload(*const_args, **const_kwargs)
+            constant = func(*const_args, **const_kwargs)
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
@@ -323,6 +322,9 @@ def wrap_key(f, tensors, tracer):
     return wrapped
 
 
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+
+
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer):
         self.tracer = tracer
@@ -330,9 +332,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
 
-    def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with self.sym_mode.enable(False):
-            return self.inner_torch_dispatch(func_overload, types, args, kwargs)
+            return self.inner_torch_dispatch(func, types, args, kwargs)
 
     @contextmanager
     def restore(self):
@@ -340,28 +342,23 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             with super().restore():
                 yield
 
-    def inner_torch_dispatch(self, func_overload, types, args=(), kwargs=None):
+    def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
         if not self.enable_tracing:
-            return func_overload(*args, **kwargs)
+            return func(*args, **kwargs)
 
-        if symbolic_shapes.is_symbolic_op(func_overload):
+        if symbolic_shapes.is_symbolic_op(func):
             with self.restore():
-                return symbolic_shapes.handle_symbolic_op(func_overload, args, kwargs)
+                return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
 
-        func = func_overload.overloadpacket
-        # We don't want to convert torch.tensor constants into tracing objects.
-        if func_overload == aten.lift.default:
-            return args[0]
-
-        if func in [prim.device]:
-            return func_overload(*args, **kwargs)
+        if func in [prim.device.default]:
+            return func(*args, **kwargs)
 
         if pytree.tree_any_only(
             torch.Tensor,
             lambda t: has_proxy_slot(t, self.tracer),
             (args, kwargs)
         ):
-            out = proxy_call(self, func_overload, args, kwargs)
+            out = proxy_call(self, func, args, kwargs)
         # When we trace through a torch.tensor invocation, you never actually
         # see a torch.ops.aten.tensor call. Instead, the way this function is
         # implemented internally is that we allocate a plain tensor (this is
@@ -397,27 +394,26 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # This is what the overload modification does.
         else:
             flat_args = pytree.tree_flatten((args, kwargs))[0]
-            handled_types = [torch.Tensor, _ProxyTensor, torch.nn.Parameter]
 
             # If there are any tensor subclasses, we need to handle those tensor subclasses first
             # TODO: we could use types to test this
-            if any(isinstance(arg, torch.Tensor) and type(arg) not in handled_types for arg in flat_args):
+            if any(isinstance(arg, torch.Tensor) and type(arg) not in HANDLED_TYPES for arg in flat_args):
                 return NotImplemented
 
-            if func_overload is torch.ops.aten.lift_fresh.default:
-                func_overload = torch.ops.aten.lift_fresh_copy.default
+            if func is torch.ops.aten.lift_fresh.default:
+                func = torch.ops.aten.lift_fresh_copy.default
 
             n_args, n_kwargs = pytree.tree_map_only(SymInt, fetch_symint_proxy(self.tracer), (args, kwargs))
 
-            proxy_out = self.tracer.create_proxy('call_function', func_overload, n_args, n_kwargs,
-                                                 name=self.tracer.graph._target_to_str(func.__name__))
+            proxy_out = self.tracer.create_proxy('call_function', func, n_args, n_kwargs,
+                                                 name=self.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
-            out = func_overload(*args, **kwargs)
+            out = func(*args, **kwargs)
 
             # If this is a lift, the input tensor is guaranteed to be a
             # constant, so we keep a copy of the original argument along so
             # we can query it if we're asked to item() it at some later point
-            is_lift = func_overload is torch.ops.aten.lift_fresh_copy.default
+            is_lift = func is torch.ops.aten.lift_fresh_copy.default
             if is_lift and out.numel() <= CONSTANT_NUMEL_LIMIT:
                 with maybe_disable_fake_tensor_mode():
                     constant = args[0].clone()
