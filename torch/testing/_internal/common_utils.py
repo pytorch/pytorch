@@ -722,30 +722,6 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner  # type: ignore[import]
-        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
-
-        class XMLTestResultVerbose(_XMLTestResult):
-            """
-            Adding verbosity to test outputs:
-            by default test summary prints 'skip',
-            but we want to also print the skip reason.
-            GH issue: https://github.com/pytorch/pytorch/issues/69014
-
-            This works with unittest_xml_reporting<=3.2.0,>=2.0.0
-            (3.2.0 is latest at the moment)
-            """
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-
-            def addSkip(self, test, reason):
-                super().addSkip(test, reason)
-                for c in self.callback.__closure__:
-                    if isinstance(c.cell_contents, str) and c.cell_contents == 'skip':
-                        # this message is printed in test summary;
-                        # it stands for `verbose_str` captured in the closure
-                        c.cell_contents = f"skip: {reason}"
-
         test_filename = inspect.getfile(sys._getframe(1))
         test_filename = sanitize_if_functorch_test_filename(test_filename)
         test_filename = sanitize_test_filename(test_filename)
