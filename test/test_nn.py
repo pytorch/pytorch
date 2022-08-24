@@ -123,10 +123,6 @@ class TestAvgPool(TestCase):
                 expected = self._avg_pool2d(input, (i, j))
                 self.assertEqual(actual, expected, rtol=0, atol=1e-5)
 
-    def test_avg_pool2d_with_zero_divisor(self):
-        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
-
     def test_doubletensor_avg_pool2d_with_divisor(self):
         n, m = 3, 3
         input = torch.rand(1, 1, n, m)
@@ -160,10 +156,6 @@ class TestAvgPool(TestCase):
                         actual = actual.view(1, actual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
                         self.assertEqual(actual, expected, rtol=0, atol=1e-5)
-
-    def test_avg_pool3d_with_zero_divisor(self):
-        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: F.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
@@ -15432,23 +15424,6 @@ torch.cuda.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyCPU
-    @dtypes(torch.float)
-    def test_max_pool1d_errors(self, device, dtype):
-        def check(x, args, message):
-            model = torch.nn.MaxPool1d(*args)
-            with self.assertRaisesRegex(RuntimeError, r'max_pool1d\(\) ' + message):
-                model(torch.tensor(x, device=device, dtype=dtype))
-
-        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), "Expected 2D or 3D input tensor, but got")
-        check([], (1,), "Expected 2D or 3D input tensor, but got")
-        check([[]], (1, 0), "stride must be greater than zero, but got 0")
-        check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
-        check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
-        check([[]], (1, 1, 0, 0), "dilation must be greater than zero, but got 0")
-        check([[]], (5, 1, 0, 1), "Invalid computed output size: -4")
-
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d_corner_cases(self, device, dtype):
         def check(x, args, expected):
@@ -16959,6 +16934,7 @@ torch.cuda.synchronize()
             torch.cuda.synchronize()
         issue_24823_2()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/945")
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
