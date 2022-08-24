@@ -169,6 +169,7 @@ struct NNModuleInfo {
   PyModuleCls cls_;
   at::StringView cls_name_;
 
+  std::vector<std::pair<std::string, void*>> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
