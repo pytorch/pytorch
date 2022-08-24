@@ -535,7 +535,7 @@ def forward(self, x_1):
 
                 self.layer_norm = torch.nn.LayerNorm(input_dim)
 
-            def forward(mod_self, x):
+            def forward(mod_self, x):  # noqa: B902
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
                 y = mod_self.layer_norm(x)
                 self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))

@@ -271,7 +271,8 @@ class PythonKeyTracer(Tracer):
     ) -> Any:
         return forward(*args, **kwargs)
 
-    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+    # We don't want to turn getattr calls into proxies. So we just return the actual value.
+    def getattr(self, attr, attr_val, parameter_proxy_cache):
         return attr_val
 
     def create_arg(self, a: Any):
