@@ -132,7 +132,22 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<ExtraFields<EventType::Allocation>>(m, "_ExtraFields_Allocation");
 
+  py::class_<NNModuleInfo>(m, "_NNModuleInfo")
+      .def_property_readonly(
+          "params",
+          [](const NNModuleInfo& s) {
+            py::list list;
+            for (auto& p : s.params_) {
+              list.append(std::make_pair(
+                  p.first, reinterpret_cast<intptr_t>(p.second)));
+            }
+            return list;
+          })
+      .def_property_readonly(
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
 
