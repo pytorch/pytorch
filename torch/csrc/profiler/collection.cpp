@@ -70,10 +70,16 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*UNSAFE_tensor_impl_ptr_*/ t.unsafeGetTensorImpl(),
+
+        // This needs to be the start of the allocated data block (and not
+        // offset by some storage offset) in order for the logic in the function
+        // to calculate the unique_tensor_id to be correct.
+        /*unique_tensor_id_*/ (size_t)t.storage().data(),
+
         /*device_type_*/ t.device().type(),
         /*device_index_*/ t.device().index(),
-        /*dtype=*/t.scalar_type(),
+        /*dtype_=*/t.scalar_type(),
         /*dim_=*/(uint32_t)dim,
         /*layout_=*/layout);
 
@@ -853,12 +859,70 @@ struct ResultGreater {
   }
 };
 
-void build_tree(std::vector<std::shared_ptr<Result>>& events) {
-  std::stable_sort(
-      events.begin(), events.end(), [](const auto& a, const auto& b) {
-        return a->start_time_ns_ < b->start_time_ns_;
-      });
+void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
+  // Go through the result vectors
+  // For Torch Ops, check if (TensorImpl*, StorageImpl*) is already in the map
+  // For allocator events with negative allocation sizes,
 
+  // Do I need to track both TensorImpl and StorageImpl?
+
+  struct UniqueTensorInfo {
+    void* data_ptr_;
+    size_t unique_tensor_id_;
+  };
+
+  size_t cur_unique_tensor_id = 1;
+
+  std::unordered_set<void*> valid_storage_impls;
+  std::unordered_map<void*, UniqueTensorInfo> unique_tensor_map;
+
+  for (auto& res : sorted_results) {
+    TORCH_INTERNAL_ASSERT(res != nullptr);
+    res->visit(c10::overloaded(
+        [&](ExtraFields<EventType::TorchOp>& torch_op) {
+          auto& metadata_vec = torch_op.inputs_.tensor_metadata_;
+          for (auto& metadata : metadata_vec) {
+            if (!metadata) {
+              continue;
+            }
+            auto tensor_impl = metadata->UNSAFE_tensor_impl_ptr_;
+
+            // This holds the storage pointer until we update it
+            void* data_ptr = (void*)metadata->unique_tensor_id_;
+            if (!tensor_impl || !data_ptr) {
+              continue;
+            }
+            if (valid_storage_impls.find(data_ptr) ==
+                valid_storage_impls.end()) {
+              cur_unique_tensor_id++;
+              valid_storage_impls.insert(data_ptr);
+              unique_tensor_map[tensor_impl] = {data_ptr, cur_unique_tensor_id};
+              metadata->unique_tensor_id_ = cur_unique_tensor_id;
+            }
+
+            auto it = unique_tensor_map.find(tensor_impl);
+            if (it == unique_tensor_map.end() ||
+                it->second.data_ptr_ != data_ptr) {
+              cur_unique_tensor_id++;
+              unique_tensor_map[tensor_impl] = {data_ptr, cur_unique_tensor_id};
+              metadata->unique_tensor_id_ = cur_unique_tensor_id;
+              continue;
+            }
+            metadata->unique_tensor_id_ = it->second.unique_tensor_id_;
+          }
+        },
+        [&](ExtraFields<EventType::Allocation>& alloc_op) {
+          if (alloc_op.alloc_size_ < 0) {
+            // For deallocations, clear relevant pointers
+            valid_storage_impls.erase(alloc_op.ptr_);
+            unique_tensor_map.erase(alloc_op.ptr_);
+          }
+        },
+        [](const auto&) {}));
+  }
+}
+
+void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
   std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
@@ -933,7 +997,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
   };
 
   // Stack replay loop.
-  for (auto& event : events) {
+  for (auto& event : sorted_events) {
     while (!end_events_.empty() &&
            end_events_.top()->endTimeNS() < event->start_time_ns_) {
       pop_event(end_events_.top());
@@ -1003,6 +1067,15 @@ RecordQueue::getRecords(
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
+
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a->start_time_ns_ < b->start_time_ns_;
+  });
+
+  // Needs both TorchOp and Allocation events in order to apply
+  // the unique_tensor_id_ field, hence why it's done here.
+  calculate_unique_tensor_ids(out);
+
   build_tree(out);
   return {out, std::move(trace)};
 }
