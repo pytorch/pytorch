@@ -374,13 +374,13 @@ class TestPoolingNNDeviceType(NNTestCase):
 
         inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
             inp = torch.randn(1, 0, 50, 32, device=device)
@@ -390,7 +390,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     def test_FractionalMaxPool3d_zero_batch(self, device):
         mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
         inp = torch.ones(0, 16, 50, 32, 32, device=device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
@@ -414,14 +414,14 @@ class TestPoolingNNDeviceType(NNTestCase):
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         # 1D is supposed to be okay with 0 numel() inputs so dont test
         # error raising for that case.
 
         inp = torch.randn(0, 16, 50, 32, device=device)
         mod = torch.nn.MaxPool2d(3, stride=2).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.randn(1, 0, 50, 32, device=device)
@@ -429,7 +429,7 @@ class TestPoolingNNDeviceType(NNTestCase):
 
         inp = torch.ones(0, 16, 50, 44, 31, device=device)
         mod = torch.nn.MaxPool3d(3, stride=2).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
@@ -539,7 +539,7 @@ torch.cuda.synchronize()
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.randn(1, 0, 50, device=device)
@@ -547,7 +547,7 @@ torch.cuda.synchronize()
 
         inp = torch.randn(0, 16, 50, 32, device=device)
         mod = torch.nn.AdaptiveMaxPool2d(3).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.randn(1, 0, 50, 32, device=device)
@@ -555,7 +555,7 @@ torch.cuda.synchronize()
 
         inp = torch.ones(0, 16, 50, 44, 31, device=device)
         mod = torch.nn.AdaptiveMaxPool3d(3).to(device)
-        self._test_module_empty_input(mod, inp, check_size=False)
+        _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
@@ -565,10 +565,10 @@ torch.cuda.synchronize()
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
-        self._test_module_empty_input(avgpool, inp, check_size=False)
+        _test_module_empty_input(self, avgpool, inp, check_size=False)
 
         clast_inp = torch.randn(0, 16, 20, 32, device=device).contiguous(memory_format=torch.channels_last)
-        self._test_module_empty_input(avgpool, clast_inp, check_size=False)
+        _test_module_empty_input(self, avgpool, clast_inp, check_size=False)
 
         # test with empty non-batch input
         with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
