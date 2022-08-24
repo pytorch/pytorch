@@ -2028,15 +2028,22 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
   std::string error_str = "Discovered operators that have been registered through the dispatcher"
                           " without explicitly specifying their schemas. Please do so using"
                           " the TORCH_LIBRARY macro. Suspect operators:\n";
+  auto dangling_prim_ops = 0;
   for (auto& op : danglingImpls) {
       auto& op_name = op.operator_name();
+      // Primtorch ops are registered from python, but can potentially
+      // have some kernels registered directly in C++ (like functionalization).
+      // Skip them in this test.
+      if (op_name.name.rfind("prims", 0) == 0) {
+          ++dangling_prim_ops;
+      }
       error_str += "\t" + op_name.name;
       if (op_name.overload_name != "") {
           error_str += "." + op_name.overload_name;
       }
       error_str += "\n";
   }
-  ASSERT_EQ(danglingImpls.size(), 0) << error_str;
+  ASSERT_EQ(danglingImpls.size(), dangling_prim_ops) << error_str;
 }
 
 bool called_kernel_cpu = false;
