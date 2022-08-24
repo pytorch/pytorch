@@ -25,9 +25,8 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     """
     Checks that function used in a callable datapipe works with the input column
 
-    This simply ensures that the number of
-     positional arguments matches
-    the size of the input column. The function must not contain any non-default
+    This simply ensures that the number of positional arguments matches the size
+    of the input column. The function must not contain any non-default
     keyword-only arguments.
 
     Examples:
@@ -42,14 +41,13 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Notes:
         If the function contains variable positional (`inspect.VAR_POSITIONAL`) arguments,
         for example, f(a, *args), the validator will accept any size of input column
-        greater than or equal to the number of positional or keyword arguments.
+        greater than or equal to the number of positional arguments.
         (in this case, 1).
 
     Args:
         fn: The function to check.
         input_col: The input column to check.
-    Returns:
-        None.
+
     Raises:
         ValueError: If the function is not compatible with the input column.
     """
