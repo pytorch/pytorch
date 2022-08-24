@@ -525,7 +525,7 @@ class AvgPool1d(_AvgPoolNd):
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.,  4.,  6.]]])
+        tensor([[[2., 4., 6.]]])
     """
 
     kernel_size: _size_1_t
