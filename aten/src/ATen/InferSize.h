@@ -5,6 +5,7 @@
 #include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
+#include "c10/core/SymIntArrayRef.h"
 
 namespace at {
 
@@ -14,9 +15,12 @@ namespace at {
 // templated to handle std::vector<int64_t> and DimVector use cases, see
 // below
 //
-template <typename ResultVec>
-inline void infer_size_impl(IntArrayRef shape, int64_t numel, ResultVec& res) {
-  int64_t newsize = 1;
+template <typename InputArrayRef, typename NumelType, typename ResultVec>
+inline void infer_size_impl(
+    InputArrayRef shape,
+    NumelType numel,
+    ResultVec& res) {
+  NumelType newsize = 1;
   auto infer_dim = c10::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (shape[dim] == -1) {
@@ -65,7 +69,16 @@ inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
 
 inline at::DimVector infer_size_dv(IntArrayRef shape, int64_t numel) {
   auto res = at::DimVector(shape);
-  infer_size_impl(shape, numel, res);
+  infer_size_impl<IntArrayRef, int64_t, at::DimVector>(shape, numel, res);
+  return res;
+}
+
+inline at::SymDimVector infer_size_dv(
+    c10::SymIntArrayRef shape,
+    c10::SymInt numel) {
+  auto res = at::SymDimVector(shape);
+  infer_size_impl<c10::SymIntArrayRef, c10::SymInt, at::SymDimVector>(
+      shape, numel, res);
   return res;
 }
 

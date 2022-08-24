@@ -12,5 +12,4 @@ constexpr size_t kDimVectorStaticSize = C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE;
 /// A container for sizes or strides
 using DimVector = SmallVector<int64_t, kDimVectorStaticSize>;
 using SymDimVector = SmallVector<c10::SymInt, kDimVectorStaticSize>;
-
 } // namespace c10
