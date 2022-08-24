@@ -507,7 +507,7 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: at::linalg_lu_solve(LU, pivots, A_t, /*left*/true, /*adjoint*/!A_p.is_complex() && A_p.is_contiguous()).diagonal(0, -2, -1).sum(-1) * result
+  result: linalg_det_jvp(A_t, result, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, False, False]
 
 - name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
