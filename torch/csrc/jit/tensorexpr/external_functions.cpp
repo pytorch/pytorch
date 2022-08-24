@@ -1451,7 +1451,6 @@ void nnc_mkldnn_prepacked_linear_run(
   const at::Tensor& x = tensors[1];
   auto context = reinterpret_cast<LinearOpContext*>(buf_data[2]);
 
-  at::Tensor output = context->run(x);
   context->run(x, buf_data[0]);
 }
 
