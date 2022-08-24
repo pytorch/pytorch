@@ -107,16 +107,16 @@ void FusionDefinition::print(std::ostream& os) const {
   os << "\n";
 }
 
-Scalar* FusionDefinition::defineScalar() {
+Scalar FusionDefinition::defineScalar() {
   FUSER_PERF_SCOPE("FusionDefinition::defineScalar");
-  Scalar* out = new nvfuser::Scalar(recording_state_.size());
-  recording_state_.emplace_back(out);
+  Scalar out(recording_state_.size());
+  recording_state_.emplace_back(out(), StateType::Scalar);
   return out;
 }
-Tensor* FusionDefinition::defineTensor() {
+Tensor FusionDefinition::defineTensor() {
   FUSER_PERF_SCOPE("FusionDefinition::defineTensor");
-  Tensor* out = new nvfuser::Tensor(recording_state_.size());
-  recording_state_.emplace_back(out);
+  Tensor out(recording_state_.size());
+  recording_state_.emplace_back(out(), StateType::Tensor);
   return out;
 }
 void FusionDefinition::defineRecord(RecordFunctor* record) {
@@ -161,6 +161,10 @@ Nvf::Val* FusionDefinition::getFusionState(size_t index) const {
 }
 void FusionDefinition::setFusionState(size_t index, Nvf::Val* val) {
   fusion_state_.at(index) = val;
+}
+
+State FusionDefinition::recordingState(size_t index) const {
+  return recording_state_.at(index);
 }
 
 } // namespace nvfuser

@@ -56,7 +56,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     auto t0 = fd.defineTensor();
     try {
       fd.defineRecord(new TensorRecord(
-          {*static_cast<State*>(t0)}, {3}, {true}, Nvf::DataType::Float));
+          {fd.recordingState(t0())}, {3}, {true}, Nvf::DataType::Float));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Tensor Record creation! " << e.what();
@@ -65,7 +65,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     auto s1 = fd.defineScalar();
     try {
       fd.defineRecord(
-          new ScalarRecord({*static_cast<State*>(s1)}, Nvf::DataType::Double));
+          new ScalarRecord({fd.recordingState(s1())}, Nvf::DataType::Double));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Scalar Record creation! " << e.what();
@@ -75,8 +75,8 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     try {
       fd.defineRecord(
           new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
-              {*static_cast<State*>(t0), *static_cast<State*>(s1)},
-              {*static_cast<State*>(t2)},
+              {fd.recordingState(t0()), fd.recordingState(s1())},
+              {fd.recordingState(t2())},
               "ops.add",
               static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>(
                   Nvf::add)));
@@ -87,14 +87,14 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
     try {
       fd.defineRecord(
-          new OutputRecord<Nvf::TensorView>({*static_cast<State*>(t2)}));
+          new OutputRecord<Nvf::TensorView>({fd.recordingState(t2())}));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Output Record creation! " << e.what();
     }
 
     try {
-      fd.defineRecord(new OutputRecord<Nvf::Val>({*static_cast<State*>(s1)}));
+      fd.defineRecord(new OutputRecord<Nvf::Val>({fd.recordingState(s1())}));
       FAIL() << "Expected an assert for too many records!";
     } catch (...) {
       SUCCEED();
@@ -124,7 +124,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     auto t0 = fd.defineTensor();
     try {
       fd.defineRecord(new TensorRecord(
-          {*static_cast<State*>(t0)}, {3}, {true}, Nvf::DataType::Float));
+          {fd.recordingState(t0())}, {3}, {true}, Nvf::DataType::Float));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Tensor Record creation! " << e.what();
@@ -133,7 +133,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     auto s1 = fd.defineScalar();
     try {
       fd.defineRecord(
-          new ScalarRecord({*static_cast<State*>(s1)}, Nvf::DataType::Double));
+          new ScalarRecord({fd.recordingState(s1())}, Nvf::DataType::Double));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Scalar Record creation! " << e.what();
@@ -143,8 +143,8 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     try {
       fd.defineRecord(
           new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
-              {*static_cast<State*>(t0), *static_cast<State*>(s1)},
-              {*static_cast<State*>(t2)},
+              {fd.recordingState(t0()), fd.recordingState(s1())},
+              {fd.recordingState(t2())},
               "ops.add",
               static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>(
                   Nvf::add)));
@@ -155,7 +155,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
     try {
       fd.defineRecord(
-          new OutputRecord<Nvf::TensorView>({*static_cast<State*>(t2)}));
+          new OutputRecord<Nvf::TensorView>({fd.recordingState(t2())}));
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Unexpected assert during Output Record creation! " << e.what();

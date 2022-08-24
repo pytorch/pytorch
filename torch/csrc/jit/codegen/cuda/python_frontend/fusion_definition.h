@@ -16,9 +16,8 @@ class FusionManager;
 
 TORCH_CUDA_CU_API const char* dtypeToPyString(Nvf::DataType t);
 
-//! The State, child classes Tensor and Scalar, and the StateType enum
-//! are used to define state objects to encapsulate the recording of state
-//! in the FusionDefinition.
+//! The State and the StateType enum are used to define state objects to
+//! encapsulate the recording of state in the FusionDefinition.
 
 enum class StateType {
   Tensor,
@@ -27,15 +26,15 @@ enum class StateType {
 };
 
 struct State {
-  State(StateType _stype, size_t _index) : stype(_stype), index(_index) {}
+  State(size_t _index, StateType _stype) : index(_index), stype(_stype) {}
 
-  //! StateType is either: Tensor or Scalar
-  StateType stype;
   //! A unique index to identifiy each recorded state item.
   size_t index;
+  //! StateType is either: Tensor or Scalar
+  StateType stype;
 };
 
-//! The child classes are used to define separate function signtures in
+//! The Tensor and Scalar classes are used to define separate function signtures
 //! in the FusionDefintion to identify the appropriate Operator function.
 //!
 //! Example:
@@ -43,12 +42,26 @@ struct State {
 //!   add(Tensor* arg1, Tensor* arg2) -> Tensor*
 //!   add(Tensor* arg1, Scalar* arg2) -> Tensor*
 //!   add(Scalar* arg1, Scalar* arg2) -> Scalar*
-struct Tensor : State {
-  Tensor(size_t _index) : State(StateType::Tensor, _index) {}
+struct Tensor {
+  Tensor(size_t _index) : index(_index) {}
+
+  size_t operator()() const {
+    return index;
+  }
+
+  //! A unique index to identifiy each recorded state item.
+  size_t index;
 };
 
-struct Scalar : State {
-  Scalar(size_t _index) : State(StateType::Scalar, _index) {}
+struct Scalar {
+  Scalar(size_t _index) : index(_index) {}
+
+  size_t operator()() const {
+    return index;
+  }
+
+  //! A unique index to identifiy each recorded state item.
+  size_t index;
 };
 
 //! FusionDefinition defines the C++ side of a Python Context manager to
@@ -90,9 +103,9 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! These methods are used to record the FusionDefinition for cache lookup
 
   //! Defines a Scalar State Record
-  Scalar* defineScalar();
+  Scalar defineScalar();
   //! Defines a Tensor State Record
-  Tensor* defineTensor();
+  Tensor defineTensor();
   //! Defines a Record that records the operation required to
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
@@ -104,6 +117,8 @@ class TORCH_CUDA_CU_API FusionDefinition {
   Nvf::Val* getFusionState(size_t index) const;
   //! Sets a Fusion IR Tensor/Scalar object
   void setFusionState(size_t index, Nvf::Val* val);
+  //! Gets a Record State object
+  State recordingState(size_t index) const;
 
  private:
   //! Builds an nvFuser Fusion IR object upon exit of a FusionDefintion
@@ -125,8 +140,8 @@ class TORCH_CUDA_CU_API FusionDefinition {
 
   //! A vector of record operations in the FusionDefintion
   std::vector<std::shared_ptr<RecordFunctor>> recording_;
-  //! A vector of state (Tensor/Scalar) recorded in the FusionDefinition
-  std::vector<std::unique_ptr<State>> recording_state_;
+  //! A vector of state recorded in the FusionDefinition
+  std::vector<State> recording_state_;
 
   //! A vector of nvFuser Fusion IR TensorViews/Vals for building the Fusion
   //! IR graph.

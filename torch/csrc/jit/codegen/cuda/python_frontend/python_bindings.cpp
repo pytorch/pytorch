@@ -99,31 +99,31 @@ void initNvFuserPythonBindings(PyObject* module) {
           })
       .def(
           "add_output",
-          [](nvfuser::FusionDefinition& self, nvfuser::Scalar* output) {
+          [](nvfuser::FusionDefinition& self, nvfuser::Scalar output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
             self.defineRecord(new nvfuser::OutputRecord<Nvf::Val>(
-                {*static_cast<nvfuser::State*>(output)}));
+                {self.recordingState(output())}));
           })
       .def(
           "add_output",
-          [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
+          [](nvfuser::FusionDefinition& self, nvfuser::Tensor output) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
             self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
-                {*static_cast<nvfuser::State*>(output)}));
+                {self.recordingState(output())}));
           })
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              size_t ndims,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (simple)");
             std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);
             ;
             std::vector<bool> contig_info(ndims, false);
 
-            nvfuser::Tensor* out = self.defineTensor();
+            nvfuser::Tensor out = self.defineTensor();
             self.defineRecord(new nvfuser::TensorRecord(
-                {*static_cast<nvfuser::State*>(out)},
+                {self.recordingState(out())},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
                 dtype));
@@ -138,7 +138,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t>& symbolic_sizes,
              std::vector<bool>& contiguous,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (default)");
 
             for (size_t i = 0; i < symbolic_sizes.size(); ++i) {
@@ -151,9 +151,9 @@ void initNvFuserPythonBindings(PyObject* module) {
                   " was neither broadcast(1) or symbolic(-1).");
             }
 
-            nvfuser::Tensor* out = self.defineTensor();
+            nvfuser::Tensor out = self.defineTensor();
             self.defineRecord(new nvfuser::TensorRecord(
-                {*static_cast<nvfuser::State*>(out)},
+                {self.recordingState(out())},
                 symbolic_sizes,
                 contiguous,
                 dtype));
@@ -169,7 +169,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t>& sizes,
              std::vector<int64_t>& strides,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor* {
+             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (integration)");
             TORCH_CHECK(
                 sizes.size() == strides.size(),
@@ -207,9 +207,9 @@ void initNvFuserPythonBindings(PyObject* module) {
               }
             }
 
-            nvfuser::Tensor* out = self.defineTensor();
+            nvfuser::Tensor out = self.defineTensor();
             self.defineRecord(new nvfuser::TensorRecord(
-                {*static_cast<nvfuser::State*>(out)},
+                {self.recordingState(out())},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
                 dtype));
@@ -222,55 +222,55 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar* {
+          [](nvfuser::FusionDefinition& self, double val) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (double)");
-            nvfuser::Scalar* out = self.defineScalar();
+            nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Double, double>(
-                {*static_cast<nvfuser::State*>(out)}, val));
+                {self.recordingState(out())}, val));
             return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self,
-             c10::complex<double> val) -> nvfuser::Scalar* {
+             c10::complex<double> val) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (complex)");
-            nvfuser::Scalar* out = self.defineScalar();
+            nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(
                 new nvfuser::
                     ConstantRecord<Nvf::ComplexDouble, c10::complex<double>>(
-                        {*static_cast<nvfuser::State*>(out)}, val));
+                        {self.recordingState(out())}, val));
             return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar* {
+          [](nvfuser::FusionDefinition& self, bool val) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (bool)");
-            nvfuser::Scalar* out = self.defineScalar();
+            nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Bool, bool>(
-                {*static_cast<nvfuser::State*>(out)}, val));
+                {self.recordingState(out())}, val));
             return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_constant",
-          [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar* {
+          [](nvfuser::FusionDefinition& self, int64_t val) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (int)");
-            nvfuser::Scalar* out = self.defineScalar();
+            nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<Nvf::Int, int64_t>(
-                {*static_cast<nvfuser::State*>(out)}, val));
+                {self.recordingState(out())}, val));
             return out;
           },
           py::return_value_policy::reference)
       .def(
           "define_scalar",
           [](nvfuser::FusionDefinition& self,
-             Nvf::DataType dtype = Nvf::DataType::Double) -> nvfuser::Scalar* {
+             Nvf::DataType dtype = Nvf::DataType::Double) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_scalar");
-            nvfuser::Scalar* out = self.defineScalar();
-            self.defineRecord(new nvfuser::ScalarRecord(
-                {*static_cast<nvfuser::State*>(out)}, dtype));
+            nvfuser::Scalar out = self.defineScalar();
+            self.defineRecord(
+                new nvfuser::ScalarRecord({self.recordingState(out())}, dtype));
             return out;
           },
           py::arg("dtype") = Nvf::DataType::Double,
@@ -290,37 +290,38 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   // ******************** INSERT OP BINDINGS BELOW HERE ********************
 #define OP_PREFIX "Operators."
-#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)                  \
-  nvf_ops.def(                                                            \
-      op_str,                                                             \
-      [](nvfuser::FusionDefinition::Operators& self,                      \
-         nvfuser::Tensor* input) -> nvfuser::Tensor* {                    \
-        FUSER_PERF_SCOPE("Operators." op_str);                            \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor(); \
-        self.fusion_definition->defineRecord(                             \
-            new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>(    \
-                {*static_cast<nvfuser::State*>(input)},                   \
-                {*static_cast<nvfuser::State*>(output)},                  \
-                ("ops." op_str),                                          \
-                static_cast<Nvf::TensorView* (*)(Nvf::TensorView*)>(      \
-                    Nvf::op_name)));                                      \
-        return output;                                                    \
-      },                                                                  \
-      py::return_value_policy::reference);                                \
-  nvf_ops.def(                                                            \
-      op_str,                                                             \
-      [](nvfuser::FusionDefinition::Operators& self,                      \
-         nvfuser::Scalar* input) -> nvfuser::Scalar* {                    \
-        FUSER_PERF_SCOPE("Operators." op_str);                            \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar(); \
-        self.fusion_definition->defineRecord(                             \
-            new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(                  \
-                {*static_cast<nvfuser::State*>(input)},                   \
-                {*static_cast<nvfuser::State*>(output)},                  \
-                ("ops." op_str),                                          \
-                static_cast<Nvf::Val* (*)(Nvf::Val*)>(Nvf::op_name)));    \
-        return output;                                                    \
-      },                                                                  \
+#define NVFUSER_PYTHON_BINDING_UNARY_OP(op_str, op_name)               \
+  nvf_ops.def(                                                         \
+      op_str,                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                   \
+         nvfuser::Tensor input) -> nvfuser::Tensor {                   \
+        FUSER_PERF_SCOPE("Operators." op_str);                         \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;        \
+        nvfuser::Tensor output = fd->defineTensor();                   \
+        fd->defineRecord(                                              \
+            new nvfuser::OpRecord<Nvf::TensorView*, Nvf::TensorView*>( \
+                {fd->recordingState(input())},                         \
+                {fd->recordingState(output())},                        \
+                ("ops." op_str),                                       \
+                static_cast<Nvf::TensorView* (*)(Nvf::TensorView*)>(   \
+                    Nvf::op_name)));                                   \
+        return output;                                                 \
+      },                                                               \
+      py::return_value_policy::reference);                             \
+  nvf_ops.def(                                                         \
+      op_str,                                                          \
+      [](nvfuser::FusionDefinition::Operators& self,                   \
+         nvfuser::Scalar input) -> nvfuser::Scalar {                   \
+        FUSER_PERF_SCOPE("Operators." op_str);                         \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;        \
+        nvfuser::Scalar output = fd->defineScalar();                   \
+        fd->defineRecord(new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*>(  \
+            {fd->recordingState(input())},                             \
+            {fd->recordingState(output())},                            \
+            ("ops." op_str),                                           \
+            static_cast<Nvf::Val* (*)(Nvf::Val*)>(Nvf::op_name)));     \
+        return output;                                                 \
+      },                                                               \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_UNARY_OP("abs", abs)
@@ -373,17 +374,17 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Tensor* arg1,                                             \
-         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+         nvfuser::Tensor arg1,                                              \
+         nvfuser::Tensor arg2) -> nvfuser::Tensor {                         \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
-                                             Nvf::TensorView*,              \
-                                             Nvf::TensorView*,              \
-                                             Nvf::TensorView*>(             \
-            {*static_cast<nvfuser::State*>(arg1),                           \
-             *static_cast<nvfuser::State*>(arg2)},                          \
-            {*static_cast<nvfuser::State*>(output)},                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Tensor output = fd->defineTensor();                        \
+        fd->defineRecord(new nvfuser::OpRecord<                             \
+                         Nvf::TensorView*,                                  \
+                         Nvf::TensorView*,                                  \
+                         Nvf::TensorView*>(                                 \
+            {fd->recordingState(arg1()), fd->recordingState(arg2())},       \
+            {fd->recordingState(output())},                                 \
             ("ops." op_str),                                                \
             static_cast<                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::TensorView*)>(  \
@@ -394,17 +395,17 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Tensor* arg1,                                             \
-         nvfuser::Scalar* arg2) -> nvfuser::Tensor* {                       \
+         nvfuser::Tensor arg1,                                              \
+         nvfuser::Scalar arg2) -> nvfuser::Tensor {                         \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
-                                             Nvf::TensorView*,              \
-                                             Nvf::TensorView*,              \
-                                             Nvf::Val*>(                    \
-            {*static_cast<nvfuser::State*>(arg1),                           \
-             *static_cast<nvfuser::State*>(arg2)},                          \
-            {*static_cast<nvfuser::State*>(output)},                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Tensor output = fd->defineTensor();                        \
+        fd->defineRecord(new nvfuser::OpRecord<                             \
+                         Nvf::TensorView*,                                  \
+                         Nvf::TensorView*,                                  \
+                         Nvf::Val*>(                                        \
+            {fd->recordingState(arg1()), fd->recordingState(arg2())},       \
+            {fd->recordingState(output())},                                 \
             ("ops." op_str),                                                \
             static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>( \
                 Nvf::op_name)));                                            \
@@ -414,17 +415,17 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Scalar* arg1,                                             \
-         nvfuser::Tensor* arg2) -> nvfuser::Tensor* {                       \
+         nvfuser::Scalar arg1,                                              \
+         nvfuser::Tensor arg2) -> nvfuser::Tensor {                         \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<         \
-                                             Nvf::TensorView*,              \
-                                             Nvf::Val*,                     \
-                                             Nvf::TensorView*>(             \
-            {*static_cast<nvfuser::State*>(arg1),                           \
-             *static_cast<nvfuser::State*>(arg2)},                          \
-            {*static_cast<nvfuser::State*>(output)},                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Tensor output = fd->defineTensor();                        \
+        fd->defineRecord(new nvfuser::OpRecord<                             \
+                         Nvf::TensorView*,                                  \
+                         Nvf::Val*,                                         \
+                         Nvf::TensorView*>(                                 \
+            {fd->recordingState(arg1()), fd->recordingState(arg2())},       \
+            {fd->recordingState(output())},                                 \
             ("ops." op_str),                                                \
             static_cast<Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*)>( \
                 Nvf::op_name)));                                            \
@@ -434,15 +435,15 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Scalar* arg1,                                             \
-         nvfuser::Scalar* arg2) -> nvfuser::Scalar* {                       \
+         nvfuser::Scalar arg1,                                              \
+         nvfuser::Scalar arg2) -> nvfuser::Scalar {                         \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
-        self.fusion_definition->defineRecord(                               \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Scalar output = fd->defineScalar();                        \
+        fd->defineRecord(                                                   \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*>(         \
-                {*static_cast<nvfuser::State*>(arg1),                       \
-                 *static_cast<nvfuser::State*>(arg2)},                      \
-                {*static_cast<nvfuser::State*>(output)},                    \
+                {fd->recordingState(arg1()), fd->recordingState(arg2())},   \
+                {fd->recordingState(output())},                             \
                 ("ops." op_str),                                            \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*)>(           \
                     Nvf::op_name)));                                        \
@@ -476,20 +477,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                       \
       op_str,                                                                        \
       [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+         nvfuser::Tensor arg1,                                                       \
+         nvfuser::Tensor arg2,                                                       \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                  \
         FUSER_PERF_SCOPE("Operators." op_str);                                       \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::Val*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                    \
-             *static_cast<nvfuser::State*>(arg2),                                    \
-             *static_cast<nvfuser::State*>(arg3)},                                   \
-            {*static_cast<nvfuser::State*>(output)},                                 \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                      \
+        nvfuser::Tensor output = fd->defineTensor();                                 \
+        fd->defineRecord(new nvfuser::OpRecord<                                      \
+                         Nvf::TensorView*,                                           \
+                         Nvf::TensorView*,                                           \
+                         Nvf::TensorView*,                                           \
+                         Nvf::Val*>(                                                 \
+            {fd->recordingState(arg1()),                                             \
+             fd->recordingState(arg2()),                                             \
+             fd->recordingState(arg3())},                                            \
+            {fd->recordingState(output())},                                          \
             ("ops." op_str),                                                         \
             static_cast<                                                             \
                 Nvf::                                                                \
@@ -501,20 +503,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                       \
       op_str,                                                                        \
       [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Tensor* arg1,                                                      \
-         nvfuser::Scalar* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+         nvfuser::Tensor arg1,                                                       \
+         nvfuser::Scalar arg2,                                                       \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                  \
         FUSER_PERF_SCOPE("Operators." op_str);                                       \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::Val*,                              \
-                                             Nvf::Val*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                    \
-             *static_cast<nvfuser::State*>(arg2),                                    \
-             *static_cast<nvfuser::State*>(arg3)},                                   \
-            {*static_cast<nvfuser::State*>(output)},                                 \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                      \
+        nvfuser::Tensor output = fd->defineTensor();                                 \
+        fd->defineRecord(new nvfuser::OpRecord<                                      \
+                         Nvf::TensorView*,                                           \
+                         Nvf::TensorView*,                                           \
+                         Nvf::Val*,                                                  \
+                         Nvf::Val*>(                                                 \
+            {fd->recordingState(arg1()),                                             \
+             fd->recordingState(arg2()),                                             \
+             fd->recordingState(arg3())},                                            \
+            {fd->recordingState(output())},                                          \
             ("ops." op_str),                                                         \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(       \
@@ -525,20 +528,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                       \
       op_str,                                                                        \
       [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Scalar* arg1,                                                      \
-         nvfuser::Tensor* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                \
+         nvfuser::Scalar arg1,                                                       \
+         nvfuser::Tensor arg2,                                                       \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                  \
         FUSER_PERF_SCOPE("Operators." op_str);                                       \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();            \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                  \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::Val*,                              \
-                                             Nvf::TensorView*,                       \
-                                             Nvf::Val*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                    \
-             *static_cast<nvfuser::State*>(arg2),                                    \
-             *static_cast<nvfuser::State*>(arg3)},                                   \
-            {*static_cast<nvfuser::State*>(output)},                                 \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                      \
+        nvfuser::Tensor output = fd->defineTensor();                                 \
+        fd->defineRecord(new nvfuser::OpRecord<                                      \
+                         Nvf::TensorView*,                                           \
+                         Nvf::Val*,                                                  \
+                         Nvf::TensorView*,                                           \
+                         Nvf::Val*>(                                                 \
+            {fd->recordingState(arg1()),                                             \
+             fd->recordingState(arg2()),                                             \
+             fd->recordingState(arg3())},                                            \
+            {fd->recordingState(output())},                                          \
             ("ops." op_str),                                                         \
             static_cast<                                                             \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(       \
@@ -549,17 +553,18 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                       \
       op_str,                                                                        \
       [](nvfuser::FusionDefinition::Operators& self,                                 \
-         nvfuser::Scalar* arg1,                                                      \
-         nvfuser::Scalar* arg2,                                                      \
-         nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                \
+         nvfuser::Scalar arg1,                                                       \
+         nvfuser::Scalar arg2,                                                       \
+         nvfuser::Scalar arg3) -> nvfuser::Scalar {                                  \
         FUSER_PERF_SCOPE("Operators." op_str);                                       \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();            \
-        self.fusion_definition->defineRecord(                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                      \
+        nvfuser::Scalar output = fd->defineScalar();                                 \
+        fd->defineRecord(                                                            \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(       \
-                {*static_cast<nvfuser::State*>(arg1),                                \
-                 *static_cast<nvfuser::State*>(arg2),                                \
-                 *static_cast<nvfuser::State*>(arg3)},                               \
-                {*static_cast<nvfuser::State*>(output)},                             \
+                {fd->recordingState(arg1()),                                         \
+                 fd->recordingState(arg2()),                                         \
+                 fd->recordingState(arg3())},                                        \
+                {fd->recordingState(output())},                                      \
                 ("ops." op_str),                                                     \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(         \
                     Nvf::op_name)));                                                 \
@@ -575,17 +580,18 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Scalar* arg1,                                                             \
-         nvfuser::Scalar* arg2,                                                             \
-         nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                                       \
+         nvfuser::Scalar arg1,                                                              \
+         nvfuser::Scalar arg2,                                                              \
+         nvfuser::Scalar arg3) -> nvfuser::Scalar {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                   \
-        self.fusion_definition->defineRecord(                                               \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Scalar output = fd->defineScalar();                                        \
+        fd->defineRecord(                                                                   \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>(              \
-                {*static_cast<nvfuser::State*>(arg1),                                       \
-                 *static_cast<nvfuser::State*>(arg2),                                       \
-                 *static_cast<nvfuser::State*>(arg3)},                                      \
-                {*static_cast<nvfuser::State*>(output)},                                    \
+                {fd->recordingState(arg1()),                                                \
+                 fd->recordingState(arg2()),                                                \
+                 fd->recordingState(arg3())},                                               \
+                {fd->recordingState(output())},                                             \
                 ("ops." op_str),                                                            \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                \
                     Nvf::op_name)));                                                        \
@@ -595,20 +601,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Tensor* arg1,                                                             \
-         nvfuser::Tensor* arg2,                                                             \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Tensor arg1,                                                              \
+         nvfuser::Tensor arg2,                                                              \
+         nvfuser::Tensor arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*>(                                                 \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -620,20 +627,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Tensor* arg1,                                                             \
-         nvfuser::Tensor* arg2,                                                             \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Tensor arg1,                                                              \
+         nvfuser::Tensor arg2,                                                              \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*>(                                    \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*>(                                                        \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -645,20 +653,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Tensor* arg1,                                                             \
-         nvfuser::Scalar* arg2,                                                             \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Tensor arg1,                                                              \
+         nvfuser::Scalar arg2,                                                              \
+         nvfuser::Tensor arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*,                                     \
-                                             Nvf::TensorView*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*,                                                         \
+                         Nvf::TensorView*>(                                                 \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -670,20 +679,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Scalar* arg1,                                                             \
-         nvfuser::Tensor* arg2,                                                             \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Scalar arg1,                                                              \
+         nvfuser::Tensor arg2,                                                              \
+         nvfuser::Tensor arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*,                                     \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*,                                                         \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*>(                                                 \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::                                                                       \
@@ -695,20 +705,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Scalar* arg1,                                                             \
-         nvfuser::Scalar* arg2,                                                             \
-         nvfuser::Tensor* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Scalar arg1,                                                              \
+         nvfuser::Scalar arg2,                                                              \
+         nvfuser::Tensor arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*,                                     \
-                                             Nvf::Val*,                                     \
-                                             Nvf::TensorView*>(                             \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*,                                                         \
+                         Nvf::Val*,                                                         \
+                         Nvf::TensorView*>(                                                 \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::Val*, Nvf::TensorView*)>(              \
@@ -719,20 +730,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Tensor* arg1,                                                             \
-         nvfuser::Scalar* arg2,                                                             \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Tensor arg1,                                                              \
+         nvfuser::Scalar arg2,                                                              \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*,                                     \
-                                             Nvf::Val*>(                                    \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*,                                                         \
+                         Nvf::Val*>(                                                        \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>(              \
@@ -743,20 +755,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                              \
       op_str,                                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                                        \
-         nvfuser::Scalar* arg1,                                                             \
-         nvfuser::Tensor* arg2,                                                             \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                                       \
+         nvfuser::Scalar arg1,                                                              \
+         nvfuser::Tensor arg2,                                                              \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                                         \
         FUSER_PERF_SCOPE("Operators." op_str);                                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                   \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                         \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*,                                     \
-                                             Nvf::TensorView*,                              \
-                                             Nvf::Val*>(                                    \
-            {*static_cast<nvfuser::State*>(arg1),                                           \
-             *static_cast<nvfuser::State*>(arg2),                                           \
-             *static_cast<nvfuser::State*>(arg3)},                                          \
-            {*static_cast<nvfuser::State*>(output)},                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                             \
+        nvfuser::Tensor output = fd->defineTensor();                                        \
+        fd->defineRecord(new nvfuser::OpRecord<                                             \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*,                                                         \
+                         Nvf::TensorView*,                                                  \
+                         Nvf::Val*>(                                                        \
+            {fd->recordingState(arg1()),                                                    \
+             fd->recordingState(arg2()),                                                    \
+             fd->recordingState(arg3())},                                                   \
+            {fd->recordingState(output())},                                                 \
             ("ops." op_str),                                                                \
             static_cast<                                                                    \
                 Nvf::TensorView* (*)(Nvf::Val*, Nvf::TensorView*, Nvf::Val*)>(              \
@@ -773,17 +786,18 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                 \
       op_str,                                                                  \
       [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Scalar* arg1,                                                \
-         nvfuser::Scalar* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Scalar* {                          \
+         nvfuser::Scalar arg1,                                                 \
+         nvfuser::Scalar arg2,                                                 \
+         nvfuser::Scalar arg3) -> nvfuser::Scalar {                            \
         FUSER_PERF_SCOPE("Operators." op_str);                                 \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();      \
-        self.fusion_definition->defineRecord(                                  \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                \
+        nvfuser::Scalar output = fd->defineScalar();                           \
+        fd->defineRecord(                                                      \
             new nvfuser::OpRecord<Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*>( \
-                {*static_cast<nvfuser::State*>(arg1),                          \
-                 *static_cast<nvfuser::State*>(arg2),                          \
-                 *static_cast<nvfuser::State*>(arg3)},                         \
-                {*static_cast<nvfuser::State*>(output)},                       \
+                {fd->recordingState(arg1()),                                   \
+                 fd->recordingState(arg2()),                                   \
+                 fd->recordingState(arg3())},                                  \
+                {fd->recordingState(output())},                                \
                 ("ops." op_str),                                               \
                 static_cast<Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*)>(   \
                     Nvf::op_name)));                                           \
@@ -793,20 +807,21 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                 \
       op_str,                                                                  \
       [](nvfuser::FusionDefinition::Operators& self,                           \
-         nvfuser::Tensor* arg1,                                                \
-         nvfuser::Scalar* arg2,                                                \
-         nvfuser::Scalar* arg3) -> nvfuser::Tensor* {                          \
+         nvfuser::Tensor arg1,                                                 \
+         nvfuser::Scalar arg2,                                                 \
+         nvfuser::Scalar arg3) -> nvfuser::Tensor {                            \
         FUSER_PERF_SCOPE("Operators." op_str);                                 \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();      \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<            \
-                                             Nvf::TensorView*,                 \
-                                             Nvf::TensorView*,                 \
-                                             Nvf::Val*,                        \
-                                             Nvf::Val*>(                       \
-            {*static_cast<nvfuser::State*>(arg1),                              \
-             *static_cast<nvfuser::State*>(arg2),                              \
-             *static_cast<nvfuser::State*>(arg3)},                             \
-            {*static_cast<nvfuser::State*>(output)},                           \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                \
+        nvfuser::Tensor output = fd->defineTensor();                           \
+        fd->defineRecord(new nvfuser::OpRecord<                                \
+                         Nvf::TensorView*,                                     \
+                         Nvf::TensorView*,                                     \
+                         Nvf::Val*,                                            \
+                         Nvf::Val*>(                                           \
+            {fd->recordingState(arg1()),                                       \
+             fd->recordingState(arg2()),                                       \
+             fd->recordingState(arg3())},                                      \
+            {fd->recordingState(output())},                                    \
             ("ops." op_str),                                                   \
             static_cast<                                                       \
                 Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*, Nvf::Val*)>( \
@@ -823,23 +838,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Scalar* arg1,                                                                        \
-         nvfuser::Scalar* arg2,                                                                        \
-         nvfuser::Scalar* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Scalar* {                                                  \
+         nvfuser::Scalar arg1,                                                                         \
+         nvfuser::Scalar arg2,                                                                         \
+         nvfuser::Scalar arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Scalar {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Scalar output = fd->defineScalar();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::Val* (*)(Nvf::Val*, Nvf::Val*, Nvf::Val*, Nvf::Val*)>(                            \
@@ -850,23 +866,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Tensor* arg1,                                                                        \
-         nvfuser::Tensor* arg2,                                                                        \
-         nvfuser::Tensor* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Tensor arg1,                                                                         \
+         nvfuser::Tensor arg2,                                                                         \
+         nvfuser::Tensor arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*>(                                        \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*>(                                                            \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -878,23 +895,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Tensor* arg1,                                                                        \
-         nvfuser::Tensor* arg2,                                                                        \
-         nvfuser::Scalar* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Tensor arg1,                                                                         \
+         nvfuser::Tensor arg2,                                                                         \
+         nvfuser::Scalar arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -906,23 +924,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Tensor* arg1,                                                                        \
-         nvfuser::Scalar* arg2,                                                                        \
-         nvfuser::Tensor* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Tensor arg1,                                                                         \
+         nvfuser::Scalar arg2,                                                                         \
+         nvfuser::Tensor arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -934,23 +953,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Scalar* arg1,                                                                        \
-         nvfuser::Tensor* arg2,                                                                        \
-         nvfuser::Tensor* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Scalar arg1,                                                                         \
+         nvfuser::Tensor arg2,                                                                         \
+         nvfuser::Tensor arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -962,23 +982,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Scalar* arg1,                                                                        \
-         nvfuser::Scalar* arg2,                                                                        \
-         nvfuser::Tensor* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Scalar arg1,                                                                         \
+         nvfuser::Scalar arg2,                                                                         \
+         nvfuser::Tensor arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*,                                                \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*,                                                                    \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -990,23 +1011,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Tensor* arg1,                                                                        \
-         nvfuser::Scalar* arg2,                                                                        \
-         nvfuser::Scalar* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Tensor arg1,                                                                         \
+         nvfuser::Scalar arg2,                                                                         \
+         nvfuser::Scalar arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -1018,23 +1040,24 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                                                         \
       op_str,                                                                                          \
       [](nvfuser::FusionDefinition::Operators& self,                                                   \
-         nvfuser::Scalar* arg1,                                                                        \
-         nvfuser::Tensor* arg2,                                                                        \
-         nvfuser::Scalar* arg3,                                                                        \
-         nvfuser::Scalar* arg4) -> nvfuser::Tensor* {                                                  \
+         nvfuser::Scalar arg1,                                                                         \
+         nvfuser::Tensor arg2,                                                                         \
+         nvfuser::Scalar arg3,                                                                         \
+         nvfuser::Scalar arg4) -> nvfuser::Tensor {                                                    \
         FUSER_PERF_SCOPE("Operators." op_str);                                                         \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();                              \
-        self.fusion_definition->defineRecord(new nvfuser::OpRecord<                                    \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::TensorView*,                                         \
-                                             Nvf::Val*,                                                \
-                                             Nvf::Val*>(                                               \
-            {*static_cast<nvfuser::State*>(arg1),                                                      \
-             *static_cast<nvfuser::State*>(arg2),                                                      \
-             *static_cast<nvfuser::State*>(arg3),                                                      \
-             *static_cast<nvfuser::State*>(arg4)},                                                     \
-            {*static_cast<nvfuser::State*>(output)},                                                   \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                        \
+        nvfuser::Tensor output = fd->defineTensor();                                                   \
+        fd->defineRecord(new nvfuser::OpRecord<                                                        \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::TensorView*,                                                             \
+                         Nvf::Val*,                                                                    \
+                         Nvf::Val*>(                                                                   \
+            {fd->recordingState(arg1()),                                                               \
+             fd->recordingState(arg2()),                                                               \
+             fd->recordingState(arg3()),                                                               \
+             fd->recordingState(arg4())},                                                              \
+            {fd->recordingState(output())},                                                            \
             ("ops." op_str),                                                                           \
             static_cast<                                                                               \
                 Nvf::                                                                                  \
@@ -1047,30 +1070,31 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP("addcmul", addcmul)
 #undef NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP
 
-#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)                 \
-  nvf_ops.def(                                                               \
-      op_str,                                                                \
-      [](nvfuser::FusionDefinition::Operators& self,                         \
-         nvfuser::Tensor* arg,                                               \
-         const std::vector<int>& axes,                                       \
-         bool keepdim,                                                       \
-         Nvf::DataType dtype) -> nvfuser::Tensor* {                          \
-        FUSER_PERF_SCOPE("Operators." op_str);                               \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();    \
-        self.fusion_definition->defineRecord(new nvfuser::ReductionOpRecord( \
-            {*static_cast<nvfuser::State*>(arg)},                            \
-            {*static_cast<nvfuser::State*>(output)},                         \
-            ("ops." op_str),                                                 \
-            Nvf::op_name,                                                    \
-            axes,                                                            \
-            keepdim,                                                         \
-            dtype));                                                         \
-        return output;                                                       \
-      },                                                                     \
-      py::arg("arg"),                                                        \
-      py::arg("axes"),                                                       \
-      py::arg("keepdim") = false,                                            \
-      py::arg("dtype") = Nvf::DataType::Null,                                \
+#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)    \
+  nvf_ops.def(                                                  \
+      op_str,                                                   \
+      [](nvfuser::FusionDefinition::Operators& self,            \
+         nvfuser::Tensor arg,                                   \
+         const std::vector<int>& axes,                          \
+         bool keepdim,                                          \
+         Nvf::DataType dtype) -> nvfuser::Tensor {              \
+        FUSER_PERF_SCOPE("Operators." op_str);                  \
+        nvfuser::FusionDefinition* fd = self.fusion_definition; \
+        nvfuser::Tensor output = fd->defineTensor();            \
+        fd->defineRecord(new nvfuser::ReductionOpRecord(        \
+            {fd->recordingState(arg())},                        \
+            {fd->recordingState(output())},                     \
+            ("ops." op_str),                                    \
+            Nvf::op_name,                                       \
+            axes,                                               \
+            keepdim,                                            \
+            dtype));                                            \
+        return output;                                          \
+      },                                                        \
+      py::arg("arg"),                                           \
+      py::arg("axes"),                                          \
+      py::arg("keepdim") = false,                               \
+      py::arg("dtype") = Nvf::DataType::Null,                   \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)
@@ -1082,14 +1106,15 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Tensor* arg,                                              \
-         Nvf::DataType dtype) -> nvfuser::Tensor* {                         \
+         nvfuser::Tensor arg,                                               \
+         Nvf::DataType dtype) -> nvfuser::Tensor {                          \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();   \
-        self.fusion_definition->defineRecord(                               \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Tensor output = fd->defineTensor();                        \
+        fd->defineRecord(                                                   \
             new nvfuser::CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(  \
-                {*static_cast<nvfuser::State*>(arg)},                       \
-                {*static_cast<nvfuser::State*>(output)},                    \
+                {fd->recordingState(arg())},                                \
+                {fd->recordingState(output())},                             \
                 ("ops." op_str),                                            \
                 static_cast<                                                \
                     Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>( \
@@ -1101,18 +1126,18 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(                                                              \
       op_str,                                                               \
       [](nvfuser::FusionDefinition::Operators& self,                        \
-         nvfuser::Scalar* arg,                                              \
-         Nvf::DataType dtype) -> nvfuser::Scalar* {                         \
+         nvfuser::Scalar arg,                                               \
+         Nvf::DataType dtype) -> nvfuser::Scalar {                          \
         FUSER_PERF_SCOPE("Operators." op_str);                              \
-        nvfuser::Scalar* output = self.fusion_definition->defineScalar();   \
-        self.fusion_definition->defineRecord(                               \
-            new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(                \
-                {*static_cast<nvfuser::State*>(arg)},                       \
-                {*static_cast<nvfuser::State*>(output)},                    \
-                ("ops." op_str),                                            \
-                static_cast<Nvf::Val* (*)(Nvf::DataType, Nvf::Val*)>(       \
-                    Nvf::op_name),                                          \
-                dtype));                                                    \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;             \
+        nvfuser::Scalar output = fd->defineScalar();                        \
+        fd->defineRecord(new nvfuser::CastOpRecord<Nvf::Val*, Nvf::Val*>(   \
+            {fd->recordingState(arg())},                                    \
+            {fd->recordingState(output())},                                 \
+            ("ops." op_str),                                                \
+            static_cast<Nvf::Val* (*)(Nvf::DataType, Nvf::Val*)>(           \
+                Nvf::op_name),                                              \
+            dtype));                                                        \
         return output;                                                      \
       },                                                                    \
       py::return_value_policy::reference);
@@ -1123,15 +1148,16 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor* arg,
+         nvfuser::Tensor arg,
          std::vector<int>& axes,
          int64_t correction,
-         bool keepdim) -> nvfuser::Tensor* {
+         bool keepdim) -> nvfuser::Tensor {
         FUSER_PERF_SCOPE("Operators.var");
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
-            {*static_cast<nvfuser::State*>(arg)},
-            {*static_cast<nvfuser::State*>(output)},
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::VarianceOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
             axes,
             correction,
             keepdim));
@@ -1146,17 +1172,18 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(
       "broadcast_in_dim",
       [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor* arg,
+         nvfuser::Tensor arg,
          std::vector<int64_t>& output_shape,
-         std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor* {
+         std::vector<int64_t>& broadcast_dims) -> nvfuser::Tensor {
         FUSER_PERF_SCOPE("Operators.broadcast_in_dim");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
         TORCH_CHECK(
             output_shape.size() >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::BroadcastOpRecord(
-            {*static_cast<nvfuser::State*>(arg)},
-            {*static_cast<nvfuser::State*>(output)},
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
             "ops.broadcast_in_dim",
             output_shape,
             broadcast_dims));

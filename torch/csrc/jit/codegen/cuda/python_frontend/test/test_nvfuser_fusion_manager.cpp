@@ -68,7 +68,7 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   // record to an empty cache.
   {
     std::shared_ptr<RecordFunctor> test_record(new TensorRecord(
-        {State(StateType::Tensor, 0)}, {3}, {true}, Nvf::DataType::Float));
+        {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
 
     // Check Methods prior to adding an entry to the cache
 
@@ -174,9 +174,9 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
   // record to a cache with 1 fusion.
   {
     std::shared_ptr<RecordFunctor> cached_record(new TensorRecord(
-        {State(StateType::Tensor, 0)}, {3}, {true}, Nvf::DataType::Float));
+        {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
     std::shared_ptr<RecordFunctor> new_record(
-        new ScalarRecord({State(StateType::Scalar, 1)}, Nvf::DataType::Float));
+        new ScalarRecord({State(1, StateType::Scalar)}, Nvf::DataType::Float));
 
     try {
       auto hit_cache_entry = fm->lookupFusionCacheEntry(cached_record);
