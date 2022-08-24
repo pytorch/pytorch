@@ -1,8 +1,11 @@
 # Owner(s): ["module: cuda"]
 
+import functools
 import sys
+import traceback
 import unittest
 import unittest.mock
+from typing import List
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
@@ -90,6 +93,23 @@ class TestCudaTrace(TestCase):
         tensor = torch.empty(10, 4, device="cuda")
         self.mock.assert_called_once_with(tensor.data_ptr())
         other.assert_called_once_with(tensor.data_ptr())
+
+    def test_trace_offset(self):
+        def cb(tb: List[str], *args, **kwargs):
+            tb.extend(traceback.format_stack())
+
+        # If this test stops working because of a change in CUDA trace hooks,
+        # please make sure to change the constant itself.
+        expected_offset = cuda_trace._CUDA_HOOK_TRACE_OFFSET - 1
+        tb: List[str] = []
+
+        cuda_trace.register_callback_for_cuda_memory_allocation(
+            functools.partial(cb, tb)
+        )
+        # Tests if the line calling the allocation is at the expected offset in the
+        # stack trace using the fact that the unique variable name will appear in it.
+        _long_and_unique_alloc_name_ = torch.ones(10, device="cuda")
+        self.assertIn("_long_and_unique_alloc_name", tb[expected_offset])
 
 
 if __name__ == "__main__":
