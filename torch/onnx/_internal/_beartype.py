@@ -21,7 +21,7 @@ if GLOBALS.runtime_type_check is False:
     beartype = _no_op_decorator
 else:
     try:
-        import beartype as beartype_lib
+        import beartype as beartype_lib  # type: ignore[import]
         from beartype import roar as _roar
 
         # Beartype warns when we import from typing because the types are deprecated
