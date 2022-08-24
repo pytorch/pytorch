@@ -32,6 +32,9 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     stride = inp_type.strides()
     device = inp_type.device()
     dtype = inp_type.dtype()
+    # sanity check: can we create a tiny tensor of this device type?
+    torch.rand((4, 4), device=device)
+
     assert size is not None
     assert stride is not None
     assert device is not None
