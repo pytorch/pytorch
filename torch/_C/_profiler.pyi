@@ -65,7 +65,7 @@ class _ProfilerEvent:
         _ExtraFields_TorchOp,
         _ExtraFields_Backend,
         _ExtraFields_Allocation,
-        _ExtraFields_OutOfMemory
+        _ExtraFields_OutOfMemory,
         _ExtraFields_PyCall,
         _ExtraFields_PyCCall,
         _ExtraFields_Kineto,
