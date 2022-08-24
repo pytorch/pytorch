@@ -42,7 +42,13 @@ if(NOT __NCCL_INCLUDED)
     string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
     string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
 
-    if((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
+    # TODO: Replace me with SKIP_NCCL_SLIMMING option (and investigate why it does not work on newer compilers)
+    if("$ENV{BUILD_ENVIRONMENT}" MATCHES ".*-libtorch-cxx11-abi$")
+      # See https://github.com/pytorch/pytorch/issues/83887
+      message(WARNING "Skip NCCL library slimming for cxx11-abi builds")
+      set(__NCCL_LIBRARY_DEP nccl_external)
+      set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
+    elseif((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
       message(WARNING "Enabling NCCL library slimming")
       add_custom_command(
         OUTPUT "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a"
