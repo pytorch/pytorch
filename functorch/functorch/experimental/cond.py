@@ -54,11 +54,11 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     for node in false_graph.graph.nodes:
         if node.op == 'output':
             false_outs.extend(node.args)
-    
+
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
     assert(len(flat_true_outs) == len(flat_false_outs))
-    
+
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
@@ -89,12 +89,15 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
         name="conditional")
-    
-    if pred:
-        out = true_fn(*operands)
-    else:
-        out = false_fn(*operands)
-    
+
+    # We could get an out tensor by running the real ops
+    # But to avoid running real code in tracing, we just use a dummy tensor.
+    # if pred:
+    #     out = true_fn(*operands)
+    # else:
+    #     out = false_fn(*operands)
+    out = torch.zeros([])
+
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 

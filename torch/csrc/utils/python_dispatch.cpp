@@ -349,31 +349,29 @@ void initDispatchBindings(PyObject* module) {
     auto dt = (c10::DispatchKey)dispatch_key;
     return c10::toString(dt);
   });
-  m.def("_dispatch_num_backends", []() {
-    return c10::num_backends;
-  });
+  m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
   py::enum_<c10::DispatchKey>(m, "DispatchKey")
-    .value("Undefined", c10::DispatchKey::Undefined)
-    .value("Dense", c10::DispatchKey::Dense)
-    .value("BackendSelect", c10::DispatchKey::BackendSelect)
-    .value("CPU", c10::DispatchKey::CPU)
-    .value("CUDA", c10::DispatchKey::CUDA)
-    .value("AutocastCPU", c10::DispatchKey::AutocastCPU)
-    .value("AutocastCUDA", c10::DispatchKey::AutocastCUDA)
-    .value("AutogradCPU", c10::DispatchKey::AutogradCPU)
-    .value("ADInplaceOrView", c10::DispatchKey::ADInplaceOrView)
-    .value("AutogradCUDA", c10::DispatchKey::AutogradCUDA)
-    .value("PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot)
-    .value("Python", c10::DispatchKey::Python);
+      .value("Undefined", c10::DispatchKey::Undefined)
+      .value("Dense", c10::DispatchKey::Dense)
+      .value("BackendSelect", c10::DispatchKey::BackendSelect)
+      .value("CPU", c10::DispatchKey::CPU)
+      .value("CUDA", c10::DispatchKey::CUDA)
+      .value("AutocastCPU", c10::DispatchKey::AutocastCPU)
+      .value("AutocastCUDA", c10::DispatchKey::AutocastCUDA)
+      .value("AutogradCPU", c10::DispatchKey::AutogradCPU)
+      .value("ADInplaceOrView", c10::DispatchKey::ADInplaceOrView)
+      .value("AutogradCUDA", c10::DispatchKey::AutogradCUDA)
+      .value("PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot)
+      .value("Python", c10::DispatchKey::Python);
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
-    .def(py::init<c10::DispatchKey>())
-    .def("__or__", &c10::DispatchKeySet::operator|)
-    .def("__sub__", &c10::DispatchKeySet::operator-)
-    .def("__and__", &c10::DispatchKeySet::operator&)
-    .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
-    .def("has", &c10::DispatchKeySet::has);
+      .def(py::init<c10::DispatchKey>())
+      .def("__or__", &c10::DispatchKeySet::operator|)
+      .def("__sub__", &c10::DispatchKeySet::operator-)
+      .def("__and__", &c10::DispatchKeySet::operator&)
+      .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def("has", &c10::DispatchKeySet::has);
 
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
@@ -395,7 +393,6 @@ void initDispatchBindings(PyObject* module) {
   });
   py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
       .def(py::init<c10::DispatchKeySet>());
-
 
   py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
       .def(py::init<>());

@@ -150,3 +150,32 @@ class TestControlFlowTraced(TestCase):
         code = "".join(code.split())
         out = "".join(out.split())
         self.assertEqual(code, out)
+
+    def test_assert_on_mismatch_type_size(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return (x, x)
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(4)
+        with self.assertRaises(AssertionError):
+            make_fx(f)(x, torch.tensor(False))
+
+
+    def test_assert_on_mismatch_tensor_size(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return torch.zeros([10, 10])
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(4)
+        with self.assertRaises(AssertionError):
+            make_fx(f)(x, torch.tensor(False))
