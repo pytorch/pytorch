@@ -73,7 +73,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          python3 pytorch/.github/scripts/run_torchbench.py \
+          CUDA_LAUNCH_BLOCKING=1 python3 pytorch/.github/scripts/run_torchbench.py \
                   --pr-body "$PR_BODY_FILE" \
                   run \
                   --pytorch-path "${HOME}"/pytorch \
