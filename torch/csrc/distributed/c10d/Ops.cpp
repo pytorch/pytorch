@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/Ops.hpp>
 
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/library.h>
 
 namespace c10d {
@@ -28,7 +29,7 @@ allreduce_(
   auto work = process_group->allreduce(
       tensor_vec,
       AllreduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp(static_cast<ReduceOp::RedOpType>(reduce_op)),
           std::chrono::milliseconds(timeout)});
 
   // Return input tensors as output tensors to make inplace allreduce look like
@@ -60,7 +61,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp(static_cast<ReduceOp::RedOpType>(reduce_op)),
           std::chrono::milliseconds(timeout)});
 }
 
@@ -75,7 +76,7 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_(
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          ReduceOp{static_cast<ReduceOp::RedOpType>(reduce_op)},
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
