@@ -192,7 +192,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
     replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
-    match_changed_node: Dict[Node, Node] = dict()
+    match_changed_node: Dict[Node, Node] = {}
 
     for match in _matches:
 

@@ -383,7 +383,7 @@ Attempted to convert a derivative formula for a mutable operator
             )
             continue
 
-        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = dict()
+        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = {}
         for key, info in info_dict.items():
             if not info.forward_derivatives:
                 fw_derivative_dict[key] = []

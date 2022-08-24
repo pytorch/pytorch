@@ -258,7 +258,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
         if node.type().kind() != CLASSTYPE_KIND:
             nodes_py.append(NodePyIO(node, "input"))
 
-    attr_to_scope: Dict[Any, str] = dict()
+    attr_to_scope: Dict[Any, str] = {}
     for node in graph.nodes():
         if node.kind() == GETATTR_KIND:
             attr_name = node.s("name")
@@ -297,7 +297,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             module_name = getattr(module, "original_name", "Module")
         return module_name
 
-    alias_to_name = dict()
+    alias_to_name = {}
     base_name = parse_traced_name(trace)
     for name, module in trace.named_modules(prefix="__module"):
         mod_name = parse_traced_name(module)

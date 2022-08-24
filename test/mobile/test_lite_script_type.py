@@ -45,7 +45,7 @@ class TestLiteScriptModule(TestCase):
 
             def forward(self, a: torch.Tensor):
                 self.foo = Foo(a)
-                re: Dict[str, Foo] = dict()
+                re: Dict[str, Foo] = {}
                 re["test"] = Foo(a)
                 return self.foo, re["test"]
 

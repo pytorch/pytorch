@@ -36,7 +36,7 @@ def run_env_analysis():
     print('Running environment analysis...')
     info = get_env_info()
 
-    result: Dict[str, str] = dict()
+    result: Dict[str, str] = {}
 
     debug_str = ''
     if info.is_debug_build:

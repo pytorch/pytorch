@@ -322,7 +322,7 @@ if __name__ == "__main__":
         default="schemas.txt",
     )
     args = parser.parse_args()
-    existing_schema_dict = dict()
+    existing_schema_dict = {}
     slist = []
     with open(args.existing_schemas, "r") as f:
         while True:

@@ -185,7 +185,7 @@ class TestQuantizedOps(TestCase):
                     # some functions require inplace=True to test in-place.
                     # copy.copy is needed because these are modified in place
                     extra_kwargs = \
-                        copy.copy(op_group.get('extra_kwargs', dict()))
+                        copy.copy(op_group.get('extra_kwargs', {}))
                     output_is_observed = \
                         copy.copy(op_group.get('output_is_observed', False))
 

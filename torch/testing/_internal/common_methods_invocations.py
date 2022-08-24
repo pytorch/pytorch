@@ -1484,9 +1484,9 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
     cases = [
-        ([3], 3, dict()),
-        ([10], 3, dict()),
-        ([3, 10], 3, dict()),
+        ([3], 3, {}),
+        ([10], 3, {}),
+        ([3, 10], 3, {}),
         ([3], 3, dict(replacement=False)),
         ([3], 3, dict(replacement=True)),
         ([3, 4], 4, dict(replacement=True)),
@@ -3766,7 +3766,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, kwargs
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 9), (3,), dict()),
+        ((2, 3, 9), (3,), {}),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
         ((2, 3, 9), (3,), dict(stride=(1,), padding=(1,), ceil_mode=False, count_include_pad=True)),
@@ -3785,7 +3785,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 3, 4, 4), (2, 2, 2), dict()),
+        ((2, 3, 3, 4, 4), (2, 2, 2), {}),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
         ((1, 2, 5, 5, 5), (2, 3, 4), dict(stride=(1, 2, 2), padding=(0, 1, 2), ceil_mode=True,
@@ -5072,7 +5072,7 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     shapes2d = ((L, M),)
     shapes3d = ((L, M, S),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 > dim2 is allowed
@@ -5107,7 +5107,7 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
     shapes2d = ((M, L),)
     shapes3d = ((M, S, L),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 == dim2 is not allowed
@@ -5193,10 +5193,10 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
     reductions = ("mean", "sum", "none")
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        (shape, dict()),
-        ((*shape, 1), dict()),
-        ((*shape, 1, 2), dict()),
-        ((*shape, 1, 2, 3), dict()),
+        (shape, {}),
+        ((*shape, 1), {}),
+        ((*shape, 1, 2), {}),
+        ((*shape, 1, 2, 3), {}),
         *[(shape, dict(reduction=reduction)) for reduction in reductions],
         *[
             (

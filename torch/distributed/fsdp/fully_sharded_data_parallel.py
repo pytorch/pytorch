@@ -999,7 +999,7 @@ class FullyShardedDataParallel(nn.Module):
             TracingConfig
         ):
             # Initialize a dict that maps each module to its parent FSDP wrap
-            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = {}
             for wrap in self.fsdp_modules(self):
                 module_to_fsdp[wrap.module] = wrap
             # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.

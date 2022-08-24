@@ -2336,7 +2336,7 @@ class TestAutograd(TestCase):
         # which means that a lot of accessors on them may segfault. Test that we
         # properly error in this case.
         t = torch.ones(1, requires_grad=True)
-        t._backward_hooks = dict()
+        t._backward_hooks = {}
         with self.assertRaisesRegex(RuntimeError, "Attribute '_register_hook_dict' is invalid"):
             f._register_hook_dict(t)
         with self.assertRaisesRegex(RuntimeError, "Attribute 'register_hook' is invalid"):
