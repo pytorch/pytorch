@@ -63,7 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+  file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -72,7 +72,7 @@ if(INTERN_BUILD_ATEN_OPS)
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
-  ${all_python}
+  ${torchgen_python}
   ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
@@ -425,6 +425,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
   endif()
 
+  file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
+  file(GLOB_RECURSE autograd_yaml "${TOOLS_PATH}/autograd/*.yaml")
+  file(GLOB_RECURSE autograd_templates "${TOOLS_PATH}/autograd/templates/*")
   add_custom_command(
     OUTPUT
     ${TORCH_GENERATED_CODE}
@@ -438,48 +441,20 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --gen_lazy_ts_backend
       ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
-    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
-    "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
-    "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
-    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
-    "${TOOLS_PATH}/autograd/templates/VariableType.h"
-    "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
-    "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
-    "${TOOLS_PATH}/autograd/templates/Functions.h"
-    "${TOOLS_PATH}/autograd/templates/Functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_functions.h"
-    "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_enum_tag.cpp"
-    "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
-    "${TOOLS_PATH}/autograd/deprecated.yaml"
-    "${TOOLS_PATH}/autograd/derivatives.yaml"
-    "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
-    "${TOOLS_PATH}/autograd/gen_autograd.py"
-    "${TOOLS_PATH}/autograd/gen_python_functions.py"
-    "${TOOLS_PATH}/autograd/gen_variable_factories.py"
-    "${TOOLS_PATH}/autograd/gen_variable_type.py"
-    "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
-    "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TORCH_ROOT}/torchgen/gen_backend_stubs.py"
-    "${TORCH_ROOT}/torchgen/gen_lazy_tensor.py"
-    "${TORCH_ROOT}/torchgen/api/lazy.py"
-    "${TORCH_ROOT}/torchgen/dest/lazy_ir.py"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
+      "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+      "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+      "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
+      "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
+      ${autograd_python}
+      ${autograd_yaml}
+      ${autograd_templates}
+      ${torchgen_python}
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -1065,23 +1040,36 @@ endif()
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  file(GLOB lite_interpreter_python "${TOOLS_PATH}/lite_interpreter/*.py")
   if(${TRACING_BASED})
+    file(GLOB code_analyzer_python "${TOOLS_PATH}/code_analyzer/*.py")
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-      "${PYTHON_EXECUTABLE}"
-      -m tools.code_analyzer.gen_oplist
-      --model_file_list_path "${SELECTED_OP_LIST}"
-      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+        "${PYTHON_EXECUTABLE}"
+        -m tools.code_analyzer.gen_oplist
+        --model_file_list_path "${SELECTED_OP_LIST}"
+        --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      DEPENDS
+        ${torchgen_python}
+        ${lite_interpreter_python}
+        ${code_analyzer_python}
+        "${SELECTED_OP_LIST}"
+        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       WORKING_DIRECTORY "${TORCH_ROOT}")
   else()
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-      "${PYTHON_EXECUTABLE}"
-      -m tools.lite_interpreter.gen_selected_mobile_ops_header
-      --yaml_file_path "${SELECTED_OP_LIST}"
-      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+        "${PYTHON_EXECUTABLE}"
+        -m tools.lite_interpreter.gen_selected_mobile_ops_header
+        --yaml_file_path "${SELECTED_OP_LIST}"
+        --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      DEPENDS
+        ${torchgen_python}
+        ${lite_interpreter_python}
+        "${SELECTED_OP_LIST}"
+        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       WORKING_DIRECTORY "${TORCH_ROOT}")
   endif()
 
