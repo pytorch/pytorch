@@ -216,6 +216,9 @@ jobs:
         uses: actions/setup-node@v2
         with:
           cache: npm
+          # This is not a node project so there is no package-lock.json. I will just use
+          # the same python requirements here
+          cache-dependency-path: requirements.txt
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
