@@ -931,7 +931,7 @@ void Value::replaceFirstUseWith(Value* newValue) {
 }
 
 void Value::replaceLastUseWith(Value* newValue) {
-  AT_ASSERT(owningGraph() == newValue->owningGraph());
+  TORCH_INTERNAL_ASSERT(owningGraph() == newValue->owningGraph());
   auto u = uses().back();
   u.user->inputs_[u.offset] = newValue;
   uses_.erase(uses_.end() - 1);
