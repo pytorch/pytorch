@@ -546,7 +546,7 @@ def _optimize_graph(
     operator_export_type: _C_onnx.OperatorExportTypes,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
-    params_dict=None,
+    params_dict={},
     dynamic_axes=None,
     input_names=None,
     module=None,
