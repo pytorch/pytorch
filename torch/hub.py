@@ -10,7 +10,7 @@ import torch
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, Optional, Union, Any
+from typing import Dict, Optional, Any
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401

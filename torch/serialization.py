@@ -14,7 +14,7 @@ from ._six import string_classes as _string_classes
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, TypeAlias, Tuple, Union, IO
 import copyreg
 import pickle
 import pathlib
@@ -29,8 +29,8 @@ MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
 PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
-FILE_LIKE = Union[str, os.PathLike, BinaryIO, IO[bytes]],
-MAP_LOCATION = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]],
+MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
 
 __all__ = [
     'SourceChangeWarning',
