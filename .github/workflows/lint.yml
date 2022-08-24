@@ -19,6 +19,7 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+          cache: pip
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -69,6 +70,7 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+          cache: pip
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -81,7 +83,7 @@ jobs:
           git clean -fxd
       - name: Install requirements
         id: requirements
-        run: pip3 install -r requirements.txt --user
+        run: pip install -r requirements.txt --user
       - name: Ensure no non-breaking spaces
         if: always()
         run: |
@@ -160,6 +162,7 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+          cache: pip
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -169,10 +172,10 @@ jobs:
       - name: Install requirements
         id: requirements
         run: |
-          pip3 install -r requirements.txt --user
+          pip install -r requirements.txt --user
       - name: Install Jinja2
         run: |
-          pip3 install Jinja2==3.0.1 --user
+          pip install Jinja2==3.0.1 --user
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -204,6 +207,8 @@ jobs:
     steps:
       - name: Setup Node
         uses: actions/setup-node@v2
+        with:
+          cache: npm
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -246,6 +251,7 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+          cache: pip
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
@@ -257,13 +263,13 @@ jobs:
         # .circleci/docker/common/install_conda.sh
         run: |
           set -eux
-          python3 -mpip install -r requirements.txt
-          python3 -mpip install boto3==1.16.34
-          pip3 install typing-extensions==3.10 --user
-          pip3 install -r requirements-flake8.txt --user
-          python3 -mpip install rockset==0.8.10 --user
-          python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.960 --user
+          pip install -r requirements.txt
+          pip install boto3==1.16.34
+          pip install typing-extensions==3.10 --user
+          pip install -r requirements-flake8.txt --user
+          pip install rockset==0.8.10 --user
+          pip install -r requirements.txt --user
+          pip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
@@ -284,12 +290,14 @@ jobs:
         with:
           python-version: 3.5
           architecture: x64
+          cache: pip
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
           architecture: x64
+          cache: pip
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
