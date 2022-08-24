@@ -65,6 +65,7 @@ jobs:
           nvidia-smi
       - name: Run TorchBench
         run: |
+          set +x
           pushd "${HOME}"/pytorch
           PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
           popd
