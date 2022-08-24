@@ -126,8 +126,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerLegacyThreadLocalState(
       const torch::profiler::impl::ProfilerConfig& config)
-      : ProfilerStateBase(config),
-        remoteProfiledEvents_{c10::nullopt} {}
+      : ProfilerStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {
