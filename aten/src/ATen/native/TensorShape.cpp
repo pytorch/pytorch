@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <ATen/core/ATen_fwd.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/StringUtil.h>
 
 namespace at {
@@ -1256,11 +1258,23 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+
+Tensor reshape(const Tensor& self, SymIntArrayRef proposed_shape) {
+  // reshape has special autograd logic since it sometimes returns a view but sometimes does not
+  // we have to intercept here instead of using dispatcher
+  // otherwise we will see "autograd still running" kind of error in inference mode:
+  // * if we create a tensor in inference mode scope,
+  //   then pass it to a inference mode decorated function,
+  //   everything is fine
+  // * but if we create the input tensor not with inference mode,
+  //   then errors like "Cannot set version_counter for inference tensor" arise
+  if (self.is_nested()) {
+    return at::_reshape_nested(self, c10::asIntArrayRefUnchecked(proposed_shape));
+  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  DimVector shape = infer_size_dv(proposed_shape, self.numel());
+  DimVector shape = infer_size_dv(c10::asIntArrayRefSlow(proposed_shape), self.numel());
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, shape);
@@ -1268,7 +1282,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+  auto stride = at::detail::computeStride(c10::asIntArrayRefSlow(self.sym_sizes()), c10::asIntArrayRefSlow(self.sym_strides()), shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -1293,6 +1307,10 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
+  return self.reshape_symint(c10::SymIntArrayRef::fromIntArrayRef(proposed_shape));
 }
 
 Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
@@ -2936,7 +2954,7 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
     shape.push_back(self.sizes()[i]);
   }
 
-  return native::reshape(self, shape);
+  return self.reshape(shape);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
