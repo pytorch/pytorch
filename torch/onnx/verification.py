@@ -122,7 +122,7 @@ def _compare_ort_pytorch_outputs(
     atol: float,
     check_shape: bool,
     check_dtype: bool,
-    ignoreNone: bool,
+    ignore_none: bool,
     acceptable_error_percentage: Optional[float],
 ):
     """
@@ -133,7 +133,7 @@ def _compare_ort_pytorch_outputs(
         pt_outs: outputs from PyTorch.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        ignoreNone (bool, optional): Default True. If True, ignore None type in
+        ignore_none (bool, optional): Whether to ignore None type in
             torch output, which is usually the case with tracing. Set this to False, if
             torch output should keep None type, which is usually the case with exporting
             ScriptModules.
@@ -145,7 +145,7 @@ def _compare_ort_pytorch_outputs(
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
-    if ignoreNone:
+    if ignore_none:
         # torch.jit._flatten filters None type
         pt_outs, _ = torch.jit._flatten(pt_outs)
     else:
@@ -285,7 +285,7 @@ def _compare_ort_pytorch_model(
     additional_test_inputs,
     remained_onnx_input_idx,
     flatten,
-    ignoreNone,
+    ignore_none,
     rtol,
     atol,
     check_shape,
@@ -319,7 +319,7 @@ def _compare_ort_pytorch_model(
             atol,
             check_shape,
             check_dtype,
-            ignoreNone,
+            ignore_none,
             accetable_error_persentage,
         )
 
@@ -497,9 +497,7 @@ def _onnx_graph_from_model(
     if opset_version is None:
         opset_version = _constants.onnx_default_opset
 
-    export_modules_as_functions = utils._setup_trace_module_map(
-        model, export_modules_as_functions
-    )
+    utils._setup_trace_module_map(model, export_modules_as_functions)
 
     if not operator_export_type:
         if _C_onnx._CAFFE2_ATEN_FALLBACK:
@@ -598,7 +596,7 @@ def verify(
     additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
-    ignoreNone: bool = True,
+    ignore_none: bool = True,
     check_shape: bool = True,
     check_dtype: bool = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
@@ -635,15 +633,15 @@ def verify(
             inputs into a flattened list of Tensors for ONNX. Set this to False if nested
             structures are to be preserved for ONNX, which is usually the case with
             exporting ScriptModules.
-        ignoreNone (bool, optional): Default True. If True, ignore None type in
+        ignore_none (bool, optional): Whether to ignore None type in
             torch output, which is usually the case with tracing. Set this to False, if
             torch output should keep None type, which is usually the case with exporting
-            ScriptModules.
-        check_shape (bool, optional): Default True. If True, check the shapes between
+            ScriptModules. Default to True.
+        check_shape (bool, optional): Whether to check the shapes between
             PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
-            output shape broadcasting.
-        check_dtype (bool, optional): Default True. If True, check the dtypes between
-            PyTorch and ONNX Runtime outputs are consistent.
+            output shape broadcasting. Default to True.
+        check_dtype (bool, optional): Whether to check the dtypes between
+            PyTorch and ONNX Runtime outputs are consistent. Default to True.
         ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
@@ -694,7 +692,7 @@ def verify(
             additional_test_inputs,
             remained_onnx_input_idx,
             flatten,
-            ignoreNone,
+            ignore_none,
             rtol,
             atol,
             check_shape,
