@@ -1278,7 +1278,6 @@ class TestTorchTidyProfiler(TestCase):
         b_id = get_id("aten::mul", 0)
         f_id = get_id("aten::relu", 0)
 
-        print((a_id, b_id, c_1, f_id))
         self.assertNotEqual(a_id, b_id)
         self.assertNotEqual(a_id, c_1)
 
