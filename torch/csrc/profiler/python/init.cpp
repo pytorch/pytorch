@@ -157,7 +157,22 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
       .def_readonly("total_reserved", &allocation_t::total_reserved_);
 
+  py::class_<NNModuleInfo>(m, "_NNModuleInfo")
+      .def_property_readonly(
+          "params",
+          [](const NNModuleInfo& s) {
+            py::list list;
+            for (auto& p : s.params_) {
+              list.append(std::make_pair(
+                  p.first, reinterpret_cast<intptr_t>(p.second)));
+            }
+            return list;
+          })
+      .def_property_readonly(
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
       .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
@@ -175,7 +190,9 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo");
 
-  py::class_<ExtraFields<EventType::OutOfMemory>>(m, "_ExtraFields_OutOfMemory");
+  py::class_<ExtraFields<EventType::OutOfMemory>>(
+      m, "_ExtraFields_OutOfMemory");
+
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
