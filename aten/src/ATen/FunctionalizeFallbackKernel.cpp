@@ -300,3 +300,34 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
 }
+
+
+
+
+at::Tensor broadcast_in_dim_functionalization(at::Tensor a, c10::SymIntArrayRef shape, at::IntArrayRef broadcast_dimensions) {
+  static auto handle = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("prims::broadcast_in_dim", "")
+    .typed<at::Tensor(at::Tensor, c10::SymIntArrayRef, at::IntArrayRef)>();
+
+  auto a_ = at::functionalization::impl::from_functional_tensor(a);
+  at::Tensor tmp_output;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    tmp_output = handle.call(a_, shape, broadcast_dimensions);
+    // prim ops aren't part of ATen, so we need to dig into the dispatcher to get them.
+  }
+  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+    [shape = shape.vec(), broadcast_dimensions = broadcast_dimensions.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
+      return handle.call(base, shape, broadcast_dimensions);
+    },
+    [shape = shape.vec(), broadcast_dimensions = broadcast_dimensions.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+      return mutated_view.view(base.sizes());
+    }
+  );
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, a, view_meta);
+  return out;
+}
+
+TORCH_LIBRARY_IMPL(prims, Functionalize, m) {
+  m.impl("broadcast_in_dim", TORCH_FN(broadcast_in_dim_functionalization));
+}
