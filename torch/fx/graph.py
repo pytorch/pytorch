@@ -294,7 +294,7 @@ class CodeGen(object):
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, verbose: bool = False) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -1136,7 +1136,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str, verbose: bool = False) -> PythonCode:
+    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1195,10 +1195,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace, verbose)
+            return self._python_code(root_module, namespace, verbose=verbose)
 
-    def _python_code(self, root_module: str, namespace: _Namespace, verbose: bool = False) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose)
+    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:
