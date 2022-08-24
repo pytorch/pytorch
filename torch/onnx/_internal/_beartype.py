@@ -59,6 +59,7 @@ else:
                             category=CallHintViolationWarning,
                             stacklevel=2,
                         )
+                    finally:
                         return func(*args, **kwargs)
 
                 return _coerce_beartype_exceptions_to_warnings
