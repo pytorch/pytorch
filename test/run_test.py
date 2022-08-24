@@ -306,7 +306,7 @@ if dist.is_available():
             "UCX_TLS": "tcp,cuda",
             "UCX_LOG_LEVEL": "debug",
             "UCC_LOG_LEVEL": "info",
-            "TORCH_UCC_ALLREDUCE_BLOCKING_WAIT": 1,
+            "TORCH_UCC_ALLREDUCE_BLOCKING_WAIT": "1",
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
