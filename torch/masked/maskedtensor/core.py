@@ -587,7 +587,16 @@ class MaskedTensor(torch.Tensor):
         return self.get_data().masked_fill(~self.get_mask(), value)
 
     def get_data(self):
-        return self._masked_data
+        class GetData(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, self):
+                return self._masked_data
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, None
+
+        return GetData.apply(self)
 
     def get_mask(self):
         return self._masked_mask
