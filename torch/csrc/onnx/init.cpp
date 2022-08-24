@@ -233,7 +233,14 @@ void initONNXBindings(PyObject* module) {
               ::torch::jit::onnx::ONNXScopeName::createFullScopeName),
           "Create a full scope name from class name and variable name.");
 
-  m.def("_check_onnx_proto", ::torch::wrap_pybind_function(check_onnx_proto));
+  m.def(
+      "_check_onnx_proto",
+      ::torch::wrap_pybind_function(
+          [](const std::string& proto_string, bool full_check) {
+            check_onnx_proto(proto_string, full_check);
+          }),
+      py::arg("proto_string"),
+      py::arg("full_check") = false);
 
   auto onnx = m.def_submodule("_onnx");
   py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")
