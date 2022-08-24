@@ -1251,7 +1251,7 @@ class TestTorchTidyProfiler(TestCase):
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = a + c
             _ = b * c
-            # Resize should change the StorageImpl but
+            # Resize should change the data_ptr but
             # keep the TensorImpl the same
             f = a.resize_(128, 129)
             _ = torch.relu(f)
