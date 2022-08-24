@@ -15,7 +15,7 @@ namespace profiler {
 namespace impl {
 
 class RecordQueue;
-class Result;
+struct Result;
 namespace python_tracer {
 /*
 Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
