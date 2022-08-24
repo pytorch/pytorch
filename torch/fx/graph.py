@@ -1200,7 +1200,6 @@ class Graph:
     def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
         return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
-
     def __str__(self) -> str:
         """
         Return a human-readable (not machine-readable) string representation

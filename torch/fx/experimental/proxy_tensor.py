@@ -540,6 +540,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
+        fx_tracer.record_stack_traces = True
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
