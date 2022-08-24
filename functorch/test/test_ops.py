@@ -436,6 +436,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
+        xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
