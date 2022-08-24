@@ -566,23 +566,19 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
-        has_symbolic_sizes = any([i.has_sym_ints for i in flat_arg_tensors])
+        flat_symints = [
+            i
+            for i in tree_flatten((args, kwargs))[0]
+            if isinstance(i, torch._C.SymIntNode)
+        ]
+        has_symbolic_sizes = (
+            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        )
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
-
-            # TODO: hack, doesn't actually work.
-            # see https://github.com/pytorch/pytorch/pull/81598#issuecomment-1192030435
-            with enable_torch_dispatch_mode(
-                self
-            ), torch.overrides.enable_reentrant_dispatch():
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
-                    return r
-                if func in decomposition_table:
-                    return decomposition_table[func](*args, **kwargs)
 
             with no_dispatch():
                 if symbolic_shapes.is_symbolic_op(func):
@@ -592,6 +588,18 @@ class FakeTensorMode(TorchDispatchMode):
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+
+            with self.restore():
+                if func in meta_table:
+                    r = meta_table[func](*args, **kwargs)
+                    return r
+                if func in decomposition_table:
+                    return decomposition_table[func](*args, **kwargs)
+
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
