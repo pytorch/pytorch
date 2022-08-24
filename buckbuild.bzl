@@ -739,7 +739,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":flatbuffers_jit"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -1347,7 +1347,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":flatbuffers_jit",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
@@ -1803,6 +1803,15 @@ def define_buck_targets(
             ":flatbuffer_loader",
             ":flatbuffers_serializer_mobile",
             ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 
