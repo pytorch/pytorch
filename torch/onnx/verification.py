@@ -131,9 +131,9 @@ def _compare_ort_pytorch_outputs(
     Args:
         ort_outs: outputs from ONNX Runtime.
         pt_outs: outputs from PyTorch.
-        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        ignore_none (bool, optional): Whether to ignore None type in
+        rtol (float): relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol (float): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        ignore_none (bool): Whether to ignore None type in
             torch output, which is usually the case with tracing. Set this to False, if
             torch output should keep None type, which is usually the case with exporting
             ScriptModules.
@@ -167,7 +167,8 @@ def _compare_ort_pytorch_outputs(
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not check_shape:
                 # Allow different but broadcastable output shapes.
-                ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
+                ort_out, pt_out_np = np.broadcast_arrays(ort_out, pt_out)
+                pt_out = torch.from_numpy(pt_out_np)
             torch.testing.assert_close(
                 ort_out,
                 pt_out,
@@ -581,7 +582,7 @@ def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     input_args: Tuple[Any, ...],
     input_kwargs: Optional[Mapping[str, Any]] = None,
-    do_constant_folding: bool = True,
+    do_constant_folding: Optional[bool] = True,
     dynamic_axes: Optional[
         Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
     ] = None,
@@ -590,18 +591,18 @@ def verify(
     training: torch.onnx.TrainingMode = torch.onnx.TrainingMode.EVAL,
     opset_version: Optional[int] = None,
     keep_initializers_as_inputs: bool = True,
-    verbose: bool = False,
-    fixed_batch_size: bool = False,
-    use_external_data: bool = False,
+    verbose: Optional[bool] = False,
+    fixed_batch_size: Optional[bool] = False,
+    use_external_data: Optional[bool] = False,
     additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
-    flatten: bool = True,
-    ignore_none: bool = True,
-    check_shape: bool = True,
-    check_dtype: bool = True,
+    flatten: Optional[bool] = True,
+    ignore_none: Optional[bool] = True,
+    check_shape: Optional[bool] = True,
+    check_dtype: Optional[bool] = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
-    rtol: float = 0.001,
-    atol: float = 1e-7,
+    rtol: Optional[float] = 0.001,
+    atol: Optional[float] = 1e-7,
     acceptable_error_percentage: Optional[float] = None,
     **_,
 ):
