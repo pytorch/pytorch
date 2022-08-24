@@ -1570,7 +1570,7 @@ Tensor miopen_convolution_add_relu(
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias.has_value()
           ? bias.value()
-          : at::native::zeros(
+          : at::zeros(
                 {contig_output.size(1)},
                 optTypeMetaToScalarType(contig_output.options().dtype_opt()),
                 contig_output.options().layout_opt(),
@@ -1614,7 +1614,7 @@ Tensor miopen_convolution_relu(
 
     auto _bias = bias.has_value()
             ? bias.value()
-            : at::native::zeros(
+            : at::zeros(
                   {output_t.size(1)},
                   optTypeMetaToScalarType(output_t.options().dtype_opt()),
                   output_t.options().layout_opt(),
@@ -1661,7 +1661,7 @@ Tensor miopen_convolution_relu(
 
     auto _bias = bias.has_value()
             ? bias.value()
-            : at::native::zeros(
+            : at::zeros(
                   {contig_output.size(1)},
                   optTypeMetaToScalarType(contig_output.options().dtype_opt()),
                   contig_output.options().layout_opt(),

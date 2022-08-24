@@ -54,6 +54,8 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Groups = 8u;
     static constexpr uint32_t OutputMin = 9u;
     static constexpr uint32_t OutputMax = 10u;
+
+    static constexpr uint32_t NumArgs = 11u;
   };
 
   /*
@@ -74,11 +76,15 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t OutputMax = 11u;
     static constexpr uint32_t ConvMethod = 12u;
     static constexpr uint32_t WeightSizes = 13u;
+
+    static constexpr uint32_t NumArgs = 14u;
   };
 
   static Conv2dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
+    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+
     return unpacked_;
   }
 };
