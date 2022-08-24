@@ -31,6 +31,7 @@ __inline__ __device__ T WarpReduceSum(T val) {
 
 // Sums `val` across all threads in a block.
 //
+// Warning: the return value is only valid for thread 0.
 // Assumptions:
 //   - Thread blocks are an 1D set of threads (indexed with `threadIdx.x` only)
 //   - The size of each block should be a multiple of `C10_WARP_SIZE`
@@ -41,7 +42,7 @@ __inline__ __device__ T BlockReduceSum(T val, T* shared) {
   const int lid = threadIdx.x % C10_WARP_SIZE;
   const int wid = threadIdx.x / C10_WARP_SIZE;
   val = WarpReduceSum(val);
-  __syncthreads();
+  __syncthreads(); // prevent races when BlockReduces are called in a row.
   if (lid == 0) {
     shared[wid] = val;
   }
@@ -68,7 +69,7 @@ BlockReduce(T val, const ReduceOp& op, const T& identity_element, T* shared) {
   const int lid = threadIdx.x % C10_WARP_SIZE;
   const int wid = threadIdx.x / C10_WARP_SIZE;
   val = WarpReduce(val, op);
-  __syncthreads();
+  __syncthreads(); // prevent races when BlockReduces are called in a row.
   if (lid == 0) {
     shared[wid] = val;
   }
