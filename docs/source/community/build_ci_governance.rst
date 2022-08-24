@@ -6,8 +6,8 @@ How to Add a New Maintainer
 
 For the person to be a maintainer, a person needs to:
 
-* land at least six commits to the related part of the PyTorch repository
-* at least one of these commits must be submitted in the last six months
+* Land at least six commits to the related part of the PyTorch repository
+* At least one of these commits must be submitted in the last six months
 
 To add a qualified person to the maintainers' list, please create
 a PR that adds a person to the `persons of interests <https://pytorch.org/docs/master/community/persons_of_interest.html>`__ page and
