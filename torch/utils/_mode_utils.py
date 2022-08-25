@@ -63,7 +63,7 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
-            help_text = f'Use `with Mode():` instead.'
+            help_text = 'Use `with Mode():` instead.'
         else:
             help_text = (
                 'If you intended to completely override the preexisting mode, '
