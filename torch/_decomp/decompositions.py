@@ -549,7 +549,7 @@ def soft_margin_loss(
     target: Tensor,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    loss = torch.log(1.0 + torch.exp(-input * target))
+    loss = torch.log1p(torch.exp(-input * target))
     return apply_loss_reduction(loss, reduction)
 
 
