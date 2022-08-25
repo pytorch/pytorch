@@ -108,7 +108,7 @@ class TestFSDPMisc(FSDPTest):
                     self.assertEqual(full_param.storage().size(), 0)
 
                 self.assertEqual(
-                    param.data.data_ptr(),
+                    param.data_ptr(),
                     param._local_shard.data_ptr()
                 )
 

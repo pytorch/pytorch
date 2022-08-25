@@ -3086,6 +3086,10 @@ class FullyShardedDataParallel(nn.Module):
             but post-backward does not fire since the output was not ultimately
             used in loss computation so FSDP parameter did not get a gradient.
             """
+            # Note that we wrap resharding logic in a try-catch as a defensive
+            # approach, as if an error is thrown, we are in the backwards pass,
+            # and autograd would not print out much useful info about the actual
+            # error hit.
             try:
                 for p in fsdp_module.params:
                     # Parameter is already resharded if the param in use points
