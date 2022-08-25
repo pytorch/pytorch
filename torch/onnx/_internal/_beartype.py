@@ -63,11 +63,15 @@ else:
                 # Remove the return type from the func function's
                 # annotations so that the beartype decorator does not complain
                 # about the return type.
+                return_type = func.__annotations__["return"]
                 del func.__annotations__["return"]
+                beartyped = _beartype_lib.beartype(func)
+                # Restore the return type to the func function's annotations
+                func.__annotations__["return"] = return_type
+            else:
+                beartyped = _beartype_lib.beartype(func)
 
-            beartyped = _beartype_lib.beartype(func)  # type: ignore[assignment,call-overload]
-
-            @functools.wraps(beartyped)
+            @functools.wraps(func)
             def _coerce_beartype_exceptions_to_warnings(*args, **kwargs):
                 try:
                     return beartyped(*args, **kwargs)
@@ -79,13 +83,13 @@ else:
                         stacklevel=2,
                     )
                 finally:
-                    return func(*args, **kwargs)  # type: ignore[operator] # noqa: B012
+                    return func(*args, **kwargs)  # noqa: B012
 
-            return _coerce_beartype_exceptions_to_warnings  # type: ignore[return-value]
+            return _coerce_beartype_exceptions_to_warnings
 
     except ImportError:
         # Beartype is not installed. Return a no-op decorator.
         beartype = _no_op_decorator
 
 # Make sure that the beartype decorator is enabled whichever path we took.
-# assert beartype is not None
+assert beartype is not None
