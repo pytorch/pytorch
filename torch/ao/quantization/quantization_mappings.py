@@ -10,7 +10,7 @@ import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.ao.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 import torch.nn.qat.dynamic as nnqatd
 

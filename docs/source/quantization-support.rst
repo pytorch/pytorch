@@ -430,7 +430,7 @@ This module implements the quantized versions of the functional layers such as
     upsample_nearest
 
 torch.nn.quantizable
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantizable versions of some of the nn layers.
 These modules can be used in conjunction with the custom module mechanism,
@@ -447,16 +447,16 @@ by providing the ``custom_module_config`` argument to both prepare and convert.
     MultiheadAttention
 
 
-torch.nn.quantized.dynamic
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized.dynamic
-.. automodule:: torch.nn.quantized.dynamic.modules
+torch.ao.nn.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.quantized.dynamic
+.. automodule:: torch.ao.nn.quantized.dynamic.modules
 
 Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
 :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
 :class:`~torch.nn.RNNCell`.
 
-.. currentmodule:: torch.nn.quantized.dynamic
+.. currentmodule:: torch.ao.nn.quantized.dynamic
 
 .. autosummary::
     :toctree: generated

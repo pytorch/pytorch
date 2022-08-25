@@ -2,7 +2,10 @@
   "being_migrated": {
     "torch.nn.quantized.functional": "torch.ao.nn.quantized.functional",
     "torch.nn.quantized": "torch.ao.nn.quantized",
-    "torch.nn.quantized.modules": "torch.ao.nn.quantized.modules"
+    "torch.nn.quantized.modules": "torch.ao.nn.quantized.modules",
+    "torch.nn.quantized.dynamic": "torch.ao.nn.quantized.dynamic",
+    "torch.nn.quantized.dynamic.modules": "torch.ao.nn.quantized.dynamic.modules",
+    "torch.nn.quantized.dynamic.modules.rnn": "torch.ao.nn.quantized.dynamic.modules.rnn"
   },
   "torch.ao.quantization": [
     "ABC",
