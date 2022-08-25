@@ -294,7 +294,7 @@ class CodeGen(object):
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -408,51 +408,6 @@ class CodeGen(object):
             else:
                 body.append('\n')
 
-        prev_stacktrace = None
-
-        def append_stacktrace_summary(node : Node):
-            """
-            Append a summary of the stacktrace to the generated code. This is
-            useful for debugging.
-            """
-            nonlocal prev_stacktrace
-            pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
-
-            if node.op not in {'placeholder', 'output'}:
-                if node.stack_trace:
-                    if node.stack_trace != prev_stacktrace:
-                        prev_stacktrace = node.stack_trace
-
-                        lines = node.stack_trace.strip().split('\n')
-                        idx = 0
-                        context_lines = []
-                        while idx < len(lines):
-                            line = lines[idx].strip()
-                            if line.startswith('File '):
-                                break
-                            context_lines.append(line)
-                            idx += 1
-
-                        summary_lines = []
-                        if context_lines:
-                            summary_lines.append(', '.join(context_lines))
-
-                        if idx + 1 < len(lines):
-                            matches = pattern.match(lines[idx].strip())
-                            if matches:
-                                file = matches.group(1)
-                                lineno = matches.group(2)
-                                lineage = f'File: {file}:{lineno}'
-                                summary_lines.append(lineage)
-
-                            code = f"code: {lines[idx + 1].strip()}"
-                            summary_lines.append(code)
-
-                        summary_str = ', '.join(summary_lines)
-                        body.append(f'\n# {summary_str}\n')
-                elif prev_stacktrace != "":
-                    prev_stacktrace = ""
-                    body.append('\n# No stacktrace found for following nodes \n')
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -517,23 +472,19 @@ class CodeGen(object):
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        print_readable_comment = '# To see more debug info, please use `graph_module.print_readable()`\n'
-        if not verbose:
-            body.append(print_readable_comment)
-
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
-            if verbose:
-                append_stacktrace_summary(node)
             emit_node(node)
             delete_unused_values(node)
 
-        if len(body) == 1 and body[0] is print_readable_comment:
+        if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
+
+
 
         if len(wrapped_fns) > 0:
             wrap_name = add_global('wrap', torch.fx.wrap)
@@ -1138,7 +1089,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
+    def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1197,10 +1148,11 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace, verbose=verbose)
+            return self._python_code(root_module, namespace)
 
-    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
+    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace)
+
 
     def __str__(self) -> str:
         """

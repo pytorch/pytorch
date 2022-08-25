@@ -116,7 +116,6 @@ class TestFunctionalization(TestCase):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
@@ -132,7 +131,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
@@ -158,7 +156,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
@@ -173,7 +170,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
@@ -197,7 +193,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
@@ -212,7 +207,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
@@ -237,7 +231,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     _tensor_constant0 = self._tensor_constant0
     lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     view_copy_default = torch.ops.aten.view_copy.default(lift_fresh, [-1]);  lift_fresh = None
@@ -252,7 +245,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     _tensor_constant0 = self._tensor_constant0
     lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     view_default = torch.ops.aten.view.default(lift_fresh, [-1]);  lift_fresh = None
@@ -289,7 +281,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
@@ -304,7 +295,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
@@ -325,7 +315,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     _fused_moving_avg_obs_fq_helper_functional_default = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0)
     getitem = _fused_moving_avg_obs_fq_helper_functional_default[0]
     getitem_1 = _fused_moving_avg_obs_fq_helper_functional_default[1]
@@ -349,7 +338,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     as_strided_copy_default = torch.ops.aten.as_strided_copy.default(a_1, [2], [2], 1)
     add_tensor = torch.ops.aten.add.Tensor(as_strided_copy_default, 1);  as_strided_copy_default = None
     as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(a_1, add_tensor, [2], [2], 1);  add_tensor = None
@@ -369,7 +357,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     block_diag_default = torch.ops.aten.block_diag.default([a_1, a_1]);  a_1 = None
     return block_diag_default
     """)
@@ -386,7 +373,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
@@ -398,7 +384,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
     return cat_default
@@ -420,7 +405,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone_default = torch.ops.aten.clone.default(a_1)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(clone_default);  clone_default = None
@@ -435,7 +419,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone_default = torch.ops.aten.clone.default(a_1)
     diagonal_default = torch.ops.aten.diagonal.default(clone_default);  clone_default = None
@@ -459,7 +442,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(a_1)
     add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, ones);  diagonal_copy_default = ones = None
@@ -484,7 +466,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     split_copy_tensor = torch.ops.aten.split_copy.Tensor(a_1, 2)
     getitem = split_copy_tensor[0]
@@ -516,7 +497,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose_copy_int = torch.ops.aten.transpose_copy.int(a_1, 1, 0)
     select_copy_int = torch.ops.aten.select_copy.int(transpose_copy_int, 0, 0);  transpose_copy_int = None
@@ -544,7 +524,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [8])
     arange = torch.ops.aten.arange.default(4, device = device(type='cpu'), pin_memory = False)
     arange_1 = torch.ops.aten.arange.default(4, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
@@ -570,7 +549,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, 1);  view_copy_default = None
@@ -596,7 +574,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a_1);  a_1 = None
     ge_scalar = torch.ops.aten.ge.Scalar(clone_default, 0);  clone_default = None
     _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
@@ -609,7 +586,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     clone_default = torch.ops.aten.clone.default(a_1);  a_1 = None
     ge_scalar = torch.ops.aten.ge.Scalar(clone_default, 0);  clone_default = None
     _to_copy_default = torch.ops.aten._to_copy.default(ge_scalar, dtype = torch.float32, layout = torch.strided);  ge_scalar = None
@@ -646,7 +622,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
     return view_copy_default
     """)
@@ -672,7 +647,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [8])
@@ -711,7 +685,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view_default = torch.ops.aten.view.default(add_tensor, [8])
@@ -757,7 +730,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_default = torch.ops.aten.view.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
@@ -808,7 +780,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
@@ -821,7 +792,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
@@ -836,7 +806,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2])
@@ -850,7 +819,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2])
@@ -866,7 +834,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
@@ -880,7 +847,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
@@ -896,7 +862,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
@@ -911,7 +876,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_default = torch.ops.aten.diagonal.default(zeros);  zeros = None
     _to_copy_default = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
@@ -933,7 +897,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     expand_copy_default = torch.ops.aten.expand_copy.default(a_1, [2, 2]);  a_1 = None
     return expand_copy_default
     """)
@@ -952,7 +915,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(add_tensor)
     fill_scalar = torch.ops.aten.fill.Scalar(diagonal_copy_default, 0);  diagonal_copy_default = None
@@ -966,7 +928,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     diagonal_default = torch.ops.aten.diagonal.default(add_tensor)
     fill_scalar = torch.ops.aten.fill_.Scalar(diagonal_default, 0);  diagonal_default = None
@@ -991,7 +952,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
     view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4, 4])
     resize_default = torch.ops.aten.resize.default(view_copy_default, [3, 3])
@@ -1015,7 +975,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
     view_default = torch.ops.aten.view.default(add_tensor, [4, 4])
     resize_default = torch.ops.aten.resize.default(view_default, [3, 3])
@@ -1056,7 +1015,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
     resize_default = torch.ops.aten.resize.default(add_tensor, [5, 5]);  add_tensor = None
     view_copy_default = torch.ops.aten.view_copy.default(resize_default, [25]);  resize_default = None
@@ -1072,7 +1030,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     add_tensor = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
     resize_default = torch.ops.aten.resize_.default(add_tensor, [5, 5])
     view_default = torch.ops.aten.view.default(add_tensor, [25]);  add_tensor = None
@@ -1157,7 +1114,6 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_copy_int = torch.ops.aten.select_copy.int(zeros, 0, 5)
     fill_scalar = torch.ops.aten.fill.Scalar(select_copy_int, 1);  select_copy_int = None
@@ -1171,7 +1127,6 @@ def forward(self, a_1):
 
 
 def forward(self, a_1):
-    # To see more debug info, please use `graph_module.print_readable()`
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_int = torch.ops.aten.select.int(zeros, 0, 5)
     fill_scalar = torch.ops.aten.fill_.Scalar(select_int, 1);  select_int = None
