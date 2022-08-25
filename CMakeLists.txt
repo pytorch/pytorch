@@ -186,7 +186,7 @@ cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
-option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
+option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
@@ -209,8 +209,8 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
-    "USE_CUDA;BUILD_TEST" OFF)
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
+    "USE_CUDA" OFF)
 cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
     "USE_CUDNN" OFF)
@@ -871,11 +871,11 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
-    if(${COLORIZE_OUTPUT})
+    if(${USE_COLORIZE_OUTPUT})
     endif()
   endif()
 
-  if(${COLORIZE_OUTPUT})
+  if(${USE_COLORIZE_OUTPUT})
     append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
   endif()
@@ -963,6 +963,8 @@ if(APPLE)
     if(USE_MPS)
       string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      # To suppress MPSGraph availability warnings
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)

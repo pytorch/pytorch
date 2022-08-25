@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from random import randint
 
 import torch
 import torch.cuda
@@ -1978,7 +1979,7 @@ t1.start()
 t2.start()
 """])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
+    @unittest.skipIf(TEST_WITH_ROCM, "In ROCm, kernel asserts are disabled due to performance overhead")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -4406,6 +4407,47 @@ class TestCudaComm(TestCase):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
             self.assertTrue(torch.equal(x, cat))
+
+    def test_memory_snapshot(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True)
+            x = torch.rand(311, 411, device='cuda')
+
+            # create a bunch of tensors that all will tile into the
+            # same segment to  exercise the history merging code
+            # 512B is the minimum block size,
+            # so we allocate all the tensors to this size to make sure
+            # they tile evenly
+            tensors = [torch.rand(128, device='cuda') for _ in range(1000)]
+            while tensors:
+                del tensors[randint(0, len(tensors) - 1)]
+
+            # exercise the history trimming code
+            torch.rand(128 * 5, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue('test_cuda' in h['frames'][0]['filename'])
+                                found_it = True
+            self.assertTrue(found_it)
+            if not IS_WINDOWS:
+                with tempfile.NamedTemporaryFile() as f:
+                    torch.cuda.memory._save_segment_usage(f.name)
+                    with open(f.name, 'r') as f2:
+                        self.assertTrue('test_cuda.py' in f2.read())
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+    def test_raises_oom(self):
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
 instantiate_parametrized_tests(TestCuda)
 

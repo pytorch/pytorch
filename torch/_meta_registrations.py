@@ -70,6 +70,12 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
+@register_meta(aten.randperm.generator_out)
+def meta_randperm(n, *, generator=None, out):
+    assert out.ndim == 1 and out.size(0) == n
+    return out
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -189,20 +195,27 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@register_meta(aten.inverse.default)
-def meta_inverse(self):
-    # Bug: https://github.com/pytorch/pytorch/issues/77498
-    if self.numel() == 0:
-        return torch.empty_like(self)
-    r = self.new_empty(self.shape)
-    r.transpose_(-2, -1)
-    return r
-
-
 @torch.library.impl(meta_lib, "bernoulli.out")
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
     return out
+
+
+@register_meta(aten._to_copy.default, False)
+def _to_copy(
+    self: torch.Tensor,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    dtype = self.dtype if dtype is None else dtype
+    device = self.device if device is None else device
+    layout = self.layout if layout is None else layout
+    assert pin_memory is None
+    assert memory_format is None
+    return self.new_empty(self.shape, dtype=dtype, device=device, pin_memory=pin_memory)
 
 
 @register_meta(aten.convolution.default)

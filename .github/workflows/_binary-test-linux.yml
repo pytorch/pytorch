@@ -139,7 +139,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: ${{ inputs.build_name }}
@@ -172,7 +172,7 @@ jobs:
         working-directory: builder
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
         with:
           timeout_minutes: 10
