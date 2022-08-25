@@ -52,9 +52,6 @@ class AppendOnlyList {
       "AppendOnlyList expects raw low level pointer storage.");
   static_assert(ChunkSize > 0, "Block cannot be empty.");
 
-  // Match std container convention.
-  using value_type = T;
-
   AppendOnlyList() : buffer_last_{buffer_.before_begin()} {}
   AppendOnlyList(const AppendOnlyList&) = delete;
   AppendOnlyList& operator=(const AppendOnlyList&) = delete;
