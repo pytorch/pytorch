@@ -1021,9 +1021,9 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                modes = tuple(arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
-                assert all_same_mode(modes)
-                with Mode():
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
                     return func(*args, **kwargs)
 
         class Mode(TorchDispatchMode):
@@ -1052,7 +1052,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             z = y + y
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
-        self.assertIsInstance(torch.add(y, z), ModeTensor)
 
         with Mode():
             with BasicMode():  # we can't nest two modes that call make_subclass because it only accepts vanilla tensors
@@ -1060,7 +1059,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 z = y + y
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
-        self.assertIsInstance(torch.add(y, z), ModeTensor)
 
         assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
 
