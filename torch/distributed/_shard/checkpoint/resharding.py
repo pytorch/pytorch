@@ -167,7 +167,7 @@ def _prepare_sharded_tensor_write(
     NB `storage_key` is used to compose the key names of the local shards.
     """
     write_requests = []
-    shard_to_storage_key: Dict[str, str] = dict()
+    shard_to_storage_key: Dict[str, str] = {}
     storage_md = {}
 
     for shard_md in sharded_tensor.metadata().shards_metadata:
