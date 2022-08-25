@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Sequence
 
 import torch
 
+import torch._decomp
 import torch._prims
 
 import torch._refs
@@ -76,7 +77,8 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.ops.prims.* functions to
     use nvFuser's prims in torch.ops.nvprims.*
 
-    >>> with NvfuserPrimMode():
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode():
     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 
     By default, this context manager will fall back on the torch.ops.prims* if the
@@ -145,6 +147,16 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
                 return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
+
+        # For torch.ops.aten.*, use registered decompositions from torch._decomp
+        # torch._decomp.decomposition_table provides a mapping from
+        # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
+        # implementations.
+        # There're other ways to implement this functionality,
+        # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+            func = torch._decomp.decomposition_table.get(orig_func, None)
+
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, func, args, kwargs):
