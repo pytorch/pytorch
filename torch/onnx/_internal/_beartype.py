@@ -4,13 +4,12 @@ The module returns a no-op decorator when the beartype library is not installed.
 """
 import functools
 import traceback
-from types import ModuleType
 import typing
 import warnings
+from types import ModuleType
 
 from torch.onnx import _exporter_states, errors
 from torch.onnx._globals import GLOBALS
-
 
 try:
     import beartype as _beartype_lib  # type: ignore[import]
@@ -25,11 +24,11 @@ try:
         category=_roar.BeartypeDecorHintPep585DeprecationWarning,
     )
 except ImportError:
-    _beartype_lib = None
+    _beartype_lib = None  # type: ignore[assignment]
 except Exception as e:
     # Warn errors that are not import errors (unexpected).
     warnings.warn(f"{e}")
-    _beartype_lib = None
+    _beartype_lib = None  # type: ignore[assignment]
 
 
 def _no_op_decorator(func):

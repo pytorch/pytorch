@@ -1,3 +1,4 @@
+# Owner(s): ["module: onnx"]
 """Unit tests for the internal beartype wrapper module."""
 
 import unittest
@@ -10,7 +11,7 @@ from torch.testing._internal import common_utils
 
 def skip_if_beartype_not_installed(test_case):
     try:
-        import beartype
+        import beartype  # noqa: F401
     except ImportError:
         raise unittest.SkipTest("beartype is not installed")
     return test_case
@@ -21,7 +22,7 @@ def func_with_type_hint(x: int) -> int:
 
 
 def func_with_incorrect_type_hint(x: int) -> str:
-    return x  # type: ignore
+    return x  # type: ignore[return-value]
 
 
 @common_utils.instantiate_parametrized_tests
@@ -31,7 +32,7 @@ class TestBeartype(common_utils.TestCase):
             _exporter_states.RuntimeTypeCheckState.DISABLED,
         )
         decorated = decorator(func_with_incorrect_type_hint)
-        decorated("string_input")  # type: ignore
+        decorated("string_input")  # type: ignore[arg-type]
 
     @skip_if_beartype_not_installed
     def test_create_beartype_decorator_warns_when_warnings(self):
@@ -40,7 +41,7 @@ class TestBeartype(common_utils.TestCase):
         )
         decorated = decorator(func_with_incorrect_type_hint)
         with self.assertWarns(torch.onnx.errors.CallHintViolationWarning):
-            decorated("string_input")  # type: ignore
+            decorated("string_input")  # type: ignore[arg-type]
 
     @common_utils.parametrize("arg", [1, "string_input"])
     @skip_if_beartype_not_installed
@@ -61,13 +62,13 @@ class TestBeartype(common_utils.TestCase):
         def func_with_incorrect_type_hint_and_side_effect(x: int) -> str:
             nonlocal call_count
             call_count += 1
-            return x  # type: ignore
+            return x  # type: ignore[return-value]
 
         decorator = _beartype._create_beartype_decorator(
             _exporter_states.RuntimeTypeCheckState.WARNINGS,
         )
         decorated = decorator(func_with_incorrect_type_hint_and_side_effect)
-        decorated("string_input")  # type: ignore
+        decorated("string_input")  # type: ignore[arg-type]
         self.assertEqual(call_count, 1)
         decorated(1)
         # The return value violates the type hint, but the function is called
