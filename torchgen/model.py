@@ -696,11 +696,6 @@ class NativeFunction:
             dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
                 cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
-            dispatch[
-                DispatchKey.CompositeImplicitAutogradNestedTensor
-            ] = BackendMetadata(
-                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
-            )
 
         composites_in_dispatch = [
             d
@@ -771,7 +766,9 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             is_abstract = True
         else:
-            is_abstract = dispatch.keys() != {
+            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd} \
+            and dispatch.keys() != {DispatchKey.CompositeImplicitAutogradNestedTensor} \
+            and dispatch.keys() != {
                 DispatchKey.CompositeImplicitAutograd,
                 DispatchKey.CompositeImplicitAutogradNestedTensor,
             }
@@ -908,9 +905,11 @@ class NativeFunction:
     def has_composite_kernel(self) -> bool:
         return (
             self.has_composite_implicit_autograd_kernel
-            or self.has_composite_implicit_autograd_nested_tensor_kernel
             or self.has_composite_explicit_autograd_kernel
             or self.has_composite_explicit_autograd_non_functional_kernel
+        ) or (
+            self.has_composite_implicit_autograd_kernel
+            and self.has_composite_implicit_autograd_nested_tensor_kernel
         )
 
     @property
