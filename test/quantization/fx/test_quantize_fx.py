@@ -945,7 +945,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             self.checkGraphModeFxOp(
@@ -970,7 +970,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             result_dict = self.checkGraphModeFxOp(
@@ -1205,7 +1205,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for (ModuleClass, module_constructor_inputs,
                  inputs, quantized_node, weight_prepack_node) in tests:
                 for is_reference in [True, False]:
-                    node_occurrence = dict()
+                    node_occurrence = {}
                     if weight_prepack_node:
                         node_occurrence[weight_prepack_node] = 0
                     m = ModuleClass(*module_constructor_inputs).eval()
@@ -7058,7 +7058,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
 
-    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_qmatmul(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -7067,7 +7066,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M().eval()
         example_inputs = (torch.randn(2, 2), torch.randn(2, 2))
-        qconfig_dict = {"": torch.ao.quantization.default_qconfig}
+        qconfig_dict = get_default_qconfig_mapping("fbgemm")
         mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mp(*example_inputs)
         mq = convert_fx(mp)
