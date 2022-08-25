@@ -34,12 +34,13 @@ class SymbolicContext:
         self.onnx_block: _C.Block = onnx_block
 
 
+@enum.unique
 class RuntimeTypeCheckState(enum.Enum):
     """Runtime type check state."""
 
     # Runtime type checking is disabled.
-    DISABLED = 0
-    # Runtime type checking is enabled.
-    ERRORS = 1
+    DISABLED = enum.auto()
     # Runtime type checking is enabled but warnings are shown only.
-    WARNINGS = 2
+    WARNINGS = enum.auto()
+    # Runtime type checking is enabled.
+    ERRORS = enum.auto()
