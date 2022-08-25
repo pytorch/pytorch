@@ -1085,7 +1085,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             {fd->recordingState(arg())},                        \
             {fd->recordingState(output())},                     \
             ("ops." op_str),                                    \
-            Nvf::op_name,                                       \
+            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>(Nvf::op_name),\
             axes,                                               \
             keepdim,                                            \
             dtype));                                            \

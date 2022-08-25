@@ -211,7 +211,7 @@ struct OpRecord : RecordFunctor {
                 Nvf::DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x"
                     << fusion_op_.target_type().name() << "] [other: 0x"
-                    << child_ptr->fusion_op_.target_type().name() << "]\n";
+                    << child_ptr->fusion_op_.target_type().name() << "] ";
         }
         // Match the nvFuser arith function pointers
         result = result &&
@@ -221,7 +221,7 @@ struct OpRecord : RecordFunctor {
         if (Nvf::isDebugDumpEnabled(
                 Nvf::DebugDumpOption::PythonFrontendDebug)) {
           std::cout
-              << "\nOpRecord: " << name_ << " Target  Ptr [self: 0x" << std::hex
+              << "Target  Ptr [self: 0x" << std::hex
               << (size_t)*fusion_op_.template target<OutType (*)(ArgTypes...)>()
               << "] [other: 0x" << std::hex
               << (size_t)*child_ptr->fusion_op_
@@ -470,11 +470,27 @@ struct CastOpRecord : RecordFunctor {
       if (result) {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout << "\nCastOpRecord: " << name_ << " Target Type [self: 0x"
+                    << fusion_op_.target_type().name() << "] [other: 0x"
+                    << child_ptr->fusion_op_.target_type().name() << "]";
+        }
         result = result &&
-            (fusion_op_
+            (*fusion_op_
                  .template target<OutType (*)(Nvf::DataType, ArgType)>() ==
-             child_ptr->fusion_op_
+             *child_ptr->fusion_op_
                  .template target<OutType (*)(Nvf::DataType, ArgType)>());
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout
+              << " Target  Ptr [self: 0x" << std::hex
+              << (size_t)*fusion_op_.template target<OutType (*)(Nvf::DataType, ArgType)>()
+              << "] [other: 0x" << std::hex
+              << (size_t)*child_ptr->fusion_op_
+                     .template target<OutType (*)(Nvf::DataType, ArgType)>()
+              << "]\n";
+        }
         result = result && (dtype_ == child_ptr->dtype_);
       }
     }
@@ -807,13 +823,28 @@ struct ReductionOpRecord : RecordFunctor {
       if (result) {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout << "\nReductionOpRecord: " << name_ << " Target Type [self: 0x"
+                    << fusion_op_.target_type().name() << "] [other: 0x"
+                    << child_ptr->fusion_op_.target_type().name() << "]";
+        }
         result = result &&
-            (fusion_op_.template target<
+            (*fusion_op_.template target<
                  Nvf::
-                     TensorView* (*)(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>() ==
-             child_ptr->fusion_op_.template target<
+                     TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>() ==
+             *child_ptr->fusion_op_.template target<
                  Nvf::
-                     TensorView* (*)(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>());
+                     TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>());
+        if (Nvf::isDebugDumpEnabled(
+                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+          std::cout
+              << " Target  Ptr [self: 0x" << std::hex
+              << (size_t)*fusion_op_.template target<Nvf:: TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>()
+              << "] [other: 0x" << std::hex
+              << (size_t)*child_ptr->fusion_op_ .template target< Nvf:: TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>()
+              << "]\n";
+        }
         result = result && (keep_dim_ == child_ptr->keep_dim_);
         result = result && (dtype_ == child_ptr->dtype_);
         if (result) {

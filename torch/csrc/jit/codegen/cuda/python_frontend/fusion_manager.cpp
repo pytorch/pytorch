@@ -65,8 +65,14 @@ void FusionManager::createFusionCacheEntry(RecordFunctor* rec) {
   // than managing a shared pointer that would  only share with
   // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
-  fusion_cache_ptr_->record_hash_map[new_rec] =
+  fusionCachePtr()->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec);
+  if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    std::stringstream ss;
+    new_rec->print(ss);
+    std::cout << "\nFusionDefinition: Create new cache entry for: "
+              << ss.str() << "\n";
+  }
 }
 void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   TORCH_CHECK(
@@ -89,12 +95,17 @@ void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   // than managing a shared pointer that would  only share with
   // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
-  fusion_cache_ptr_->record_hash_map[new_rec] =
+  fusionCachePtr()->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec, true);
+  if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    std::stringstream ss;
+    new_rec->print(ss);
+    std::cout << "\nFusionDefinition: Create new terminal cache entry.\n";
+  }
 }
 void FusionManager::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
-  TORCH_CHECK(fusion_cache_ptr_->record->recordType() == RecordType::Start);
+  TORCH_CHECK(fusionCachePtr()->record->recordType() == RecordType::Start);
 }
 void FusionManager::traverseFusionCache(RecordFunctor* rec) {
   TORCH_CHECK(
