@@ -1,8 +1,8 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
+from pytorch_test_common import skipIfNoCuda
 
 import torch
-from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
@@ -21,7 +21,7 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     graph = torch.onnx.utils._optimize_graph(
         graph, operator_export_type, params_dict={}
     )
-    proto, _, _ = graph._export_onnx(
+    proto, _, _, _ = graph._export_onnx(
         {},
         opset_version,
         {},
