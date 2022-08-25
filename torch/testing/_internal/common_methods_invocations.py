@@ -16776,10 +16776,6 @@ python_ref_db = [
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/78613
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.expand",
@@ -16810,10 +16806,6 @@ python_ref_db = [
         "_refs.hstack",
         torch_opinfo_name="hstack",
         supports_nvfuser=False,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/78613
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.narrow",
@@ -16907,10 +16899,6 @@ python_ref_db = [
         "_refs.vstack",
         torch_opinfo_name="vstack",
         supports_nvfuser=False,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/78613
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.unflatten",
