@@ -105,7 +105,7 @@ class TestSparse(TestSparseBase):
         self.legacy_sparse_tensor = torch.sparse.DoubleTensor
 
     def _gen_sparse(self, sparse_dim, nnz, with_size, dtype, device, coalesced):
-        if nnz < 2: 
+        if nnz < 2:
             assert coalesced, "Tensor with nnz < 2 is always coalesced"
 
         if isinstance(with_size, Number):
