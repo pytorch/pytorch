@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
-import unittest
+import contextlib
 from pathlib import Path
 
 import torch
@@ -11,6 +11,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
+from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_ARM64
 
 
@@ -21,6 +22,10 @@ class TestQuantizationDocs(QuantizationTestCase):
     they must be provided in the test. The imports seem to behave a bit inconsistently,
     they can be imported either in the test file or passed as a global input
     """
+
+    def run(self, result=None):
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+            super(TestQuantizationDocs, self).run(result)
 
     def _get_code(
         self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
@@ -36,28 +41,17 @@ class TestQuantizationDocs(QuantizationTestCase):
         def get_correct_path(path_from_pytorch):
             r"""
             Current working directory when CI is running test seems to vary, this function
-            looks for docs and if it finds it looks for the path to the
-            file and if the file exists returns that path, otherwise keeps looking. Will
-            only work if cwd contains pytorch or docs or a parent contains docs.
+            looks for docs relative to this test file.
             """
-            # get cwd
-            cur_dir_path = Path(".").resolve()
-
-            # check if cwd contains pytorch, use that if it does
-            if (cur_dir_path / "pytorch").is_dir():
-                cur_dir_path = (cur_dir_path / "pytorch").resolve()
-
-            # need to find the file, so we check current directory
-            # and all parent directories to see if the path leads to it
-            check_dir = cur_dir_path
-            while not check_dir == check_dir.parent:
-                file_path = (check_dir / path_from_pytorch).resolve()
-                if file_path.is_file():
-                    return file_path
-                check_dir = check_dir.parent.resolve()
-
-            # no longer passing when file not found
-            raise FileNotFoundError("could not find {}".format(path_from_pytorch))
+            core_dir = Path(__file__).parent
+            assert core_dir.match("test/quantization/core/"), (
+                "test_docs.py is in an unexpected location. If you've been "
+                "moving files around, ensure that the test and build files have "
+                "been updated to have the correct relative path between "
+                "test_docs.py and the docs."
+            )
+            pytorch_root = core_dir.parent.parent.parent
+            return pytorch_root / path_from_pytorch
 
         path_to_file = get_correct_path(path_from_pytorch)
         if path_to_file:
@@ -108,21 +102,18 @@ class TestQuantizationDocs(QuantizationTestCase):
             expr = compile(code, "test", "exec")
             exec(expr, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_ptdq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTDQ API Example::"
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_ptsq(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "PTSQ API Example::"
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_qat(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "QAT API Example::"
@@ -132,11 +123,9 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         input_fp32 = torch.randn(1, 1, 1, 1)
         global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
-
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_fx(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "FXPTQ API Example::"
@@ -147,7 +136,6 @@ class TestQuantizationDocs(QuantizationTestCase):
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)
 
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_quantization_doc_custom(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"

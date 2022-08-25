@@ -33,7 +33,7 @@ Updated operators:
 import warnings
 
 import torch
-from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 
 block_listed_operators = [
     "nonzero",
@@ -67,7 +67,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         output_size = symbolic_helper._maybe_get_const(output_size, "is")
         if symbolic_helper._is_value(output_size):
             return symbolic_helper._unimplemented(
@@ -198,18 +198,28 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other)
-    assert ty is not None
-    lower_type = ty.lower()
-    # TODO(justinchuby): Remove the g.constant method
-    C = g.constant(0, [1], lower_type)
-    if symbolic_helper._try_get_scalar_type(self):
-        old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
-        return _cast_to_type(
-            g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type
+    scalar_type = symbolic_helper._try_get_scalar_type(self, other)
+    if scalar_type is None:
+        raise errors.SymbolicValueError(
+            "mm can only operate on tensors with known types", self
         )
-    else:
-        return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
+    zero_constant = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
+        ),
+    )
+
+    if symbolic_helper._try_get_scalar_type(self):
+        old_type, self, other, zero_constant = _try_cast_integer_to_float(
+            g, self, other, zero_constant
+        )
+        return _cast_to_type(
+            g,
+            g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0),
+            old_type,
+        )
+    return g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0)
 
 
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
