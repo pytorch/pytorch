@@ -30,6 +30,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+HAS_CUDA = torch.cuda.is_available()
 
 
 def process_failures():
@@ -614,6 +615,7 @@ def forward(self, x_1):
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_amp_cache(self):
         layer = torch.nn.Conv2d(3, 3, 3).cuda()
 

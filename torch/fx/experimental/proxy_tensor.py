@@ -611,6 +611,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             func = f
 
+        # We disable the autocast cache as the autocast cache causes type conversions on parameters to
+        # check a cache, which introduces untracked tensors into the graph
         with decompose(decomposition_table), fake_tensor_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
