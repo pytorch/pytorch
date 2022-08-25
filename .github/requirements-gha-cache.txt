@@ -1,0 +1,12 @@
+# This file is to cache other dependencies not specified elsewhere in:
+#   requirement.txt
+#   requirements-flake8.txt
+#   docs/requirements.txt
+#   docs/cpp/requirements.txt
+#   functorch/docs/requirements.txt
+#   .circleci/docker/requirements-ci.txt
+jinja2==3.0.1
+lintrunner=0.9.2
+pynvml==11.4.1
+rich==10.9.0
+rockset==0.8.10
