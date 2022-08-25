@@ -488,9 +488,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
             # (We can't pass in the input tensors directly, because they are "functional wrappers".
             # If any of the meta kernels call a tensor op and redispatch, we don't want to hit the functionalize kernels.)
             # Even at::meta:: functions might redispatch, e.g. if they call into view ops.
-            dispatcher_sig = DispatcherSignature.from_schema(
-                func.func, structured_type_override=func.part_of_structured_group
-            )
+            dispatcher_sig = DispatcherSignature.from_schema(func.func)
             meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
             meta_call_args = [
                 e.expr
@@ -605,12 +603,7 @@ class ComputeShapeSignature:
     def __init__(self, kernel_name: str, f: NativeFunction):
         self.__schema = LazyIrSchema(f.func)
         self.__dispatch_args = ", ".join(
-            [
-                a.decl()
-                for a in dispatcher.arguments(
-                    f.func, structured_type_override=f.part_of_structured_group
-                )
-            ]
+            [a.decl() for a in dispatcher.arguments(f.func)]
         )
         self.__call_args = ", ".join(
             [f"{arg.name}" for arg in self.__schema.filtered_args(generator=True)]
