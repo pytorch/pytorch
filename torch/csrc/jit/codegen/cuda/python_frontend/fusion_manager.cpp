@@ -89,7 +89,7 @@ void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   // than managing a shared pointer that would  only share with
   // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
-  fusion_cache_ptr_->record_hash_map[rec] =
+  fusion_cache_ptr_->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec, true);
 }
 void FusionManager::resetFusionCachePtr() {
