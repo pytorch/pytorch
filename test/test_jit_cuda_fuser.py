@@ -189,7 +189,7 @@ class TestCudaFuser(JitTestCase):
             self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
-    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1, tol=None):
+    def _run_helper(self, jit_op, op, *args, check_stride=False, num_fusion=1, check_runs=1):
         seed = 123
         torch.cuda.manual_seed_all(seed)
         jit_o = jit_op(*args)
@@ -206,10 +206,7 @@ class TestCudaFuser(JitTestCase):
 
             for oo, jit_oo in zip(o, jit_o):
                 self.assertEqual(oo.dtype, jit_oo.dtype)
-                if tol is None:
-                    self.assertEqual(oo, jit_oo)
-                else:
-                    self.assertEqual(oo, jit_oo, atol=tol, rtol=tol)
+                self.assertEqual(oo, jit_oo)
                 if check_stride:
                     self.assertEqual(oo.stride(), jit_oo.stride())
 
@@ -2362,10 +2359,13 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
+    @unittest.skip("Skipped due to rand_like behavior change")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_profiling_node(self):
+        # TODO: should we change this test to not use rand_like, or just
+        # remove this test?
         dtype = torch.float
         device = "cuda"
         x = torch.randn(4, 8, 8, 8, dtype=dtype, device=device)
@@ -2376,26 +2376,6 @@ class TestCudaFuser(JitTestCase):
             return o
         repro_jit = torch.jit.script(repro)
         self._run_helper(repro_jit, repro, x, 0.6)
-
-    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_rand_like(self):
-        dtype = torch.float
-        device = "cuda"
-
-        def t(x: torch.Tensor, alpha: float):
-            o = torch.rand_like(x)
-            o = torch.add(o, alpha)
-            return o
-
-        # disabling cache so new inputs would generate new graph
-        t.__disable_jit_function_caching__ = True
-
-        for m_format in [torch.contiguous_format, torch.channels_last]:
-            x = torch.randn(4, 5, 6, 7, dtype=dtype, device=device).to(memory_format=m_format)
-            t_jit = torch.jit.script(t)
-            self._run_helper(t_jit, t, x, 0.6, check_stride=True)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4874,23 +4854,13 @@ class TestCudaFuser(JitTestCase):
     def test_device_constant(self):
         x = torch.randn(4, 2, device="cuda")
 
-        def t(x):
-            return torch.rand_like(x, device=torch.device(type='cuda'))
-
         # cpu tensor shouldn't be fused
         def t_cpu(x):
             return torch.rand_like(x, device=torch.device(type='cpu'))
 
-        # ROCm jitted rand vs rocrand needed relaxed tolerance
-        # Mismatched elements: 4 / 8 (50.0%)
-        # Greatest absolute difference: 3.1106173986605867e-07 at index (1, 1) (up to 1e-07 allowed)
-        # Greatest relative difference: 7.083319357527836e-07 at index (0, 0) (up to 1e-07 allowed)
         with nvfuser_singleton_fusion(True):
-            t_jit = torch.jit.script(t)
-            self._run_helper(t_jit, t, x, tol=1e-6)
-
             t_cpu_jit = torch.jit.script(t_cpu)
-            for i in range(5):
+            for _ in range(5):
                 t_cpu_jit(x)
 
             self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
