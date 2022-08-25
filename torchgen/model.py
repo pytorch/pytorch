@@ -766,12 +766,16 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             is_abstract = True
         else:
-            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd} \
-            and dispatch.keys() != {DispatchKey.CompositeImplicitAutogradNestedTensor} \
-            and dispatch.keys() != {
-                DispatchKey.CompositeImplicitAutograd,
-                DispatchKey.CompositeImplicitAutogradNestedTensor,
-            }
+            is_abstract = (
+                dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                and dispatch.keys()
+                != {DispatchKey.CompositeImplicitAutogradNestedTensor}
+                and dispatch.keys()
+                != {
+                    DispatchKey.CompositeImplicitAutograd,
+                    DispatchKey.CompositeImplicitAutogradNestedTensor,
+                }
+            )
 
         has_composite_implicit_autograd_kernel = (
             DispatchKey.CompositeImplicitAutograd in dispatch.keys()
