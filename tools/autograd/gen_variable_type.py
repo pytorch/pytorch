@@ -28,7 +28,6 @@
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.autograd import (
     DifferentiableInput,
     dispatch_strategy,
@@ -853,9 +852,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argument_type(
-            a, binds=a.name, structured_type_override=f.part_of_structured_group
-        ).cpp_type()
+        cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
 
         if not is_differentiable(a.name, a.type, info):
             return None
@@ -1134,9 +1131,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
     ) -> str:
         """Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(
-            f.func, structured_type_override=f.part_of_structured_group
-        )
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)
         dispatcher_exprs = dispatcher_sig.exprs()
 
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.

@@ -115,12 +115,7 @@ def valuetype_type(
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
-    t: Type,
-    *,
-    mutable: bool,
-    binds: ArgName,
-    remove_non_owning_ref_types: bool = False,
-    structured_type_override: bool,
+    t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False
 ) -> NamedCType:
     # If it's a value type, do the value type translation
     r = valuetype_type(
@@ -153,12 +148,7 @@ def argumenttype_type(
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
             return NamedCType(binds, BaseCType(optionalIntArrayRefT))
-        elem = argumenttype_type(
-            t.elem,
-            mutable=mutable,
-            binds=binds,
-            structured_type_override=structured_type_override,
-        )
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
@@ -173,7 +163,7 @@ def argumenttype_type(
             else:
                 return NamedCType(binds, BaseCType(symIntArrayRefT))
         elif str(t.elem) == "Tensor":
-            if structured_type_override:
+            if local.use_ilistref_for_tensor_lists():
                 return NamedCType(binds, ConstRefCType(BaseCType(iTensorListRefT)))
             else:
                 return NamedCType(binds, BaseCType(tensorListT))
@@ -182,32 +172,24 @@ def argumenttype_type(
         elif str(t.elem) == "Dimname":
             return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == "Tensor?":
-            if structured_type_override:
+            if local.use_ilistref_for_tensor_lists():
                 return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorListRefT)))
             else:
                 return NamedCType(
                     binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT))))
                 )
-        elem = argumenttype_type(
-            t.elem,
-            mutable=mutable,
-            binds=binds,
-            structured_type_override=structured_type_override,
-        )
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
 # Translate a JIT argument into its C++ type
-def argument_type(
-    a: Argument, *, binds: ArgName, structured_type_override: bool
-) -> NamedCType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(
         a.type,
         mutable=a.is_write,
         binds=binds,
-        structured_type_override=structured_type_override,
     )
 
 
@@ -356,7 +338,6 @@ def argument(
     method: bool,
     faithful: bool,
     has_tensor_options: bool,
-    structured_type_override: bool,
 ) -> List[Binding]:
     def sub_argument(
         a: Union[Argument, TensorOptionsArguments, SelfArgument]
@@ -367,7 +348,6 @@ def argument(
             method=method,
             faithful=faithful,
             has_tensor_options=has_tensor_options,
-            structured_type_override=structured_type_override,
         )
 
     if isinstance(a, Argument):
@@ -381,9 +361,7 @@ def argument(
             default = default_expr(a.default, a.type)
         return [
             Binding(
-                nctype=argument_type(
-                    a, binds=binds, structured_type_override=structured_type_override
-                ),
+                nctype=argument_type(a, binds=binds),
                 name=a.name,
                 default=default,
                 argument=a,
@@ -424,12 +402,7 @@ def argument(
 
 
 def arguments(
-    arguments: Arguments,
-    *,
-    faithful: bool,
-    method: bool,
-    cpp_no_default_args: Set[str],
-    structured_type_override: bool,
+    arguments: Arguments, *, faithful: bool, method: bool, cpp_no_default_args: Set[str]
 ) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if faithful:
@@ -447,6 +420,5 @@ def arguments(
             method=method,
             has_tensor_options=arguments.tensor_options is not None,
             cpp_no_default_args=cpp_no_default_args,
-            structured_type_override=structured_type_override,
         )
     ]

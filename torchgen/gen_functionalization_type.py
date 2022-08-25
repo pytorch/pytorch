@@ -102,13 +102,10 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 }
 """
     # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(
-        g.view_copy.func, structured_type_override=g.view_copy.part_of_structured_group
-    )
+    view_copy_sig = NativeSignature(g.view_copy.func)
+
     # view is a dispatcher signature, since we're calling into the at::_ops API
-    view_sig = DispatcherSignature(
-        g.view.func, structured_type_override=g.view.part_of_structured_group
-    )
+    view_sig = DispatcherSignature(g.view.func)
 
     view_api_name = g.view.func.name.unambiguous_name()
     exprs = ", ".join(
@@ -150,15 +147,10 @@ def gen_symint_view_copy_kernel(
     view_copy: NativeFunction, view_copy_symint: NativeFunction
 ) -> str:
     # view_copy.symint is a native signature, since we're generating an at::native:: kernel
-    view_copy_symint_sig = NativeSignature(
-        view_copy_symint.func,
-        structured_type_override=view_copy_symint.part_of_structured_group,
-    )
+    view_copy_symint_sig = NativeSignature(view_copy_symint.func)
 
     # view_copy is a dispatcher signature, since we're calling into the at::_ops API
-    view_copy_sig = DispatcherSignature(
-        view_copy.func, structured_type_override=view_copy.part_of_structured_group
-    )
+    view_copy_sig = DispatcherSignature(view_copy.func)
 
     exprs = ", ".join(
         [
@@ -324,10 +316,7 @@ def emit_view_functionalization_body(
 
     assert g.view_copy is not None
     with native_function_manager(f):
-        call_sig = DispatcherSignature.from_schema(
-            g.view_copy.func,
-            structured_type_override=g.view_copy.part_of_structured_group,
-        )
+        call_sig = DispatcherSignature.from_schema(g.view_copy.func)
 
         # the "view_copy" op name that the functionalization kernels need to call
         api_name = g.view_copy.func.name.unambiguous_name()
@@ -335,9 +324,7 @@ def emit_view_functionalization_body(
         # "no-op"ing in this context is just redispatching to the original op.
         noop_api_name = f.func.name.unambiguous_name()
 
-        dispatcher_sig = DispatcherSignature.from_schema(
-            f.func, structured_type_override=g.view_copy.part_of_structured_group
-        )
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)
         assert_view_op_properties(f.func)
         view_tensor_name = dispatcher_sig.arguments()[0].name
 
@@ -551,9 +538,7 @@ def emit_inplace_functionalization_body(
     # mutation case
     assert modifies_arguments(f)
 
-    dispatcher_sig = DispatcherSignature.from_schema(
-        f.func, structured_type_override=f.part_of_structured_group
-    )
+    dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
     unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(
         dispatcher_sig, is_view_op=False
@@ -596,10 +581,7 @@ def emit_inplace_functionalization_body(
     return_type = (
         dispatcher.returns_type(g.functional.func.returns).remove_const_ref().cpp_type()
     )
-    functional_sig = DispatcherSignature.from_schema(
-        g.functional.func,
-        structured_type_override=g.functional.part_of_structured_group,
-    )
+    functional_sig = DispatcherSignature.from_schema(g.functional.func)
     functional_exprs = [
         e.expr
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
@@ -695,9 +677,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(
-                f.func, structured_type_override=f.part_of_structured_group
-            )
+            sig = DispatcherSignature.from_schema(f.func)
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
