@@ -1,4 +1,12 @@
 import torch
+
+# The quantized modules use `torch.nn` and `torch.ao.nn.quantizable`
+# packages. However, the `quantizable` package uses "lazy imports"
+# to avoid circular dependency.
+# Hence we need to include it here to make sure it is resolved before
+# they are used in the modules.
+import torch.ao.nn.quantizable
+
 from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention, PReLU

@@ -374,3 +374,27 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         ]
         self._test_function_import('sparse', function_list,
                                    base='nn.quantized._reference.modules')
+
+    def test_package_import_nn_quantizable(self):
+        self._test_package_import('quantizable', base='nn')
+
+    def test_package_import_nn_quantizable_modules(self):
+        r"""Tests the migration of the torch.nn.quantizable.modules"""
+        self._test_package_import('modules', base='nn.quantizable')
+        self._test_package_import('modules.activation', base='nn.quantizable')
+        self._test_package_import('modules.rnn', base='nn.quantizable')
+
+    def test_import_nn_quantizable_activation(self):
+        module_list = [
+            # Modules
+            'MultiheadAttention',
+        ]
+        self._test_function_import('activation', module_list, base='nn.quantizable.modules')
+
+    def test_import_nn_quantizable_rnn(self):
+        module_list = [
+            # Modules
+            'LSTM',
+            'LSTMCell',
+        ]
+        self._test_function_import('rnn', module_list, base='nn.quantizable.modules')

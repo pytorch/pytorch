@@ -184,8 +184,9 @@ class Softmax(torch.nn.Softmax):
     def from_reference(cls, mod, scale, zero_point):
         return cls(mod.dim, float(scale), int(zero_point))
 
-class MultiheadAttention(torch.nn.quantizable.MultiheadAttention):
-    _FLOAT_MODULE = torch.nn.quantizable.MultiheadAttention
+
+class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
+    _FLOAT_MODULE = torch.ao.nn.quantizable.MultiheadAttention
 
     def _get_name(self):
         return "QuantizedMultiheadAttention"
