@@ -20,23 +20,36 @@
   }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-#define VK_CHECK(function)              \
-  do {                                  \
-    const VkResult result = (function); \
-    TORCH_CHECK(                        \
-        VK_SUCCESS == result,           \
-        C10_STRINGIZE(__FILE__),        \
-        " [",                           \
-        C10_STRINGIZE(__LINE__),        \
-        "] "                            \
-        "VkResult:",                    \
-        result);                        \
+/*
+ * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an
+ * error with the returned code if not. If STRIP_ERROR_MESSAGES is defined then
+ * only the return code will be preserved.
+ */
+#ifdef STRIP_ERROR_MESSAGES
+#define VK_CHECK(function)                                       \
+  do {                                                           \
+    const VkResult result = (function);                          \
+    if (VK_SUCCESS != result) {                                  \
+      throw c10::Error(                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+          c10::str(result));                                     \
+    }                                                            \
   } while (false)
-
-#define VK_CHECK_RELAXED(function)                          \
-  do {                                                      \
-    const VkResult result = (function);                     \
-    TORCH_CHECK(VK_SUCCESS <= result, "VkResult:", result); \
+#else
+#define VK_CHECK(function)                                       \
+  do {                                                           \
+    const VkResult result = (function);                          \
+    if (VK_SUCCESS != result) {                                  \
+      throw c10::Error(                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+          c10::str(                                              \
+              C10_STRINGIZE(__FILE__),                           \
+              "[",                                               \
+              C10_STRINGIZE(__LINE__),                           \
+              "] Expected VK_SUCCESS, got VkResult of ",         \
+              result));                                          \
+    }                                                            \
   } while (false)
+#endif /* STRIP_ERROR_MESSAGES */
 
 #endif /* USE_VULKAN_API */

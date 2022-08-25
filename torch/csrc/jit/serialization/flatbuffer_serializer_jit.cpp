@@ -6,14 +6,11 @@
 
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
-
-#if ENABLE_UPGRADERS
-#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
-#endif
 
 namespace torch {
 namespace jit {
@@ -23,9 +20,7 @@ Module parse_and_initialize_jit_module(
     size_t size,
     ExtraFilesMap& extra_files,
     c10::optional<at::Device> device) {
-#if ENABLE_UPGRADERS
   populate_upgraders_graph_map();
-#endif
   ExtraFilesMap jit_files;
   std::vector<IValue> jit_constants;
   mobile::Module mobilem = parse_and_initialize_mobile_module_for_jit(
