@@ -68,13 +68,56 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymIntNodeImpl.h>
 #include <array>
 #include <cstddef>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
+
+namespace torch {
+inline bool is_symint_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
+  if (py::isinstance(obj, tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+} // namespace torch
+
+namespace pybind11 {
+namespace detail {
+template <>
+struct type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  bool load(py::handle src, bool) {
+    if (torch::is_symint_node(src)) {
+      value = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
+      return true;
+    }
+
+    auto raw_obj = src.ptr();
+    if (THPUtils_checkIndex(raw_obj)) {
+      value = c10::SymInt{THPUtils_unpackIndex(raw_obj)};
+      return true;
+    }
+    return false;
+  }
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl()).release()
+                            : py::cast(si.expect_int()).release();
+  }
+};
+} // namespace detail
+} // namespace pybind11
 
 namespace torch {
 
@@ -474,22 +517,13 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline bool is_symint_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymbolicIntNode>();
-  // TODO: switch this to `isinstance`
-  if (obj.get_type().equal(tp_symn)) {
-    TORCH_CHECK(
-        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
-    return true;
-  }
-  return false;
-}
-
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    return py::cast(symint.toSymbolicIntNode()).release().ptr();
+    auto r = py::cast(symint.toSymIntNodeImpl()).release().ptr();
+    TORCH_INTERNAL_ASSERT(r);
+    return r;
   } else {
-    return THPUtils_packInt64(symint.data());
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 
@@ -507,7 +541,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   }
 
   if (size1 > 0 && torch::is_symint_node(py::handle(args[i]))) {
-    auto si = py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+    auto si = py::handle(args[i]).cast<c10::SymIntNodeImpl*>()->toSymInt();
     return std::vector<c10::SymInt>(size1, si);
   }
 
@@ -522,8 +556,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       if (is_symint_node(py::handle(obj))) {
-        res.push_back(
-            py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
+        res.push_back(py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
       } else {
         // Elements of torch.Size are tensors during tracing, and we need to
         // record extra information before they are turned into an IntArrayRef
@@ -714,8 +747,7 @@ inline at::Device toDevice(PyObject* obj) {
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(
-        dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
+    return torch::tensors::get_default_device();
   }
   return toDevice(args[i]);
 }
@@ -854,10 +886,8 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
-  if (torch::is_symint_node(py::handle(args[i]))) {
-    return py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
-  }
-  return c10::SymInt(THPUtils_unpackLong(args[i]));
+
+  return py::cast<c10::SymInt>(py::handle(args[i]));
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {

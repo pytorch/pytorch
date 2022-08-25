@@ -4,6 +4,7 @@
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -32,7 +33,9 @@ std::vector<SourceLocation> GetPythonFrames() {
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
     PyFrameObject* frame = PyEval_GetFrame();
-    Py_INCREF(frame);
+    if (frame != nullptr) {
+      Py_INCREF(frame);
+    }
     while (frame != nullptr) {
       SourceLocation loc;
       auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));

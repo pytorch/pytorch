@@ -61,29 +61,35 @@ def _prepare(
     metadata = Metadata(state_dict_metadata={})
     tensor_write_requests: List[TensorWriteRequest] = []
     bytes_write_requests: List[BytesWriteRequest] = []
-    storage_key_to_fqn: Dict[str, str] = dict()
+    storage_key_to_fqn: Dict[str, str] = {}
+
+    storage_md = {}
 
     for fqn, obj in state_dict.items():
         if isinstance(obj, ShardedTensor):
-            st_write_reqs, st_md = _prepare_sharded_tensor_write(obj, fqn, storage_key_to_fqn)
+            st_write_reqs, st_md, storage_data = _prepare_sharded_tensor_write(fqn, obj, fqn, storage_key_to_fqn)
             tensor_write_requests += st_write_reqs
             metadata.state_dict_metadata[fqn] = st_md
+            storage_md.update(storage_data)
         elif isinstance(obj, Tensor):
-            write_reqs, tensor_md = _prepare_tensor_write(obj, fqn, storage_key_to_fqn)
+            write_reqs, tensor_md, storage_data = _prepare_tensor_write(obj, fqn, storage_key_to_fqn)
             if write_replicated_data:
                 tensor_write_requests += write_reqs
             metadata.state_dict_metadata[fqn] = tensor_md
+            storage_md.update(storage_data)
         else:
             bytes_io = io.BytesIO()
             # This produces incomplete MD for rank > 0 since we won't populate bytes_io.
             # This is ok since only rank == 0 uses this data
             if write_replicated_data:
                 torch.save(obj, bytes_io)
-            byte_write_reqs, bytes_md = _prepare_bytes_write(bytes_io, fqn, storage_key_to_fqn)
+            byte_write_reqs, bytes_md, storage_data = _prepare_bytes_write(bytes_io, fqn, storage_key_to_fqn)
             if write_replicated_data:
                 bytes_write_requests += byte_write_reqs
             metadata.state_dict_metadata[fqn] = bytes_md
+            storage_md.update(storage_data)
 
+    metadata.storage_data = storage_md
     return (metadata, bytes_write_requests, tensor_write_requests)
 
 def save_state_dict(
@@ -122,6 +128,7 @@ def save_state_dict(
         no_dist (bool): Don't attempt to save in SPMD style. Default to False
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
         >>> # We must call this function prior to state_dict()
         >>> my_model._register_state_dict_hook(state_dict_hook)

@@ -247,7 +247,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments
-    if (kernel_summary.is_stochastic) {
+    if (kernel_summary.max_rng_offsets >= 0) {
       code_ << ", at::PhiloxCudaState philox_args";
     }
 
@@ -259,14 +259,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto& kernel_summary = kernel_->summary();
 
     // Random number generator (optional)
-    if (kernel_summary.is_stochastic) {
-      indent()
-          << "const auto idx = ((((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x) * blockDim.z + threadIdx.z) * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;";
+    if (kernel_summary.max_rng_offsets >= 0) {
       indent() << "auto offset = philox_args.captured_ ?\n";
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
       indent() << "  philox_args.offset_.val;\n";
-      indent() << "Philox rnd(philox_args.seed_, idx, offset);\n";
+      indent() << "uint4 rng_result;\n";
+      indent() << "nvfuser_index_t rng_subseq = -1;\n";
+      indent() << "nvfuser_index_t rng_offset = -1;\n";
     }
 
     // Do we have any dynamic shared memory buffers?
@@ -474,7 +474,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::TensorIndex* ti) final {
+  //! Returns the sum of all indices in a TensorIndex,
+  //!  or 0 if the indices vector is empty.
+  //! Used lowering generic tensor index and lowering
+  //!  mma fragment indices.
+  std::string genTensorIndex(const kir::TensorIndex* ti) {
     bool first = true;
     std::stringstream index;
     for (auto* ind : ti->indices()) {
@@ -490,12 +494,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (first) {
       index << "0";
     }
+
+    return index.str();
+  }
+
+  void handle(const kir::TensorIndex* ti) final {
     bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
         kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
-    code_ << varName(ti->view()) << "[" << index.str() << "]";
+    code_ << varName(ti->view()) << "[" << genTensorIndex(ti) << "]";
   }
 
   void handle(const ViewAsScalar* sv) final {
@@ -621,7 +630,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           //  Double buffered local tensors need indexed initialization,
           //   so will need to use `arraySet` option.
           if (out_tv->getMemoryType() == MemoryType::Local &&
-              !out_tv->isDoubleBuffered()) {
+              !(out_tv->isDoubleBuffered() || out_tv->isCircularBuffered())) {
             // Vectorized initialization
             indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
           } else {
@@ -686,8 +695,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       }
     }
 
+    const auto op_type = uop->getUnaryOpType();
+
     if (uop->out()->isA<NamedScalar>()) {
-      const auto op_type = uop->getUnaryOpType();
       if (auto op = inline_op_str(op_type)) {
         indent() << gen(uop->out()) << " = " << *op << genInline(uop->in())
                  << ";\n";
@@ -696,15 +706,36 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     if (!print_inline_) {
+      if (op_type == UnaryOpType::RandLike) {
+        auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+        auto index = genTensorIndex(uop->in()->as<kir::TensorIndex>());
+        int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
+        indent() << "nvfuser_index_t subseq" << uop->name() << " = (" << index
+                 << ") / " << multiple << ";\n";
+        indent() << "nvfuser_index_t component" << uop->name() << " = ("
+                 << index << ") % " << multiple << ";\n";
+        indent() << "nvfuser_index_t offset" << uop->name() << " = "
+                 << uop->getRNGOffset() << ";\n";
+        indent() << "if (rng_subseq != subseq" << uop->name()
+                 << " || rng_offset != offset" << uop->name() << ") {\n";
+        indent() << "  rng_result = philox(philox_args.seed_, subseq"
+                 << uop->name() << ", offset / 4 + offset" << uop->name()
+                 << ");\n";
+        indent() << "  rng_subseq = subseq" << uop->name() << ";\n";
+        indent() << "  rng_offset = offset" << uop->name() << ";\n";
+        indent() << "}\n";
+      }
+
       indent() << gen(uop->out());
       if (!uop->out()->isScalar() && !uop->in()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
       }
       code_ << " = ";
+    } else {
+      TORCH_INTERNAL_ASSERT(op_type != UnaryOpType::RandLike);
     }
 
-    const auto op_type = uop->getUnaryOpType();
     if (auto op = inline_op_str(op_type)) {
       if (alsoBooleanOperator(op_type) &&
           uop->out()->dtype() == DataType::Bool) {
@@ -733,7 +764,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
       code_ << "(";
       if (op_type == UnaryOpType::RandLike) {
-        code_ << "rnd";
+        code_ << "rng_result, component" << uop->name();
       } else {
         code_ << gen(uop->in());
       }
@@ -971,13 +1002,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  std::string genArchString(MmaOptions options) {
+  std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
-    if (isVolta(options.macro)) {
+    if (isVolta(macro)) {
       ss << "Volta";
-    } else if (isTuring(options.macro)) {
+    } else if (isTuring(macro)) {
       ss << "Turing";
-    } else if (isAmpere(options.macro)) {
+    } else if (isAmpere(macro)) {
       ss << "Ampere";
     } else {
       TORCH_INTERNAL_ASSERT(false, "mma macro unknown arch");
@@ -988,7 +1019,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   std::string genMmaOp(const MmaOp* mma, bool init = false) {
     std::stringstream ss;
     auto options = mma->options();
-    ss << genArchString(options) << "::";
+    ss << genArchString(options.macro) << "::";
     if (init) {
       ss << "init";
     }
@@ -1013,14 +1044,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     auto options = mma->options();
     auto in_a = mma->inA()->as<kir::TensorIndex>()->view();
     auto dtype = in_a->getDataType().value();
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputARegisterSize(options.macro) << ","
              << getInputARegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inA()) << "),\n";
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << varName(mma->inA()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inA()->as<kir::TensorIndex>()) << "])"
+             << ",\n";
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputBRegisterSize(options.macro) << ","
              << getInputBRegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inB()) << ")";
+             << varName(mma->inB()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inB()->as<kir::TensorIndex>()) << "])";
   }
 
   void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {
@@ -1417,7 +1451,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         kernel_->profile().isProfiled(expr)) {
       const auto& buffer_indices =
           kernel_->profile().getIndicesInProfileBuffer(expr);
@@ -2332,7 +2366,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const kir::CpAsyncWait* cpasync_wait) final {
-    indent() << "Ampere::cpAsyncBarrier();\n";
+    if (cpasync_wait->keepStages() > 0) {
+      // Perform partial sync, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncPartialBarrier<" << cpasync_wait->keepStages()
+               << ">();\n";
+    } else {
+      // Perform sync all, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncBarrier();\n";
+    }
+  }
+
+  void handle(const kir::CpAsyncCommit* cpasync_wait) final {
+    // Commit inflight cp.async transfers. See comment on kir::CpAsyncCommit.
+    indent() << "Ampere::cpAsyncCommit();\n";
   }
 
   void handle(const kir::GridSync* sync) final {
@@ -2390,11 +2436,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const kir::IntPair* int_pair) {
     const auto def = int_pair->definition();
-    if (print_inline_) {
-      code_ << gen(def);
-    } else {
-      code_ << varName(int_pair);
-    }
+    TORCH_INTERNAL_ASSERT(
+        def != nullptr, "no support for un-inlined int pair yet.");
+    code_ << gen(def);
   }
 
   void handle(const kir::PairSelect* pair_select) {

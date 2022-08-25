@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -633,6 +634,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Undefined;
   }
 }
+
+BackendComponent toBackendComponent(DeviceType device_type);
 
 // Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
 // DispatchKey::CUDA.
