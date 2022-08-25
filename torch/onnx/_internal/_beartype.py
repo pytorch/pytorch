@@ -26,6 +26,9 @@ try:
     has_beartype = True
 except ImportError:
     has_beartype = False
+except Exception as e:
+    warnings.warn(f"{e}")
+    has_beartype = False
 
 
 def _no_op_decorator(func):
