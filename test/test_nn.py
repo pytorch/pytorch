@@ -13644,6 +13644,46 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
 
+    @onlyCPU
+    def test_conv_contiguous_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/80837.
+        for dtype in [torch.float, torch.bfloat16]:
+            conv = nn.Conv2d(
+                1,
+                128,
+                kernel_size=(5, 2),
+                stride=(2, 1),
+                padding=(0, 1),
+                dilation=(1, 1),
+                groups=1,
+                bias=True,
+                padding_mode='zeros').to(dtype=dtype)
+
+            x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
+            x = torch.transpose(x, 1, 4)
+            x2 = x[..., 0]
+            inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
+            if torch.backends.mkldnn.is_available():
+                y = conv(x2)
+                # Disable MKLDNN explicitly
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_ = conv(x2)
+                    self.assertEqual(y, y_)
+
+    @onlyCPU
+    def test_conv_ic1_channels_last_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
+        for dtype in [torch.float, torch.bfloat16]:
+            conv = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), padding=(1, 1), bias=False)
+            conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
+            x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
+            if torch.backends.mkldnn.is_available():
+                y = conv(x)
+                # Disable MKLDNN explicitly
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_ = conv(x)
+                    self.assertEqual(y, y_)
+
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
