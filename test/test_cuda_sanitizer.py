@@ -5,8 +5,8 @@ import textwrap
 from typing import List
 
 import torch
-from torch._cuda_sanitizer import sanitizer, trace_checker
-from torch._cuda_sanitizer.trace_checker import StreamId, DataPtr, EventId
+import torch._cuda_sanitizer as csan
+from torch._cuda_sanitizer import StreamId, DataPtr, EventId
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
@@ -27,7 +27,7 @@ class TestArgumentHandler(TestCase):
         a = torch.ones(5, 3, device="cuda")
         b = torch.randn(5, 3, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(add_func._schema, (a, b), {})
         c = torch.add(a, b)
         argument_handler.parse_outputs(c)
@@ -41,7 +41,7 @@ class TestArgumentHandler(TestCase):
         b = torch.zeros(2, 1, 5, device="cuda")
         c = torch.rand(2, 7, 5, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(cat_func._schema, ([a, b, c], 1), {})
         d = torch.cat((a, b, c), dim=1)
         argument_handler.parse_outputs(d)
@@ -55,7 +55,7 @@ class TestArgumentHandler(TestCase):
         split_func = torch.ops.aten.split.Tensor
         a = torch.arange(10, device="cuda").reshape(5, 2)
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(split_func._schema, (a, 2), {})
         out = torch.split(a, 2)
         argument_handler.parse_outputs(out)
@@ -71,7 +71,7 @@ class TestArgumentHandler(TestCase):
         add_inplace_func = torch.ops.aten.add_.Tensor
         a = torch.rand(4, 2, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(add_inplace_func._schema, (a, 5), {})
         a.add_(5)
         argument_handler.parse_outputs(a)
@@ -84,7 +84,7 @@ class TestArgumentHandler(TestCase):
         a = torch.arange(8, device="cuda")
         b = torch.empty(8, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(mul_out_func._schema, (a, 3), {"out": b})
         torch.mul(a, 3, out=b)
         argument_handler.parse_outputs(b)
@@ -96,7 +96,7 @@ class TestArgumentHandler(TestCase):
         nonzero_func = torch.ops.aten.nonzero.default
         a = torch.ones(5, 3, 2, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(nonzero_func._schema, (a,), {"as_tuple": True})
         out = torch.nonzero(a, as_tuple=True)
         argument_handler.parse_outputs(out)
@@ -110,7 +110,7 @@ class TestArgumentHandler(TestCase):
         vec = torch.arange(1, 4, device="cuda")
         M = torch.zeros(3, 3, device="cuda")
 
-        argument_handler = sanitizer.ArgumentHandler()
+        argument_handler = csan.ArgumentHandler()
         argument_handler.parse_inputs(addr_func._schema, (M, vec, vec), {})
         out = torch.addr(M, vec, vec)
         argument_handler.parse_outputs(out)
@@ -137,21 +137,21 @@ def event_id(i: int) -> EventId:
     return 2000 + i
 
 
-class TestTraceChecker(TestCase):
+class TestEventHandler(TestCase):
     def setUp(self):
-        self.checker = trace_checker.TraceChecker()
+        self.handler = csan.EventHandler()
 
     def kernel_launch(
         self,
         stream: StreamId,
         read_only: List[DataPtr] = None,
         read_write: List[DataPtr] = None,
-    ) -> List[trace_checker.SynchronizationError]:
+    ) -> List[csan.SynchronizationError]:
         if read_only is None:
             read_only = []
         if read_write is None:
             read_write = []
-        return self.checker._handle_kernel_launch(
+        return self.handler._handle_kernel_launch(
             stream,
             read_only,
             read_write,
@@ -188,8 +188,8 @@ class TestTraceChecker(TestCase):
 
     def test_simple_sync(self):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
-        self.checker._handle_event_record(event_id(0), stream_id(1))
-        self.checker._handle_event_wait(event_id(0), stream_id(2))
+        self.handler._handle_event_record(event_id(0), stream_id(1))
+        self.handler._handle_event_wait(event_id(0), stream_id(2))
         self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
 
     def test_reads_check_last_write(self):
@@ -197,8 +197,8 @@ class TestTraceChecker(TestCase):
         # with the last write operation, but all read operations do.
 
         self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
-        self.checker._handle_event_record(event_id(0), stream_id(1))
-        self.checker._handle_event_wait(event_id(0), stream_id(2))
+        self.handler._handle_event_record(event_id(0), stream_id(1))
+        self.handler._handle_event_wait(event_id(0), stream_id(2))
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
 
         self.assert_bad_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
@@ -208,9 +208,9 @@ class TestTraceChecker(TestCase):
         # cannot write without further synchronization.
 
         self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
-        self.checker._handle_event_record(event_id(0), stream_id(1))
-        self.checker._handle_event_wait(event_id(0), stream_id(2))
-        self.checker._handle_event_wait(event_id(0), stream_id(3))
+        self.handler._handle_event_record(event_id(0), stream_id(1))
+        self.handler._handle_event_wait(event_id(0), stream_id(2))
+        self.handler._handle_event_wait(event_id(0), stream_id(3))
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
 
@@ -221,15 +221,15 @@ class TestTraceChecker(TestCase):
 
         self.assert_good_kernel_launch(stream_id(0), read_only=[tensor_id(1)])
         for i in range(iterations):
-            self.checker._handle_event_record(event_id(i), stream_id(i))
-            self.checker._handle_event_wait(event_id(i), stream_id(i + 1))
+            self.handler._handle_event_record(event_id(i), stream_id(i))
+            self.handler._handle_event_wait(event_id(i), stream_id(i + 1))
         self.assert_good_kernel_launch(stream_id(iterations), read_write=[tensor_id(1)])
 
     def test_expired_record(self):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
-        self.checker._handle_event_record(event_id(0), stream_id(1))
+        self.handler._handle_event_record(event_id(0), stream_id(1))
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
-        self.checker._handle_event_wait(event_id(0), stream_id(2))
+        self.handler._handle_event_wait(event_id(0), stream_id(2))
 
         self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
 
@@ -242,24 +242,24 @@ class TestTraceChecker(TestCase):
             self.setUp()
             with self.subTest(should_delete=should_delete, should_create=should_create):
                 self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
-                self.checker._handle_event_record(event_id(0), stream_id(1))
+                self.handler._handle_event_record(event_id(0), stream_id(1))
 
                 if should_delete:
-                    self.checker._handle_event_deletion(event_id(0))
+                    self.handler._handle_event_deletion(event_id(0))
                 if should_create:
-                    self.checker._handle_event_creation(event_id(0))
+                    self.handler._handle_event_creation(event_id(0))
 
-                self.checker._handle_event_wait(event_id(0), stream_id(2))
+                self.handler._handle_event_wait(event_id(0), stream_id(2))
                 self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
 
     def test_all_reads_checked_failing(self):
         iterations = 10
         for i in range(1, iterations + 1):
             self.assert_good_kernel_launch(stream_id(i), read_only=[tensor_id(1)])
-            self.checker._handle_event_record(event_id(i), stream_id(i))
+            self.handler._handle_event_record(event_id(i), stream_id(i))
 
         for i in range(1, iterations):
-            self.checker._handle_event_wait(event_id(i), stream_id(0))
+            self.handler._handle_event_wait(event_id(i), stream_id(0))
 
         self.assert_bad_kernel_launch(stream_id(0), read_write=[tensor_id(1)])
 
@@ -267,10 +267,10 @@ class TestTraceChecker(TestCase):
         iterations = 10
         for i in range(1, iterations):
             self.assert_good_kernel_launch(stream_id(i), read_only=[tensor_id(1)])
-            self.checker._handle_event_record(event_id(i), stream_id(i))
+            self.handler._handle_event_record(event_id(i), stream_id(i))
 
         for i in range(1, iterations):
-            self.checker._handle_event_wait(event_id(i), stream_id(0))
+            self.handler._handle_event_wait(event_id(i), stream_id(0))
 
         self.assert_good_kernel_launch(stream_id(0), read_write=[tensor_id(1)])
 
@@ -279,7 +279,7 @@ class TestTraceChecker(TestCase):
         self.assert_good_kernel_launch(
             stream_id(0), read_write=[tensor_id(i) for i in range(iterations)]
         )
-        errors = self.checker._handle_kernel_launch(
+        errors = self.handler._handle_kernel_launch(
             stream_id(1),
             read_only=[],
             read_write=[tensor_id(i) for i in range(iterations)],
@@ -294,16 +294,16 @@ class TestTraceChecker(TestCase):
 
         self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(2)])
-        self.checker._handle_event_record(event_id(1), stream_id(1))
-        self.checker._handle_event_record(event_id(2), stream_id(2))
+        self.handler._handle_event_record(event_id(1), stream_id(1))
+        self.handler._handle_event_record(event_id(2), stream_id(2))
 
         self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(2)])
-        self.checker._handle_event_wait(event_id(1), stream_id(2))
-        self.checker._handle_event_wait(event_id(2), stream_id(1))
+        self.handler._handle_event_wait(event_id(1), stream_id(2))
+        self.handler._handle_event_wait(event_id(2), stream_id(1))
 
-        self.checker._handle_event_record(event_id(3), stream_id(2))
-        self.checker._handle_event_wait(event_id(3), stream_id(1))
+        self.handler._handle_event_record(event_id(3), stream_id(2))
+        self.handler._handle_event_wait(event_id(3), stream_id(1))
         self.assert_good_kernel_launch(
             stream_id(1), read_write=[tensor_id(1), tensor_id(2)]
         )
@@ -311,10 +311,10 @@ class TestTraceChecker(TestCase):
     def test_record_override(self):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(2)])
-        self.checker._handle_event_record(event_id(1), stream_id(1))
-        self.checker._handle_event_record(event_id(1), stream_id(2))
+        self.handler._handle_event_record(event_id(1), stream_id(1))
+        self.handler._handle_event_record(event_id(1), stream_id(2))
 
-        self.checker._handle_event_wait(event_id(1), stream_id(3))
+        self.handler._handle_event_wait(event_id(1), stream_id(3))
         self.assert_bad_kernel_launch(stream_id(3), read_write=[tensor_id(1)])
 
     def test_multiple_wait(self):
@@ -322,9 +322,9 @@ class TestTraceChecker(TestCase):
         # by different streams.
 
         self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
-        self.checker._handle_event_record(event_id(1), stream_id(1))
-        self.checker._handle_event_wait(event_id(1), stream_id(2))
-        self.checker._handle_event_wait(event_id(1), stream_id(3))
+        self.handler._handle_event_record(event_id(1), stream_id(1))
+        self.handler._handle_event_wait(event_id(1), stream_id(2))
+        self.handler._handle_event_wait(event_id(1), stream_id(3))
 
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
@@ -332,19 +332,19 @@ class TestTraceChecker(TestCase):
 
 class TestMessages(TestCase):
     def setUp(self):
-        self.checker = trace_checker.TraceChecker()
+        self.handler = csan.EventHandler()
 
     def test_ensure_exists(self):
         ARG = 0
         for func, out in [
             (
-                self.checker._handle_event_deletion,
+                self.handler._handle_event_deletion,
                 f"Found Event with id: {ARG}, but no matching event "
                 "creation in the trace. Backfilling the trace now. "
                 "No action is necessary.",
             ),
             (
-                self.checker._handle_memory_deallocation,
+                self.handler._handle_memory_deallocation,
                 f"Found tensor with pointer: {ARG}, but no matching tensor "
                 "allocation in the trace. Backfilling the trace now. "
                 "No action is necessary.",
@@ -357,17 +357,17 @@ class TestMessages(TestCase):
 
     def test_ensure_does_not_exist(self):
         ARG = 0
-        self.checker._handle_event_creation(ARG)
-        self.checker._handle_stream_creation(ARG)
+        self.handler._handle_event_creation(ARG)
+        self.handler._handle_stream_creation(ARG)
         for func, out in [
             (
-                self.checker._handle_event_creation,
+                self.handler._handle_event_creation,
                 "Found duplicate event creation in the trace for event with "
                 f"id: {ARG}. Assuming the trace for event deletion wasn't caught "
                 "and backfilling it now. No action is necessary.",
             ),
             (
-                self.checker._handle_stream_creation,
+                self.handler._handle_stream_creation,
                 "Found duplicate Stream creation in the trace for Stream with "
                 f"id: {ARG}. PyTorch Streams are only created once, so this "
                 "trace entry is ignored.",
@@ -379,23 +379,23 @@ class TestMessages(TestCase):
                 self.assertEqual(captured.records[0].getMessage(), out)
 
     def test_error_message(self):
-        current_access = trace_checker.Access(
-            type=trace_checker.AccessType.WRITE,
+        current_access = csan.Access(
+            type=csan.AccessType.WRITE,
             seq_num=1,
             stream=stream_id(1),
             operator="schema",
             names=["b"],
             stack_trace=["  stack\n    trace b\n"],
         )
-        previous_access = trace_checker.Access(
-            type=trace_checker.AccessType.READ,
+        previous_access = csan.Access(
+            type=csan.AccessType.READ,
             seq_num=2,
             stream=stream_id(0),
             operator="schema",
             names=["a"],
             stack_trace=["  stack\n    trace a\n"],
         )
-        error = trace_checker.UnsynchronizedAccessError(
+        error = csan.UnsynchronizedAccessError(
             data_ptr=tensor_id(1),
             allocation_trace=["  alloc\n    trace\n"],
             current_access=current_access,
