@@ -271,6 +271,10 @@ class PythonKeyTracer(Tracer):
     ) -> Any:
         return forward(*args, **kwargs)
 
+    # We don't want to turn getattr calls into proxies. So we just return the actual value.
+    def getattr(self, attr, attr_val, parameter_proxy_cache):
+        return attr_val
+
     def create_arg(self, a: Any):
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
