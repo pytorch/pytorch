@@ -465,7 +465,7 @@ def scale_weight_functional(
     equalization_scale: torch.Tensor,
     next_equalization_scale: Optional[torch.Tensor],
 ) -> None:
-    """ Scales the weight value for torch/ao/quantization/fx/_equalize.pyfunctional layers
+    """ Scales the weight value for functional layers
     """
     if equalization_scale is None:
         return
