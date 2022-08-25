@@ -45,6 +45,10 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
+  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* ]]; then
+    export USE_UCC=1
+    export USE_SYSTEM_UCC=1
+  fi
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
