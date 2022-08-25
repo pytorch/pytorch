@@ -2592,16 +2592,16 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
+        squeeze_rstd = _squeeze_multiple(rstd, reduction_dims)
+        compute_dtype, _ = utils.elementwise_dtypes(
+            input, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
         if input.device.type == "cuda":
-            squeeze_rstd = _squeeze_multiple(rstd, reduction_dims)
-            compute_dtype, _ = utils.elementwise_dtypes(
-                input, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-            )
             save_mean = prims.convert_element_type(running_mean, compute_dtype)
             save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
         else:
-            save_mean = torch.empty([0])
-            save_rstd = torch.empty([0])
+            save_mean = torch.empty_like(running_mean, dtype=compute_dtype)
+            save_rstd = torch.empty_like(squeeze_rstd, dtype=compute_dtype)
 
     if weight is None and bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
