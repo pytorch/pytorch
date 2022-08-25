@@ -123,7 +123,6 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             # Skip the packages that are not yet migrated, but are still
             # part of the `nn.quantized`.
             '_reference',
-            'dynamic'
         ]
         self._test_package_import('quantized', base='nn', skip=skip)
 
@@ -221,6 +220,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'ConvTranspose2d',
             'ConvTranspose3d',
         ]
+
         self._test_function_import('conv', function_list,
                                    base='nn.quantized.modules')
 
@@ -278,3 +278,31 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
         ]
         self._test_function_import('utils', function_list,
                                    base='nn.quantized.modules')
+
+    def test_package_import_nn_quantized_dynamic(self):
+        self._test_package_import('dynamic', base='nn.quantized')
+
+    def test_package_import_nn_quantized_dynamic_modules(self):
+        r"""Tests the migration of the torch.nn.quantized.modules"""
+        self._test_package_import('modules', base='nn.quantized.dynamic')
+        self._test_package_import('modules.conv', base='nn.quantized.dynamic')
+        self._test_package_import('modules.linear', base='nn.quantized.dynamic')
+        self._test_package_import('modules.rnn', base='nn.quantized.dynamic')
+
+    def test_import_nn_quantized_dynamic_import(self):
+        module_list = [
+            # Modules
+            'Linear',
+            'LSTM',
+            'GRU',
+            'LSTMCell',
+            'RNNCell',
+            'GRUCell',
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+            'ConvTranspose1d',
+            'ConvTranspose2d',
+            'ConvTranspose3d',
+        ]
+        self._test_function_import('dynamic', module_list, base='nn.quantized')
