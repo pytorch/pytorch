@@ -77,4 +77,4 @@ class FakeSparsity(nn.Module):
         # We don't want to let the parametrizations to save the mask.
         # That way we make sure that the linear module doesn't store the masks
         # alongside their parametrizations.
-        return dict()
+        return {}
