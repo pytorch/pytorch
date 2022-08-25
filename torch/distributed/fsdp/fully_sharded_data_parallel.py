@@ -968,8 +968,6 @@ class FullyShardedDataParallel(nn.Module):
         # dtype for model checkpointing
         self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
 
-        if not torch.cuda.is_available():
-            raise RuntimeError("FSDP does not support CPU only execution")
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
         self._materialize_module(module, param_init_fn, device_from_device_id)
@@ -1709,6 +1707,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
+        if not torch.cuda.is_available():
+            # Allow the FSDP constructor to run even with CUDA but check this
+            # once we start real execution
+            raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
         self._is_root = True
