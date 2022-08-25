@@ -12,7 +12,9 @@ from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
 
 fm = FusionManager.get()
 with FusionDefinition(fm) as fd :
-    t0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1], contiguous=[True, True, True], dtype=DataType.Float)
+    t0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1],
+                          contiguous=[True, True, True],
+                          dtype=DataType.Float)
     t1 = fd.define_tensor(3)
     c0 = fd.define_constant(3.0)
   
@@ -35,3 +37,22 @@ nvf_out1 = fm.execute([input1, input2])[0]
 ### `FusionDefiniton` Context Manager - Interface for Defining Fusions
 
 # Debug Information
+**Query a list of supported operations:**
+```
+python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition.Operators)"
+```
+**View the fusion definitions that are executed by setting an environment variable:**
+```
+export PYTORCH_NVFUSER_DUMP=python_definition
+```
+Example Output:
+```
+def nvfuser_fusion(fd : FusionDefinition) -> None :
+    T0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1], contiguous=[True, True, True], dtype=DataType.Float)
+    T1 = fd.define_tensor(symbolic_sizes=[-1, -1, -1], contiguous=[False, False, False], dtype=DataType.Float)
+    S2 = fd.define_constant(3.00000)
+    T3 = fd.ops.add(T0, T1)
+    T4 = fd.ops.mul(T3, S2)
+    T5 = fd.ops.sum(T4, axes=[-1], keepdim=False, dtype=DataType.Float)
+    fd.add_output(T5)
+```
