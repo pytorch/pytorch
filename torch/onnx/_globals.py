@@ -34,11 +34,11 @@ class _InternalGlobals:
 
         # Internal feature flags
         if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "1":
-            self.runtime_type_check = _exporter_states.RuntimeTypeCheckState.ENABLED
+            self.runtime_type_check_state = _exporter_states.RuntimeTypeCheckState.ERRORS
         elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "0":
-            self.runtime_type_check = _exporter_states.RuntimeTypeCheckState.DISABLED
+            self.runtime_type_check_state = _exporter_states.RuntimeTypeCheckState.DISABLED
         else:
-            self.runtime_type_check = _exporter_states.RuntimeTypeCheckState.WARNINGS_ONLY
+            self.runtime_type_check_state = _exporter_states.RuntimeTypeCheckState.WARNINGS
 
     @property
     def training_mode(self):

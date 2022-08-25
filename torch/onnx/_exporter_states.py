@@ -40,6 +40,6 @@ class RuntimeTypeCheckState(enum.Enum):
     # Runtime type checking is disabled.
     DISABLED = 0
     # Runtime type checking is enabled.
-    ENABLED = 1
+    ERRORS = 1
     # Runtime type checking is enabled but warnings are shown only.
-    WARNINGS_ONLY = 2
+    WARNINGS = 2
