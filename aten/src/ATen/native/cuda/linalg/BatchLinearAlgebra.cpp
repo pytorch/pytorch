@@ -1615,7 +1615,12 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-    if (batch_size == 1 || m != n || m >= 512) {
+    // In CUDA 10.2, lu_factor_looped_cusolver does not finish the computations when the input
+    // matrix is exactly singular. The returned pivots contain garbage. This breaks linalg.det
+    // Now, batched_cublas does not handle rectangular matrices, so we still dispatch to
+    // looped_cusolver even if m != n.
+    constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
+    if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
