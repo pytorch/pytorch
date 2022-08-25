@@ -1259,7 +1259,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"],
+            dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
 
