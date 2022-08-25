@@ -497,12 +497,6 @@ at::Tensor LazyNativeFunctions::_trilinear(
   return at::functionalization::functionalize_aten_op<ATEN_OP(_trilinear)>::
       call(i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim);
 }
-::std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::linalg_inv_ex(
-    const at::Tensor& self,
-    bool check_errors) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
-      linalg_inv_ex)>::call(self, check_errors);
-}
 at::Tensor LazyNativeFunctions::linalg_pinv(
     const at::Tensor& self,
     const c10::optional<at::Tensor>& atol,
