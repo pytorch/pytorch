@@ -642,7 +642,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
-                    torch.per_channel_symmetric and torch.per_channel_affine."
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
             )
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -831,7 +831,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
-                    torch.per_channel_symmetric and torch.per_channel_affine."
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
             )
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis,
