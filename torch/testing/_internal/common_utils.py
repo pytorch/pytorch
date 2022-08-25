@@ -724,15 +724,15 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        test_name = inspect.getfile(sys._getframe(1))
-        if test_name in ["test_nn", "test_quantization"]:
-            exit(0)
         test_filename = inspect.getfile(sys._getframe(1))
         test_filename = sanitize_if_functorch_test_filename(test_filename)
         test_filename = sanitize_test_filename(test_filename)
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
+
+        if test_filename in ["test_nn", "test_quantization"]:
+            exit(0)
         # exclude linux cuda tests because we run into memory issues when running in parallel
         import pytest
         os.environ["NO_COLOR"] = "1"
@@ -750,7 +750,7 @@ def run_tests(argv=UNITTEST_ARGS):
         exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-vv', '-x',
                                 '--reruns=2', '-rfEX', f'--junit-xml-reruns={pytest_report_path}'])
         del os.environ["USING_PYTEST"]
-        sanitize_pytest_xml(f'{pytest_report_path}')
+        # sanitize_pytest_xml(f'{pytest_report_path}')
         print("Skip info is located in the xml test reports, please either go to s3 or the hud to download them")
         # exitcode of 5 means no tests were found, which happens since some test configs don't
         # run tests from certain files
