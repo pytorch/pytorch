@@ -904,9 +904,9 @@ def native_group_norm_backward(
         )
         d_input = d_input.reshape(input.shape).to(input.dtype)
     if output_mask[1]:
-        raise RuntimeError("Not implemented")
+        d_gamma = ((ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.view(N, group, 1)) * rstd.view(N, group, 1)).reshape(C)
     if output_mask[2]:
-        raise RuntimeError("Not implemented")
+        d_bias = db.sum(dim=[0])
 
     return (d_input, d_gamma, d_bias)
 
