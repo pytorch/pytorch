@@ -24,7 +24,7 @@ jobs:
           python-version: 3.8
           architecture: x64
           cache: 'pip'
-      - run: pip install pyyaml
+      - run: pip install pyyaml==6.0
 
       - name: Setup committer id
         run: |
