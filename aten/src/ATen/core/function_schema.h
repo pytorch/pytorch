@@ -44,7 +44,7 @@ struct Argument {
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
-        real_type_(real_type ? std::move(real_type) : type_),
+        real_type_(real_type ? std::move(real_type) : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
@@ -88,8 +88,6 @@ struct Argument {
   const TypePtr& type() const {
     return type_;
   }
-  // if type() is non-null, this is guaranteed to be non-null (if no real
-  // type was provided, this takes on type()'s value)
   const TypePtr& real_type() const {
     return real_type_;
   }
@@ -473,8 +471,6 @@ struct TORCH_API FunctionSchema {
 
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
-
-  FunctionSchema cloneWithRealTypes() const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.
