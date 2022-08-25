@@ -45,7 +45,7 @@ def _create_beartype_decorator(
         else:
             # If the beartype library is not installed, return a no-op decorator
             warnings.warn(
-                "TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK is set to '1', "
+                "TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK is set to 'ERRORS', "
                 "but the beartype library is not installed."
                 "Install beartype with `pip install beartype` to enable runtime type checking."
             )
