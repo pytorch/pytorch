@@ -710,7 +710,7 @@ class TestHistogramObserver(QuantizationTestCase):
         ref_qparams = ref_obs.calculate_qparams()
         my_qparams = my_obs.calculate_qparams()
 
-        self.assertEqual(ref_qparams, my_qparams)
+        self.assertEqual(ref_qparams, my_qparams, f"failed to match {my_qparams} to {ref_qparams}")
 
 
 class TestFakeQuantize(TestCase):
