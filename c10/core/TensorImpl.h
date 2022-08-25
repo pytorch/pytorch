@@ -1556,6 +1556,29 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  void set_sizes_and_strides(
+      c10::SymIntArrayRef new_size,
+      c10::SymIntArrayRef new_stride) {
+    auto new_size_int = c10::asIntArrayRefSlowOpt(new_size);
+    auto new_stride_int = c10::asIntArrayRefSlowOpt(new_stride);
+    if (new_size_int && new_stride_int) {
+      return set_sizes_and_strides(*new_size_int, *new_stride_int);
+    }
+
+    TORCH_CHECK(
+        new_size.size() == new_stride.size(),
+        "dimensionality of sizes (",
+        new_size.size(),
+        ") must match dimensionality of strides (",
+        new_stride.size(),
+        ")");
+
+    set_sym_sizes_and_strides(new_size, new_stride);
+
+    // N.B. we don't need to refresh contiguity or numel as
+    // both should be implemented via `numel_custom` and `is_contiguous_custom`
+  }
+
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides /
    * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor

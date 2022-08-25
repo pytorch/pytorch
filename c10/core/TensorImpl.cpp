@@ -875,6 +875,11 @@ void TensorImpl::set_sym_sizes_and_strides(
   if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
   }
+  for (auto s : strides) {
+    TORCH_CHECK(
+        s.is_symbolic() || s.as_int_unchecked() != -1,
+        "Negative Strides on SymInts aren't supported");
+  }
   extra_meta_->sizes_ = sizes;
   extra_meta_->strides_ = strides;
   SymInt numel = 1;
