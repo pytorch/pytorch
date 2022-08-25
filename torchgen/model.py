@@ -925,6 +925,12 @@ class NativeFunctionsGroup:
                     "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
+
+            if self.structured != f.part_of_structured_group:
+                raise AssertionError(
+                    "NativeFunctionsGroup constructed from structured and unstructured "
+                    f"functions: {self.out.func.name} and {f.func.name}"
+                )
         assert self.functional.func.kind() == SchemaKind.functional
         assert self.out.func.kind() == SchemaKind.out
         assert self.functional.namespace == self.out.namespace

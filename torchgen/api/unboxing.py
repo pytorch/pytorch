@@ -125,7 +125,6 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
             argument.type,
             argument.name,
             mutable=argument.is_write,
-            structured_type_override=f.part_of_structured_group,
         )
         code_list.extend(decl)
         code_list.extend(code)
@@ -137,14 +136,9 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
 # (1) the C++ code necessary to unbox the argument
 # (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
 def argumenttype_ivalue_convert(
-    t: Type, arg_name: str, *, mutable: bool = False, structured_type_override: bool
+    t: Type, arg_name: str, *, mutable: bool = False
 ) -> Tuple[str, CType, List[str], List[str]]:
-    ctype = cpp.argumenttype_type(
-        t=t,
-        mutable=mutable,
-        binds=arg_name,
-        structured_type_override=structured_type_override,
-    ).type
+    ctype = cpp.argumenttype_type(t=t, mutable=mutable, binds=arg_name).type
 
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"
@@ -158,7 +152,6 @@ def argumenttype_ivalue_convert(
             out_name=out_name,
             t=t,
             ctype=ctype,
-            structured_type_override=structured_type_override,
         )
     elif isinstance(t, ListType):
         out_name = f"{arg_name}_list_out"
@@ -167,7 +160,6 @@ def argumenttype_ivalue_convert(
             out_name=out_name,
             t=t,
             ctype=ctype,
-            structured_type_override=structured_type_override,
         )
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
@@ -183,16 +175,10 @@ def _gen_code_base_type(
 
 
 def _gen_code_optional_type(
-    arg_name: str,
-    out_name: str,
-    t: OptionalType,
-    ctype: CType,
-    structured_type_override: bool,
+    arg_name: str, out_name: str, t: OptionalType, ctype: CType
 ) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_opt_in"
-    res_name, _, res_code, decl = argumenttype_ivalue_convert(
-        t.elem, in_name, structured_type_override=structured_type_override
-    )
+    res_name, _, res_code, decl = argumenttype_ivalue_convert(t.elem, in_name)
     return (
         f"""
 c10::optional<c10::IValue> {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
@@ -212,18 +198,12 @@ if ({arg_name}_opt.has_value()) {{
 
 
 def _gen_code_list_type(
-    arg_name: str,
-    out_name: str,
-    t: ListType,
-    ctype: CType,
-    structured_type_override: bool,
+    arg_name: str, out_name: str, t: ListType, ctype: CType
 ) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_list_in"
     elem_name = f"{arg_name}_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
-    res_name, res_ctype, res_code, decl = argumenttype_ivalue_convert(
-        t.elem, elem_name, structured_type_override=structured_type_override
-    )
+    res_name, res_ctype, res_code, decl = argumenttype_ivalue_convert(t.elem, elem_name)
     # handle list type with size, e.g., bool[4]
     if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
         code.extend(
