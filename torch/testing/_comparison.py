@@ -697,7 +697,6 @@ class TensorLikePair(TensorMetaPair):
         expected: Any,
         *,
         id: Tuple[Any, ...] = (),
-        allow_subclasses: bool = True,
         rtol: Optional[float] = None,
         atol: Optional[float] = None,
         equal_nan: bool = False,
