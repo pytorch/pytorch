@@ -1224,6 +1224,74 @@ def cudnn_batch_norm_backward(
         [True, True, True],
     )
 
+@register_decomposition(aten._adaptive_avg_pool2d)
+def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
+    # Preconditions
+    device = input.device
+    ndim = len(shape)
+    utils.check(ndim in (3, 4), lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}")
+    for d in input.shape[-2:]:
+        utils.check(d != 0,
+                    lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
+                            f"non-batch dimensions, but input has shape {tuple(shape)}.")
+
+    # Optimisation (we should also do this in the kernel implementation)
+    if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
+        stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
+        kernel = tuple(i - (o - 1) * s for i, o, s in zip(shape[-2:], output_size, stride))
+        return torch.nn.functional.avg_pool2d(input, kernel, stride)
+
+    def start_index(a, b, c):
+        return (a * c).float().div(b).floor().long()
+
+    def end_index(a, b, c):
+        return ((a + 1) * c).float().div(b).ceil().long()
+
+    # Let's assume the reduction we want to apply is to sum all the elements (averaging from this is easy)
+    # Even more, let's assume that we want to just do the 1d case.
+    # The 2d case is recovered by applying the 1d case along two dimensions
+    # The issue here is that we may want to sum segments of different sizes.
+    # What we do is to get the largest segment, and select all the elements from the initial points
+    # up to the max length. Then we zero out the elements that we picked up and were not necessary
+
+    def adaptive_avg_pool1d(x, dim, out_size):
+        assert dim == -2 or dim == -1
+        in_size = x.dim(dim)
+
+        orange = torch.arange(out_size, device=device)
+        i0 = start_index(orange, out_size, in_size)
+        i1 = end(orange, out_size, in_size)
+        length = i1 - i0
+
+        # Select elements
+        # Doing this logic with arange is intrinsically data-dependent, as the length of the range
+        # is data-dependent. I don't think there's a way to do this that's not data-dependent really
+        maxlength = torch.max(length).item()
+        onesh = torch.ones(maxlength - 1, dtype=i0.dtype, device=device)
+        idxh = torch.cat([i0.unsqueeze(1), onesh]).cumsum(dim=1)  # [size, max]
+
+        # index_select does not support indices of several dimensions (ugh)
+        def index_select(x, dim, index):
+            out = torch.index_select(x, dim, indices.view(-1))
+            out_shape = x.shape[:dim] + indices.shape
+            if dim != -1:
+                out_shape = out_shape + x.shape[dim + 1:]
+            return out.view(out_shape)
+
+        vals = index_select(x, dim, idxh)
+        # zero-out the things we didn't really want to select
+        mask_idx = torch.arange(maxlength, device=device)
+        assert dim < 0
+        mask = _unsqueeze_to_dim(mask_idx >= ih1, -dim)
+        vals = torch.masked_fill(mask, 0)
+        div = _unsqueeze_to_dim(length, -dim)
+        return vals.sum(dim) / div
+
+    out = x
+    for i in (-2, -1):
+        out = adaptive_avg_pool1d(out, i, output_size[i])
+    return out
+
 
 @register_decomposition(aten.transpose.int, disable_meta=True)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
