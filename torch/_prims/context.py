@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Sequence
 
 import torch
 
+import torch._decomp
 import torch._prims
 
 import torch._refs
@@ -36,6 +37,12 @@ def torch_to_refs_map():
         torch.Tensor.__and__: torch._refs.bitwise_and,
         torch.Tensor.__or__: torch._refs.bitwise_or,
         torch.Tensor.__eq__: torch._refs.eq,
+        torch.Tensor.__rsub__: torch._refs.rsub,
+        torch.Tensor.__rtruediv__: torch._refs.rtruediv,
+        torch.Tensor.__floordiv__: torch._refs.floor_divide,
+        torch.Tensor.__rfloordiv__: torch._refs.rfloordiv,
+        torch.Tensor.__pow__: torch._refs.pow,
+        torch.Tensor.__rpow__: torch._refs.rpow,
         torch.Tensor.new_empty: torch._refs.new_empty,
         torch.Tensor.new_full: torch._refs.new_full,
         torch.Tensor.new_zeros: torch._refs.new_zeros,
@@ -70,7 +77,8 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.ops.prims.* functions to
     use nvFuser's prims in torch.ops.nvprims.*
 
-    >>> with NvfuserPrimMode():
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode():
     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 
     By default, this context manager will fall back on the torch.ops.prims* if the
@@ -139,6 +147,16 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
                 return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
+
+        # For torch.ops.aten.*, use registered decompositions from torch._decomp
+        # torch._decomp.decomposition_table provides a mapping from
+        # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
+        # implementations.
+        # There're other ways to implement this functionality,
+        # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+            func = torch._decomp.decomposition_table.get(orig_func, None)
+
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, func, args, kwargs):

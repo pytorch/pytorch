@@ -128,8 +128,6 @@ class FlatParameter(nn.Parameter):
         flattened parameter, or the unsharded flattened parameter.
 
     Attributes:
-        _is_sharded (bool): Whether the flattened parameter is *ever* sharded
-            across ranks (not whether it is *currently* sharded).
         _unsharded_size (torch.Size): Unsharded flattened parameter's size
             (without padding).
 
@@ -163,8 +161,9 @@ class FlatParameter(nn.Parameter):
 
         _local_shard (Tensor): Sharded flattened parameter with padding if
             using a sharded strategy. If using ``NO_SHARD``, then this is the
-            sharded flattened parameter, padded unsharded flattened parameter,
-            and unpadded unsharded flattened parameter, altogether.
+            unpadded unsharded flattened parameter, and there is no notion of a
+            sharded flattened parameter or padded unsharded flattened
+            parameter.
         _full_param_padded (Tensor): Unsharded flattened parameter with
             padding. This is not defined for ``NO_SHARD``. When using mixed
             precision for parameters, this has the low precision.
@@ -175,9 +174,9 @@ class FlatParameter(nn.Parameter):
         _post_backward_hook_state (Tuple[AccumulateGrad, RemovableHandle]):
             Flattened parameter's :class:`AccumulateGrad` object and
             post-backward hook handle.
-        _mp_shard (Tensor): Low precision flattened parameter with padding.
-            This is only defined when parameter mixed precision is enabled. For
-            ``NO_SHARD``, this is used for computation.
+        _mp_shard (Tensor): Low precision sharded flattened parameter with
+            padding. This is only defined when parameter mixed precision is
+            enabled. For ``NO_SHARD``, this is used for computation.
         _cpu_grad (Tensor): Sharded gradient with padding stored on CPU.
             This is only defined when offloading parameters is enabled.
         _saved_grad_shard (Tensor): Sharded gradient with padding from previous
@@ -312,7 +311,7 @@ class FlatParamHandle:
                             "`FlatParameter` requires uniform dtype but got "
                             f"{dtype} and {param.dtype}"
                         )
-                    elif dtype is None and not param.is_floating_point():
+                    if dtype is None and not param.is_floating_point():
                         raise ValueError("Integer parameters are unsupported")
                     if (
                         requires_grad is not None
