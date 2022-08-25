@@ -525,6 +525,29 @@ def forward(self, x_1):
             torch.allclose(fx_f(input, params)[1], f(input, params)[1])
         )
 
+    def test_make_fx_model_double_param(self):
+        class Emformer(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim: int = 256,
+            ) -> None:
+                super().__init__()
+
+                self.layer_norm = torch.nn.LayerNorm(input_dim)
+
+            def forward(mod_self, x):  # noqa: B902
+                self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
+                y = mod_self.layer_norm(x)
+                self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
+                z = mod_self.layer_norm(y)
+                return z
+
+
+        gm = make_fx(Emformer())(torch.randn(16, 1, 256))
+        ops = set([n.target for n in gm.graph.nodes if n.op == 'call_function'])
+        self.assertEqual(len(ops), 2)
+
+
     def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -712,7 +735,7 @@ class TestSymbolicTracing(TestCase):
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
-    empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     return empty""")
 
@@ -926,6 +949,7 @@ symbolic_tensor_failures = {
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
