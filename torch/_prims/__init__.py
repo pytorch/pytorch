@@ -295,7 +295,7 @@ def _make_prim(
 
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
-            return _meta_impl(*args, **kwargs)
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
