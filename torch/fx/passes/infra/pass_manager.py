@@ -6,7 +6,7 @@ from typing import Callable, Dict, List
 import torch.nn as nn
 from torch.fx.graph_module import GraphModule
 from torch.fx._compatibility import compatibility
-from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 __all__ = ['inplace_wrapper', 'pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
 
@@ -31,6 +31,8 @@ def inplace_wrapper(fn: Callable) -> Callable:
         fn(gm)
         return PassResult(gm, True)
 
+    if wrapped_fn.__name__ == 'wrapped_fn':
+        wrapped_fn.__name__ = str(fn)
     return wrapped_fn
 
 @compatibility(is_backward_compatible=False)
@@ -285,8 +287,8 @@ class PassManager:
                     res = fn(module)
                 except Exception as e:
                     prev_pass_names = [p.__name__ for p in self.passes[:i]]
-                    msg = f"An error occured when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
-                    raise RuntimeError(msg) from e
+                    msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
+                    raise type(e)(msg) from e
 
                 module = res.graph_module
                 modified = modified or res.modified
