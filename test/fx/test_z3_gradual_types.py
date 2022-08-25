@@ -31,6 +31,23 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TorchDynamoUseCases(unittest.TestCase):
 
+    def test_dim(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: TensorType([1, 2])):
+                y = x.dim()
+                return y
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        y_res = z3.z3.Int(2)
+        self.assertEqual(s.model()[y_res], 2)
+
 
     def test_reshape(self):
         """
@@ -1013,6 +1030,31 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEquals(s.check(), z3.sat)
 
+
+    def test_conditional_wrong_assumption(self):
+        """
+        Test condition after making the wrong assumption about the input
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                gt = x > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.gt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
 
     def test_conditional(self):
         """
