@@ -88,6 +88,9 @@ def _create_beartype_decorator(
                         stacklevel=2,
                     )
                 except _roar.BeartypeCallHintViolation:
+                    # This can be (1) return type violation (unexpected) or
+                    # (2) user usage of beartype.abby (possible).
+                    # In either case we should raise an exception.
                     raise
                 finally:
                     # Call the function in the finally block instead of in the except
