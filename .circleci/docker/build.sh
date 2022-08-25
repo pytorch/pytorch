@@ -283,8 +283,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -294,8 +292,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
