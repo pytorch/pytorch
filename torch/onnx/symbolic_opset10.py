@@ -11,6 +11,7 @@ from torch import _C
 from torch.onnx import (  # noqa: F401
     _patch_torch,
     _type_utils,
+    errors,
     symbolic_helper,
     symbolic_opset9 as opset9,
 )
@@ -233,7 +234,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         if scales is None:
             scales = symbolic_helper._interpolate_size_to_scales(
                 g, input, output_size, dim
@@ -296,7 +297,7 @@ def slice(g, self, *args):
         start, end, step = args
         dim = 0
     else:
-        raise NotImplementedError("Unknown aten::slice signature")
+        raise errors.SymbolicValueError("Unknown aten::slice signature", self)
     is_start_none = start.node().kind() == "prim::Constant" and isinstance(
         start.type(), _C.NoneType
     )
@@ -447,11 +448,13 @@ def fake_quantize_per_tensor_affine(
             10,
             13,
             "Quantize range (0, 127) not supported, requires opset 13 Clip",
+            inputs,
         )
     if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             f"For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
-            f"Got ({quant_min}, {quant_max})"
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     scale = symbolic_helper._maybe_get_scalar(scale)
     if scale is None:
@@ -460,6 +463,7 @@ def fake_quantize_per_tensor_affine(
             10,
             13,
             "Non-constant scale not supported",
+            inputs,
         )
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
