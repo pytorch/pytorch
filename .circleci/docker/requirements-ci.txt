@@ -164,10 +164,15 @@ pytest-rerunfailures
 #Pinned versions:
 #test that import:
 
-#xdoctest
+xdoctest==1.0.2
 #Description: runs doctests in pytest
-#Pinned versions:
+#Pinned versions: 1.0.2
 #test that import:
+
+pygments==2.12.0
+#Description: support doctest highlighting
+#Pinned versions: 2.12.0
+#test that import: the doctests
 
 #PyYAML
 #Description: data serialization format
