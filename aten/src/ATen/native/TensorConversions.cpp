@@ -92,21 +92,21 @@ Tensor compressed_to_batched_compressed_indices(
     bool out_int32) {
   auto n_compressed_per_batch = (compressed_in.size(0) - 1) / n_batch;
   ScalarType out_type = out_int32 ? ScalarType::Int : ScalarType::Long;
-  auto batched_out =
-      at::zeros({n_batch, n_compressed_per_batch + 1}, compressed_in.options());
+  auto batched_out = at::zeros(
+      {n_batch, n_compressed_per_batch + 1},
+      compressed_in.options().dtype(out_type));
 
-  using namespace indexing;
   // If the compressed dimension has length zero there is 1 element in each
   // batch and it is zero we already have this result formed
   if (n_compressed_per_batch > 0) {
     auto trailing_slice =
-        compressed_in.index({Slice(1, None)}).reshape({n_batch, -1});
-    auto offsets = compressed_in.index({Slice(0, -1, n_compressed_per_batch)})
+        compressed_in.slice(0, 1, c10::nullopt, 1).reshape({n_batch, -1});
+    auto offsets = compressed_in.slice(0, 0, -1, n_compressed_per_batch)
                        .reshape({n_batch, -1});
-    batched_out.index_put_(
-        {Ellipsis, Slice(1, None)}, trailing_slice - offsets);
+    batched_out.narrow(-1, 1, n_compressed_per_batch)
+        .copy_(trailing_slice - offsets);
   }
-  return batched_out.to(out_type);
+  return batched_out;
 }
 
 // After generating member tensors for sparse_compressed matrix, if the target
