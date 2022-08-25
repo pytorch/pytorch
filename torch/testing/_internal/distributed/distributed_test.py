@@ -1924,9 +1924,8 @@ class DistributedTest:
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
 
-            # Note that the master port is set to 0, which means that a random
-            # free port from 1024 to 65535 will be selected
-            os.environ["MASTER_PORT"] = str(MASTER_PORT)
+            new_port = str(MASTER_PORT + 1)
+            os.environ["MASTER_PORT"] = new_port
             gen_iterator = dist.rendezvous("env://", rank, dist.get_world_size())
             store, rank, size = next(gen_iterator)
             store = dist.PrefixStore(new_port, store)
