@@ -934,6 +934,7 @@ class GitHubPR:
                                       branch: str,
                                       force: bool = False,
                                       comment_id: Optional[int] = None,) -> str:
+        orig_branch = repo.current_branch()
         self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
         land_check_branch = f'landchecks/{self.pr_num}'
         try:
@@ -943,6 +944,9 @@ class GitHubPR:
         repo._run_git('checkout', "-b", land_check_branch)
         repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
+        # Important, return to original branch
+        if repo.current_branch() != orig_branch:
+            repo.checkout(orig_branch)
         return commit
 
 
