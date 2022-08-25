@@ -125,6 +125,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::multiply, aten::mul},
       {aten::multiply_, aten::mul_},
       {aten::linalg_matmul, aten::matmul},
+      {aten::inverse, aten::linalg_inv},
       {aten::true_divide, aten::div},
       {aten::true_divide_, aten::div_},
       {aten::concat, aten::cat},
