@@ -9,4 +9,3 @@ jinja2==3.0.1
 pynvml==11.4.1
 rich==10.9.0
 rockset==0.8.10
-torch==1.*
