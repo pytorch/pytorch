@@ -1,4 +1,4 @@
-from torch.dispatch._dispatcher import PyDispatcher, to_flat_tuple, compute_keyset
+from torch._dispatch._dispatcher import PyDispatcher, to_flat_tuple, compute_keyset
 from torch.nn.functional import handle_torch_function
 from torch.overrides import has_torch_function
 import torch._C as _C
