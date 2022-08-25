@@ -5,7 +5,6 @@ Do not use this module outside of `torch.onnx` and its tests.
 Be very judicious when adding any new global variables. Do not create new global
 variables unless they are absolutely necessary.
 """
-import enum
 import os
 from typing import Optional
 
