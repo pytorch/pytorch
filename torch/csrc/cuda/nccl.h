@@ -73,14 +73,6 @@ enum class ncclDataType {
   NumTypes = 10
 };
 
-// RAII helper class to manage NCCL group API and CUDA free mutex.
-// The destructor is allowed to throw since this helper class only
-// manages group and lock lifetimes.
-struct AutoNcclGroup {
-  AutoNcclGroup();
-  ~AutoNcclGroup() noexcept(false);
-};
-
 // NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
 // Don't use them outside of these files.
 namespace detail {

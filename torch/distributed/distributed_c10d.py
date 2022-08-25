@@ -183,9 +183,9 @@ class _reduce_op(object):
 
     def __init__(self):
         # __members__ is a dict storing key-value pairs for enum classes
-        for k, v in ReduceOp.Kind.__members__.items():
+        for k, v in ReduceOp.__members__.items():
             setattr(self, k, v)
-        self.__members__ = ReduceOp.Kind.__members__
+        self.__members__ = ReduceOp.__members__
 
     def __getattribute__(self, key):
         warnings.warn(
