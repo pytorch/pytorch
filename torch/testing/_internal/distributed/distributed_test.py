@@ -503,7 +503,7 @@ class TestDistBackend(MultiProcessTestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-        os.environ["MASTER_PORT"] = str(MASTER_PORT)
+        # Not setting MASTER_PORT and get a random free port
         super().setUpClass()
 
     def setUp(self):
