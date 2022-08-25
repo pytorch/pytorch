@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized._reference as nnqr
 import torch.ao.quantization
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
