@@ -443,9 +443,9 @@ namespace {
     checkAllSameGPU(__func__, {input_arg, output_arg});
 
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    int64_t ndim = input.dim();
     TORCH_CHECK((ndim == 3 || ndim == 4),
       "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
-    int64_t ndim = input.ndimension();
     for (const auto i : {-2, -1}) {
       TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
