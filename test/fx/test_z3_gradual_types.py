@@ -1476,9 +1476,11 @@ class TestSingleOperation(unittest.TestCase):
                                              kernel_size=2, stride=2,
                                              padding=2, groups=2, bias=False, dilation=2)
 
+                self.relu = torch.nn.ReLU(inplace=True)
+
             def forward(self, x: Dyn):
-                y = self.conv1(x)
-                z = self.conv2(x)
+                y = self.relu(self.conv1(x))
+                z = self.relu(self.conv2(x))
                 return z
 
         ast_rewriter = RewritingTracer()
