@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import os
 import pprint
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1289,6 +1290,29 @@ class TestMPS(TestCase):
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
 
+    def test_scalar_from_slice_unary(self):
+        # https://github.com/pytorch/pytorch/issues/82543
+        tensor_list = torch.tensor([1.0, 1.2], device="mps")
+
+        for scalar in tensor_list:
+            r_mps = torch.ceil(scalar)
+            r_cpu = torch.ceil(scalar.to("cpu"))
+            self.assertEqual(r_mps.cpu(), r_cpu)
+
+    def test_scalar_from_slice_binary(self):
+        # https://github.com/pytorch/pytorch/issues/82543
+        def helper(binary_op):
+            tensor_list = torch.tensor([1.0, 1.2, 2.5, 1.0], device="mps")
+
+            for scalar in tensor_list:
+                r_mps = binary_op(scalar, 1.0)
+                r_cpu = binary_op(scalar.cpu(), 1.0)
+                self.assertEqual(r_mps.cpu(), r_cpu)
+        helper(torch.sub)
+        helper(torch.add)
+        helper(torch.not_equal)
+        helper(torch.eq)
+
     def test_slice_contiguous_view(self):
         # https://github.com/pytorch/pytorch/issues/77750
 
@@ -1544,9 +1568,14 @@ class TestMPS(TestCase):
             self.assertEqual(t, t_mps.cpu())
 
     # See https://github.com/pytorch/pytorch/issues/82427
-    # Test should not crash
-    def test_bool_full(self):
+    # and https://github.com/pytorch/pytorch/issues/83692
+    def test_full_bugs(self):
+        # Test should not crash
         x = torch.full((3, 3), True, device='mps')
+        # torch.full should work for uint8
+        y_mps = torch.full((2, 2), 247, device='mps', dtype=torch.uint8)
+        y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
+        self.assertEqual(y_mps, y_cpu)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):
@@ -3462,6 +3491,8 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6), 3, nn.ReplicationPad1d)
         # Constant Pad 1D
         helper((2, 3, 4), 2, nn.ConstantPad1d)
+        # Constant Pad 1D with single dimension input
+        helper((16), (1, 2), nn.ConstantPad1d)
 
         # 2D Padding
         helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
@@ -5860,6 +5891,304 @@ class TestViewOpsMPS(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+class TestConvolutionMPS(TestCase):
+    def test_conv1d_all_strides_paddings(self):
+        # https://github.com/pytorch/pytorch/issues/82921
+        def helper(stride, padding):
+            y_cpu = torch.randn(1, 57, 40)
+            conv_cpu = nn.Conv1d(57, 20, stride=stride, padding=padding, kernel_size=3, bias=False)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+
+            y_gpu = y_cpu.to(device='mps')
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu())
+        for stride in range(1, 4):
+            for padding in range(1, 4):
+                helper(stride, padding)
+
+
+    def test_conv1d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/81557
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.arange((128 * 176), dtype=torch.float32)
+        a_cpu = a_cpu.view(128, 176, 1).permute(0, 2, 1)
+        out_cpu = model_cpu(a_cpu)
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        self.assertEqual(out_cpu, out_mps.cpu(), rtol=2.6e-05, atol=2e-04)
+
+    def test_conv_transpose_1d_all_strides(self):
+        # https://github.com/pytorch/pytorch/issues/82711
+        def helper(stride):
+            y_cpu = torch.ones(1, 1, 2)
+            deconv_cpu = nn.ConvTranspose1d(in_channels=1, out_channels=1, kernel_size=1, stride=stride, bias=False, padding=1)
+            deconv_cpu.weight.data = torch.ones(1, 1, 2)
+            deconv_gpu = copy.deepcopy(deconv_cpu).to(device='mps')
+            x_cpu = deconv_cpu(y_cpu)
+
+            y_gpu = y_cpu.to(device='mps')
+            x_gpu = deconv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu())
+        [helper(stride) for stride in [1, 2, 3]]
+
+    def test_conv_transpose_1d_nn_functional(self):
+        # https://github.com/pytorch/pytorch/issues/82563
+        tin = torch.rand((1, 512, 1245), dtype=torch.float32)
+        tparams = torch.rand((512, 256, 16), dtype=torch.float32)
+        tbias = torch.rand((256), dtype=torch.float32)
+
+        device = 'cpu'
+        tcpu = torch.nn.functional.conv_transpose1d(tin.to(device), tparams.to(device), tbias.to(device), stride=8, padding=4)
+
+        device = 'mps'
+        tgpu = torch.nn.functional.conv_transpose1d(tin.to(device), tparams.to(device), tbias.to(device), stride=8, padding=4)
+
+        self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
+
+    def test_conv1d_contiguous(self):
+        model_cpu = torch.nn.Conv1d(1, 128, 3)
+        a_cpu = torch.ones(128, 1, 176)
+        out_cpu = model_cpu(a_cpu)
+
+        a_mps = a_cpu.detach().clone().to("mps")
+        model_mps = model_cpu.to("mps")
+        out_mps = model_mps(a_mps)
+
+        self.assertEqual(out_cpu.shape, out_mps.shape)
+        self.assertEqual(out_cpu, out_mps.cpu())
+
+    def test_conv2d_all_strides_paddings(self):
+        # https://github.com/pytorch/pytorch/issues/83180
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for strideX in range(1, 4):
+            for strideY in range(1, 4):
+                conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=(strideX, strideY))
+                conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+                x_cpu = conv_cpu(y_cpu)
+                x_gpu = conv_gpu(y_gpu)
+                self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+    def test_conv2d_single_stride(self):
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for stride in range(1, 4):
+            conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=stride)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+class TestAdvancedIndexing(TestCase):
+    supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
+
+    # examples from https://www.tutorialspoint.com/numpy/numpy_advanced_indexing.htm
+    def test_indexing_1(self):
+        def helper(dtype):
+            x_cpu = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
+
+            y_cpu = x_cpu[[0, 1, 2], [0, 1, 0]]
+            y_mps = x_mps[[0, 1, 2], [0, 1, 0]]
+            self.assertEqual(y_cpu, y_mps, str(dtype))
+        [helper(dtype) for dtype in self.supported_dtypes]
+
+    def test_indexing_select_corners(self):
+        def helper(dtype):
+            x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
+
+            rows_cpu = torch.tensor([[0, 0], [3, 3]])
+            rows_mps = rows_cpu.detach().clone().to("mps")
+
+            cols_cpu = torch.tensor([[0, 2], [0, 2]])
+            cols_mps = cols_cpu.detach().clone().to("mps")
+
+            res_cpu = x_cpu[rows_cpu, cols_cpu]
+            res_mps = x_mps[rows_mps, cols_mps]
+
+            self.assertEqual(res_cpu, res_mps, str(dtype))
+        [helper(dtype) for dtype in self.supported_dtypes]
+
+    # FIXME: uint8 fails for this testcase, needs further debugging
+    def test_slicing_using_advanced_index_for_column(self):
+        def helper(dtype):
+            x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
+
+            z_cpu = x_cpu[1:4, 1:3]
+            z_mps = x_mps[1:4, 1:3]
+            self.assertEqual(z_cpu, z_mps, str(dtype))
+
+            # using advanced index for column
+            y_cpu = x_cpu[1:4, [1, 2]]
+            y_mps = x_mps[1:4, [1, 2]]
+            self.assertEqual(y_cpu, y_mps, str(dtype))
+        # FIXME: use supported_dtypes once uint8 is fixed
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16]]
+
+    # FIXME: conditional indexing not working
+    # def test_boolean_array_indexing_1(self):
+    #     def helper(dtype):
+    #         x_cpu = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], dtype=dtype)
+    #         x_mps = x_cpu.detach().clone().to("mps")
+
+    #         res_cpu = x_cpu[x_cpu > 5]
+    #         res_mps = x_mps[x_mps > 5]
+
+    #         print(res_cpu)
+    #         print(res_mps)
+
+    #         self.assertEqual(res_cpu, res_mps, str(dtype))
+    #     [helper(dtype) for dtype in self.supported_dtypes]
+
+    # tests from test_indexing.py
+    def test_bool_indices(self, device="mps"):
+        v = torch.randn(5, 7, 3, device=device)
+        boolIndices = torch.tensor([True, False, True, True, False], dtype=torch.bool, device=device)
+        self.assertEqual(v[boolIndices].shape, (3, 7, 3))
+        self.assertEqual(v[boolIndices], torch.stack([v[0], v[2], v[3]]))
+
+        v = torch.tensor([True, False, True], dtype=torch.bool, device=device)
+        boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
+        uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
+            self.assertEqual(v[boolIndices], v[uint8Indices])
+            self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
+            self.assertEqual(len(w), 2)
+
+    def test_multiple_bool_indices(self, device="mps"):
+        v = torch.randn(5, 7, 3, device=device)
+        # note: these broadcast together and are transposed to the first dim
+        mask1 = torch.tensor([1, 0, 1, 1, 0], dtype=torch.bool, device=device)
+        mask2 = torch.tensor([1, 1, 1], dtype=torch.bool, device=device)
+        self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
+
+    def test_step(self, device="mps"):
+        v = torch.arange(10, device=device)
+        self.assertEqual(v[::1], v)
+        self.assertEqual(v[::2].tolist(), [0, 2, 4, 6, 8])
+        self.assertEqual(v[::3].tolist(), [0, 3, 6, 9])
+        self.assertEqual(v[::11].tolist(), [0])
+        self.assertEqual(v[1:6:2].tolist(), [1, 3, 5])
+
+    def test_byte_mask(self, device="mps"):
+        v = torch.randn(5, 7, 3, device=device)
+        mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(v[mask].shape, (3, 7, 3))
+            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
+            self.assertEqual(len(w), 2)
+
+        v = torch.tensor([1.], device=device)
+        self.assertEqual(v[v == 0], torch.tensor([], device=device))
+
+    def test_int_indices2d(self, device="mps"):
+        # From the NumPy indexing example
+        x = torch.arange(0, 12, device=device).view(4, 3)
+        rows = torch.tensor([[0, 0], [3, 3]], device=device)
+        columns = torch.tensor([[0, 2], [0, 2]], device=device)
+        self.assertEqual(x[rows, columns].tolist(), [[0, 2], [9, 11]])
+
+    def test_int_indices_broadcast(self, device="mps"):
+        # From the NumPy indexing example
+        x = torch.arange(0, 12, device=device).view(4, 3)
+        rows = torch.tensor([0, 3], device=device)
+        columns = torch.tensor([0, 2], device=device)
+        result = x[rows[:, None], columns]
+        self.assertEqual(result.tolist(), [[0, 2], [9, 11]])
+
+    def test_empty_ndim_index(self, device="mps"):
+        x = torch.randn(5, device=device)
+        self.assertEqual(torch.empty(0, 2, device=device), x[torch.empty(0, 2, dtype=torch.int64, device=device)])
+
+        x = torch.randn(2, 3, 4, 5, device=device)
+        self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
+                         x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
+
+        x = torch.empty(10, 0, device=device)
+        self.assertEqual(x[[1, 2]].shape, (2, 0))
+        self.assertEqual(x[[], []].shape, (0,))
+        with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
+            x[:, [0, 1]]
+
+    def test_empty_ndim_index_bool(self, device="mps"):
+        x = torch.randn(5, device=device)
+        self.assertRaises(IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)])
+
+    def test_index_getitem_copy_bools_slices(self, device="mps"):
+        true = torch.tensor(1, dtype=torch.uint8, device=device)
+        false = torch.tensor(0, dtype=torch.uint8, device=device)
+
+        tensors = [torch.randn(2, 3, device=device), torch.tensor(3., device=device)]
+
+        for a in tensors:
+            self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
+            self.assertEqual(torch.empty(0, *a.shape), a[False])
+            self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
+            self.assertEqual(torch.empty(0, *a.shape), a[false])
+            self.assertEqual(a.data_ptr(), a[None].data_ptr())
+            self.assertEqual(a.data_ptr(), a[...].data_ptr())
+
+    def test_index_scalar_with_bool_mask(self, device="mps"):
+        a = torch.tensor(1, device=device)
+        uintMask = torch.tensor(True, dtype=torch.uint8, device=device)
+        boolMask = torch.tensor(True, dtype=torch.bool, device=device)
+        self.assertEqual(a[uintMask], a[boolMask])
+        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+
+        a = torch.tensor(True, dtype=torch.bool, device=device)
+        self.assertEqual(a[uintMask], a[boolMask])
+        self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+
+    def test_getitem_scalars(self, device="mps"):
+        zero = torch.tensor(0, dtype=torch.int64, device=device)
+        one = torch.tensor(1, dtype=torch.int64, device=device)
+
+        # non-scalar indexed with scalars
+        a = torch.randn(2, 3, device=device)
+        self.assertEqual(a[0], a[zero])
+        self.assertEqual(a[0][1], a[zero][one])
+        self.assertEqual(a[0, 1], a[zero, one])
+        self.assertEqual(a[0, one], a[zero, 1])
+
+        # indexing by a scalar should slice (not copy)
+        self.assertEqual(a[0, 1].data_ptr(), a[zero, one].data_ptr())
+        self.assertEqual(a[1].data_ptr(), a[one.int()].data_ptr())
+        self.assertEqual(a[1].data_ptr(), a[one.short()].data_ptr())
+
+        # scalar indexed with scalar
+        r = torch.randn((), device=device)
+        with self.assertRaises(IndexError):
+            r[:]
+        with self.assertRaises(IndexError):
+            r[zero]
+        self.assertEqual(r, r[...])
+
+    def test_variable_slicing(self, device="mps"):
+        x = torch.arange(0, 16, device=device).view(4, 4)
+        indices = torch.IntTensor([0, 1]).to(device)
+        i, j = indices
+        self.assertEqual(x[i:j], x[0:1])
+
+    def test_ellipsis_tensor(self, device="mps"):
+        x = torch.arange(0, 9, device=device).view(3, 3)
+        idx = torch.tensor([0, 2], device=device)
+        self.assertEqual(x[..., idx].tolist(), [[0, 2],
+                                                [3, 5],
+                                                [6, 8]])
+        self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
+                                                [6, 7, 8]])
+
+    def test_invalid_index(self, device="mps"):
+        x = torch.arange(0, 16, device=device).view(4, 4)
+        self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
+
 class TestRNNMPS(TestCase):
     def test_lstm_1(self, device="mps", dtype=torch.float32):
 
@@ -6312,6 +6641,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['torch.float32'],
         'nn.functional.kl_div': ['torch.float32'],
         'nn.functional.l1_loss': ['torch.float32'],
+        'nn.functional.linear': ['torch.float32'],
         'nn.functional.huber_loss': ['torch.float32'],
         'nn.functional.leaky_relu': ['torch.float32'],
         'nn.functional.mse_loss': ['torch.float16', 'torch.float32'],
