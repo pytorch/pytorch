@@ -1633,11 +1633,6 @@ op_db: List[OpInfo] = [
         check_batched_grad=False,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
         sample_inputs_func=sample_inputs_linalg_matrix_power,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-        skips=(
-            # Strides are not the same!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
-        ),
     ),
     OpInfo(
         "linalg.multi_dot",
@@ -1851,16 +1846,14 @@ op_db: List[OpInfo] = [
         "linalg.inv",
         aten_name="linalg_inv",
         op=torch.linalg.inv,
+        aliases=("inverse",),
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1887,16 +1880,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "linalg.inv_ex",
         aten_name="linalg_inv_ex",
+        op=torch.linalg.inv_ex,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
