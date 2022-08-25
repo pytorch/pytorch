@@ -52,50 +52,46 @@ def _create_beartype_decorator(
                 "Install beartype with `pip install beartype` to enable runtime type checking."
             )
         return _no_op_decorator
-    else:
-        assert isinstance(_beartype_lib, ModuleType)
 
-        if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
-            # Enable runtime type checking which errors on any type hint violation.
-            return _beartype_lib.beartype
+    assert isinstance(_beartype_lib, ModuleType)
 
-        # Warnings only
-        def beartype(func):
-            """Warn on type hint violation."""
+    if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
+        # Enable runtime type checking which errors on any type hint violation.
+        return _beartype_lib.beartype
 
-            if "return" in func.__annotations__:
-                # Remove the return type from the func function's
-                # annotations so that the beartype decorator does not complain
-                # about the return type.
-                return_type = func.__annotations__["return"]
-                del func.__annotations__["return"]
-                beartyped = _beartype_lib.beartype(func)
-                # Restore the return type to the func function's annotations
-                func.__annotations__["return"] = return_type
-            else:
-                beartyped = _beartype_lib.beartype(func)
+    # Warnings only
+    def beartype(func):
+        """Warn on type hint violation."""
 
-            @functools.wraps(func)
-            def _coerce_beartype_exceptions_to_warnings(*args, **kwargs):
-                try:
-                    return beartyped(*args, **kwargs)
-                except _roar.BeartypeCallHintParamViolation:
-                    # Fall back to the original function if the beartype hint is violated.
-                    warnings.warn(
-                        traceback.format_exc(),
-                        category=errors.CallHintViolationWarning,
-                        stacklevel=2,
-                    )
-                finally:
-                    # Call the function in the finally block instead of in the except
-                    # block to clean the stack trace caused by the BeartypeCallHintViolation.
-                    # So if func itself raises an exception, the stack trace will be
-                    # free of information from the BeartypeCallHintViolation.
-                    return func(*args, **kwargs)  # noqa: B012
+        if "return" in func.__annotations__:
+            # Remove the return type from the func function's
+            # annotations so that the beartype decorator does not complain
+            # about the return type.
+            return_type = func.__annotations__["return"]
+            del func.__annotations__["return"]
+            beartyped = _beartype_lib.beartype(func)
+            # Restore the return type to the func function's annotations
+            func.__annotations__["return"] = return_type
+        else:
+            beartyped = _beartype_lib.beartype(func)
 
-            return _coerce_beartype_exceptions_to_warnings
+        @functools.wraps(func)
+        def _coerce_beartype_exceptions_to_warnings(*args, **kwargs):
+            try:
+                return beartyped(*args, **kwargs)
+            except _roar.BeartypeCallHintParamViolation:
+                # Fall back to the original function if the beartype hint is violated.
+                warnings.warn(
+                    traceback.format_exc(),
+                    category=errors.CallHintViolationWarning,
+                    stacklevel=2,
+                )
 
-        return beartype
+            return func(*args, **kwargs)  # noqa: B012
+
+        return _coerce_beartype_exceptions_to_warnings
+
+    return beartype
 
 
 if typing.TYPE_CHECKING:

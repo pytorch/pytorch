@@ -9,12 +9,18 @@ from torch.onnx._internal import _beartype
 from torch.testing._internal import common_utils
 
 
-def skip_if_beartype_not_installed(test_case):
+def beartype_installed():
     try:
         import beartype  # noqa: F401
     except ImportError:
-        raise unittest.SkipTest("beartype is not installed")
-    return test_case
+        return False
+    return True
+
+
+def skip_if_beartype_not_installed(test_case):
+    return unittest.skipIf(not beartype_installed(), "beartype is not installed")(
+        test_case
+    )
 
 
 def func_with_type_hint(x: int) -> int:
