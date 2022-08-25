@@ -1375,7 +1375,8 @@ class CommTensor(torch.Tensor):
     1. The first node is inserted right after the
     communication, wrapping both the inplace output tensor and the returned
     work handle into a custom CommResult type. We have to do this because
-    ``ProxyTensor`` only wraps Tensor objects and will treat the work handle
+    ``ProxyTorchDispatchMode`` only handles ``torch.Tensor``, ``_ProxyTensor``,
+    and ``torch.nn.Parameter`` objects and will treat the work handle
     as a constant and embed that into the graph. As a result, during execution,
     it will use the work handle created during tracing and will lead to wrong
     result. The solution in this test is to manually create a proxy on the
@@ -1409,7 +1410,7 @@ class CommTensor(torch.Tensor):
         return f"CommTensor({self._tensor}, after_comm={self._after_comm})"
 
     # disable __torch_function__ so that CommTensor can recursively dispatch
-    # ProxyTensor in make_fx
+    # with ProxyTorchDispatchMode in make_fx
     __torch_function__ = _disabled_torch_function_impl
 
     @classmethod
@@ -1494,7 +1495,7 @@ class CommTensor(torch.Tensor):
                 )
 
                 with no_dispatch():
-                    # disable dispatch to avoid trigger ProxyTensor logic
+                    # disable dispatch to avoid trigger ProxyTorchDispatchMode logic
                     out = func(*unwrapped_args, **unwrapped_kwargs)
 
                 # wrap output with the proxy of CommResult, so that subsequent
@@ -1551,8 +1552,9 @@ class CompilerTest(MultiProcessTestCase):
             # discussion.
             y = CommTensor(x + x)
             work = dist.all_reduce(y, group=pg, async_op=True)
-            # this wait() will be ignored in tracing mode as ProxyTensor won't
-            # wrap non-Tensor objects
+            # this wait() will be ignored in tracing mode as
+            # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
+            # and torch.nn.Parameter objects
             work.wait()
             return y * 2
 
