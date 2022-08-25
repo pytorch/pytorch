@@ -79,7 +79,6 @@
 namespace torch {
 inline bool is_symint_node(py::handle obj) {
   auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
-  // TODO: switch this to `isinstance`
   if (py::isinstance(obj, tp_symn)) {
     TORCH_CHECK(
         !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
