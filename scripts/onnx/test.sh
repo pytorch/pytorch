@@ -6,6 +6,7 @@ UNKNOWN=()
 
 # defaults
 PARALLEL=1
+export TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK=ERRORS
 
 while [[ $# -gt 0 ]]
 do
