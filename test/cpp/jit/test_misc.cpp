@@ -1446,6 +1446,7 @@ TEST(TestSymInt, AddSymbolicInt) {
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
+#ifndef C10_MOBILE
 TEST(TestSymInt, TestIntrusive) {
   auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
   auto b = c10::make_intrusive<c10::SymIntNodeImpl>();
@@ -1520,6 +1521,7 @@ TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
     }
   }
 }
+#endif
 
 TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
