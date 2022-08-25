@@ -15,7 +15,6 @@ cases*/
 
 #if defined(USE_ROCM)
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
-// THIS IS ROCM CODEGEN
 ${RuntimeHeader}
 ${HalfHeader}
 ${BFloat16Header}
@@ -39,7 +38,6 @@ struct TensorInfo<T, 0> {
 )");
 #else
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
-// THIS IS CUDA CODEGEN
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;

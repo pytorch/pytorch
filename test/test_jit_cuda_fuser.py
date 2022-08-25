@@ -19,8 +19,8 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, slowTest, \
-    is_iterable_of_tensors, freeze_rng_state, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
+    is_iterable_of_tensors, freeze_rng_state
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -1768,6 +1768,7 @@ class TestCudaFuser(JitTestCase):
         channel_sizes = [67, 457, 1024, 4096]
 
         with torch.backends.cudnn.flags(enabled=False):
+            # TODO instance norm on ROCm was giving ~50% incorrect results
             for is_batch_norm_else_instance_norm in [True] if TEST_WITH_ROCM else [False, True]:
                 for dims in range(3, 6):
                     output_size = int(pow(output_elements, 1. / (dims - 1)))
@@ -1786,6 +1787,7 @@ class TestCudaFuser(JitTestCase):
         channel_sizes = [67, 457, 1024, 4096]
 
         with torch.backends.cudnn.flags(enabled=False):
+            # TODO instance norm on ROCm was giving ~50% incorrect results
             for is_batch_norm_else_instance_norm in [True] if TEST_WITH_ROCM else [False, True]:
                 for dims in range(3, 6):
                     output_size = int(pow(output_elements, 1. / (dims - 1)))
