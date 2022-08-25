@@ -25,7 +25,7 @@ gamma_series(T1 a, T1 x) {
 
     q = r = T1(1) / a;
 
-    for (unsigned int j = 1; j <= 10 * int(10 + std::sqrt(std::abs(a))); j++) {
+    for (auto j = 1; j <= 10 * int(10 + std::sqrt(std::abs(a))); j++) {
       p = p + T3(1);
       q = q * (x / p);
       r = r + q;

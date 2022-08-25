@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/native/special/detail/spherical_harmonic_y.h>
+#include <ATen/native/special/detail/hurwitz_zeta.h>
 #include <ATen/native/special/detail/promote_t.h>
 #include <c10/macros/Macros.h>
 
@@ -10,11 +10,11 @@ namespace special {
 template<typename T1, typename T2>
 C10_HOST_DEVICE
 inline constexpr
-c10::complex<detail::promote_t<T1, T2>>
-spherical_harmonic_y(unsigned int l, int m, T1 theta, T2 phi) {
+detail::promote_t<T1, T2>
+hurwitz_zeta(T1 s, T2 a) {
   using T3 = detail::promote_t<T1, T2>;
 
-  return detail::spherical_harmonic_y<T3>(l, m, theta, phi);
+  return detail::hurwitz_zeta<T3>(s, a);
 }
 } // namespace special
 } // namespace native

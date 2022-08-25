@@ -40,6 +40,7 @@ TORCH_META_FUNC (special_gamma)                                   (const Tensor 
 TORCH_META_FUNC (special_hankel_h_1)                              (const Tensor &v, const Tensor &z)   { build_borrowing_binary_float_op (maybe_get_output(), v, z);   }
 TORCH_META_FUNC (special_hankel_h_2)                              (const Tensor &v, const Tensor &z)   { build_borrowing_binary_float_op (maybe_get_output(), v, z);   }
 TORCH_META_FUNC (special_harmonic_number)                         (const Tensor &n)                    { build_borrowing_unary_float_op  (maybe_get_output(), n);      }
+TORCH_META_FUNC (special_hurwitz_zeta)                            (const Tensor &s, const Tensor &a)   { build_borrowing_binary_float_op (maybe_get_output(), s, a);   }
 TORCH_META_FUNC (special_incomplete_legendre_elliptic_integral_d) (const Tensor &k, const Tensor &phi) { build_borrowing_binary_float_op (maybe_get_output(), k, phi); }
 TORCH_META_FUNC (special_incomplete_legendre_elliptic_integral_e) (const Tensor &k, const Tensor &phi) { build_borrowing_binary_float_op (maybe_get_output(), k, phi); }
 TORCH_META_FUNC (special_incomplete_legendre_elliptic_integral_f) (const Tensor &k, const Tensor &phi) { build_borrowing_binary_float_op (maybe_get_output(), k, phi); }
@@ -55,6 +56,7 @@ TORCH_META_FUNC (special_modified_bessel_i)                       (const Tensor 
 TORCH_META_FUNC (special_modified_bessel_k)                       (const Tensor &v, const Tensor &z)   { build_borrowing_binary_float_op (maybe_get_output(), v, z);   }
 TORCH_META_FUNC (special_prime_number)                            (const Tensor &n)                    { build_borrowing_unary_float_op  (maybe_get_output(), n);      }
 TORCH_META_FUNC (special_reciprocal_gamma)                        (const Tensor &z)                    { build_borrowing_unary_float_op  (maybe_get_output(), z);      }
+TORCH_META_FUNC (special_riemann_zeta)                            (const Tensor &s)                    { build_borrowing_unary_float_op  (maybe_get_output(), s);      }
 TORCH_META_FUNC (special_rising_factorial)                        (const Tensor &x, const Tensor &n)   { build_borrowing_binary_float_op (maybe_get_output(), x, n);   }
 TORCH_META_FUNC (special_sin_pi)                                  (const Tensor &z)                    { build_borrowing_unary_float_op  (maybe_get_output(), z);      }
 TORCH_META_FUNC (special_sinh_pi)                                 (const Tensor &z)                    { build_borrowing_unary_float_op  (maybe_get_output(), z);      }
@@ -97,6 +99,7 @@ DEFINE_DISPATCH(special_gamma_stub);
 DEFINE_DISPATCH(special_hankel_h_1_stub);
 DEFINE_DISPATCH(special_hankel_h_2_stub);
 DEFINE_DISPATCH(special_harmonic_number_stub);
+DEFINE_DISPATCH(special_hurwitz_zeta_stub);
 DEFINE_DISPATCH(special_incomplete_legendre_elliptic_integral_d_stub);
 DEFINE_DISPATCH(special_incomplete_legendre_elliptic_integral_e_stub);
 DEFINE_DISPATCH(special_incomplete_legendre_elliptic_integral_f_stub);
@@ -112,6 +115,7 @@ DEFINE_DISPATCH(special_modified_bessel_i_stub);
 DEFINE_DISPATCH(special_modified_bessel_k_stub);
 DEFINE_DISPATCH(special_prime_number_stub);
 DEFINE_DISPATCH(special_reciprocal_gamma_stub);
+DEFINE_DISPATCH(special_riemann_zeta_stub);
 DEFINE_DISPATCH(special_rising_factorial_stub);
 DEFINE_DISPATCH(special_sin_pi_stub);
 DEFINE_DISPATCH(special_sinh_pi_stub);
@@ -152,6 +156,7 @@ TORCH_IMPL_FUNC (special_gamma_out)                                   (const Ten
 TORCH_IMPL_FUNC (special_hankel_h_1_out)                              (const Tensor &v, const Tensor &z,   const Tensor &out) { special_hankel_h_1_stub                              (device_type(), *this); }
 TORCH_IMPL_FUNC (special_hankel_h_2_out)                              (const Tensor &v, const Tensor &z,   const Tensor &out) { special_hankel_h_2_stub                              (device_type(), *this); }
 TORCH_IMPL_FUNC (special_harmonic_number_out)                         (const Tensor &n,                    const Tensor &out) { special_harmonic_number_stub                         (device_type(), *this); }
+TORCH_IMPL_FUNC (special_hurwitz_zeta_out)                            (const Tensor &s, const Tensor &a,   const Tensor &out) { special_hurwitz_zeta_stub                            (device_type(), *this); }
 TORCH_IMPL_FUNC (special_incomplete_legendre_elliptic_integral_d_out) (const Tensor &k, const Tensor &phi, const Tensor &out) { special_incomplete_legendre_elliptic_integral_d_stub (device_type(), *this); }
 TORCH_IMPL_FUNC (special_incomplete_legendre_elliptic_integral_e_out) (const Tensor &k, const Tensor &phi, const Tensor &out) { special_incomplete_legendre_elliptic_integral_e_stub (device_type(), *this); }
 TORCH_IMPL_FUNC (special_incomplete_legendre_elliptic_integral_f_out) (const Tensor &k, const Tensor &phi, const Tensor &out) { special_incomplete_legendre_elliptic_integral_f_stub (device_type(), *this); }
@@ -167,6 +172,7 @@ TORCH_IMPL_FUNC (special_modified_bessel_i_out)                       (const Ten
 TORCH_IMPL_FUNC (special_modified_bessel_k_out)                       (const Tensor &v, const Tensor &z,   const Tensor &out) { special_modified_bessel_k_stub                       (device_type(), *this); }
 TORCH_IMPL_FUNC (special_prime_number_out)                            (const Tensor &n,                    const Tensor &out) { special_prime_number_stub                            (device_type(), *this); }
 TORCH_IMPL_FUNC (special_reciprocal_gamma_out)                        (const Tensor &z,                    const Tensor &out) { special_reciprocal_gamma_stub                        (device_type(), *this); }
+TORCH_IMPL_FUNC (special_riemann_zeta_out)                            (const Tensor &s,                    const Tensor &out) { special_riemann_zeta_stub                            (device_type(), *this); }
 TORCH_IMPL_FUNC (special_rising_factorial_out)                        (const Tensor &x, const Tensor &n,   const Tensor &out) { special_rising_factorial_stub                        (device_type(), *this); }
 TORCH_IMPL_FUNC (special_sin_pi_out)                                  (const Tensor &z,                    const Tensor &out) { special_sin_pi_stub                                  (device_type(), *this); }
 TORCH_IMPL_FUNC (special_sinh_pi_out)                                 (const Tensor &z,                    const Tensor &out) { special_sinh_pi_stub                                 (device_type(), *this); }
@@ -249,6 +255,11 @@ Tensor  special_hankel_h_2                                  (const Scalar &v, co
 Tensor  special_hankel_h_2                                  (const Tensor &v, const Scalar &z)                { return at::special_hankel_h_2                                  (     v,                        wrapped_scalar_tensor(z));    }
 Tensor& special_hankel_h_2_out                              (const Tensor &v, const Scalar &z,   Tensor &out) { return at::special_hankel_h_2_out                              (out, wrapped_scalar_tensor(z), v);                           }
 Tensor& special_hankel_h_2_out                              (const Scalar &v, const Tensor &z,   Tensor &out) { return at::special_hankel_h_2_out                              (out, z,                        wrapped_scalar_tensor(v));    }
+
+Tensor  special_hurwitz_zeta                                (const Scalar &s, const Tensor &a)                { return at::special_hurwitz_zeta                                (     wrapped_scalar_tensor(s), a);                           }
+Tensor  special_hurwitz_zeta                                (const Tensor &s, const Scalar &a)                { return at::special_hurwitz_zeta                                (     s,                        wrapped_scalar_tensor(a));    }
+Tensor& special_hurwitz_zeta_out                            (const Tensor &s, const Scalar &a,   Tensor &out) { return at::special_hurwitz_zeta_out                            (out, wrapped_scalar_tensor(a), s);                           }
+Tensor& special_hurwitz_zeta_out                            (const Scalar &s, const Tensor &a,   Tensor &out) { return at::special_hurwitz_zeta_out                            (out, a,                        wrapped_scalar_tensor(s));    }
 
 Tensor  special_incomplete_legendre_elliptic_integral_d     (const Scalar &k, const Tensor &phi)              { return at::special_incomplete_legendre_elliptic_integral_d     (     wrapped_scalar_tensor(k), phi);                         }
 Tensor  special_incomplete_legendre_elliptic_integral_d     (const Tensor &k, const Scalar &phi)              { return at::special_incomplete_legendre_elliptic_integral_d     (     k,                        wrapped_scalar_tensor(phi));  }

@@ -20,7 +20,7 @@ gamma_continued_fraction(T1 a, T1 x) {
   auto d = T3(1) / b;
   auto h = d;
 
-  for (unsigned int j = 1; j <= 10 * int(10 + std::sqrt(std::abs(a))); j++) {
+  for (auto j = 1; j <= 10 * int(10 + std::sqrt(std::abs(a))); j++) {
     auto an = -T3(j) * (T3(j) - a);
 
     b = b + T3(2);

@@ -21,7 +21,7 @@ incomplete_beta_continued_fraction(T1 a, T1 b, T1 x) {
 
   auto r = q;
 
-  for (unsigned int j = 1; j <= 100; j++) {
+  for (auto j = 1; j <= 100; j++) {
     auto s = T1(j) * (b - T1(j)) * x / ((a - T1(1) + T1(2 * j)) * (a + T1(2 * j)));
 
     q = T1(1) + s * q;

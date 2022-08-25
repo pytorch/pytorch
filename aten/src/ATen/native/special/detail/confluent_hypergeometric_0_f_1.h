@@ -17,7 +17,7 @@ confluent_hypergeometric_0_f_1(T1 c, T1 x) {
     auto p = T1(1);
     auto q = T1(1);
 
-    for (unsigned int j = 0; j < 100000; j++) {
+    for (auto j = 0; j < 100000; j++) {
       p = p * (x / ((c + T1(j)) * T1(1 + j)));
       q = q + p;
 

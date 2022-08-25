@@ -2,6 +2,7 @@
 
 #include <ATen/native/special/detail/spherical_modified_bessel.h>
 #include <ATen/native/special/detail/promote_t.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {

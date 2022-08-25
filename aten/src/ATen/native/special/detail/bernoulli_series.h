@@ -42,7 +42,7 @@ bernoulli_series(unsigned int n) {
       p = p * -T1(1);
     }
 
-    for (unsigned int j = 1; j <= n; j++) {
+    for (auto j = 1; j <= n; j++) {
       p = p * (j / c10::numbers::tau_v<T1>);
     }
 

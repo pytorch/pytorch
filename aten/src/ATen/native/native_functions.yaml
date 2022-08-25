@@ -13858,6 +13858,19 @@
   structured: True
   variants: function
 
+- func: special_riemann_zeta(Tensor s) -> Tensor
+  python_module: special
+  structured_delegate: special_riemann_zeta.out
+  variants: function
+
+- func: special_riemann_zeta.out(Tensor s, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_riemann_zeta_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_bernoulli_number(Tensor n) -> Tensor
   python_module: special
   structured_delegate: special_bernoulli_number.out
@@ -15287,6 +15300,43 @@
 - func: special_upper_incomplete_gamma.z_scalar_out(Tensor a, Scalar z, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: special_upper_incomplete_gamma_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_hurwitz_zeta(Tensor s, Tensor a) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_hurwitz_zeta.out
+  variants: function
+
+- func: special_hurwitz_zeta.s_scalar(Scalar s, Tensor a) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_hurwitz_zeta.a_scalar(Tensor s, Scalar a) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_hurwitz_zeta.out(Tensor s, Tensor a, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_hurwitz_zeta_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_hurwitz_zeta.s_scalar_out(Scalar s, Tensor a, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_hurwitz_zeta.a_scalar_out(Tensor s, Scalar a, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_hurwitz_zeta_out
   device_check: NoCheck
   python_module: special
   variants: function
