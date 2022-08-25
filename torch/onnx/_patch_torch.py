@@ -8,13 +8,15 @@ from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch.onnx import _deprecation
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 
 # TODO(#78694): Refactor the patching process to make it more transparent to users.
+@_beartype.beartype
 def _graph_op(
     g: torch._C.Graph,
     opname: str,
-    *raw_args: torch._C.Value,
+    *raw_args: Union[torch.Tensor, torch._C.Value],
     outputs: int = 1,
     **kwargs,
 ) -> Union[torch._C.Value, Tuple[torch._C.Value, ...]]:
@@ -76,6 +78,7 @@ def _graph_op(
 
 
 # Generate an ONNX ATen op node.
+@_beartype.beartype
 def _aten_op(g, operator: str, *args, overload_name: str = "", **kwargs):
     kwargs["aten"] = True
     return g.op(
@@ -83,6 +86,7 @@ def _aten_op(g, operator: str, *args, overload_name: str = "", **kwargs):
     )
 
 
+@_beartype.beartype
 def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     if "::" in opname:
         aten = False
@@ -102,6 +106,7 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     return tuple(o for o in n.outputs())
 
 
+@_beartype.beartype
 def _new_node(g: torch._C.Graph, opname: str, outputs, *args, **kwargs):
     if "::" in opname:
         aten = False
@@ -122,6 +127,7 @@ def _new_node(g: torch._C.Graph, opname: str, outputs, *args, **kwargs):
 _attr_pattern = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
+@_beartype.beartype
 def _is_onnx_list(value):
     return (
         not isinstance(value, torch._six.string_classes)
@@ -130,12 +136,14 @@ def _is_onnx_list(value):
     )
 
 
+@_beartype.beartype
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
 
 
+@_beartype.beartype
 def _is_caffe2_aten_fallback():
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -143,6 +151,7 @@ def _is_caffe2_aten_fallback():
     )
 
 
+@_beartype.beartype
 def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _attr_pattern.match(key)
@@ -172,6 +181,7 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 @_deprecation.deprecated(
     "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
 )
+@_beartype.beartype
 def _graph_constant(
     g,
     value,
