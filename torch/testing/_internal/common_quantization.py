@@ -588,7 +588,7 @@ class QuantizationTestCase(TestCase):
             expected_node, expected_node_occurrence, expected_node_list:
                see docs for checkGraphModeFxOp
         """
-        nodes_in_graph = dict()
+        nodes_in_graph = {}
         node_list = []
         modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
