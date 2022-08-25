@@ -1468,7 +1468,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
       MPSStream* stream = getCurrentMPSStream();
 
       @autoreleasepool {
-        string key = "softplus_out_mps:" + getTensorsStringKey({self});
+        string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(beta.to<double>()) + ":" + std::to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
@@ -1567,7 +1567,7 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
       MPSStream* stream = getCurrentMPSStream();
 
       @autoreleasepool {
-        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self});
+        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self}) + ":" + std::to_string(beta.to<double>()) + ":" + std::to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
