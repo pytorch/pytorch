@@ -847,6 +847,70 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+@register_decomposition(aten.native_group_norm_backward)
+def native_group_norm_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    assert grad_output.shape == input.shape
+    assert input.numel() == N * C * HxW
+    assert mean.shape == (N, group)
+    assert rstd.shape == (N, group)
+    assert gamma is None or gamma.numel() == C
+
+    # Compute Internal gradients
+    acc_dtype = utils.get_computation_dtype(input.dtype)
+    ds = torch.mul(grad_output, input.to(dtype=acc_dtype)).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2], dtype=acc_dtype)
+
+    d_input: Optional[Tensor] = None
+    d_gamma: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
+    cpg = C // group
+    if output_mask[0]:
+        s = 1.0 / (HxW * cpg)
+        if gamma is not None:
+            ds_val = torch.mul(ds, gamma.reshape(1, C)).reshape(N, group, cpg).sum(2)
+            db_val = (db * gamma.reshape(1, C)).reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.reshape(N, group, 1),
+                gamma.to(dtype=acc_dtype).reshape(1, group, cpg),
+            )
+        else:
+            ds_val = ds.reshape(N, group, cpg).sum(2, dtype=acc_dtype)
+            db_val = db.reshape(N, group, cpg).sum(2, dtype=acc_dtype)
+            c1 = torch.mul(
+                rstd.reshape(N, group, 1),
+                torch.ones((1, group, cpg), dtype=acc_dtype, device=rstd.device),
+            )
+        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - db_val * rstd * s
+
+        c1 = c1.reshape(N, group, cpg, 1)
+        c2 = c2.reshape(N, group, 1, 1)
+        c3 = c3.reshape(N, group, 1, 1)
+        d_input = (
+            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
+            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
+            + c3
+        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
+    if output_mask[1]:
+        raise RuntimeError("Not implemented")
+    if output_mask[2]:
+        raise RuntimeError("Not implemented")
+
+    return (d_input, d_gamma, d_bias)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
