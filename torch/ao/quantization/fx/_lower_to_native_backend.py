@@ -331,9 +331,9 @@ def fold_weight(
     graph module with the traced nodes and run the graph module to pack the
     weight. then replace the original chain of ops with the packed weight.
     """
-    packed_weights = dict()
+    packed_weights = {}
     # map from folded node name to the prepacked weight name
-    folded_nodes = dict()
+    folded_nodes = {}
     # get packed weights
     for node in quantized.graph.nodes:
         if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
