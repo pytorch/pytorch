@@ -518,18 +518,30 @@ class TestOperators(TestCase):
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
         xfail("_masked.prod"),  # calls item
+        xfail("_masked.cumprod"),  # calls item
         xfail("as_strided"),  # incorrect output
+        xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
+        xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("cumprod"),  # calls item
         xfail("double"),  # rank 4 tensor for channels_last
         xfail("eig"),  # calls item
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("index_reduce"),
         xfail("linalg.eig"),  # vmap over torch.allclose
         xfail("linalg.eigvals"),  # vmap over torch.allclose
         xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("linalg.vander"),
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
+        xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm"),
@@ -545,6 +557,7 @@ class TestOperators(TestCase):
         xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
+        skip("nn.functional.dropout3d"),  # calls random op
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
@@ -571,14 +584,14 @@ class TestOperators(TestCase):
         xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
+        xfail("pca_lowrank"),  # calls random op
         # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
         xfail("prod"),
         xfail("put"),  # vmap: inplace into a regular tensor
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
-        # vmap: Calling Tensor.as_strided is not supported unless the batch dims being
-        # vmapped over are at the front of the tensor
-        xfail("stft"),
+        xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail("svd_lowrank"),  # calls random op
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
