@@ -154,23 +154,24 @@ class TestTransformers(NNTestCase):
         ]
         input_mask_pairs = [
             (
-                torch.tensor(pair[0], device=device, dtype=torch.float32), # float input
-                torch.tensor(pair[1], device=device, dtype=torch.bool) # bool mask
+                torch.tensor(pair[0], device=device, dtype=torch.float32),  # float input
+                torch.tensor(pair[1], device=device, dtype=torch.bool)  # bool mask
             ) for pair in input_mask_pairs
         ]
-        
+
         for input, src_key_padding_mask in input_mask_pairs:
             with torch.no_grad():
                 fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
-            slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask) # reference
+            slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
 
             # Make sure fastpath_output is same shape as slowpath_output and mask.
             # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
-            # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4. Expand back to old size to match.
+            # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
+            # Expand back to old size to match.
             bs, true_seqlen, embed_dim = fastpath_output.shape
             expanded_seqlen = src_key_padding_mask.shape[1]
             fastpath_output_expanded = torch.zeros(bs, expanded_seqlen, embed_dim, device=device)
-            fastpath_output_expanded[:,:true_seqlen,:] = fastpath_output
+            fastpath_output_expanded[:, :true_seqlen, :] = fastpath_output
             # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
             fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
             slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
