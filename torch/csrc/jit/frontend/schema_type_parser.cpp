@@ -425,7 +425,11 @@ SchemaTypeParser::parseFakeAndRealType() {
       fake_value = c10::TypeFactory::create<ListType>(fake_value);
       real_value = c10::TypeFactory::create<ListType>(real_value);
       auto container = parseAliasAnnotation();
-      if (container && alias_info) {
+      if (alias_info) {
+        if (!container) {
+          container = c10::optional<AliasInfo>(AliasInfo());
+          container->setIsWrite(alias_info->isWrite());
+        }
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
