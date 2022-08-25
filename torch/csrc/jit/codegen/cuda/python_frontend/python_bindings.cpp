@@ -1070,31 +1070,34 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP("addcmul", addcmul)
 #undef NVFUSER_PYTHON_BINDING_TERNARY_WITH_ALPHA_OP
 
-#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)    \
-  nvf_ops.def(                                                  \
-      op_str,                                                   \
-      [](nvfuser::FusionDefinition::Operators& self,            \
-         nvfuser::Tensor arg,                                   \
-         const std::vector<int>& axes,                          \
-         bool keepdim,                                          \
-         Nvf::DataType dtype) -> nvfuser::Tensor {              \
-        FUSER_PERF_SCOPE("Operators." op_str);                  \
-        nvfuser::FusionDefinition* fd = self.fusion_definition; \
-        nvfuser::Tensor output = fd->defineTensor();            \
-        fd->defineRecord(new nvfuser::ReductionOpRecord(        \
-            {fd->recordingState(arg())},                        \
-            {fd->recordingState(output())},                     \
-            ("ops." op_str),                                    \
-            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>(Nvf::op_name),\
-            axes,                                               \
-            keepdim,                                            \
-            dtype));                                            \
-        return output;                                          \
-      },                                                        \
-      py::arg("arg"),                                           \
-      py::arg("axes"),                                          \
-      py::arg("keepdim") = false,                               \
-      py::arg("dtype") = Nvf::DataType::Null,                   \
+#define NVFUSER_PYTHON_BINDING_REDUCTION_OP(op_str, op_name)                                          \
+  nvf_ops.def(                                                                                        \
+      op_str,                                                                                         \
+      [](nvfuser::FusionDefinition::Operators& self,                                                  \
+         nvfuser::Tensor arg,                                                                         \
+         const std::vector<int>& axes,                                                                \
+         bool keepdim,                                                                                \
+         Nvf::DataType dtype) -> nvfuser::Tensor {                                                    \
+        FUSER_PERF_SCOPE("Operators." op_str);                                                        \
+        nvfuser::FusionDefinition* fd = self.fusion_definition;                                       \
+        nvfuser::Tensor output = fd->defineTensor();                                                  \
+        fd->defineRecord(new nvfuser::ReductionOpRecord(                                              \
+            {fd->recordingState(arg())},                                                              \
+            {fd->recordingState(output())},                                                           \
+            ("ops." op_str),                                                                          \
+            static_cast<                                                                              \
+                Nvf::                                                                                 \
+                    TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>( \
+                Nvf::op_name),                                                                        \
+            axes,                                                                                     \
+            keepdim,                                                                                  \
+            dtype));                                                                                  \
+        return output;                                                                                \
+      },                                                                                              \
+      py::arg("arg"),                                                                                 \
+      py::arg("axes"),                                                                                \
+      py::arg("keepdim") = false,                                                                     \
+      py::arg("dtype") = Nvf::DataType::Null,                                                         \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_REDUCTION_OP("sum", sum)

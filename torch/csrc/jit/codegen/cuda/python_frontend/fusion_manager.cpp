@@ -70,8 +70,8 @@ void FusionManager::createFusionCacheEntry(RecordFunctor* rec) {
   if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
     new_rec->print(ss);
-    std::cout << "\nFusionDefinition: Create new cache entry for: "
-              << ss.str() << "\n";
+    std::cout << "\nFusionDefinition: Create new cache entry for: " << ss.str()
+              << "\n";
   }
 }
 void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {

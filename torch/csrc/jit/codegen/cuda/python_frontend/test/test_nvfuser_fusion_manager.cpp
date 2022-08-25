@@ -228,7 +228,7 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
       SUCCEED();
     }
   }
-  
+
   // Setup cache for a new cache lookup
   try {
     fm->resetFusionCachePtr();
@@ -237,7 +237,7 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     FAIL() << "Did not properly set cache to pointer to top of tree!"
            << e.what();
   }
-  
+
   // Verify proper cache lookup up of complete fusion already cached.
   // This tends to flush out pointer problems in the cache.
   {
@@ -260,7 +260,7 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
     }
-    
+
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
       auto no_cache_entry_ptr = fm->lookupFusionCacheEntry(end_record.get());
