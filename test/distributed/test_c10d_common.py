@@ -28,7 +28,6 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
     fetch_tensor_proxy,
-    get_proxy_slot,
     get_proxy_slots,
     make_fx,
     set_proxy_slot,
@@ -1481,8 +1480,6 @@ class CommTensor(torch.Tensor):
                         (unwrapped_args, unwrapped_kwargs)
                     ),
                 )
-                #proxy_args = tree_map(unwrap_proxy, unwrapped_args)
-                #proxy_kwargs = tree_map(unwrap_proxy, unwrapped_kwargs)
 
                 # get proxy for output tuple
                 proxy_res = func(*proxy_args, **proxy_kwargs)

@@ -120,7 +120,6 @@ ALLOW_LIST = [
     ("aten::segment_reduce", datetime.date(2022, 6, 30)),
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
-    ("c10d::broadcast", datetime.date(2022, 6, 25)),
     ("aten::.*functional", datetime.date(2022, 8, 1)),
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     ("aten::unflatten", datetime.date(2022, 8, 10)),
@@ -269,6 +268,7 @@ ALLOW_LIST = [
     ("aten::unsafe_split_with_sizes.out", datetime.date(2022, 9, 1)),
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
+    ("c10d::allreduce_", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
