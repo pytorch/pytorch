@@ -181,6 +181,14 @@ class vTensor final {
   }
 
   /*
+   * Number of texels in the image texture.
+   */
+  inline VkDeviceSize numtexels() {
+    return view_->extents_.data[0u] * view_->extents_.data[1u] *
+        view_->extents_.data[2u];
+  }
+
+  /*
    * Number of "cells" in the image texture. 4 cells make up a texel.
    */
   inline VkDeviceSize numcells() {
