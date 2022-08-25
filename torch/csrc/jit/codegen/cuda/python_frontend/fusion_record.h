@@ -214,6 +214,8 @@ struct OpRecord : RecordFunctor {
                     << child_ptr->fusion_op_.target_type().name() << "] ";
         }
         // Match the nvFuser arith function pointers
+        // IMPORTANT! you need to dereference the target pointer in order
+        // to match the function
         result = result &&
             (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
              *child_ptr->fusion_op_
@@ -476,6 +478,8 @@ struct CastOpRecord : RecordFunctor {
                     << fusion_op_.target_type().name() << "] [other: 0x"
                     << child_ptr->fusion_op_.target_type().name() << "]";
         }
+        // IMPORTANT! you need to dereference the target pointer in order
+        // to match the function
         result = result &&
             (*fusion_op_
                   .template target<OutType (*)(Nvf::DataType, ArgType)>() ==
@@ -831,6 +835,8 @@ struct ReductionOpRecord : RecordFunctor {
                     << fusion_op_.target_type().name() << "] [other: 0x"
                     << child_ptr->fusion_op_.target_type().name() << "]";
         }
+        // IMPORTANT! you need to dereference the target pointer in order
+        // to match the function
         result = result &&
             (*fusion_op_.template target<
                  Nvf::
