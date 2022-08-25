@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <c10/core/SymInt.h>
 #include <ATen/ops/_reshape_alias.h>
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/SymIntArrayRef.h>
@@ -1234,11 +1235,10 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
 //
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
-template <typename Vec>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
-    const Vec& sizes,
-    const Vec& strides) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
   //caller should make sure that sizes and strides are valid for self
   //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
@@ -1319,7 +1319,7 @@ Tensor _reshape_alias(const Tensor& self, SymIntArrayRef sizes, SymIntArrayRef s
   // to `view`. This removes the overhead of calling `view` which duplicates some of
   // the work that's already been done (`infer_size_dv` and `computeStride`).
 
-  return alias_with_sizes_and_strides(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides));
+  return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
 Tensor _reshape_alias(const Tensor& self, at::IntArrayRef sizes, at::IntArrayRef strides) {
@@ -2871,7 +2871,7 @@ inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+  return alias_with_sizes_and_strides(self, c10::SymIntArrayRef::fromIntArrayRef(inferred_size), c10::SymIntArrayRef::fromIntArrayRef(*stride));
 
 }
 
@@ -3243,7 +3243,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+    return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
 }
 
 Tensor detach(const Tensor& self) {
