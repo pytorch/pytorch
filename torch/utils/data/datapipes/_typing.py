@@ -351,11 +351,11 @@ class _IterDataPipeMeta(_DataPipeMeta):
             @functools.wraps(reset_func)
             def conditional_reset(*args, **kwargs):
                 r"""
-                Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating`. This allows recently
+                Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`. This allows recently
                 restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
-                if datapipe._snapshot_state == _SnapshotState.Iterating:
+                if datapipe._snapshot_state in (_SnapshotState.Iterating, _SnapshotState.NotStarted):
                     # Reset `NotStarted` is necessary because the `source_datapipe` of a DataPipe might have
                     # already begun iterating.
                     datapipe._number_of_samples_yielded = 0
