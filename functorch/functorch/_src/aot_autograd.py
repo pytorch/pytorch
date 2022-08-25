@@ -177,8 +177,6 @@ def normalize_as_list(x):
 
 aot_autograd_decompositions = {}
 
-# TODO: Remove these stupid decompositions
-
 
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
