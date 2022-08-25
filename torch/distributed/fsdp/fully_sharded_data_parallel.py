@@ -1509,14 +1509,14 @@ class FullyShardedDataParallel(nn.Module):
         if self.limit_all_gathers:
             queue = self._free_event_queue
             events: List[FreeEvent] = []
-            while queue.queue_size >= self._max_inflight_all_gather_size:
-                event = queue.dequeue()
-                if event is None:
-                    # If there is no event to dequeue, then the queue has
-                    # unexpectedly become corrupted -- raise an error
-                    queue.check_integrity()
-                    assert 0, "Queue integrity check should have failed"
-                events.append(event)
+            if queue.queue_size > self._max_inflight_all_gather_size:
+                # Upon reaching the limit, flush the queue
+                while queue.queue_size > 0:
+                    event = queue.dequeue()
+                    if event is None:
+                        queue.check_integrity()
+                        assert 0, "Queue integrity check should have failed"
+                    events.append(event)
             # As an optimization, only synchronize the latest event
             if events:
                 events[-1].cuda_event.synchronize()
