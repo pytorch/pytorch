@@ -1,0 +1,29 @@
+#pragma once
+
+#include <ATen/native/special/detail/spherical_hankel_h_2.h>
+#include <ATen/native/special/detail/promote_t.h>
+
+namespace at {
+namespace native {
+namespace special {
+template<typename T1>
+C10_HOST_DEVICE
+inline constexpr
+c10::complex<detail::promote_t<T1>>
+spherical_hankel_h_2(unsigned int n, T1 z) {
+  using T2 = detail::promote_t<T1>;
+
+  return detail::spherical_hankel_h_2<T2>(n, z);
+}
+
+//template<typename T1>
+//inline constexpr
+//c10::complex<detail::promote_t<T1>>
+//spherical_hankel_h_2(unsigned int n, c10::complex<T1> z) {
+//  using T2 = detail::promote_t<T1>;
+//
+//  return detail::spherical_hankel_h_2<T2>(n, z);
+//}
+} // namespace special
+} // namespace native
+} // namespace at
