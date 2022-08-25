@@ -614,7 +614,20 @@ def forward(self, x_1):
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
 
+    def test_amp_cache(self):
+        layer = torch.nn.Conv2d(3, 3, 3).cuda()
 
+        def f(x, w):
+            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
+
+        inp = torch.randn(4, 3, 10, 10, device='cuda')
+        with torch.autocast('cuda'):
+            out_graph = make_fx(f)(inp, layer.weight).graph
+            out_graph2 = make_fx(f)(inp, layer.weight).graph
+
+        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
+        for a, b in zip(out_graph.nodes, out_graph2.nodes):
+            self.assertEqual(a.op, b.op)
 
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):

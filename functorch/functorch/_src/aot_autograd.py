@@ -283,33 +283,22 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-@contextmanager
-def disable_autocast_cache():
-    old_value = torch.is_autocast_cache_enabled()
-    torch.set_autocast_cache_enabled(False)
-    try:
-        yield
-    finally:
-        torch.set_autocast_cache_enabled(old_value)
-
-
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
-    with disable_autocast_cache():
-        out = flat_fn(*flat_args)
-        out = pytree.tree_map(
-            lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-            out,
-        )
+    out = flat_fn(*flat_args)
+    out = pytree.tree_map(
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+        out,
+    )
 
-        if isinstance(out, (list, tuple)):
-            _num_outs = len(out)
-        else:
-            _num_outs = 1
+    if isinstance(out, (list, tuple)):
+        _num_outs = len(out)
+    else:
+        _num_outs = 1
 
-        joint_inputs = (flat_args, out)
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+    joint_inputs = (flat_args, out)
+    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.use_functionalize:
         # Functionalize the foward backward graph. First create a
