@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: !{{ common.upload_artifact_s3_action }}
+      - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
           name: !{{ config["build_name"] }}
@@ -93,7 +93,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      - uses: !{{ common.download_artifact_s3_action }}
+      - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}

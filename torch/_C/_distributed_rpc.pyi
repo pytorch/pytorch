@@ -4,8 +4,9 @@ import enum
 import torch
 from torch.types import Device
 from . import Future
-from ._autograd import ProfilerConfig, ProfilerState, ProfilerEvent
+from ._autograd import ProfilerEvent
 from ._distributed_c10d import ProcessGroup, Store
+from ._profiler import ActiveProfilerType, ProfilerConfig, ProfilerState
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
@@ -77,7 +78,7 @@ class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
         _channels: Optional[List],
         rpc_timeout: float = _DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = _DEFAULT_INIT_METHOD,
-        device_maps: Dict[str, Dict[torch.device, torch.device]] = dict(),
+        device_maps: Dict[str, Dict[torch.device, torch.device]] = {},
         devices: List[torch.device] = list()): ...
     def _set_device_map(self, to: str, device_map: Dict[torch.device, torch.device]): ...
 
