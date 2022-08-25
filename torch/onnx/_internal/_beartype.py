@@ -4,6 +4,7 @@ The module returns a no-op decorator when the beartype library is not installed.
 """
 import functools
 import traceback
+from types import ModuleType
 import typing
 import warnings
 
@@ -53,7 +54,7 @@ def _create_beartype_decorator(
             )
         return _no_op_decorator
     else:
-        assert _beartype_lib is not None
+        assert isinstance(_beartype_lib, ModuleType)
 
         if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
             # Enable runtime type checking which errors on any type hint violation.
