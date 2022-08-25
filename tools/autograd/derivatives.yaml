@@ -835,13 +835,10 @@
   index: non_differentiable
   result: auto_linear
 
-- name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
-  result: -at::matmul(at::matmul(result, self_t), result)
-
-- name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
-  self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
-  inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
+- name: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+  A: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
+  inverse: -at::matmul(at::matmul(inverse, A_t), inverse)
+  output_differentiability: [True, False]
 
 - name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   self: pinv_backward(grad, result, self)

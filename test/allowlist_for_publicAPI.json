@@ -2001,7 +2001,6 @@
     "_is_functional_tensor",
     "_is_zerotensor",
     "_linalg_check_errors",
-    "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
     "_linalg_solve_ex",

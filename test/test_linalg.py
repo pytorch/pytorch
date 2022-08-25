@@ -2719,7 +2719,7 @@ class TestLinalg(TestCase):
 
             # Compare against NumPy output
             # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
-            # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
+            # But in PyTorch 'gertf' + 'getrs' is used. As such, there may be some element-wise differences
             expected = np.linalg.inv(matrix.cpu().numpy())
             self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=self.precision)
 
@@ -3008,7 +3008,7 @@ class TestLinalg(TestCase):
         # dtypes should match
         a = torch.eye(2, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.inv(a, out=out)
 
         # device should match
