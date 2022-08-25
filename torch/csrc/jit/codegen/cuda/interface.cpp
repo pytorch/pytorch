@@ -917,7 +917,8 @@ RegisterOperators reg_expand_copy({
                 "alias ops, should be restored after fusion pass!");
             IValue self, size, implicit;
             pop(stack, self, size, implicit);
-            push(stack, self.toTensor().expand(size.toIntVector()));
+            push(
+                stack, at::native::expand(self.toTensor(), size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),

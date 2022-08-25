@@ -37,9 +37,6 @@ from torchgen.utils import assert_never
 # native:: kernels.  The intention is to make native API and dispatcher API
 # line up as closely as possible, since this results in the least overhead
 # (no translation is needed from dispatcher API to native API).
-#
-# NB: this is symint aware, you will get the non-SymInt variant for some
-# dispatch entries and SymInt for others.
 
 
 def name(func: FunctionSchema) -> str:
@@ -52,9 +49,7 @@ def name(func: FunctionSchema) -> str:
     return name
 
 
-def argumenttype_type(
-    t: Type, *, mutable: bool, binds: ArgName, symint: bool
-) -> NamedCType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     if str(t) == "Tensor?":
         tensor_type: OptionalCType = OptionalCType(BaseCType(tensorT))
         if mutable and not local.use_const_ref_for_mutable_tensors():
@@ -69,22 +64,19 @@ def argumenttype_type(
         return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
     elif str(t) == "Scalar?":
         return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
-    return cpp.argumenttype_type(t, mutable=mutable, binds=binds, symint=symint)
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 
-def returns_type(rs: Sequence[Return], *, symint: bool) -> CType:
-    return cpp.returns_type(rs, symint=symint)
+def returns_type(rs: Sequence[Return]) -> CType:
+    return cpp.returns_type(rs)
 
 
-def argument_type(a: Argument, *, binds: ArgName, symint: bool) -> NamedCType:
-    return argumenttype_type(a.type, mutable=a.is_write, binds=binds, symint=symint)
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 
 def argument(
-    a: Union[Argument, SelfArgument, TensorOptionsArguments],
-    *,
-    is_out: bool,
-    symint: bool,
+    a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool
 ) -> List[Binding]:
     # Ideally, we NEVER default native functions.  However, there are a number
     # of functions that call native:: directly and rely on the defaulting
@@ -98,7 +90,7 @@ def argument(
             default = cpp.default_expr(a.default, a.type)
         return [
             Binding(
-                nctype=argument_type(a, binds=a.name, symint=symint),
+                nctype=argument_type(a, binds=a.name),
                 name=a.name,
                 default=default,
                 argument=a,
@@ -106,7 +98,7 @@ def argument(
         ]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return argument(a.argument, is_out=is_out, symint=symint)
+        return argument(a.argument, is_out=is_out)
     elif isinstance(a, TensorOptionsArguments):
         default = None
         if should_default:
@@ -144,10 +136,8 @@ def argument(
         assert_never(a)
 
 
-def arguments(func: FunctionSchema, *, symint: bool) -> List[Binding]:
+def arguments(func: FunctionSchema) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(func.arguments.non_out)
     args.extend(func.arguments.out)
-    return [
-        r for arg in args for r in argument(arg, symint=symint, is_out=func.is_out_fn())
-    ]
+    return [r for arg in args for r in argument(arg, is_out=func.is_out_fn())]

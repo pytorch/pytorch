@@ -337,16 +337,10 @@ Check this module for more information.
                 )
                 return f"c10::asIntArrayRefSlow({symIntArrayRef_type})"
         elif goal.type == BaseCType(symIntArrayRefT):
-            try:
-                r = direct_solve(NamedCType(goal.name, BaseCType(intArrayRefT)))
-                return f"c10::SymIntArrayRef::fromIntArrayRef({r})"
-            except UnsatError:
-                return direct_solve(NamedCType(goal.name, longSymVec_ctype))
-        elif goal.type == BaseCType(SymIntT):
-            return direct_solve(NamedCType(goal.name, BaseCType(longT)))
+            return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(longT):
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
-            return f"{symInt_type}.expect_int()"
+            return f"{symInt_type}.expectInt()"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
