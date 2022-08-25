@@ -82,7 +82,7 @@ class Linear(nnq.Linear):
                           utilities or provided by the user
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
-                         torch.nn.intrinsic.modules.fused.LinearReLU, torch.nn.qat.dynamic.Linear]
+                         torch.nn.intrinsic.modules.fused.LinearReLU, torch.ao.nn.qat.dynamic.Linear]
 
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \
