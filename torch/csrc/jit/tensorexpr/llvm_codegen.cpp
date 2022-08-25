@@ -1002,7 +1002,7 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
-  value_ = llvm::ConstantInt::get(ShortTy_, v->value());
+  value_ = llvm::ConstantInt::get(ShortTy_, v->value().x);
 }
 
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
