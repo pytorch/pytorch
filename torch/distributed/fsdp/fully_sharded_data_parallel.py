@@ -396,6 +396,7 @@ class _ExecOrderData:
         self.all_handles: List[FlatParamHandle] = []
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
         self.flat_param_to_prefixed_param_names: Dict[FlatParameter, List[str]] = {}
+        self.handles_debug_pre_forward_order: List[int] = []
         self.current_order_index = 0
         self.warn_status = _ExecOrderWarnStatus.NONE
 
@@ -432,20 +433,33 @@ class _ExecOrderData:
     def get_handles_to_backward_prefetch(
         self,
         current_handles_key: HandlesKey,
+        backward_prefetch: BackwardPrefetch,
     ) -> Optional[HandlesKey]:
         """
         Returns the handles key of the handles to backward prefetch given the
         current handles key or ``None`` if there is no valid handles key to
         prefetch.
         """
-        current_index = self.handles_to_post_forward_order_index.get(current_handles_key, None)
-        if current_index is None:
-            return None
-        target_index = current_index - 1
-        if target_index < 0:
-            return None
-        target_handles_key = self.handles_post_forward_order[target_index]
-        return target_handles_key
+        if backward_prefetch == BackwardPrefetch.BACKWARD_PRE:
+            # Prefetch using the reverse post-forward order
+            current_index = self.handles_to_post_forward_order_index.get(current_handles_key, None)
+            if current_index is None:
+                return None
+            target_index = current_index - 1
+            if target_index < 0:
+                return None
+            return self.handles_post_forward_order[target_index]
+        elif backward_prefetch == BackwardPrefetch.BACKWARD_POST:
+            # Prefetch using the reverse pre-forward order
+            current_index = self.handles_to_pre_forward_order_index.get(current_handles_key, None)
+            if current_index is None:
+                return None
+            target_index = current_index - 1
+            if target_index < 0:
+                return None
+            return self.handles_pre_forward_order[target_index]
+        else:
+            raise AssertionError(f"Unsupported `backward_prefetch`: {backward_prefetch}")
 
     def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
         """
@@ -470,9 +484,9 @@ class _ExecOrderData:
 
     def record_pre_forward(self, handles: List[FlatParamHandle]) -> None:
         """
-        Records ``handles`` in the pre-forward order on the first iteration,
-        where ``handles`` should be a group of handles used in the same
-        module's forward. If ``handles`` is empty, then it is omitted.
+        Records ``handles`` in the pre-forward order, where ``handles`` should
+        be a group of handles used in the same module's forward. If ``handles``
+        is empty, then it is omitted.
 
         If the distributed debug level is at least INFO, then this additionally
         checks the execution order across ranks. See :meth:`_check_order` for
@@ -483,12 +497,12 @@ class _ExecOrderData:
         handles_key = tuple(handles)
         if self._checking_order:
             self._check_order(handles_key)
-        # Fix the order after the first iteration and only record the first
-        # usage of a handles key
-        if (
-            not self.is_first_iter
-            or handles_key in self.handles_to_pre_forward_order_index
-        ):
+            # Fix the debug pre-forward order after the first iteration since
+            # we check against the first iteration order thereafter
+            if self.is_first_iter:
+                self.handles_debug_pre_forward_order.append(handles_key)
+        # Only record the first usage of a handles key
+        if handles_key in self.handles_to_post_forward_order_index:
             return
         index = len(self.handles_pre_forward_order)
         self.handles_to_pre_forward_order_index[handles_key] = index
@@ -572,14 +586,14 @@ class _ExecOrderData:
             if self.warn_status == _ExecOrderWarnStatus.WARNED:
                 return
             msg_prefix = None  # non-`None` means we should warn
-            if self.current_order_index >= len(self.handles_pre_forward_order):
+            if self.current_order_index >= len(self.handles_debug_pre_forward_order):
                 # This iteration sees extra all-gather(s) compared to the first
                 msg_prefix = (
                     "Expected to not all-gather any more parameters in the "
                     "forward but trying to all-gather parameters for "
                 )
             else:
-                expected_handles_key = self.handles_pre_forward_order[
+                expected_handles_key = self.handles_debug_pre_forward_order[
                     self.current_order_index
                 ]
                 if expected_handles_key != handles_key:
@@ -1909,7 +1923,9 @@ class FullyShardedDataParallel(nn.Module):
             training_state == HandleTrainingState.PRE_BACKWARD
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
         ):
-            target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
+            target_handles_key = eod.get_handles_to_backward_prefetch(
+                current_handles_key, self.backward_prefetch,
+            )
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
                 if target_training_state != HandleTrainingState.POST_BACKWARD:
@@ -1918,7 +1934,9 @@ class FullyShardedDataParallel(nn.Module):
             training_state == HandleTrainingState.POST_BACKWARD
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
         ):
-            target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
+            target_handles_key = eod.get_handles_to_backward_prefetch(
+                current_handles_key, self.backward_prefetch,
+            )
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
                 # TODO (awgu): I think we should check that the target training
