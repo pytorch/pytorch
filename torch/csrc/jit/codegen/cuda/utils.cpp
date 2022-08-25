@@ -287,12 +287,12 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
   return dump_options.at(option);
 }
 
-bool isDisabled(DisableOption option) {
+bool isOptionDisabled(DisableOption option) {
   const static auto options = parseDisableOptions();
   return options.at(option);
 }
 
-bool isEnabled(EnableOption option) {
+bool isOptionEnabled(EnableOption option) {
   const static auto options = parseEnableOptions();
   return options.at(option);
 }
@@ -301,7 +301,8 @@ bool useFallback() {
   // Keep this env var for compatibility
   const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
   bool fallback_disabled = disable_fb_env ? atoi(disable_fb_env) : false;
-  fallback_disabled = fallback_disabled || isDisabled(DisableOption::Fallback);
+  fallback_disabled =
+      fallback_disabled || isOptionDisabled(DisableOption::Fallback);
 
   return !fallback_disabled;
 }
