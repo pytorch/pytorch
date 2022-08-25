@@ -1,4 +1,3 @@
-import functools
 import torch
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
@@ -54,7 +53,7 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
-            help_text = f'Use `with Mode():` instead.'
+            help_text = 'Use `with Mode():` instead.'
         else:
             help_text = (
                 'If you intended to completely override the preexisting mode, '
@@ -77,6 +76,19 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
     mode_info.set_mode(mode)
     try:
         yield mode  # type: ignore[misc]
+    finally:
+        mode_info.set_mode(old)
+
+
+def _restore_mode(mode, mode_info: _ModeInfo):
+    if not hasattr(mode, "ancestors"):
+        raise RuntimeError(f"{mode} does not have any ancestors. Use the standard version instead of restore")
+    old = mode_info.get_mode()
+    if old is not None and old not in mode.ancestors:
+        raise RuntimeError(f"{mode} is not valid in the current state because the current mode is not its ancestor")
+    mode_info.set_mode(mode)
+    try:
+        yield mode
     finally:
         mode_info.set_mode(old)
 
