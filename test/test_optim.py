@@ -2833,6 +2833,7 @@ class TestSWAUtils(TestCase):
         # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
@@ -2851,11 +2852,17 @@ class TestSWAUtils(TestCase):
                 else:
                     updated_averaged_params.append((p_avg * alpha +
                                                    p * (1 - alpha)).clone())
+            for b in dnn.buffers():
+                if b.size() != torch.Size([]):
+                    b.detach_().add_(torch.randn_like(b))
+
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
+        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+            self.assertEqual(b_avg, b_swa)
 
     def test_averaged_model_exponential_buffers(self):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
