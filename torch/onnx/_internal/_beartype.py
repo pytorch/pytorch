@@ -4,27 +4,11 @@ The module returns a no-op decorator when the beartype library is not installed.
 """
 import functools
 import traceback
+import typing
 import warnings
 
 from torch.onnx import errors, _exporter_states
 from torch.onnx._globals import GLOBALS
-
-
-try:
-    from beartype import roar as _roar
-    import beartype as _beartype_lib
-
-    # Beartype warns when we import from typing because the types are deprecated
-    # in Python 3.9. But there will be a long time until we can move to using
-    # the native container types for type annotations (when 3.9 is the lowest
-    # supported version). So we silence the warning.
-    warnings.filterwarnings(
-        "ignore",
-        category=_roar.BeartypeDecorHintPep585DeprecationWarning,
-    )
-    has_beartype = True
-except ImportError:
-    has_beartype = False
 
 
 def _no_op_decorator(func):
@@ -34,6 +18,22 @@ def _no_op_decorator(func):
 def _create_beartype_decorator(
     runtime_check_state: _exporter_states.RuntimeTypeCheckState,
 ):
+
+    try:
+        from beartype import roar as _roar
+        import beartype as _beartype_lib
+
+        # Beartype warns when we import from typing because the types are deprecated
+        # in Python 3.9. But there will be a long time until we can move to using
+        # the native container types for type annotations (when 3.9 is the lowest
+        # supported version). So we silence the warning.
+        warnings.filterwarnings(
+            "ignore",
+            category=_roar.BeartypeDecorHintPep585DeprecationWarning,
+        )
+        has_beartype = True
+    except ImportError:
+        has_beartype = False
 
     if runtime_check_state == _exporter_states.RuntimeTypeCheckState.DISABLED:
         # Return a simple no-op decorator when TYPE_CHECKING to make mypy happy
@@ -93,6 +93,9 @@ def _create_beartype_decorator(
             return _no_op_decorator
 
 
-beartype = _create_beartype_decorator(GLOBALS.runtime_type_check_state)
-# Make sure that the beartype decorator is enabled whichever path we took.
-assert beartype is not None
+if typing.TYPE_CHECKING:
+    beartype = _no_op_decorator
+else:
+    beartype = _create_beartype_decorator(GLOBALS.runtime_type_check_state)
+    # Make sure that the beartype decorator is enabled whichever path we took.
+    assert beartype is not None
