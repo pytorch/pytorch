@@ -128,6 +128,10 @@ TESTS = discover_tests(
     ]
 )
 
+# The doctests are a special case that don't correspond to a file that discover
+# tests can enable.
+TESTS = TESTS + ['doctests']
+
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Tests need to be run with pytest.
@@ -348,20 +352,6 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
-            # Enable xdoctest
-            # TODO: enable xdoctest later
-            # Many doctests assume the existence of these variables
-            # xdoctest_global_exec_lines = r'\n'.join([
-            #     'from torch import nn',
-            #     'import torch.nn.functional as F',
-            #     'import torch',
-            # ])
-            # executable += [
-            #     "--xdoctest",
-            #     "--xdoctest-style=google",
-            #     f"--xdoctest-global-exec='{xdoctest_global_exec_lines}'",
-            #     "--xdoctest-options=+IGNORE_WHITESPACE"
-            # ]
         else:
             print_to_stderr(
                 "Pytest cannot be used for this test. Falling back to unittest."
@@ -565,6 +555,81 @@ def test_distributed(test_module, test_directory, options):
     return 0
 
 
+def run_doctests(test_module, test_directory, options):
+    """
+    Assumes the incoming test module is called doctest, and simply executes the
+    xdoctest runner on the torch library itself.
+    """
+    import xdoctest
+    import pathlib
+    pkgpath = pathlib.Path(torch.__file__).parent
+
+    #
+    enabled = {
+        # TODO: expose these options to the user
+        # Temporary disable all feature-conditional tests
+        # 'lapack': 'auto',
+        # 'cuda': 'auto',
+        # 'cuda1': 'auto',
+        # 'qengine': 'auto',
+        'lapack': 0,
+        'cuda': 0,
+        'cuda1': 0,
+        'qengine': 0,
+    }
+
+    # Resolve "auto" based on a test to determine if the feature is available.
+    if enabled['cuda'] == 'auto' and torch.cuda.is_available():
+        enabled['cuda'] = True
+
+    if enabled['cuda1'] == 'auto' and torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        enabled['cuda1'] = True
+
+    if enabled['lapack'] == 'auto' and torch._C.has_lapack:
+        enabled['lapack'] = True
+
+    if enabled['qengine'] == 'auto':
+        try:
+            # Is there a better check if quantization is enabled?
+            import torch.nn.quantized as nnq  # NOQA
+            torch.backends.quantized.engine = 'qnnpack'
+            torch.backends.quantized.engine = 'fbgemm'
+        except (ImportError, RuntimeError):
+            ...
+        else:
+            enabled['qengine'] = True
+
+    # Set doctest environment variables
+    if enabled['cuda']:
+        os.environ['TORCH_DOCTEST_CUDA'] = '1'
+
+    if enabled['cuda1']:
+        os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+
+    if enabled['lapack']:
+        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+
+    if enabled['qengine']:
+        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+
+    pkgpath = os.path.dirname(torch.__file__)
+    xdoctest_config = {
+        'global_exec': r'\n'.join([
+            'from torch import nn',
+            'import torch.nn.functional as F',
+            'import torch',
+        ]),
+        'style': 'google',
+        'options': '+IGNORE_WHITESPACE',
+    }
+    xdoctest_verbose = max(1, options.verbose)
+    run_summary = xdoctest.runner.doctest_module(
+        os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
+        command=options.xdoctest_command, argv=[])
+    result = 1 if run_summary.get('n_failed', 0) else 0
+    return result
+
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
@@ -583,6 +648,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "doctests": run_doctests,
 }
 
 
@@ -738,6 +804,15 @@ def parse_args():
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
+    )
+    parser.add_argument(
+        "--xdoctest-command",
+        default='list',
+        help=(
+            "Control the specific doctest action. "
+            "Use 'list' to simply parse doctests and check syntax. "
+            "Use 'all' to execute all doctests or specify a specific "
+            "doctest to run")
     )
     return parser.parse_args()
 
