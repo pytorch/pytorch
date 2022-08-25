@@ -24,6 +24,7 @@ def func_with_incorrect_type_hint(x: int) -> str:
     return x  # type: ignore
 
 
+@common_utils.instantiate_parametrized_tests
 class TestBeartype(common_utils.TestCase):
     def test_create_beartype_decorator_returns_no_op_decorator_when_disabled(self):
         decorator = _beartype._create_beartype_decorator(
