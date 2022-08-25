@@ -700,7 +700,7 @@ Tensor clone_nested(
     //       but it is more conservative.
     //       This is something we could revisit once we land a more
     //       efficient implementation of nested_size_tensor_ and nested_stride_tensor.
-    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), offsets);
+    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
   }
   // actually, memory format is contiguous and self is noncontiguous
   else if (memory_format == c10::MemoryFormat::Contiguous) {
