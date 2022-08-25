@@ -422,6 +422,11 @@ Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor reshape_symint_batching_rule(const Tensor& self, SymIntArrayRef shape) {
+  // TODO: properly support this
+  return reshape_batching_rule(self, asIntArrayRefSlow(shape));
+}
+
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -1124,7 +1129,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mT", native::mT);             // composite wrt autograd
   m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
-  m.impl("reshape", reshape_batching_rule);
+  m.impl("reshape", reshape_symint_batching_rule);
   m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
