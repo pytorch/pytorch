@@ -433,6 +433,68 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy("call_module", module_qualified_name, args, kwargs)
 
+    @compatibility(is_backward_compatible=False)
+    def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
+        """
+        Method that specifies the behavior of this ``Tracer`` when we call getattr
+        on a call to an ``nn.Module`` instance.
+
+        By default, the behavior is to return a proxy value for the attribute. It
+        also stores the proxy value in the ``parameter_proxy_cache``, so that future
+        calls will reuse the proxy rather than creating a new one.
+
+        This method can be overridden to --for example-- not return proxies when
+        querying parameters.
+
+        Args:
+
+            attr (str): The name of the attribute being queried
+            attr_val (Any): The value of the attribute
+            parametr_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
+
+        Return:
+
+            The return value from the getattr call.
+        """
+        def maybe_get_proxy_for_attr(
+            attr_val, collection_to_search, parameter_proxy_cache
+        ):
+            for n, p in collection_to_search:
+                if attr_val is p:
+                    if n not in parameter_proxy_cache:
+                        kwargs = {}
+                        if (
+                            "proxy_factory_fn"
+                            in inspect.signature(self.create_proxy).parameters
+                        ):
+                            kwargs["proxy_factory_fn"] = (
+                                None
+                                if not self.param_shapes_constant
+                                else lambda node: ParameterProxy(
+                                    self, node, n, attr_val
+                                )
+                            )
+                        val_proxy = self.create_proxy("get_attr", n, (), {}, **kwargs)  # type: ignore[arg-type]
+                        parameter_proxy_cache[n] = val_proxy
+                    return parameter_proxy_cache[n]
+            return None
+
+        if isinstance(attr_val, torch.nn.Parameter):
+            maybe_parameter_proxy = maybe_get_proxy_for_attr(
+                attr_val, self.root.named_parameters(), parameter_proxy_cache
+            )
+            if maybe_parameter_proxy is not None:
+                return maybe_parameter_proxy
+
+        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
+            maybe_buffer_proxy = maybe_get_proxy_for_attr(
+                attr_val, self.root.named_buffers(), parameter_proxy_cache
+            )
+            if maybe_buffer_proxy is not None:
+                return maybe_buffer_proxy
+
+        return attr_val
+
     # This method will be refactored
     @compatibility(is_backward_compatible=False)
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
@@ -559,46 +621,6 @@ class Tracer(TracerBase):
             return flatten_fn, flat_args
         return root_fn, args
 
-    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        def maybe_get_proxy_for_attr(
-            attr_val, collection_to_search, parameter_proxy_cache
-        ):
-            for n, p in collection_to_search:
-                if attr_val is p:
-                    if n not in parameter_proxy_cache:
-                        kwargs = {}
-                        if (
-                            "proxy_factory_fn"
-                            in inspect.signature(self.create_proxy).parameters
-                        ):
-                            kwargs["proxy_factory_fn"] = (
-                                None
-                                if not self.param_shapes_constant
-                                else lambda node: ParameterProxy(
-                                    self, node, n, attr_val
-                                )
-                            )
-                        val_proxy = self.create_proxy("get_attr", n, (), {}, **kwargs)  # type: ignore[arg-type]
-                        parameter_proxy_cache[n] = val_proxy
-                    return parameter_proxy_cache[n]
-            return None
-
-        if isinstance(attr_val, torch.nn.Parameter):
-            maybe_parameter_proxy = maybe_get_proxy_for_attr(
-                attr_val, self.root.named_parameters(), parameter_proxy_cache
-            )
-            if maybe_parameter_proxy is not None:
-                return maybe_parameter_proxy
-
-        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
-            maybe_buffer_proxy = maybe_get_proxy_for_attr(
-                attr_val, self.root.named_buffers(), parameter_proxy_cache
-            )
-            if maybe_buffer_proxy is not None:
-                return maybe_buffer_proxy
-
-        return attr_val
-
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
@@ -679,7 +701,7 @@ class Tracer(TracerBase):
             @functools.wraps(_orig_module_getattr)
             def module_getattr_wrapper(mod, attr):
                 attr_val = _orig_module_getattr(mod, attr)
-                return self._module_getattr(attr, attr_val, parameter_proxy_cache)
+                return self.getattr(attr, attr_val, parameter_proxy_cache)
 
             @functools.wraps(_orig_module_call)
             def module_call_wrapper(mod, *args, **kwargs):
