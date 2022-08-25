@@ -816,9 +816,6 @@ class NativeFunction:
             backend_metadata,
         )
 
-    def symints_to_ints(self) -> "NativeFunction":
-        return dataclasses.replace(self, func=self.func.symints_to_ints())
-
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
         # at once
@@ -882,6 +879,20 @@ class NativeFunction:
                 "device_check not allowed to be enabled"
             )
 
+        # NB: if your function accidentally has rand/dropout/... in its name
+        # but is not actually random, feel free to amend this to special case
+        if (
+            "rand" in str(self.func.name)
+            or (
+                "dropout" in str(self.func.name)
+                # Backwards of dropout is typically deterministic
+                and "backward" not in str(self.func.name)
+                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
+            )
+            or self.func.arguments.has_generator_arg()
+        ):
+            assert "nondeterministic_seeded" in self.tags, str(self.func.name)
+
     @property
     def has_composite_kernel(self) -> bool:
         return (
@@ -901,7 +912,7 @@ class NativeFunction:
             "inplace_view" in self.tags and str(self.func.name) != "resize_"
         )
         is_wildcard_view = any(
-            inp.annotation is not None and inp.annotation.alias_set_after != ""
+            inp.annotation is not None and "*" in inp.annotation.alias_set_after
             for inp in self.func.schema_order_arguments()
         )
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -1101,6 +1112,8 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
+    # Whether or not this backend handles symbolic ints or not
+    symint: bool
 
     @staticmethod
     def grow_index(
@@ -1218,9 +1231,6 @@ class FunctionSchema:
         )
 
     decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
-
-    def symints_to_ints(self) -> "FunctionSchema":
-        return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
 
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
@@ -1343,10 +1353,6 @@ class FunctionSchema:
 
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
-
-    def is_symint_fn(self) -> bool:
-        # TODO: make this more robust
-        return "SymInt" in self.name.overload_name
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1555,6 +1561,11 @@ class FunctionSchema:
     def modifies_arguments(self) -> bool:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
+    def has_symint(self) -> bool:
+        return self.arguments.has_symint_arg() or any(
+            r.type.is_symint_like() for r in self.returns
+        )
+
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)
         if len(self.returns) == 1:
@@ -1577,26 +1588,37 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
-    alias_set_after: str
+    alias_set_after: Tuple[str, ...]
 
     @staticmethod
     def parse(ann: str) -> "Annotation":
-        # Only handling afterSet == Wildcard for now
-        becomes_wildcard_index = ann.find(" -> *")
-        if becomes_wildcard_index != -1:
-            after_set = "*"
-            # TODO: im not good enough with regexes to ignore -> *
-            m = re.match(
-                r"^([a-z])(!?)(!?)$",
-                ann[:becomes_wildcard_index]
-                + ann[becomes_wildcard_index + len(" -> *") :],
-            )
-        else:
-            after_set = ""
-            m = re.match(r"^([a-z])(!?)(!?)$", ann)
+        # TODO: implement a proper parser if this gets more ugly
+        # Regex Explanation:
+        # Example: "a! -> a|b"
+        # Group #1: alias before optional '|', required. Matches the first
+        #   character 'a' in the example
+        # Group #2: optional alias set after optional '|', matches empty string
+        #   in the example
+        # Group #3: optional "is write" flag, matches '!' in the example.
+        # Group #4: optional section containing arrow, matches " -> a|b" in the
+        #   example.
+        # Group #5: optional alias after set, supports wildcard, matches "a|b"
+        #   in the example.
+        # Group #6: optional sub-section of alias after set, matches "|b" in the
+        #   example.
+        m = re.match(r"^([a-z])(\|[a-z])*(!?)( -> (\*|[a-z](\|[a-z])*))?$", ann)
+
         assert m is not None, f"unrecognized alias annotation {ann}"
-        alias_set = (m.group(1),)
-        is_write = m.group(2) == "!"
+        before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
+        alias_set = tuple(before_alias.split("|"))
+        is_write = m.group(3) == "!"
+        assert not (
+            is_write and len(alias_set) > 1
+        ), f"alias set larger than 1 is not mutable, got {ann} instead."
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        assert not (
+            len(before_alias) > 1 and len(after_set) > 1
+        ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
@@ -1605,10 +1627,12 @@ class Annotation:
 
     def __str__(self) -> str:
         alias_set = "|".join(self.alias_set)
-        if self.alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
-        is_write = "!" if self.is_write else ""
-        return f"{alias_set}{is_write}"
+        if self.is_write:
+            alias_set = f"{alias_set}!"
+        alias_set_after = "|".join(self.alias_set_after)
+        if alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+        return alias_set
 
 
 # The base class for the type system.  This is also loosely modeled
@@ -1652,16 +1676,22 @@ class Type:
     # so we can conveniently generate legacy Declarations.yaml but
     # really we should probably just remove these at some point
 
-    def is_tensor_like(self) -> bool:
+    def is_base_ty_like(self, base_ty: "BaseTy") -> bool:
         raise NotImplementedError
+
+    def is_tensor_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.Tensor)
+
+    def is_generator_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.Generator)
+
+    def is_symint_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.SymInt)
 
     def is_nullable(self) -> bool:
         raise NotImplementedError
 
     def is_list_like(self) -> Optional["ListType"]:
-        raise NotImplementedError
-
-    def symint_to_int(self) -> "Type":
         raise NotImplementedError
 
 
@@ -1698,19 +1728,17 @@ class BaseType(Type):
     def __str__(self) -> str:
         return f"{self.name.name}"
 
-    def is_tensor_like(self) -> bool:
-        return self.name == BaseTy.Tensor
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.name == base_ty
 
     def is_nullable(self) -> bool:
         return False
 
-    def symint_to_int(self) -> "BaseType":
-        if self.name == BaseTy.SymInt:
-            return BaseType(BaseTy.int)
-        return self
-
     def is_list_like(self) -> Optional["ListType"]:
         return None
+
+    def is_symint_like(self) -> bool:
+        return self.name == BaseTy.SymInt
 
 
 # Optional types may be specified, or may also be validly given None
@@ -1721,14 +1749,14 @@ class OptionalType(Type):
     def __str__(self) -> str:
         return f"{self.elem}?"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
+
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
 
     def is_nullable(self) -> bool:
         return True
-
-    def symint_to_int(self) -> "Type":
-        return dataclasses.replace(self, elem=self.elem.symint_to_int())
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1745,10 +1773,10 @@ class CustomClassType(Type):
         """
         return f"__torch__.torch.classes.{self.class_name}"
 
-    def is_tensor_like(self) -> bool:
-        """
-        Assume a custom class is not a tensor.
-        """
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return False
+
+    def is_symint_like(self) -> bool:
         return False
 
     def is_nullable(self) -> bool:
@@ -1756,9 +1784,6 @@ class CustomClassType(Type):
         Assume a custom class is not nullable.
         """
         return False
-
-    def symint_to_int(self) -> "Type":
-        return self
 
     def is_list_like(self) -> Optional["ListType"]:
         return None
@@ -1780,14 +1805,14 @@ class ListType(Type):
         size = f"{self.size}" if self.size else ""
         return f"{self.elem}[{size}]"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
+
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
-
-    def symint_to_int(self) -> "ListType":
-        return ListType(self.elem.symint_to_int(), self.size)
 
     def is_list_like(self) -> Optional["ListType"]:
         return self
@@ -1861,9 +1886,6 @@ class Argument:
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
-
-    def symint_to_int(self) -> "Argument":
-        return dataclasses.replace(self, type=self.type.symint_to_int())
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -2054,39 +2076,14 @@ class Arguments:
             if a.annotation is not None and a.annotation.is_write
         ]
 
-    def symints_to_ints(self) -> "Arguments":
-        arguments = self
-
-        if arguments.self_arg:
-            arguments = dataclasses.replace(
-                arguments,
-                pre_self_positional=tuple(
-                    x.symint_to_int() for x in arguments.pre_self_positional
-                ),
-            )
-
-        if self.tensor_options:
-            arguments = dataclasses.replace(
-                arguments,
-                post_tensor_options_kwarg_only=tuple(
-                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ),
-            )
-
-        arguments = dataclasses.replace(
-            arguments,
-            post_self_positional=tuple(
-                x.symint_to_int() for x in arguments.post_self_positional
-            ),
-            pre_tensor_options_kwarg_only=tuple(
-                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ),
-        )
-
-        return arguments
-
     def has_tensor_arg(self) -> bool:
         return any(a.type.is_tensor_like() for a in self.flat_non_out)
+
+    def has_symint_arg(self) -> bool:
+        return any(a.type.is_symint_like() for a in self.flat_non_out)
+
+    def has_generator_arg(self) -> bool:
+        return any(a.type.is_generator_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less
