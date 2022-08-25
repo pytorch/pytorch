@@ -86,7 +86,11 @@ def name(
 # types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
 def valuetype_type(
-    t: Type, *, binds: ArgName, remove_non_owning_ref_types: bool = False, symint: bool = False
+    t: Type,
+    *,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool = False,
 ) -> Optional[NamedCType]:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:

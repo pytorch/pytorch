@@ -217,7 +217,11 @@ class PythonArgument:
     # Compute argument formal for python argument parsing.
     # Needs to be consistent with torch/csrc/utils/python_arg_parser.h.
     def argument_str(self, *, method: bool = False, symint: bool = True) -> str:
-        type_str = argument_type_str(self.type, symint=symint).replace("const ", "").replace(" &", "")
+        type_str = (
+            argument_type_str(self.type, symint=symint)
+            .replace("const ", "")
+            .replace(" &", "")
+        )
 
         name = self.name
         # s/self/input/ outside method bindings
@@ -466,7 +470,9 @@ class PythonSignatureDeprecated(PythonSignature):
 
     def signature_str(self, *, skip_outputs: bool = False, symint: bool = True) -> str:
         return (
-            PythonSignature.signature_str(self, skip_outputs=skip_outputs, symint=symint)
+            PythonSignature.signature_str(
+                self, skip_outputs=skip_outputs, symint=symint
+            )
             + "|deprecated"
         )
 
@@ -633,7 +639,9 @@ def has_tensor_options(f: NativeFunction) -> bool:
 # 'simple_type' was introduced by the old codegen, which is slightly
 # different from the python schema type, e.g.: doesn't have '?' suffix
 # for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
-def argument_type_str(t: Type, *, simple_type: bool = False, symint: bool = True) -> str:
+def argument_type_str(
+    t: Type, *, simple_type: bool = False, symint: bool = True
+) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             return "Tensor"
@@ -676,7 +684,9 @@ def argument_type_str(t: Type, *, simple_type: bool = False, symint: bool = True
             return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
         elif str(t.elem) == "SymInt":
             if symint:
-                return f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
+                return (
+                    f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
+                )
             else:
                 return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
         elif str(t.elem) == "Tensor":
@@ -1253,10 +1263,14 @@ def arg_parser_unpack_method(
             return "toDimnameListOptional"
         elif not has_default_init and default in (None, "None", "c10::nullopt"):
             # If default is None: append 'Optional' to elem's unpacking method
-            return arg_parser_unpack_method(t.elem, None, None, symint=symint) + "Optional"
+            return (
+                arg_parser_unpack_method(t.elem, None, None, symint=symint) + "Optional"
+            )
         else:
             # Otherwise, load as underlying type with default
-            return arg_parser_unpack_method(t.elem, default, default_init, symint=symint)
+            return arg_parser_unpack_method(
+                t.elem, default, default_init, symint=symint
+            )
 
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
