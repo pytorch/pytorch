@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 import os
+import contextlib
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -24,7 +25,6 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
-from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -121,11 +121,7 @@ from torch.ao.quantization.fx.custom_config import (
     StandaloneModuleConfigEntry,
 )
 
-from torch.ao.quantization.fx.prepare import (
-    is_activation_post_process_node,
-)
-
-from torch.ao.quantization.fx.qconfig_utils import (
+from torch.ao.quantization.fx.qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
@@ -949,7 +945,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             self.checkGraphModeFxOp(
@@ -974,7 +970,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             result_dict = self.checkGraphModeFxOp(
@@ -1209,7 +1205,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for (ModuleClass, module_constructor_inputs,
                  inputs, quantized_node, weight_prepack_node) in tests:
                 for is_reference in [True, False]:
-                    node_occurrence = dict()
+                    node_occurrence = {}
                     if weight_prepack_node:
                         node_occurrence[weight_prepack_node] = 0
                     m = ModuleClass(*module_constructor_inputs).eval()
@@ -4786,29 +4782,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
             weight=torch.ao.quantization.default_per_channel_weight_observer
         )
         self.common_quant_patterns = {
-            torch.nn.ConvTranspose1d: CommonQuantizeHandler,
-            torch.nn.ConvTranspose2d: CommonQuantizeHandler,
-            torch.nn.ELU: CommonQuantizeHandler,
-            torch.nn.LeakyReLU: CommonQuantizeHandler,
-            torch.nn.Hardswish: CommonQuantizeHandler,
-            torch.nn.InstanceNorm1d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm2d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm3d: CommonQuantizeHandler,
-            torch.nn.LayerNorm: CommonQuantizeHandler,
-            torch.nn.SiLU: CommonQuantizeHandler,
-            torch.nn.Mish: CommonQuantizeHandler,
-            torch.nn.GELU: CommonQuantizeHandler,
-            torch.nn.Softmax: CommonQuantizeHandler,
-            torch.nn.functional.elu: CommonQuantizeHandler,
-            torch.nn.functional.hardswish: CommonQuantizeHandler,
-            torch.nn.functional.instance_norm: CommonQuantizeHandler,
-            torch.nn.functional.layer_norm: CommonQuantizeHandler,
-            torch.nn.functional.leaky_relu: CommonQuantizeHandler,
-            torch.nn.functional.silu: CommonQuantizeHandler,
-            torch.nn.functional.mish: CommonQuantizeHandler,
-            torch.nn.functional.gelu: CommonQuantizeHandler,
-            torch.nn.functional.softmax: CommonQuantizeHandler,
-            torch.sum: CommonQuantizeHandler
+            torch.nn.ConvTranspose1d: DefaultNodeQuantizeHandler,
+            torch.nn.ConvTranspose2d: DefaultNodeQuantizeHandler,
+            torch.nn.ELU: DefaultNodeQuantizeHandler,
+            torch.nn.LeakyReLU: DefaultNodeQuantizeHandler,
+            torch.nn.Hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm1d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm2d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm3d: DefaultNodeQuantizeHandler,
+            torch.nn.LayerNorm: DefaultNodeQuantizeHandler,
+            torch.nn.SiLU: DefaultNodeQuantizeHandler,
+            torch.nn.Mish: DefaultNodeQuantizeHandler,
+            torch.nn.GELU: DefaultNodeQuantizeHandler,
+            torch.nn.Softmax: DefaultNodeQuantizeHandler,
+            torch.nn.functional.elu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.instance_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.layer_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.leaky_relu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.silu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.mish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.gelu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.softmax: DefaultNodeQuantizeHandler,
+            torch.sum: DefaultNodeQuantizeHandler
         }
 
     """Unit tests for individual ops
@@ -6544,57 +6540,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         ])
         m3(*example_inputs)
 
-    def test_getitem_wrapped_in_observers(self):
-        """
-        Test that, for cases when there are observers around a getitem node:
-            (1) These observers are the same, and
-            (2) The pattern (dequant - getitem - quant) will be fused during the lowering step
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
-                self.conv2 = torch.nn.Conv1d(in_channels=5, out_channels=5, kernel_size=5, padding=0)
-
-            def forward(self, inputs):
-                # inputs: [1, 5, 10]
-                x1 = self.conv1(inputs)
-                # x: [1, 5, 6]
-                x1 = x1 + inputs[:, :, -6:]
-                x2 = self.conv2(x1)
-                x2 = x2 + x1[:, :, -2:]
-                return x2
-
-        m = M()
-        m.eval()
-        qconfig_mapping = get_default_qconfig_mapping()
-        m = prepare_fx(m, qconfig_mapping, example_inputs=torch.rand(1, 5, 10))
-
-        # Input and output observers of getitem should be the same
-        modules = dict(m.named_modules(remove_duplicate=False))
-        for n in m.graph.nodes:
-            if not is_activation_post_process_node(n, modules):
-                continue
-            if n.args[0].op != "call_function" or n.args[0].target != operator.getitem:
-                continue
-            getitem_node = n.args[0]
-            input_observer_node = getitem_node.args[0]
-            output_observer_node = n
-            if not is_activation_post_process_node(input_observer_node, modules):
-                continue
-            input_observer = getattr(m, input_observer_node.name)
-            output_observer = getattr(m, output_observer_node.name)
-            self.assertTrue(input_observer is output_observer,
-                            "Input observer %s for %s is not the same as output observer %s" %
-                            (input_observer_node.name, getitem_node.name, output_observer_node.name))
-
-        m(torch.rand(1, 5, 10))
-        m = convert_fx(m)
-
-        # There should only be one dequantize at the end
-        self.checkGraphModuleNodes(m, expected_node_occurrence={
-            ns.call_method("dequantize") : 1,
-        })
 
     @skipIfNoFBGEMM
     def test_fixed_qparams_ops(self):
@@ -7113,7 +7058,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
 
-    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_qmatmul(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -7122,7 +7066,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M().eval()
         example_inputs = (torch.randn(2, 2), torch.randn(2, 2))
-        qconfig_dict = {"": torch.ao.quantization.default_qconfig}
+        qconfig_dict = get_default_qconfig_mapping("fbgemm")
         mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mp(*example_inputs)
         mq = convert_fx(mp)
@@ -7222,7 +7166,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.assertEqual(out.device.type, device_after)
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm")
     def test_model_dropout(self):
         from torchvision import models
         m = models.mobilenet_v3_small()
@@ -7230,8 +7173,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 224, 224),)
         mp = prepare_qat_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mp(*example_inputs)
-        mq = convert_fx(mp)
-        res = mq(*example_inputs)
+        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+            mq = convert_fx(mp)
+        mq(*example_inputs)
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,

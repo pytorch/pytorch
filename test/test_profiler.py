@@ -1,51 +1,73 @@
 # Owner(s): ["oncall: profiler"]
 import collections
-import expecttest
 import gc
 import io
 import json
 import os
 import re
 import tempfile
-from typing import List, Optional
 import unittest
 from dataclasses import dataclass, field
+from typing import List, Optional
 
+import expecttest
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
-    TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
-from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
+from torch.autograd import (
+    _record_function_with_args_enter,
+    _record_function_with_args_exit,
+)
 from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
-    kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
-    _utils
+    _utils,
+    DeviceType,
+    ExecutionGraphObserver,
+    kineto_available,
+    profile,
+    ProfilerAction,
+    ProfilerActivity,
+    record_function,
+    supported_activities,
 )
-from torch.profiler._pattern_matcher import (Pattern, NamePattern,
-                                             ExtraCUDACopyPattern,
-                                             ForLoopIndexingPattern,
-                                             FP32MatMulPattern,
-                                             OptimizerSingleTensorPattern,
-                                             SynchronizedDataLoaderPattern,
-                                             GradNotSetToNonePattern,
-                                             Conv2dBiasFollowedByBatchNorm2dPattern,
-                                             MatMulDimInFP16Pattern,
-                                             report_all_anti_patterns)
+from torch.profiler._pattern_matcher import (
+    Conv2dBiasFollowedByBatchNorm2dPattern,
+    ExtraCUDACopyPattern,
+    ForLoopIndexingPattern,
+    FP32MatMulPattern,
+    GradNotSetToNonePattern,
+    MatMulDimInFP16Pattern,
+    NamePattern,
+    OptimizerSingleTensorPattern,
+    Pattern,
+    report_all_anti_patterns,
+    SynchronizedDataLoaderPattern,
+)
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    TemporaryDirectoryName,
+    TemporaryFileName,
+    TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 try:
     import psutil
+
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
 import pickle
+
+from torch._C._profiler import _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -222,7 +244,11 @@ class TestExecutionGraph(TestCase):
     def payload(self, use_cuda=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
-            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            inf_val = float("inf")
+            neg_inf_val = float("-inf")
+            nan_val = float("nan")
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u),
+                                                         "hello", u, inf_val, neg_inf_val, nan_val)
             x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
@@ -231,6 +257,9 @@ class TestExecutionGraph(TestCase):
                 y = y.cuda()
             z = x + y + x * y + x * y
             z.backward(z)
+            gelu = nn.GELU()
+            m = torch.randn(2)
+            _ = gelu(m)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -311,6 +340,9 @@ class TestExecutionGraph(TestCase):
         assert fp.name == eg.get_output_file_path()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
+        # Expected tensor object tuple size, in th form of:
+        # [tensor_id, storage_id, offset, numel, itemsize, device_str]
+        tensor_tuple_size = 6
         found_root_node = False
         for n in nodes:
             assert "name" in n
@@ -318,6 +350,9 @@ class TestExecutionGraph(TestCase):
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
+            # Check if tensor tuple representation size is correct.
+            if n["name"] == "## TEST 2 ##":
+                assert len(n["inputs"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
 
@@ -1164,7 +1199,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
-        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        ActiveProfilerType = torch._C._profiler.ActiveProfilerType
         self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
 
         # Autograd profiler
@@ -1234,17 +1269,17 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertIsInstance(
             node.parent.extra_fields,
-            torch._C._autograd._ExtraFields_PyCCall)
+            torch._C._profiler._ExtraFields_PyCCall)
 
         self.assertEqual(node.children[0].name(), "aten::empty")
         self.assertEqual(node.children[0].children[0].name(), "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
-            torch._C._autograd._ExtraFields_Allocation)
+            torch._C._profiler._ExtraFields_Allocation)
 
     def test_tensor_properties(self):
         x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
@@ -1259,9 +1294,10 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertIsInstance(
             node.extra_fields,
-            torch._C._autograd._ExtraFields_TorchOp)
+            torch._C._profiler._ExtraFields_TorchOp)
 
         self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
 
         input_info = node.extra_fields.inputs
         self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
@@ -1270,6 +1306,63 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
+    def test_sparse_tensors(self):
+        i = [[0, 1, 1], [2, 0, 2]]
+        v = [3, 4, 5]
+        s = torch.sparse_coo_tensor(i, v, (2, 3))
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = s + s
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+
+        self.assertEqual(node.extra_fields.inputs.shapes, [[2, 3], [2, 3], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+
+        input_info = node.extra_fields.inputs
+
+        # FIXME: Different systems have different names for int64_t
+        # below are example names I have found. This is not guaranteed to be exhaustive.
+        # self.assertIn(input_info.dtypes[0], ["long long", "long int", "long", "__int64"])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch.sparse_coo, torch.sparse_coo, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_tensors(self):
+        x = torch.ones(4, 3).to_mkldnn()
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + x
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 3], [4, 3], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch._mkldnn, torch._mkldnn, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
 
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
@@ -1287,6 +1380,41 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
         self.assertEqual(input_info.shapes, [[5, 5], [], []])
         self.assertEqual(input_info.ivalues, [None, None, alpha])
+
+    def test_nnmodule_params(self):
+
+        def flat_out_extrafields(nodes, out=None):
+            if out is None:
+                out = []
+            for node in nodes:
+                if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.module:
+                    if node.extra_fields.module.params:
+                        out.append(node.extra_fields.module)
+                flat_out_extrafields(node.children, out)
+            return out
+
+        class simpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 5)
+                self.fc2 = nn.Linear(5, 2)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = simpleNet()
+            out = net(inputs)
+
+        modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
+        self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
+
+        params = [p for module in modules for p in module.params]
+        expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
+        expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
+        self.assertEqual(expected, params, f"{expected} vs. {params}")
+
 
 
 @dataclass(frozen=True)

@@ -29,14 +29,18 @@ def dl_open_guard():
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload:
-    def __init__(self, overloadpacket, op, schema, tags):
+    def __init__(self, overloadpacket, op, op_dk, schema, tags):
         self._op = op
+        self._op_dk = op_dk
         self._schema = schema
         self._overloadpacket = overloadpacket
         self._tags = tags
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
+        self.name = self._schema.name
+        if schema.overload_name:
+            self.name += "." + schema.overload_name
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
@@ -64,6 +68,13 @@ class OpOverload:
     # `my_namespace.my_op_name.overload_name`
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
+
+    def decompose(self, *args, **kwargs):
+        dk = "CompositeImplicitAutograd"
+        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name, dk):
+            return self._op_dk(dk, *args, **kwargs)
+        else:
+            return NotImplemented
 
     @property
     def overloadpacket(self):
@@ -141,11 +152,11 @@ class OpOverloadPacket:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT
-            op_, tags = torch._C._get_operation_overload(
+            op_, op_dk_, tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = OpOverload(self, op_, schema, tags)
+            overload = OpOverload(self, op_, op_dk_, schema, tags)
             # cache the overload object
             setattr(self, key, overload)
             return overload
