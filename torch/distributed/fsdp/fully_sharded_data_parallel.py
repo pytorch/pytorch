@@ -863,11 +863,11 @@ class FullyShardedDataParallel(nn.Module):
         device_id (Optional[Union[int, torch.device]]): An ``int`` or ``torch.device``
             describing the CUDA device the FSDP module should be moved to determining where
             initialization such as sharding takes place. If this argument is not specified
-            and ``module`` is on CPU, we will move ``module`` to current CUDA device for faster
-            initialization and move ``module`` back to CPU before returning.
-            If specified, resulting FSDP instances will reside on this device.
-            Note that if ``device_id`` is specified but ``module`` is already
-            on a different CUDA device, an error will be thrown. (Default: ``None``)
+            and ``module`` is on CPU, we issue a warning mentioning that this argument can
+            be specified for faster initialization. If specified, resulting FSDP instances
+            will reside on this device, including moving ignored modules' parameters if
+            needed. Note that if ``device_id`` is specified but ``module`` is already on a
+            different CUDA device, an error will be thrown. (Default: ``None``)
 
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
@@ -1287,7 +1287,7 @@ class FullyShardedDataParallel(nn.Module):
     ):
         """
         Moves ``module`` depending on ``device_from_device_id`` and its current
-        device.
+        device. This includes moving ignored modules' parameters.
 
         - If ``device_from_device_id`` is not ``None``, then this moves
         ``module`` to the device.
@@ -1302,11 +1302,11 @@ class FullyShardedDataParallel(nn.Module):
             return  # no original parameters to manage
         if device_from_device_id is not None:
             if param.device == cpu_device:
-                # NOTE: This includes moving ignored parameters.
+                # NOTE: This includes moving ignored modules' parameters.
                 module = module.to(device_from_device_id)
-                # TODO (awgu): This is a temporary fix to move already-
-                # constructed `FlatParameter`s back to CPU if needed. This is
-                # needed to make CPU offload work with `device_id`.
+                # TODO: This is a temporary fix to move already- constructed
+                # `FlatParameter`s back to CPU if needed. This is needed to
+                # make CPU offload work with `device_id`.
                 for submodule in module.modules():
                     if (
                         isinstance(submodule, FullyShardedDataParallel)
