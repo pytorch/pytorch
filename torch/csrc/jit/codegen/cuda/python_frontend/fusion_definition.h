@@ -72,9 +72,6 @@ struct Scalar {
 //! in a cache and the recorded records are used to build an nvFuser Fusion
 //! object if the definition missed in the cache.
 //!
-//! \todo Need to implement the cache portion. Currently, the Fusion object
-//! is always built.
-//!
 //! The nested Operators class was designed to allow the user to query all the
 //! available Operators in the FusionDefinition via python help.
 //!
