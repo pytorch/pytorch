@@ -14,7 +14,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -629,6 +629,18 @@ def forward(self, x_1):
         for a, b in zip(out_graph.nodes, out_graph2.nodes):
             self.assertEqual(a.op, b.op)
 
+    def test_has_proxy(self):
+        foo = torch.randn(5)
+
+        def f(x):
+            self.assertFalse(has_proxy(foo))
+            self.assertTrue(has_proxy(x))
+            y = x.cos()
+            self.assertTrue(has_proxy(y))
+            return y
+
+        self.assertFalse(has_proxy(torch.randn(5)))
+        make_fx(f)(torch.randn(5))
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"

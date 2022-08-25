@@ -23,7 +23,7 @@ from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -80,6 +80,18 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def get_proxy_slots(obj):
     return obj.__dict__.get(proxy_slot)
 
+
+# Gets the proxy for a tensor, if it exists.
+def get_proxy(obj):
+    res = get_proxy_slots(obj)
+    if res is None:
+        return None
+    vals = tuple(res.values())
+    assert len(vals) == 1
+    return vals[0]
+
+def has_proxy(obj):
+    return get_proxy(obj) is not None
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
