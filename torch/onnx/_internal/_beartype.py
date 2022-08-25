@@ -72,7 +72,6 @@ def _create_beartype_decorator(
                 del func.__annotations__["return"]
                 beartyped = _beartype_lib.beartype(func)
                 # Restore the return type to the func function's annotations
-                # FIXME(justinchuby): Make sure this is correct
                 func.__annotations__["return"] = return_type
             else:
                 beartyped = _beartype_lib.beartype(func)
@@ -81,13 +80,15 @@ def _create_beartype_decorator(
             def _coerce_beartype_exceptions_to_warnings(*args, **kwargs):
                 try:
                     return beartyped(*args, **kwargs)
-                except _roar.BeartypeCallHintViolation:
+                except _roar.BeartypeCallHintParamViolation:
                     # Fall back to the original function if the beartype hint is violated.
                     warnings.warn(
                         traceback.format_exc(),
                         category=errors.CallHintViolationWarning,
                         stacklevel=2,
                     )
+                except _roar.BeartypeCallHintViolation:
+                    raise
                 finally:
                     # Call the function in the finally block instead of in the except
                     # block to clean the stack trace caused by the BeartypeCallHintViolation.
