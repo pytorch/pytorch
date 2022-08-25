@@ -40,7 +40,6 @@ class TestNVFuserFrontend(TestCase):
         # Expected Output is a tensor of 48's
         nvf_out1 = fm.execute([input1, input2])
       
-        print("111")
         # Run the same definition to check caching
         with FusionDefinition(fm) as fd :
             t0 = fd.define_tensor(3)
@@ -55,7 +54,6 @@ class TestNVFuserFrontend(TestCase):
   
             fd.add_output(t4)
        
-        print("222")
         nvf_out2 = fm.execute([input1, input2])
         
         eager_out = torch.sum((input1 + input2) * 3.0, dim=-1)

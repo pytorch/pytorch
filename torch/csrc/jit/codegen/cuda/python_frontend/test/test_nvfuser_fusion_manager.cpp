@@ -228,6 +228,55 @@ TEST_F(NVFuserTest, FusionManager_CUDA) {
       SUCCEED();
     }
   }
+  
+  // Setup cache for a new cache lookup
+  try {
+    fm->resetFusionCachePtr();
+    SUCCEED();
+  } catch (const std::exception& e) {
+    FAIL() << "Did not properly set cache to pointer to top of tree!"
+           << e.what();
+  }
+  
+  // Verify proper cache lookup up of complete fusion already cached.
+  // This tends to flush out pointer problems in the cache.
+  {
+    std::unique_ptr<RecordFunctor> test_record(new TensorRecord(
+        {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
+    std::unique_ptr<RecordFunctor> dummy_record(new TensorRecord(
+        {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
+
+    try {
+      auto cache_entry_ptr = fm->lookupFusionCacheEntry(test_record.get());
+      ASSERT_FALSE(cache_entry_ptr == c10::nullopt);
+      SUCCEED();
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on cache lookup!" << e.what();
+    }
+
+    try {
+      fm->traverseFusionCache(test_record.get());
+      SUCCEED();
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
+    }
+    
+    std::unique_ptr<RecordFunctor> end_record(new EndRecord());
+    try {
+      auto no_cache_entry_ptr = fm->lookupFusionCacheEntry(end_record.get());
+      SUCCEED();
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert on cache lookup!" << e.what();
+    }
+
+    try {
+      fm->traverseFusionCache(end_record.get());
+      SUCCEED();
+    } catch (const std::exception& e) {
+      FAIL() << "An unexpected assert while traversing to a Terminal Entry!"
+             << e.what();
+    }
+  }
 }
 
 } // namespace jit
