@@ -76,6 +76,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
 
  protected:
   IntArrayRef strides_custom() const override;
+  SymIntArrayRef sym_strides_custom() const override;
 
  public:
   void set_size(int64_t dim, int64_t new_size) override;

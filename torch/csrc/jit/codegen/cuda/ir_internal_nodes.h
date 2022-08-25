@@ -23,6 +23,7 @@ namespace cuda {
 class ViewTransform;
 class Scope;
 class IrCloner;
+struct AnalyzeViewResult;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
@@ -37,7 +38,12 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
+  UnaryOp(
+      IrBuilderPasskey,
+      UnaryOpType type,
+      Val* out,
+      Val* in,
+      int rng_offset = -1);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -52,12 +58,23 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  // TODO: pull RNG op out of Unary ops
+  // https://github.com/csarofeen/pytorch/pull/1892
+  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -338,6 +355,22 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 //! Fused Matmul operation
 class TORCH_CUDA_CU_API MmaOp : public Expr {
  public:
+  // This is a temporary data structure to for the
+  //  scheduling specific parameters that we still need
+  //  to store on an mma node. Eventually will only be
+  //  the mma macro type that will stay on the IR node
+  //  after additional cleaning ups.
+  struct OptionsInMma {
+    MmaOptions::MacroType macro = MmaOptions::MacroType::NoMMA;
+    MmaOptions::MmaInputLayout operand_layout = MmaOptions::MmaInputLayout::TT;
+    int accumulator_stride = 0;
+
+    bool operator==(const OptionsInMma& other) const {
+      return macro == other.macro && operand_layout == other.operand_layout &&
+          accumulator_stride == other.accumulator_stride;
+    }
+  };
+
   MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
 
   MmaOp(
@@ -346,7 +379,7 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
       Val* in_a,
       Val* in_b,
       Val* init,
-      MmaOptions options);
+      OptionsInMma options);
 
   MmaOp(const MmaOp* src, IrCloner* ir_cloner);
 
@@ -379,7 +412,15 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   }
 
   void configureOptions(MmaOptions options) {
-    options_ = options;
+    options_ = OptionsInMma();
+    TORCH_INTERNAL_ASSERT(
+        options.macro != MmaOptions::MacroType::NoMMA,
+        "Un-configured mma type from options.");
+    TORCH_INTERNAL_ASSERT(
+        options.accumulator_stride > 0, "Un-configured accumulator stride.");
+    options_->accumulator_stride = options.accumulator_stride;
+    options_->macro = options.macro;
+    options_->operand_layout = options.operand_layout;
   }
 
  private:
@@ -387,7 +428,7 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   Val* const in_a_ = nullptr;
   Val* const in_b_ = nullptr;
   Val* const init_ = nullptr;
-  c10::optional<MmaOptions> options_ = c10::nullopt;
+  c10::optional<OptionsInMma> options_ = c10::nullopt;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
@@ -852,18 +893,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   bool hasExpandedExtent() const {
-    TORCH_INTERNAL_ASSERT(
-        expanded_extent_ == nullptr || isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions",
-        " yet found an expanded extent without a strided broadcast iter type.");
     return expanded_extent_ != nullptr;
   }
 
   // Returns the expanded extent of a strided broadcast entry.
   Val* expandedExtent() const {
     TORCH_INTERNAL_ASSERT(
-        isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions.");
+        hasExpandedExtent(),
+        "Requested expanded extent, but none found on this dimension.");
     return expanded_extent_;
   }
 
@@ -967,7 +1004,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   static std::pair<IterDomain*, IterDomain*> swizzle(
       Swizzle2DType swizzle_type,
       IterDomain* in_x,
-      IterDomain* in_y);
+      IterDomain* in_y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   bool isMmaSwizzled() const {
     return is_mma_swizzled_;
@@ -1174,11 +1212,14 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   //! Applies 2D swizzle on a rectangular tile defined by
   //!  a pair of iterdomains contained in this domain.
-  void swizzle(Swizzle2DType swizzle_type, int x, int y);
+  void swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   // Transform TensorView according to merge and split transformations
-  TensorDomain* view(
-      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
+  TensorDomain* view(const AnalyzeViewResult& view_analysis);
 
   TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
 
@@ -1315,7 +1356,8 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
       IterDomain* out_y,
       IterDomain* in_x,
       IterDomain* in_y,
-      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle);
+      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
 
@@ -1335,8 +1377,12 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
     return in_y_;
   }
 
-  const auto& swizzleType() const {
+  auto swizzleType() const {
     return swizzle_type_;
+  }
+
+  auto swizzleMode() const {
+    return swizzle_mode_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -1353,7 +1399,50 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
 
   // The type of predefined 1-to-1 functions
   //  used for swizzling math.
-  Swizzle2DType swizzle_type_;
+  Swizzle2DType swizzle_type_ = Swizzle2DType::NoSwizzle;
+
+  // Swizzle mode of this swizzle instance.
+  // [Note on swizzle mode]
+  // On the current implementations we support two modes of
+  //  swizzle math, namely, data mode and loop mode.
+  // `Data` mode swizzling is a swizzle that will change the
+  //  data layout in shared memory, likely in global memory buffers
+  //  as well in the future. see also IndexSwizzle in index_compute.cpp.
+  //
+  //  Most important use cases are transpose bank conflict removal, and mma
+  //  swizzled shared memory layout. Example illustrated in 1D case:
+  //
+  // for (int i = 0; i<I; i++){
+  //   # This is a `Data` mode swizzle.
+  //  Tshared [swizzled(i)] = Tin[i];
+  // }
+  // # Now Tshared holds swizzled data, i.e. the data layout of
+  //    Tshared does not map to Tin with affine relationships.
+  //
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[swizzled(i)];
+  // }
+  //
+  // `Loop` mode swizzling does not affect the data layout of any buffer
+  //   but only permutes the iteration order of serial or parallel loop.
+  // This is useful when we want to designate non-affine mapping of thread
+  //   to data or we want to generate non-affine loops.
+  // Exampe illustrated in 1D case:
+  //   for (int i = 0; i<I; i++){
+  //     # This is a `Loop` mode swizzle
+  //    Tshared [swizzled(i)] = Tin[swizzled(i)];
+  //   }
+  // # Now Tshared holds normal data, i.e. it still has
+  //   the same data layout as if the swizzle wasn't there.
+  //
+  // # Consumers of Tshared does not need to know about the
+  //   loop swizzle at previous op if not inlined.
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[i];
+  // }
+  //  TODO: Loop swizzles eventually will be piped through in all mappings
+  //  and replay of the fusion IR infrastructure.
+  SwizzleMode swizzle_mode_ = SwizzleMode::Data;
 };
 
 //! Integer value which has a special name

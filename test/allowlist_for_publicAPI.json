@@ -1,5 +1,7 @@
 {
-  "being_migrated": {},
+  "being_migrated": {
+    "torch.nn.quantized.functional": "torch.ao.nn.quantized.functional"
+  },
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -1852,7 +1854,7 @@
     "QUInt4x2Storage",
     "QUInt8Storage",
     "Storage",
-    "_TypedStorage",
+    "TypedStorage",
     "_adaptive_avg_pool2d",
     "_adaptive_avg_pool3d",
     "_add_batch_dim",
@@ -1999,7 +2001,6 @@
     "_is_functional_tensor",
     "_is_zerotensor",
     "_linalg_check_errors",
-    "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
     "_linalg_solve_ex",

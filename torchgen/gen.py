@@ -15,6 +15,7 @@ import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
+
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -244,7 +245,12 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
                 f"Consider adding 'structured=True' to the delegated operator"
             )
-        if "inplace_view" in f.tags:
+        # See Note [resize_ in Functionalization]
+        # resize_() is technically an inplace view op (and therefore needs the tag),
+        # but it would be overkill to add a true "view" variant of resize.
+        # Instead, resize_() gets special treatment in functionalization,
+        # and we have a resize() op that is non-aliasing + functional.
+        if "inplace_view" in f.tags and str(f.func.name) != "resize_":
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
@@ -605,29 +611,19 @@ class ComputeFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             # See Note [The ATen Operators API]
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
-
         return result
 
 
@@ -651,35 +647,27 @@ class ComputeTensorMethod:
         )
 
         if self.target is Target.DECLARATION:
-            result = f"{sig_group.signature.decl()} const;\n"
-            if sig_group.faithful_signature is not None:
-                result += f"{sig_group.faithful_signature.decl()} const;\n"
+            result = ""
+            for sig in sig_group.signatures():
+                result += f"{sig.decl()} const;\n"
             return result
 
         if self.target is not Target.DEFINITION:
             assert_never(self.target)
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
+        result = ""
 
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(faithful=False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(faithful=True)
 
         return result
 
@@ -697,27 +685,18 @@ class ComputeRedispatchFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join(["dispatchKeySet"] + [a.expr for a in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl(is_redispatching_fn=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
 
         return result
 
@@ -904,12 +883,14 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
+                assert f.func.arguments.has_tensor_arg()
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
+                assert not f.func.arguments.has_tensor_arg()
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
@@ -1364,17 +1345,18 @@ def get_native_function_declarations(
     newline = "\n"
     for f in grouped_native_functions:
         native_function_namespaces = set()
-        for backend_idx in backend_indices.values():
+        dispatch_keys = set()
+        for dispatch_key, backend_idx in backend_indices.items():
             backend_metadata = backend_idx.get_kernel(f)
-            namespace = (
-                backend_metadata.cpp_namespace
-                if backend_metadata
-                else DEFAULT_KERNEL_NAMESPACE
-            )
-            native_function_namespaces.add(namespace)
+            if backend_metadata:
+                namespace = backend_metadata.cpp_namespace
+                dispatch_keys.add(dispatch_key)
+                native_function_namespaces.add(namespace)
+            else:
+                namespace = DEFAULT_KERNEL_NAMESPACE
             assert (
-                len(native_function_namespaces) == 1
-            ), "Codegen only supports one namespace per operator."
+                len(native_function_namespaces) <= 1
+            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
                 dest.compute_native_function_declaration(f, backend_idx)
             )
@@ -1387,6 +1369,168 @@ def get_native_function_declarations(
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
+        ordered_kernels = list(OrderedDict.fromkeys(kernels))
+        declarations.extend(
+            f"""
+{ns_helper.prologue}
+{newline.join(ordered_kernels)}
+{ns_helper.epilogue}
+        """.split(
+                newline
+            )
+        )
+    return declarations
+
+
+def get_kernel_namespace(
+    *, f: Union[NativeFunction, NativeFunctionsGroup], backend_idx: BackendIndex
+) -> str:
+    backend_metadata = backend_idx.get_kernel(f)
+    assert not backend_metadata or "::native" in backend_metadata.cpp_namespace, (
+        f"The kernel for function {f.func.name if isinstance(f, NativeFunction) else f.functional.func.name} "
+        f"with dispatch key {backend_idx.dispatch_key}"
+        f" has a namespace {backend_metadata.cpp_namespace} and it's not ending with '::native'."
+    )
+    return (
+        backend_metadata.cpp_namespace if backend_metadata else DEFAULT_KERNEL_NAMESPACE
+    )
+
+
+# Return native function definitions grouped by dispatch key and custom namespace.
+# Used in RegisterDispatchKey.cpp and etc.
+def get_native_function_definitions(
+    *,
+    fm: FileManager,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    dispatch_key: DispatchKey,
+    backend_idx: BackendIndex,
+    selector: SelectiveBuilder,
+    rocm: bool,
+    skip_dispatcher_op_registration: bool,
+    gen_dispatch_helpers: bool,
+) -> List[str]:
+    definitions: List[str] = []
+    ns_definitions: Dict[str, List[str]] = defaultdict(list)
+    anonymous_definitions: Dict[str, List[str]] = defaultdict(list)
+    registrations: Dict[str, Dict[str, List[str]]] = defaultdict(dict)
+    newline = "\n"
+    ns_gen = dest.RegisterDispatchKey(
+        backend_idx,
+        Target.NAMESPACED_DEFINITION,
+        selector,
+        rocm=rocm,
+        class_method_name=None,
+        skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+    )
+    anonymous_gen = dest.RegisterDispatchKey(
+        backend_idx,
+        Target.ANONYMOUS_DEFINITION,
+        selector,
+        rocm=rocm,
+        class_method_name=None,
+        skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+    )
+    reg_gen = dest.RegisterDispatchKey(
+        backend_idx,
+        Target.REGISTRATION,
+        selector,
+        rocm=rocm,
+        class_method_name=None,
+        skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+    )
+    for f in grouped_native_functions:
+        kernel_namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
+            "::native", ""
+        )
+
+        ns_definitions[kernel_namespace].extend(
+            ns_gen(f),
+        )
+        anonymous_definitions[kernel_namespace].extend(
+            anonymous_gen(f),
+        )
+        namespace = (
+            f.namespace if isinstance(f, NativeFunction) else f.functional.namespace
+        )
+        if namespace not in registrations[kernel_namespace]:
+            registrations[kernel_namespace] = defaultdict(list)
+        registrations[kernel_namespace][namespace].extend(
+            reg_gen(f),
+        )
+
+    for kernel_namespace in ns_definitions:
+        if len(ns_definitions[kernel_namespace]) == 0:
+            continue
+        ns_helper = NamespaceHelper(namespace_str=kernel_namespace)
+        registration_body = ""
+        for namespace in registrations[kernel_namespace]:
+            if not registrations[kernel_namespace][namespace]:
+                continue
+            registration_body += f"""
+TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
+    {newline.join(registrations[kernel_namespace][namespace])}
+}};"""
+        definitions.extend(
+            fm.substitute_with_template(
+                "RegisterDispatchDefinitions.ini",
+                lambda: {
+                    "ns_prologue": ns_helper.prologue,
+                    "ns_epilogue": ns_helper.epilogue,
+                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
+                    if gen_dispatch_helpers
+                    else [],
+                    "dispatch_anonymous_definitions": anonymous_definitions[
+                        kernel_namespace
+                    ],
+                    "static_init_dispatch_registrations": ""
+                    if skip_dispatcher_op_registration
+                    else registration_body,
+                    "deferred_dispatch_registrations": "",
+                    "dispatch_namespace": dispatch_key.lower(),
+                    "dispatch_namespaced_definitions": ns_definitions[kernel_namespace],
+                },
+            ).split(newline)
+        )
+
+    return definitions
+
+
+# Return native function declarations grouped by dispatch key and custom namespace.
+# Used in CPUFunctions_inl.h and etc.
+def get_namespaced_declaration(
+    *,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    dispatch_key: DispatchKey,
+    backend_idx: BackendIndex,
+    selector: SelectiveBuilder,
+    rocm: bool,
+) -> List[str]:
+    declarations: List[str] = []
+    ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
+    newline = "\n"
+    func = dest.RegisterDispatchKey(
+        backend_idx,
+        Target.NAMESPACED_DECLARATION,
+        selector,
+        rocm=rocm,
+        class_method_name=None,
+        skip_dispatcher_op_registration=False,
+    )
+    for f in grouped_native_functions:
+        namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
+            "native", dispatch_key.lower()
+        )
+
+        ns_grouped_kernels[namespace].extend(
+            func(f),
+        )
+
+    for namespace, kernels in ns_grouped_kernels.items():
+        if len(kernels) == 0:
+            continue
+        ns_helper = NamespaceHelper(
+            namespace_str=namespace, entity_name="", max_level=3
+        )
         ordered_kernels = list(OrderedDict.fromkeys(kernels))
         declarations.extend(
             f"""
@@ -1422,10 +1566,6 @@ def get_native_function_schema_registrations(
         if namespace == "aten":
             aten_schema_registrations = schema_registrations_body
         else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
@@ -1542,18 +1682,12 @@ def gen_aggregated_headers(
                 lambda: {
                     "DispatchKeyFunctions_inl_includes": [],
                     "dispatch_namespace": dispatch_key.lower(),
-                    "dispatch_namespaced_declarations": list(
-                        concatMap(
-                            dest.RegisterDispatchKey(
-                                backend_indices[dispatch_key],
-                                Target.NAMESPACED_DECLARATION,
-                                selector,
-                                rocm=rocm,
-                                class_method_name=None,
-                                skip_dispatcher_op_registration=False,
-                            ),
-                            grouped_native_functions,
-                        )
+                    "dispatch_namespaced_declarations": get_namespaced_declaration(
+                        grouped_native_functions=grouped_native_functions,
+                        dispatch_key=dispatch_key,
+                        backend_idx=backend_indices[dispatch_key],
+                        selector=selector,
+                        rocm=rocm,
                     ),
                 },
             )
@@ -1888,7 +2022,7 @@ def gen_headers(
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
     def gen_tags_enum() -> Dict[str, str]:
-        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
     core_fm.write("enum_tag.h", gen_tags_enum)
 
@@ -1990,33 +2124,17 @@ def gen_source_files(
             )
             ns_grouped_native_functions[namespace].append(grouped_native_function)
 
-        static_init_dispatch_registrations = ""
-        for namespace, functions in ns_grouped_native_functions.items():
-            dispatch_registrations_body = (
-                ""
-                if skip_dispatcher_op_registration
-                else "\n".join(
-                    list(
-                        concatMap(
-                            dest.RegisterDispatchKey(
-                                backend_index,
-                                Target.REGISTRATION,
-                                selector,
-                                rocm=rocm,
-                                class_method_name=None,
-                                skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                            ),
-                            functions,
-                        )
-                    )
-                )
-            )
-
-            static_init_dispatch_registrations += f"""
-TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
-    {dispatch_registrations_body}
-}};"""
         dispatch_namespace = str(dispatch_key).lower()
+        dispatch_definitions = get_native_function_definitions(
+            fm=fm,
+            grouped_native_functions=grouped_native_functions,
+            dispatch_key=dispatch_key,
+            backend_idx=backend_index,
+            selector=selector,
+            rocm=rocm,
+            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+            gen_dispatch_helpers=True,
+        )
         fm.write_with_template(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
@@ -2029,37 +2147,8 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                     backend_index, per_operator_headers, rocm
                 ),
                 "ops_headers": operator_headers(),
-                "DispatchKey": dispatch_key,
-                "dispatch_namespace": dispatch_key.lower(),
-                "dispatch_helpers": dest.gen_registration_helpers(backend_index),
-                "dispatch_namespaced_definitions": list(
-                    concatMap(
-                        dest.RegisterDispatchKey(
-                            backend_index,
-                            Target.NAMESPACED_DEFINITION,
-                            selector,
-                            rocm=rocm,
-                            class_method_name=None,
-                            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                        ),
-                        grouped_native_functions,
-                    )
-                ),
-                "dispatch_anonymous_definitions": list(
-                    concatMap(
-                        dest.RegisterDispatchKey(
-                            backend_index,
-                            Target.ANONYMOUS_DEFINITION,
-                            selector,
-                            rocm=rocm,
-                            class_method_name=None,
-                            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                        ),
-                        grouped_native_functions,
-                    )
-                ),
-                "static_init_dispatch_registrations": static_init_dispatch_registrations,
-                "deferred_dispatch_registrations": "",
+                "dispatch_helpers": "",
+                "dispatch_definitions": dispatch_definitions,
             },
         )
 
@@ -2356,7 +2445,7 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
             + [
                 "\n".join(
                     f"#include <ATen/ops/{f.root_name}_ops.h>"
-                    for f in [g.inplace, g.mutable]
+                    for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )
                 for g in structured_native_functions

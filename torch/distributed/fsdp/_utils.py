@@ -1,8 +1,10 @@
 from collections import OrderedDict
+import dataclasses
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
+from torch.nn.parallel.scatter_gather import _is_namedtuple  # type: ignore[attr-defined]
 
 from torch.nn.utils.rnn import PackedSequence
 
@@ -26,6 +28,12 @@ def _apply_to_tensors(
     def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
         if torch.is_tensor(x):
             return fn(x)
+        elif hasattr(x, "__dataclass_fields__"):
+            dc = dataclasses.replace(x)
+            for f in dataclasses.fields(dc):
+                name = f.name
+                setattr(dc, name, apply(getattr(dc, name)))
+            return dc
         elif isinstance(x, OrderedDict):
             od = x.__class__()
             for key, value in x.items():
@@ -36,6 +44,9 @@ def _apply_to_tensors(
             return x
         elif isinstance(x, dict):
             return {key: apply(value) for key, value in x.items()}
+        elif _is_namedtuple(x):
+            res = (apply(el) for el in x)
+            return type(x)(*res)
         elif isinstance(x, (list, tuple, set)):
             return type(x)(apply(el) for el in x)
         else:
