@@ -1274,15 +1274,15 @@ Tensor reshape(const Tensor& self, SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  DimVector shape = infer_size_dv(c10::asIntArrayRefSlow(proposed_shape), self.numel());
+  auto shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, shape);
+    return at::_mkldnn_reshape(self, c10::asIntArrayRefUnchecked(shape));
   }
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(c10::asIntArrayRefSlow(self.sym_sizes()), c10::asIntArrayRefSlow(self.sym_strides()), shape);
+  auto stride = at::detail::computeStride(c10::asIntArrayRefSlow(self.sym_sizes()), c10::asIntArrayRefSlow(self.sym_strides()), c10::asIntArrayRefSlow(shape));
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -1301,12 +1301,12 @@ Tensor reshape(const Tensor& self, SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias(shape, stride.value());
+      return self._reshape_alias(c10::asIntArrayRefSlow(shape), stride.value());
     } else {
-      return self.view(shape);
+      return self.view_symint(shape);
     }
   }
-  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), c10::asIntArrayRefSlow(shape));
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
