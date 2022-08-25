@@ -47,6 +47,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_registry,
 )
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 __all__ = [
     "is_in_onnx_export",
@@ -183,6 +184,7 @@ def exporter_context(model, mode, verbose):
         yield (mode_ctx, apex_ctx, log_ctx)
 
 
+@_beartype.beartype
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],

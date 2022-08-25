@@ -9,10 +9,24 @@ from torch.onnx import _constants
 
 __all__ = [
     "OnnxExporterError",
+    "OnnxExporterWarning",
+    "CallHintViolationWarning",
     "CheckerError",
     "UnsupportedOperatorError",
     "SymbolicValueError",
 ]
+
+
+class OnnxExporterWarning(UserWarning):
+    """Base class for all warnings in the ONNX exporter."""
+
+    pass
+
+
+class CallHintViolationWarning(OnnxExporterWarning):
+    """Warning raised when a type hint is violated during a function call."""
+
+    pass
 
 
 class OnnxExporterError(RuntimeError):
