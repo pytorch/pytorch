@@ -3222,6 +3222,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
+        xfail('linalg.cross'),  # Issue #83936
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
@@ -3518,6 +3520,24 @@ class TestVmapOperatorsOpInfo(TestCase):
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
+
+    def test_fill__Tensor(self, device):
+        # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
+        def test():
+            B = 2
+            args = (torch.randn(B, 3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (0, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (-1, 0))
+
+            args = (torch.randn(3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (None, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn([]))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
+
+        check_vmap_fallback(self, test, Tensor.fill_)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)

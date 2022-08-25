@@ -6,6 +6,7 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
@@ -60,26 +61,10 @@ struct Float2 {
     v2 += a.v2;
     return *this;
   }
-};
-
-template <typename scalar_t, typename accscalar_t, typename PTA>
-struct SumOp {
-  __device__ SumOp(const PTA& t) : tensor(t) {}
-  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
-    return static_cast<accscalar_t>(tensor[batch][plane][n]);
+  __device__ friend Float2 operator+(Float2 a, const Float2& b) {
+    a += b;
+    return a;
   }
-  const PTA& tensor;
-};
-
-template <typename scalar_t, typename accscalar_t, typename PTA>
-struct VarOp {
-  __device__ VarOp(accscalar_t m, const PTA& t) : mean(m), tensor(t) {}
-  __device__ __forceinline__ accscalar_t operator()(int batch, int plane, int n) {
-    accscalar_t val = tensor[batch][plane][n];
-    return (val - mean) * (val - mean);
-  }
-  const accscalar_t mean;
-  const PTA& tensor;
 };
 
 template <typename scalar_t, typename accscalar_t, typename PTA>
@@ -96,21 +81,25 @@ struct GradOp {
   const PTA& grad_output;
 };
 
-// Sum across all threads within a warp
-template <typename T>
-static __device__ __forceinline__ T warpSum(T val) {
-  for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
-    val += WARP_SHFL_XOR(val, 1 << i, C10_WARP_SIZE);
-  }
-  return val;
-}
+template <typename acc_t>
+struct SumReduceOp {
+    __device__ __forceinline__ acc_t combine(acc_t a, acc_t b) const { return a + b; }
+
+    __device__ __forceinline__ acc_t warp_shfl_down(acc_t data, int offset) const {
+        return WARP_SHFL_DOWN(data, offset);
+    }
+};
 
 template <typename scalar_t, typename accscalar_t>
-static __device__ __forceinline__ Float2<scalar_t, accscalar_t> warpSum(Float2<scalar_t, accscalar_t> value) {
-  value.v1 = warpSum(value.v1);
-  value.v2 = warpSum(value.v2);
-  return value;
-}
+struct SumReduceOp<Float2<scalar_t, accscalar_t>> {
+    using acc_t = Float2<scalar_t, accscalar_t>;
+
+    __device__ __forceinline__ acc_t combine(acc_t a, acc_t b) const { return a + b; }
+
+    __device__ __forceinline__ acc_t warp_shfl_down(acc_t data, int offset) const {
+        return {WARP_SHFL_DOWN(data.v1, offset), WARP_SHFL_DOWN(data.v2, offset)};
+    }
+};
 
 // Sum across (batch, x/y/z) applying Op() pointwise
 // this works by first having each thread sum it's part
@@ -130,37 +119,13 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
       sum += op(batch, plane, x);
     }
   }
-
-  // first warpSum to get one value per thread to
-  // one value per warp
-  sum = warpSum(sum);
-
-  // this writes each warps  item into shared memory
-  // there are at most C10_WARP_SIZE items left because
-  // there are at most C10_WARP_SIZE**2 threads at the beginning
   __shared__ scalar_t shared[C10_WARP_SIZE];
-  __syncthreads();
-  int tid = threadIdx.x + threadIdx.y * blockDim.x;
-  if (tid % C10_WARP_SIZE == 0) {
-    shared[tid / C10_WARP_SIZE] = sum;
-  }
-  if (tid >= blockDim.x * blockDim.y / C10_WARP_SIZE && tid < C10_WARP_SIZE) {
-    // zero out the other entries in shared
-    shared[tid] = (scalar_t)0;
-  }
-  __syncthreads();
-  // now have a second warpSum to reduce the intermediate values
-  // from shared memory to a single number. The very first
-  // thread writes it to shared memory.
-
-  if (tid / C10_WARP_SIZE == 0) {
-    sum = warpSum(shared[tid]);
-    if (tid == 0) {
+  SumReduceOp<scalar_t> reduce_op;
+  sum = cuda_utils::BlockReduce<scalar_t, SumReduceOp<scalar_t>, cuda_utils::Block2D>(sum, reduce_op, 0, shared);
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
       shared[0] = sum;
-    }
   }
   __syncthreads();
-
   // Everyone picks it up, should be broadcast into the whole grad_input
   return shared[0];
 }
