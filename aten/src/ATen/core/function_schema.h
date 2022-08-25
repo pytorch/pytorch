@@ -369,6 +369,13 @@ struct TORCH_API FunctionSchema {
   bool is_varret() const {
     return is_varret_;
   }
+  bool is_aliasing(const c10::SchemaArgument &argument) const {
+    TORCH_INTERNAL_ASSERT(
+    argument.index < getCorrectList(argument.type).size(),
+    "Invalid index for schema.");
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
+    return aliasInfo;
+  }
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
@@ -543,15 +550,24 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
-  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+  if (unopt_type->kind() == ListType::Kind) {
     // sized lists get size N from arg, not type
     auto list = unopt_type->cast<c10::ListType>();
-    out << list->getElementType()->str() << "[" << *arg.N() << "]";
+    out << list->getElementType()->str();
+    if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
+      out << arg.alias_info()->containedTypes()[0];
+    }
+    std::string N = "";
+    if (arg.N()) {
+        N = std::to_string(*arg.N());
+    }
+    out << "[" << N << "]";
   } else {
     out << unopt_type->str();
   }
 
-  if (arg.alias_info()) {
+  // print alias info if it has beforeSets.
+  if (arg.alias_info() && !arg.alias_info()->beforeSets().empty()) {
     out << *arg.alias_info();
   }
 

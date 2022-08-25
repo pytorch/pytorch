@@ -261,13 +261,18 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // That might be fine for functorch (which already doesn't preserve strides in vmap),
   // but it's worth looking into whether or not this implementation will be problematic for LazyTensor/XLA.
   auto intermediate = src.to(self, non_blocking);
-  // Unfortunately, copy()'s decomposition involves view ops.
-  // To preserve the functionalization pass semantics of "maybe reapply views",
-  // we need to manually do that here.
-  if (at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
-    return intermediate.expand(self.sizes());
-  } else {
+  // We can't use expand() here. Why?
+  // The contract for copy_() is that the output tensor has the same amount of storage as the original tensor.
+  // e.g. This should work:
+  //   a = torch.ones(4, 4)
+  //   b = torch.ones(1, 4)
+  //   c = torch.ones(4, 4)
+  //   torch.ops.aten.copy(a, b).add_(c)
+  // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
+  if (self.sizes() != intermediate.sizes()) {
     return at::expand_copy(intermediate, self.sizes());
+  } else {
+    return intermediate;
   }
 }
 

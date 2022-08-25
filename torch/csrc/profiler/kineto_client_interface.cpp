@@ -18,7 +18,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
     reportInputShapes_ = setupOpInputsCollection;
   }
 
-#ifdef USE_KINETO_UPDATED
+#ifdef USE_KINETO_MIN_CHANGE
   void start(bool withStack) override {
     ProfilerConfig cfg {
       ProfilerState::KINETO_ONDEMAND,

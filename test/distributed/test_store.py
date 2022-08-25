@@ -290,7 +290,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 class MyPythonStore(dist.Store):
     def __init__(self):
         super(MyPythonStore, self).__init__()
-        self.store = dict()
+        self.store = {}
 
     def set(self, key, value):
         if not isinstance(key, string_classes):
@@ -330,6 +330,10 @@ class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
+
+    def test_url_with_node_params(self):
+        with self.assertRaisesRegex(AssertionError, "has node-specific arguments"):
+            dist.rendezvous("file://foo?rank=12&world_size=16", 12, 16)
 
 
 class RendezvousEnvTest(TestCase):
