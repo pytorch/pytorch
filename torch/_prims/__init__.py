@@ -318,7 +318,7 @@ def _make_prim(
 
         p.schema = schema
         p.prim_impl = _prim_impl
-        p.prim_meta_impl = _wrap_tensor_meta(meta)
+        p.prim_meta_impl = meta
 
     return _prim
 
