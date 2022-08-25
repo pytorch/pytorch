@@ -1669,7 +1669,11 @@ def to(
         and non_blocking is False
     ):
         return torch.ops.nvprims.convert_element_type(a, dtype)
-    return torch.ops.aten.to(a, dtype, non_blocking, copy, memory_format=memory_format)
+    result = torch.empty_like(
+        a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
+    )
+    copy_to(result, a)
+    return result
 
 
 #
