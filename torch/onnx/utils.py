@@ -546,11 +546,14 @@ def _optimize_graph(
     operator_export_type: _C_onnx.OperatorExportTypes,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
-    params_dict={},
+    params_dict=None,
     dynamic_axes=None,
     input_names=None,
     module=None,
 ):
+    if params_dict is None:
+        params_dict = {}
+        
     # Inline everything
     _C._jit_pass_inline(graph)
 
