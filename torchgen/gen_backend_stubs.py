@@ -140,6 +140,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             dispatch_key=dispatch_key,
             use_out_as_primary=use_out_as_primary,
             external=True,
+            symint=True,  # TODO: make this configurable
             device_guard=use_device_guard,
             index=metadata,
         )

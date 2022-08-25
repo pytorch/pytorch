@@ -32,7 +32,7 @@ from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
     update_qconfig_for_qat,
 )
-from .qconfig_utils import (
+from .qconfig_mapping_utils import (
     generate_qconfig_map,
     update_qconfig_for_fusion,
 )
@@ -1137,7 +1137,7 @@ def insert_observers_for_model(
     #
     # TODO: rename this to node_name_to_target_dtype_info
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]] = defaultdict(dict)
-    cache_for_no_tensor_check: Dict[Node, bool] = dict()
+    cache_for_no_tensor_check: Dict[Node, bool] = {}
 
     inputs_seen_counter = 0
     outputs_seen_counter = 0
