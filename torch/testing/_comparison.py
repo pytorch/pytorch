@@ -523,16 +523,12 @@ class NumberPair(Pair):
         )
 
 
-class TensorLikePair(Pair):
-    """Pair for :class:`torch.Tensor`-like inputs.
+class TensorMetaPair(Pair):
+    """Pair for :class:`torch.Tensor`-like inputs whose values can be ignored, and
+    only tensor attributes will be compared.
 
     Kwargs:
         allow_subclasses (bool):
-        rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
-        atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
-        equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
         check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
             :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
             :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
@@ -555,9 +551,6 @@ class TensorLikePair(Pair):
         *,
         id: Tuple[Any, ...] = (),
         allow_subclasses: bool = True,
-        rtol: Optional[float] = None,
-        atol: Optional[float] = None,
-        equal_nan: bool = False,
         check_device: bool = True,
         check_dtype: bool = True,
         check_layout: bool = True,
@@ -568,8 +561,6 @@ class TensorLikePair(Pair):
         actual, expected = self._process_inputs(actual, expected, id=id, allow_subclasses=allow_subclasses)
         super().__init__(actual, expected, id=id, **other_parameters)
 
-        self.rtol, self.atol = get_tolerances(actual, expected, rtol=rtol, atol=atol, id=self.id)
-        self.equal_nan = equal_nan
         self.check_device = check_device
         self.check_dtype = check_dtype
         self.check_layout = check_layout
@@ -613,11 +604,6 @@ class TensorLikePair(Pair):
         actual, expected = self.actual, self.expected
 
         self._compare_attributes(actual, expected)
-        if any(input.device.type == "meta" for input in (actual, expected)):
-            return
-
-        actual, expected = self._equalize_attributes(actual, expected)
-        self._compare_values(actual, expected)
 
     def _compare_attributes(
         self,
@@ -667,6 +653,71 @@ class TensorLikePair(Pair):
 
         if self.check_dtype and actual.dtype != expected.dtype:
             raise_mismatch_error("dtype", actual.dtype, expected.dtype)
+
+
+    def extra_repr(self) -> Sequence[str]:
+        return (
+            "check_device",
+            "check_dtype",
+            "check_layout",
+            "check_stride",
+            "check_is_coalesced",
+        )
+
+
+
+class TensorLikePair(TensorMetaPair):
+    """Pair for :class:`torch.Tensor`-like inputs.
+
+    Kwargs:
+        allow_subclasses (bool):
+        rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
+            values based on the type are selected. See :func:assert_close: for details.
+        atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
+            values based on the type are selected. See :func:assert_close: for details.
+        equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
+        check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
+            :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
+            :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
+        check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
+            check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
+            :func:`torch.promote_types`) before being compared.
+        check_layout (bool): If ``True`` (default), asserts that corresponding tensors have the same ``layout``. If this
+            check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
+            compared.
+        check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
+        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
+            ``actual`` and ``expected`` are either coalesced or uncoalesced. If this check is disabled, tensors are
+            :meth:`~torch.Tensor.coalesce`'ed before being compared.
+    """
+
+    def __init__(
+        self,
+        actual: Any,
+        expected: Any,
+        *,
+        id: Tuple[Any, ...] = (),
+        allow_subclasses: bool = True,
+        rtol: Optional[float] = None,
+        atol: Optional[float] = None,
+        equal_nan: bool = False,
+        **other_parameters: Any,
+    ):
+        super().__init__(actual, expected, id=id, **other_parameters)
+
+        self.rtol, self.atol = get_tolerances(
+            self.actual, self.expected, rtol=rtol, atol=atol, id=self.id)
+        self.equal_nan = equal_nan
+
+    def compare(self) -> None:
+        actual, expected = self.actual, self.expected
+
+        self._compare_attributes(actual, expected)
+        if any(input.device.type == "meta" for input in (actual, expected)):
+            return
+
+        actual, expected = self._equalize_attributes(actual, expected)
+        self._compare_values(actual, expected)
 
     def _equalize_attributes(self, actual: torch.Tensor, expected: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Equalizes some attributes of two tensors for value comparison.

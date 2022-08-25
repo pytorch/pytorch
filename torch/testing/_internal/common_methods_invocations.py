@@ -13498,6 +13498,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_like_fns,
            reference_inputs_func=reference_inputs_like_fns,
            supports_autograd=False,
+           outputs_uninitialized=True,
            skips=(
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"),
@@ -13519,7 +13520,6 @@ op_db: List[OpInfo] = [
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
                             'test_operator'),
            )),
@@ -13608,6 +13608,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
            sample_inputs_func=sample_inputs_new_fns,
+           outputs_uninitialized=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
@@ -13627,7 +13628,6 @@ op_db: List[OpInfo] = [
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"), 'TestCompositeCompliance',
                             'test_operator'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
@@ -13640,6 +13640,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=partial(sample_inputs_new_fns, is_strided=True),
            supports_autograd=False,
+           outputs_uninitialized=True,
            skips=(
                # FX failed to normalize op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -13657,8 +13658,6 @@ op_db: List[OpInfo] = [
                             'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestMathBits', 'test_neg_conj_view'),
-               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
-                            'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
@@ -13686,6 +13685,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_empty,
            supports_autograd=False,
+           outputs_uninitialized=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
@@ -13705,14 +13705,10 @@ op_db: List[OpInfo] = [
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance',
                             'test_operator'),
                # requires_grad doesn't exist in the jit schema
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                            'TestCommon',
-                            'test_out'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon',
                             'test_out_warning'),
@@ -17024,9 +17020,6 @@ python_ref_db = [
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
-                         'test_out'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
                          'test_out_warning'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
@@ -17052,9 +17045,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
-                         'test_out'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
@@ -17093,9 +17083,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
-                         'test_out'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_out_warning'),

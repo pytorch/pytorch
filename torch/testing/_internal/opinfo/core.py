@@ -802,6 +802,9 @@ class OpInfo(object):
 
     is_factory_function: bool = False
 
+    # True if the tensor outputs have uninitialized memory, e.g. torch.empty
+    outputs_uninitialized: bool = False
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 

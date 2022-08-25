@@ -582,7 +582,7 @@ class TestCommon(TestCase):
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
 
-                self.assertEqual(expected, out)
+                self.assertOutputsMatch(expected, out, op=op)
 
                 if compare_strides_and_data_ptrs:
                     stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
@@ -699,7 +699,7 @@ class TestCommon(TestCase):
                 op_out(out=out)
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
-                self.assertEqual(expected, out)
+                self.assertOutputsMatch(expected, out, op=op)
 
                 if compare_strides_and_data_ptrs:
                     stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
@@ -1030,6 +1030,9 @@ class TestCommon(TestCase):
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
+        if op.outputs_uninitialized:
+            self.skipTest('Cannot compare uninitialized data')
+
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
             if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:

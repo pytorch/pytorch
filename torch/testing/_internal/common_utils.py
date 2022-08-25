@@ -86,6 +86,7 @@ from torch.testing._comparison import (
     NumberPair,
     Pair,
     TensorLikePair,
+    TensorMetaPair,
     UnsupportedInputs,
 )
 from torch.testing._comparison import assert_equal as assert_equal
@@ -2437,6 +2438,72 @@ class TestCase(expecttest.TestCase):
             # is True (default)
             msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
+
+    def assertEqualMeta(
+            self,
+            x,
+            y,
+            msg: Optional[Union[str, Callable[[str], str]]] = None,
+            *,
+            atol: Optional[float] = None,
+            rtol: Optional[float] = None,
+            equal_nan=True,
+            exact_dtype=True,
+            # TODO: default this to True
+            exact_device=False,
+            exact_layout=False,
+            exact_stride=False,
+            exact_is_coalesced=False
+    ):
+        """Tests equality for all non-tensor objects and meta-data equivalence between
+        tensors.
+        """
+        # Hide this function from `pytest`'s traceback
+        __tracebackhide__ = True
+
+        assert_equal(
+            x,
+            y,
+            pair_types=(
+                NonePair,
+                RelaxedBooleanPair,
+                RelaxedNumberPair,
+                TensorMetaPair,
+                StringPair,
+                SetPair,
+                TypePair,
+                ObjectPair,
+            ),
+            sequence_types=(
+                Sequence,
+                Sequential,
+                ModuleList,
+                ParameterList,
+                ScriptList,
+                torch.utils.data.dataset.Subset,
+            ),
+            mapping_types=(Mapping, ModuleDict, ParameterDict, ScriptDict),
+            rtol=rtol,
+            rtol_override=self.rel_tol,
+            atol=atol,
+            atol_override=self.precision,
+            equal_nan=equal_nan,
+            check_device=exact_device,
+            check_dtype=exact_dtype,
+            check_layout=exact_layout,
+            check_stride=exact_stride,
+            check_is_coalesced=exact_is_coalesced,
+            # This emulates unittest.TestCase's behavior if a custom message passed and
+            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+            # is True (default)
+            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
+        )
+
+    def assertOutputsMatch(self, x: Any, y: Any, *, op: "OpInfo", **kwargs) -> None:
+        if op.outputs_uninitialized:
+            self.assertEqualMeta(x, y, **kwargs)
+        else:
+            self.assertEqual(x, y, **kwargs)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
