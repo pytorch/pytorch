@@ -4,7 +4,6 @@ The module returns a no-op decorator when the beartype library is not installed.
 """
 import functools
 import traceback
-import typing
 import warnings
 
 from torch.onnx import errors, _exporter_states
