@@ -5319,8 +5319,6 @@ class TestQuantizeFx(QuantizationTestCase):
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
             m_ref = convert_to_reference_fx(m_copy)
-            print(m)
-            print(m_ref)
             node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 1,
                 ns.call_method("dequantize"): 1
