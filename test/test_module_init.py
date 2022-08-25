@@ -167,22 +167,22 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingBilinear2d: ((), {}),
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
-        torch.nn.qat.Conv1d: ((3, 3, 3), {
+        torch.ao.nn.qat.Conv1d: ((3, 3, 3), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
-        torch.nn.qat.Conv2d: ((3, 3, 3), {
+        torch.ao.nn.qat.Conv2d: ((3, 3, 3), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
-        torch.nn.qat.Conv3d: ((3, 3, 3), {
+        torch.ao.nn.qat.Conv3d: ((3, 3, 3), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
-        torch.nn.qat.Linear: ((5, 2), {
+        torch.ao.nn.qat.Linear: ((5, 2), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
-        torch.nn.qat.Embedding: ((10, 12), {
+        torch.ao.nn.qat.Embedding: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
-        torch.nn.qat.EmbeddingBag: ((10, 12), {
+        torch.ao.nn.qat.EmbeddingBag: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
         torch.nn.quantizable.LSTM: ((5, 6), {}),
@@ -237,6 +237,24 @@ def build_constructor_arg_db():
         torch.ao.nn.quantized.FXFloatFunctional: ((), {}),
         torch.ao.nn.quantized.QFunctional: ((), {}),
         # Remove torch.nn.quantized after the migration completes:
+        torch.nn.qat.Conv1d: ((3, 3, 3), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Conv2d: ((3, 3, 3), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Conv3d: ((3, 3, 3), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Linear: ((5, 2), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Embedding: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
+        torch.nn.qat.EmbeddingBag: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
         torch.nn.quantized.BatchNorm2d: ((2,), {}),
         torch.nn.quantized.BatchNorm3d: ((2,), {}),
         torch.nn.quantized.Dropout: ((), {}),
@@ -407,6 +425,7 @@ def generate_tests(test_cls, constructor_arg_db):
     # test all modules underneath these namespaces...
     NAMESPACES = [
         torch.nn,
+        torch.ao.nn.qat,
         torch.ao.nn.quantized,
         torch.nn.qat,
         torch.nn.quantizable,

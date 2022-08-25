@@ -10,9 +10,9 @@ from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,

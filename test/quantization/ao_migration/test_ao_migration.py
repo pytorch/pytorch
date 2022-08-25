@@ -398,3 +398,47 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'LSTMCell',
         ]
         self._test_function_import('rnn', module_list, base='nn.quantizable.modules')
+
+    # torch.nn.qat and torch.nn.qat.dynamic
+    def test_package_import_nn_qat(self):
+        self._test_package_import('qat', base='nn')
+
+    def test_package_import_nn_qat_modules(self):
+        r"""Tests the migration of the torch.nn.qat.modules"""
+        self._test_package_import('modules', base='nn.qat')
+        self._test_package_import('modules.conv', base='nn.qat')
+        self._test_package_import('modules.embedding_ops', base='nn.qat')
+        self._test_package_import('modules.linear', base='nn.qat')
+
+    def test_package_import_nn_qat_dynamic(self):
+        r"""Tests the migration of the torch.nn.qat.modules"""
+        self._test_package_import('dynamic', base='nn.qat')
+        self._test_package_import('dynamic.modules', base='nn.qat')
+        self._test_package_import('dynamic.modules.linear', base='nn.qat')
+
+    def test_import_nn_qat_conv(self):
+        module_list = [
+            'Conv1d',
+            'Conv2d',
+            'Conv3d',
+        ]
+        self._test_function_import('conv', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_embedding_ops(self):
+        module_list = [
+            'Embedding',
+            'EmbeddingBag',
+        ]
+        self._test_function_import('embedding_ops', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_linear(self):
+        module_list = [
+            'Linear',
+        ]
+        self._test_function_import('linear', module_list, base='nn.qat.modules')
+
+    def test_import_nn_qat_dynamic_linear(self):
+        module_list = [
+            'Linear',
+        ]
+        self._test_function_import('linear', module_list, base='nn.qat.dynamic.modules')
