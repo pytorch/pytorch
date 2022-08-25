@@ -1307,6 +1307,63 @@ class TestTorchTidyProfiler(TestCase):
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
 
+    def test_sparse_tensors(self):
+        i = [[0, 1, 1], [2, 0, 2]]
+        v = [3, 4, 5]
+        s = torch.sparse_coo_tensor(i, v, (2, 3))
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = s + s
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+
+        self.assertEqual(node.extra_fields.inputs.shapes, [[2, 3], [2, 3], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+
+        input_info = node.extra_fields.inputs
+
+        # FIXME: Different systems have different names for int64_t
+        # below are example names I have found. This is not guaranteed to be exhaustive.
+        # self.assertIn(input_info.dtypes[0], ["long long", "long int", "long", "__int64"])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch.sparse_coo, torch.sparse_coo, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_tensors(self):
+        x = torch.ones(4, 3).to_mkldnn()
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + x
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 3], [4, 3], []])
+        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+
+        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(layout_info, [torch._mkldnn, torch._mkldnn, None])
+        device_info = [x.device if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+
+
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
         alpha = 0.9
