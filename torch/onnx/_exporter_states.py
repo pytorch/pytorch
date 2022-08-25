@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from typing import Dict
 
 from torch import _C as _C
@@ -31,3 +32,14 @@ class SymbolicContext:
         self.cur_node: _C.Node = cur_node
         # Current onnx block that converted nodes are being appended to.
         self.onnx_block: _C.Block = onnx_block
+
+
+class RuntimeTypeCheckState(enum.Enum):
+    """Runtime type check state."""
+
+    # Runtime type checking is disabled.
+    DISABLED = 0
+    # Runtime type checking is enabled.
+    ENABLED = 1
+    # Runtime type checking is enabled but warnings are shown only.
+    WARNINGS_ONLY = 2
