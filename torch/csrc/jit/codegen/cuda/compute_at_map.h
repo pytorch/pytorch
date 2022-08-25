@@ -176,6 +176,10 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   //! Get the ID sets for a provided IdMappingMode
   const DisjointSets<IterDomain*>& getIdSets(IdMappingMode mode) const;
 
+  // Returns if the ID actually has a disjoint set meaning it has been processed
+  // in the creation of the compute at map.
+  bool idExistsInMap(IterDomain* id) const;
+
   //! Returns the pre-allocated index variable integer used in
   //!  the kir::ForLoop corresponding to the given IterDomain.
   //!  this interface is only valid if the ID has a loop mapping,
