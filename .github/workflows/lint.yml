@@ -308,6 +308,8 @@ jobs:
           python-version: 3.5
           architecture: x64
           cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
