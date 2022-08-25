@@ -4,7 +4,7 @@ import itertools
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Union
+from typing import Callable, Union, Type, TypeVar
 
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -15,10 +15,10 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map
-
+from torch.utils._pytree import tree_flatten, tree_map, PyTree
 
 aten = torch.ops.aten
+T = TypeVar("T")
 
 
 @dataclass
@@ -441,13 +441,12 @@ class FakeTensor(torch.Tensor):
         # the default behavior.
         # TODO: when we get other tensor types online they will also
         # need to get entries here.
-        elif func == torch.ops.aten.sym_size.default:
-            return None
-        elif func == torch.ops.aten.sym_stride.default:
-            return None
-        elif func == torch.ops.aten.size.default:
-            return None
-        elif func == torch.ops.aten.stride.default:
+        elif func in (
+            aten.sym_size.default,
+            aten.sym_stride.default,
+            aten.size.default,
+            aten.stride.default,
+        ):
             return None
 
         # Because fake mode can return NotImplemented (if it sees a subclass
@@ -533,6 +532,10 @@ class FakeTensor(torch.Tensor):
 # memory should not significantly incraese.
 
 
+def tree_flatten_only(ty: Type[T], pytree: PyTree):
+    flat_vals, _ = tree_flatten(pytree)
+    return [elem for elem in flat_vals if isinstance(elem, ty)]
+
 class FakeTensorMode(TorchDispatchMode):
     def __init__(self, *, allow_fallback_kernels=True, allow_meta=False):
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -560,23 +563,34 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        flat_arg_tensors = [
-            i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
-        ]
-        flat_symints = [
-            i
-            for i in tree_flatten((args, kwargs))[0]
-            if isinstance(i, torch._C.SymIntNode)
-        ]
-        has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
-        )
-        if has_symbolic_sizes:
+
+        flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+
+        with self.restore():
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
+            if func in meta_table:
+                r = meta_table[func](*args, **kwargs)
+                return r
+            if func in decomposition_table:
+                return decomposition_table[func](*args, **kwargs)
+            if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
+                return func.prim_impl(*args, **kwargs)
+
+            # Decomposes CompositeImplicitAutograd ops
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
+        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        has_symbolic_sizes = (
+            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        )
+
+        if has_symbolic_sizes:
             with no_dispatch():
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
@@ -586,28 +600,6 @@ class FakeTensorMode(TorchDispatchMode):
                         "It's likely that this is from calling tensor.shape in C++"
                     )
 
-            with self.restore():
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
-                    return r
-                if func in decomposition_table:
-                    return decomposition_table[func](*args, **kwargs)
-
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
-
-        # prims already wrap FakeTensor inputs to FakeTensor outputs
-        # and do device logic, we dont need do anything but run them
-        # and ensure that Meta kernels are dispatched to (see)
-        # Fake Tensor Dispatch Keys
-
-        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
-            with self.restore():
-                return func.prim_impl(*args, **kwargs)
-
-        if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]
             if func not in constructors:
                 raise RuntimeError(
@@ -615,7 +607,6 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         with no_dispatch():
-            # TODO: apply as no_dispatch decorator
             converter = self.fake_tensor_converter
 
             # if we are in the dispatch mode, we will enter this function even if the inputs
