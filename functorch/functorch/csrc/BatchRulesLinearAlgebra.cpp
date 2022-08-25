@@ -361,11 +361,11 @@ c10::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
 fourOutputs linalg_lstsq_batch_rule(
     const Tensor& self, c10::optional<int64_t> self_bdim, const Tensor& b, c10::optional<int64_t> b_bdim,
     c10::optional<double> rcond, c10::optional<c10::string_view> driver) {
-  TORCH_CHECK(!self_bdim.has_value() || self.dim() > 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
-  TORCH_CHECK(!b_bdim.has_value() || b.dim() > 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
+  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) > 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
+  TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) > 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
   const auto batch_size = get_bdim_size2(self, self_bdim, b, b_bdim);
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, false);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
   const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
   const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
 
