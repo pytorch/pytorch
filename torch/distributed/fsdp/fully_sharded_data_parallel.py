@@ -1016,8 +1016,6 @@ class FullyShardedDataParallel(nn.Module):
         # dtype for model checkpointing
         self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
 
-        if not torch.cuda.is_available():
-            raise RuntimeError("FSDP does not support CPU only execution")
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
         self._materialize_module(module, param_init_fn, device_from_device_id)
@@ -1784,6 +1782,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
+        if not torch.cuda.is_available():
+            # Allow the FSDP constructor to run even with CUDA but check this
+            # once we start real execution
+            raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
         self._is_root = True
@@ -1795,7 +1797,7 @@ class FullyShardedDataParallel(nn.Module):
         self._exec_order_data.init(self, self.process_group)
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
-        inconsistent_limit_all_gather = False
+        inconsistent_limit_all_gathers = False
         for fsdp_module in self.fsdp_modules(self):
             if fsdp_module is not self:
                 # Relax the assert for non-root FSDP instances in case the
@@ -1810,14 +1812,14 @@ class FullyShardedDataParallel(nn.Module):
                 fsdp_module._exec_order_data = self._exec_order_data
                 if fsdp_module.limit_all_gathers != self.limit_all_gathers:
                     # Prefer the root's value
-                    inconsistent_limit_all_gather = True
+                    inconsistent_limit_all_gathers = True
                     fsdp_module.limit_all_gathers = self.limit_all_gathers
                 fsdp_module._free_event_queue = self._free_event_queue
                 fsdp_module._handles_prefetched = self._handles_prefetched
                 fsdp_module._need_pre_backward_unshard = self._need_pre_backward_unshard
                 for handle in fsdp_module._handles:
                     fsdp_module._init_param_attributes(handle)
-        if inconsistent_limit_all_gather:
+        if inconsistent_limit_all_gathers:
             warnings.warn(
                 "Found inconsistent `limit_all_gathers` values across FSDP "
                 f"instances on rank {self.rank}. Using the root FSDP's value "
