@@ -73,6 +73,7 @@ weight_only_quint4x2_dtype_config = DTypeConfig(
     weight_dtype=torch.quint4x2,
 )
 
+
 # =====================
 # |  BACKEND CONFIGS  |
 # =====================
@@ -149,7 +150,7 @@ def get_native_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
         .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
         .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_default_op_configs(default_dtype_configs)) \
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
         .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
         .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
         .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
