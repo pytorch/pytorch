@@ -37,6 +37,7 @@ def _convert_node_to_placeholder(node, inps):
         return
     node.op = 'placeholder'
     node.args = ()
+    node.kwargs = {}
     node.target = node.name
     concrete_val = node.meta.get('concrete_value', None)
     if isinstance(concrete_val, torch.Tensor):
@@ -78,8 +79,13 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     num_queries = 0
 
+    def deepcopy_fx_graph(fx_graph):
+        return fx.GraphModule(fail_f, copy.deepcopy(fx_graph)).graph
+
+
     def graph_fails(graph, inps):
         nonlocal num_queries
+        graph = copy.deepcopy(graph)
         num_queries += 1
         mod = fx.GraphModule(fail_f, graph)
         mod.graph.lint()
@@ -95,7 +101,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         def new_func(old_state: ReproState, granularity=1):
             print()
             print(f"Strategy: {name} (G: {granularity}) ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
-            new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps), granularity)
+            new_state = strategy(deepcopy_fx_graph(old_state.graph), list(old_state.inps), granularity)
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
                 old_nodes = len(old_state.graph.nodes)
@@ -222,7 +228,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         num_nodes = len(cur_graph.nodes)
         for start_range in range(0, num_nodes, granularity):
             is_removing = False
-            new_graph = copy.deepcopy(cur_graph)
+            new_graph = deepcopy_fx_graph(cur_graph)
             new_inps = cur_inps[:]
             end_range = min(num_nodes, start_range + granularity)
             for idx in range(start_range, end_range):
