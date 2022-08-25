@@ -103,17 +103,24 @@ void HoistConvPackedParams(script::Module& m) {
         c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
         bool moduleNameIsQuantizedConv = moduleName.has_value() &&
             (moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+                 "__torch__.torch.ao.nn.quantized.modules.conv.Conv1d" ||
              moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+                 "__torch__.torch.ao.nn.quantized.modules.conv.Conv2d" ||
              moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
+                 "__torch__.torch.ao.nn.quantized.modules.conv.Conv3d" ||
              moduleName.value() ==
                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU1d" ||
              moduleName.value() ==
                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d" ||
              moduleName.value() ==
-                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d");
+                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d" ||
+             // BC Stuff
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv3d");
 
         if (moduleNameIsQuantizedConv) {
           GRAPH_UPDATE("Hoisting ", *n, " to root module.");

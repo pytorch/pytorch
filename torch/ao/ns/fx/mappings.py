@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd

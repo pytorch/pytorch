@@ -1,1 +1,38 @@
 from . import functional
+from .modules import *  # noqa: F403
+
+__all__ = [
+    'BatchNorm2d',
+    'BatchNorm3d',
+    'Conv1d',
+    'Conv2d',
+    'Conv3d',
+    'ConvTranspose1d',
+    'ConvTranspose2d',
+    'ConvTranspose3d',
+    'DeQuantize',
+    'ELU',
+    'Embedding',
+    'EmbeddingBag',
+    'GroupNorm',
+    'Hardswish',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'LayerNorm',
+    'LeakyReLU',
+    'Linear',
+    'LSTM',
+    'MaxPool2d',
+    'MultiheadAttention',
+    'Quantize',
+    'ReLU6',
+    'Sigmoid',
+    'Softmax',
+    'Dropout',
+    'PReLU',
+    # Wrapper modules
+    'FloatFunctional',
+    'FXFloatFunctional',
+    'QFunctional',
+]

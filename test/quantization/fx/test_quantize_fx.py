@@ -6,7 +6,7 @@ import contextlib
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
@@ -5557,7 +5557,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self, scalar):
                 super().__init__()
                 self.scalar = scalar
-                self.add_func = torch.nn.quantized.FloatFunctional()
+                self.add_func = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 return self.add_func.add_scalar(x, self.scalar)
@@ -5980,7 +5980,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         is_reference = False
         node_list = [
-            ns.call_module(torch.nn.quantized.Softmax),
+            ns.call_module(torch.ao.nn.quantized.Softmax),
             ns.call_function(functional),
         ]
         self._test_default_node_quant_handler_ops(
@@ -6702,7 +6702,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m = prepare_fx_function(m, qconfig_dict, example_inputs=example_inputs)
             node_occurrence = {
                 ns.call_module(expected_act_post_process): 7,
-                ns.call_module(torch.nn.quantized.FloatFunctional): 0
+                ns.call_module(torch.ao.nn.quantized.FloatFunctional): 0
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             m(*example_inputs)

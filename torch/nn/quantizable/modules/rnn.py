@@ -39,13 +39,13 @@ class LSTMCell(torch.nn.Module):
 
         self.igates = torch.nn.Linear(input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
         self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
-        self.gates = torch.nn.quantized.FloatFunctional()
+        self.gates = torch.ao.nn.quantized.FloatFunctional()
 
-        self.fgate_cx = torch.nn.quantized.FloatFunctional()
-        self.igate_cgate = torch.nn.quantized.FloatFunctional()
-        self.fgate_cx_igate_cgate = torch.nn.quantized.FloatFunctional()
+        self.fgate_cx = torch.ao.nn.quantized.FloatFunctional()
+        self.igate_cgate = torch.ao.nn.quantized.FloatFunctional()
+        self.fgate_cx_igate_cgate = torch.ao.nn.quantized.FloatFunctional()
 
-        self.ogate_cy = torch.nn.quantized.FloatFunctional()
+        self.ogate_cy = torch.ao.nn.quantized.FloatFunctional()
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:

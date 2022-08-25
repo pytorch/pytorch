@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.ao.quantization import prepare
 from typing import Dict, List, Optional, Any, Union, Callable, Set
