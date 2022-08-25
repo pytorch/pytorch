@@ -94,7 +94,9 @@ def _create_beartype_decorator(
 
 
 if typing.TYPE_CHECKING:
-    beartype = _no_op_decorator
+    # This is a hack to make mypy play nicely with the beartype decorator.
+    def beartype(func):
+        return func
 else:
     beartype = _create_beartype_decorator(GLOBALS.runtime_type_check_state)
     # Make sure that the beartype decorator is enabled whichever path we took.
