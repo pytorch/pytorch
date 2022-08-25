@@ -488,6 +488,3 @@ class CUDASanitizer:
 
     def __del__(self):
         self.dispatch.__exit__(None, None, None)
-
-
-cuda_sanitizer = CUDASanitizer()

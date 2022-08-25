@@ -5,8 +5,8 @@ import textwrap
 from typing import List
 
 import torch
-import torch._cuda_sanitizer as csan
-from torch._cuda_sanitizer import StreamId, DataPtr, EventId
+import torch._cuda_sanitizer.sanitizer as csan
+from torch._cuda_sanitizer.sanitizer import StreamId, DataPtr, EventId
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
