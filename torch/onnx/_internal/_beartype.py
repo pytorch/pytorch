@@ -7,13 +7,13 @@ import traceback
 import typing
 import warnings
 
-from torch.onnx import errors, _exporter_states
+from torch.onnx import _exporter_states, errors
 from torch.onnx._globals import GLOBALS
 
 
 try:
-    from beartype import roar as _roar
     import beartype as _beartype_lib
+    from beartype import roar as _roar
 
     # Beartype warns when we import from typing because the types are deprecated
     # in Python 3.9. But there will be a long time until we can move to using
@@ -97,6 +97,7 @@ if typing.TYPE_CHECKING:
     # This is a hack to make mypy play nicely with the beartype decorator.
     def beartype(func):
         return func
+
 else:
     beartype = _create_beartype_decorator(GLOBALS.runtime_type_check_state)
     # Make sure that the beartype decorator is enabled whichever path we took.
