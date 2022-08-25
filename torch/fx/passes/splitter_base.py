@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
 import logging
+import copy
 
 import torch
 from torch.fx.passes.graph_manipulation import get_size_of_node
@@ -220,12 +221,13 @@ def generate_inputs_for_submodules(
     submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
 
     def pre_forward(module, module_inputs):
-        results[submodule_to_names[module]] = module_inputs
+        results[submodule_to_names[module]] = copy.deepcopy(module_inputs)
     try:
         for name, mod in model.named_modules():
             if name in target_submodules:
                 handles.append(mod.register_forward_pre_hook(pre_forward))
-        model(*inputs)
+        with torch.no_grad():
+            model(*inputs)
     except Exception as e:
         warnings.warn(f"Failed to generate submodule inputs because of the following error:\n{e}")
     finally:
