@@ -285,6 +285,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
+
     out = flat_fn(*flat_args)
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
@@ -410,9 +411,12 @@ def create_aot_dispatcher_function(
                 # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
                 # because they use a "running-mean" style op that requires
                 # resizing the running counter buffers stored on the module.
+                def make_input(x):
+                    return x.detach().requires_grad_(x.requires_grad)
+
                 fake_flat_tensor_args = pytree.tree_map_only(
                     Tensor,
-                    lambda x: x.detach().requires_grad_(x.requires_grad),
+                    make_input,
                     flat_args,
                 )
             return fake_flat_tensor_args
