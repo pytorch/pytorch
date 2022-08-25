@@ -785,7 +785,7 @@ struct ReductionOpRecord : RecordFunctor {
       std::string _name,
       std::function<Nvf::TensorView*(
           Nvf::TensorView*,
-          std::vector<int>&,
+          const std::vector<int>&,
           bool,
           Nvf::DataType)> fusion_op,
       std::vector<int> axes,
@@ -904,9 +904,11 @@ struct ReductionOpRecord : RecordFunctor {
 
  private:
   //! nvFuser arith function signature for a given reduction operation
-  std::function<
-      Nvf::
-          TensorView*(Nvf::TensorView*, std::vector<int>&, bool, Nvf::DataType)>
+  std::function<Nvf::TensorView*(
+      Nvf::TensorView*,
+      const std::vector<int>&,
+      bool,
+      Nvf::DataType)>
       fusion_op_;
   //! The tensor dimensions to reduce
   std::vector<int> axes_;
