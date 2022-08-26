@@ -650,6 +650,8 @@ IndexCompute::IndexCompute(
 }
 
 void IndexCompute::run(const LoopIndexing& loop_indexing) {
+  TORCH_INTERNAL_ASSERT(
+      concrete_id_pass_, "concrete pass only for this option");
   // Apply loop swizzles if there are any that outputs to
   //  the loop domains.
   // Currently only support loop swizzles that directly output
@@ -669,10 +671,77 @@ void IndexCompute::run(const LoopIndexing& loop_indexing) {
     }
   }
 
+  // Resolve the index vals that could be resolved with only
+  //  the loops that consumer_tv doesn't share with any of its
+  //  consumers, i.e. the not-inlined loops that define consumer_tv
+  //  values.
+  collectIndexIntoPermissiveMap(loop_indexing);
+
   // Run through the loop indexing expressions and generate
   //  the indexing integer math for the concrete ids.
   for (auto expr : loop_indexing.getBackwardExprList()) {
+    // Resolve missing values from permissive map.
+    updateIndexMapFromPermissiveMap(expr);
+
     handle(expr);
+  }
+}
+
+void IndexCompute::collectIndexIntoPermissiveMap(
+    const LoopIndexing& loop_indexing) {
+  // Visit the expressions that only produces un-inlined iterdomains,
+  //  in reverse topological order.
+  for (auto expr : loop_indexing.getBackwardOutOfLineExprList()) {
+    // Compute indexing vals for the expression inputs.
+    //
+    // This stage should run before any indexing computation so it could be
+    //  made sure that all index values computed at this stage are
+    //  the ones that can be resolved only with the not-inlined
+    //  iterdomains.
+    //
+    auto id_outputs = ir_utils::filterByType<IterDomain>(expr->outputs());
+    if (std::all_of(
+            id_outputs.begin(), id_outputs.end(), [this](IterDomain* id) {
+              return index_map_.count(ir_utils::caMapExactConcreteId(id));
+            })) {
+      // Visit this expression:
+      // LoopIndexingAnalysis::traverseFromDomainVals made sure that each
+      //  concrete index is bound exactly once so computing these expressions
+      //  early should still be consistent.
+      handle(expr);
+
+      auto id_inputs = ir_utils::filterByType<IterDomain>(expr->inputs());
+      for (auto id : id_inputs) {
+        // Collect backward pass results from this expression if they are
+        //  made available in by this expression.
+        auto idx_it = index_map_.find(ir_utils::caMapExactConcreteId(id));
+
+        if (idx_it != index_map_.end()) {
+          permissive_index_map_
+              [GpuLower::current()->caMap()->getConcreteMappedID(
+                  id, IdMappingMode::PERMISSIVE)] = idx_it->second;
+        }
+      }
+    }
+  }
+}
+
+void IndexCompute::updateIndexMapFromPermissiveMap(const Expr* id_expr) {
+  auto id_outputs = ir_utils::filterByType<IterDomain>(id_expr->outputs());
+  for (auto id : id_outputs) {
+    auto concrete_id = ir_utils::caMapExactConcreteId(id);
+    // Only try to copy index val from permissive map when
+    //  the index is missing.
+    if (!index_map_.count(concrete_id)) {
+      auto permissive_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          id, IdMappingMode::PERMISSIVE);
+      // Write the permissive index val into index_map_ if the
+      //  missing value is found here.
+      auto permissive_it = permissive_index_map_.find(permissive_id);
+      if (permissive_it != permissive_index_map_.end()) {
+        index_map_[concrete_id] = permissive_it->second;
+      }
+    }
   }
 }
 

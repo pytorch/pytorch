@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/torch.h>
 
 #include <unordered_map>
@@ -35,6 +36,10 @@ class NVFuserTest : public ::testing::Test {
     if (!deviceMajorMinorCheck(6)) {
       GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
     }
+  }
+
+  void TearDown() override {
+    c10::cuda::CUDACachingAllocator::emptyCache();
   }
 };
 
