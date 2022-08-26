@@ -30,7 +30,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex,
     all_types_and_complex_and,
-    double_types,
     floating_and_complex_types,
     floating_and_complex_types_and,
 )
@@ -118,32 +117,36 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def sample_inputs_cross(op_info, device, dtype, requires_grad, **kwargs):
-    yield SampleInput(
-        make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
+    yield SampleInput(make_arg((S, 3)), args=(make_arg((S, 3)),))
     yield SampleInput(
-        make_tensor((S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3, S), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
-        kwargs={"dim": 1},
+        make_arg((S, 3, S)), args=(make_arg((S, 3, S)),), kwargs=dict(dim=1)
     )
-    yield SampleInput(
-        make_tensor((S, 3), device=device, dtype=dtype, requires_grad=requires_grad),
-        args=(
-            make_tensor(
-                (S, 3), device=device, dtype=dtype, requires_grad=requires_grad
-            ),
-        ),
-        kwargs={"dim": -1},
+    yield SampleInput(make_arg((1, 3)), args=(make_arg((S, 3)),), kwargs=dict(dim=-1))
+
+
+def error_inputs_cross(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    sample = SampleInput(input=make_arg((S, 3)), args=(make_arg((S, 1)),))
+    err = "inputs dimension -1 must have length 3"
+    yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+
+    sample = SampleInput(input=make_arg((5, S, 3)), args=(make_arg((S, 3)),))
+    err = "inputs must have the same number of dimensions"
+    yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+
+    sample = SampleInput(input=make_arg((S, 2)), args=(make_arg((S, 2)),))
+    err = "must have length 3"
+    yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+
+    sample = SampleInput(
+        input=make_arg((S, 2)), args=(make_arg((S, 2)),), kwargs=dict(dim=2)
     )
+    err = "Dimension out of range"
+    yield ErrorInput(sample, error_regex=err, error_type=IndexError)
 
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **kwargs):
@@ -1225,58 +1228,54 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.half),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
+        error_inputs_func=error_inputs_cross,
         supports_out=True,
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True,
     ),
     OpInfo(
         "linalg.det",
+        aten_name="linalg_det",
         op=torch.linalg.det,
         aliases=("det",),
         dtypes=floating_and_complex_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        aten_name="linalg_det",
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        decorators=[
-            skipCUDAIfNoMagma,
-            skipCPUIfNoLapack,
-            DecorateInfo(
-                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
-            ),
-        ],
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
         check_batched_gradgrad=False,
-        supports_inplace_autograd=False,
     ),
     OpInfo(
         "linalg.det",
+        aten_name="linalg_det",
         op=torch.linalg.det,
         variant_test_name="singular",
         aliases=("det",),
-        dtypes=double_types(),
-        backward_dtypes=double_types(),
+        dtypes=floating_and_complex_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        aten_name="linalg_det",
-        sample_inputs_func=sample_inputs_linalg_det_singular,
-        decorators=[
-            skipCUDAIfNoMagma,
-            skipCPUIfNoLapack,
-            DecorateInfo(
-                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
-            ),
-        ],
         check_batched_gradgrad=False,
-        supports_inplace_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_det_singular,
+        decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
         skips=(
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_fwgrad_bwgrad"
+                unittest.skip("The backward may give different results"),
+                "TestCommon",
+                "test_noncontiguous_samples",
+            ),
+            # Both Hessians are incorrect on complex inputs??
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+                dtypes=(torch.complex128,),
             ),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                dtypes=(torch.complex128,),
             ),
-            # dtypes are tested in the suite above, no need to repeat it for singular
-            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_dtypes"),
         ),
     ),
     OpInfo(
@@ -1634,11 +1633,6 @@ op_db: List[OpInfo] = [
         check_batched_grad=False,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
         sample_inputs_func=sample_inputs_linalg_matrix_power,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-        skips=(
-            # Strides are not the same!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
-        ),
     ),
     OpInfo(
         "linalg.multi_dot",
@@ -1852,16 +1846,14 @@ op_db: List[OpInfo] = [
         "linalg.inv",
         aten_name="linalg_inv",
         op=torch.linalg.inv,
+        aliases=("inverse",),
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1888,16 +1880,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "linalg.inv_ex",
         aten_name="linalg_inv_ex",
+        op=torch.linalg.inv_ex,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
