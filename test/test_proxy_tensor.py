@@ -818,9 +818,11 @@ make_fx_failures = {
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
+    xfail('cov'),
     xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
+    xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
 
