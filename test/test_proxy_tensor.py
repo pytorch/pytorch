@@ -891,14 +891,10 @@ symbolic_tensor_failures = {
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('bfloat16', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('bmm', ''),  # aten.bmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bool', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('broadcast_tensors', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('byte', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('cartesian_prod', ''),  # Tensors of type TensorImpl do not have numel
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('chalf', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('char', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('clone', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -917,7 +913,6 @@ symbolic_tensor_failures = {
     xfail('diagonal_scatter', ''),  # aten.diagonal_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
-    xfail('double', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('eig', ''),  # aten.eig.default - couldn't find symbolic meta function/decomposition
     xfail('einsum', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -945,13 +940,11 @@ symbolic_tensor_failures = {
     xfail('fill', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('flatten', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
-    xfail('float', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('full_like', ''),  # aten.full_like.default - couldn't find symbolic meta function/decomposition
     xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('half', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
@@ -963,7 +956,6 @@ symbolic_tensor_failures = {
     xfail('index_put', ''),  # aten.index_put.default - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('int', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('isreal', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
@@ -1014,7 +1006,6 @@ symbolic_tensor_failures = {
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('long', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
@@ -1052,9 +1043,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy_with_logits', ''),  # aten.binary_cross_entropy_with_logits.default - couldn'...
     xfail('nn.functional.conv1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.conv2d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.conv_transpose1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decompo...
-    xfail('nn.functional.conv_transpose2d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decompo...
-    xfail('nn.functional.conv_transpose3d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.cosine_embedding_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.cosine_similarity', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1155,7 +1143,6 @@ symbolic_tensor_failures = {
     xfail('select', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('select_scatter', ''),  # aten.select_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sgn', ''),  # aten.sgn.default - couldn't find symbolic meta function/decomposition
-    xfail('short', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('sinc', ''),  # aten.sinc.default - couldn't find symbolic meta function/decomposition
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
