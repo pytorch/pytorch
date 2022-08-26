@@ -1,6 +1,4 @@
-import os
 import sys
-from enum import Enum
 
 import torch
 
@@ -43,8 +41,8 @@ if is_available():
         DebugLevel,
         get_debug_level,
         set_debug_level,
-        set_debug_level_from_env,
     )
+    from torch._C._distributed_c10d import set_debug_level_from_env as _set_debug_level_from_env
 
     if sys.platform != "win32":
         from torch._C._distributed_c10d import (
@@ -73,4 +71,19 @@ if is_available():
 
     from .remote_device import _remote_device
 
-    set_debug_level_from_env()
+    _set_debug_level_from_env()
+
+    def _export_c_types():
+        _public_types_to_change_module = [
+            set_debug_level,
+            TCPStore,
+            Reducer,
+            Logger,
+            GradBucket,
+            FileStore,
+            HashStore,
+            BuiltinCommHookType,
+        ]
+        for type in _public_types_to_change_module:
+            type.__module__ = "torch.distributed"
+    _export_c_types()
