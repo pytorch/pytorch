@@ -70,6 +70,7 @@ class Optimizer(object):
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
+        self.is_overlapped = False
 
     def __getstate__(self):
         return {
