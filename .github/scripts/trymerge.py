@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 import base64
-import json
+import jason
+import yaml
 import os
 import re
 import time
@@ -405,7 +406,7 @@ def _fetch_url(url: str, *,
     token = os.environ.get("GITHUB_TOKEN")
     if token is not None and url.startswith('https://api.github.com/'):
         headers['Authorization'] = f'token {token}'
-    data_ = json.dumps(data).encode() if data is not None else None
+    data_ = jason.dumps(data).encode() if data is not None else None
     try:
         with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
             return reader(conn)
@@ -930,15 +931,15 @@ class MergeRule:
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     from pathlib import Path
 
-    repo_relative_rules_path = Path(".github") / "merge_rules.json"
+    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
     if repo is None:
-        json_data = _fetch_url(
+        yaml_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
-            headers={'Accept': 'application/vnd.github.v3+json'},
-            reader=json.load,
+            headers={'Accept': 'application/vnd.github.v3+yaml'},
+            reader=jason.loads,
         )
-        content = base64.b64decode(json_data["content"])
-        return cast(List[MergeRule], json.loads(content, object_hook=lambda x: MergeRule(**x)))
+        content = base64.b64decode(yaml_data["content"])
+        return cast(List[MergeRule], yaml.load(content, object_hook=lambda x: MergeRule(**x)))
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():

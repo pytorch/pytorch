@@ -4,7 +4,7 @@ expecttest
 future
 numpy
 psutil
-pyyaml
+pyyaml==6.0
 requests
 setuptools
 six

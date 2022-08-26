@@ -79,9 +79,10 @@
          "pull"
       ]
    },
+   # here is dedicated section for XLA since time to time we need to
+   # disable XLA only.
    {
       "name": "OSS CI / pytorchbot / XLA",
-      "COMMENT": "here is dedicated section for XLA since time to time we need to disable XLA only.",
       "patterns": [".github/ci_commit_pins/xla.txt"],
       "approved_by": ["pytorchbot"],
       "mandatory_checks_name": [
