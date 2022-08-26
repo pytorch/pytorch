@@ -128,39 +128,39 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     ),
 ]
 
-LINUX_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["10.2"],
-            python_versions=["3.7"]),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
-]
+# LINUX_BINARY_SMOKE_WORKFLOWS = [
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.LINUX,
+#         package_type="manywheel",
+#         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+#             OperatingSystem.LINUX,
+#             arches=["10.2"],
+#             python_versions=["3.7"]),
+#         branches="master",
+#     ),
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.LINUX,
+#         package_type="libtorch",
+#         abi_version=generate_binary_build_matrix.CXX11_ABI,
+#         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+#             OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+#             arches=["cpu"],
+#             libtorch_variants=["shared-with-deps"],
+#         ),
+#         branches="master",
+#     ),
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.LINUX,
+#         package_type="libtorch",
+#         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+#         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+#             OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+#             arches=["cpu"],
+#             libtorch_variants=["shared-with-deps"],
+#         ),
+#         branches="master",
+#     ),
+# ]
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
@@ -206,39 +206,39 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
     ),
 ]
-WINDOWS_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS,
-            arches=["11.3"],
-            python_versions=["3.7"]),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="master",
-    ),
-]
+# WINDOWS_BINARY_SMOKE_WORKFLOWS = [
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.WINDOWS,
+#         package_type="wheel",
+#         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+#             OperatingSystem.WINDOWS,
+#             arches=["11.3"],
+#             python_versions=["3.7"]),
+#         branches="master",
+#     ),
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.WINDOWS,
+#         package_type="libtorch",
+#         abi_version=generate_binary_build_matrix.RELEASE,
+#         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+#             OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE,
+#             arches=["cpu"],
+#             libtorch_variants=["shared-with-deps"],
+#         ),
+#         branches="master",
+#     ),
+#     BinaryBuildWorkflow(
+#         os=OperatingSystem.WINDOWS,
+#         package_type="libtorch",
+#         abi_version=generate_binary_build_matrix.DEBUG,
+#         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+#             OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG,
+#             arches=["cpu"],
+#             libtorch_variants=["shared-with-deps"],
+#         ),
+#         branches="master",
+#     ),
+# ]
 
 MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
@@ -315,9 +315,9 @@ def main() -> None:
     # not ported yet
     template_and_workflows = [
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
-        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
+        # (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
-        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
+        # (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.

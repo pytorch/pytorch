@@ -10,7 +10,7 @@ export SCCACHE_BUCKET=ossci-compiler-cache
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
 export VC_YEAR=2019
 
-if [[ "${GPU_ARCH_VERSION}" == *"11"* ]]; then
+if [[ "${CUDA_VERSION}" == *"11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
