@@ -481,8 +481,7 @@ class _ExecOrderData:
         if handles_key in self.handles_to_post_forward_order_index:
             return
         index = len(self.handles_post_forward_order)
-        if handles_key:
-            self.handles_to_post_forward_order_index[handles_key] = index
+        self.handles_to_post_forward_order_index[handles_key] = index
         self.handles_post_forward_order.append(handles_key)
 
     def record_pre_forward(self, handles: List[FlatParamHandle]) -> None:
@@ -1075,8 +1074,8 @@ class FullyShardedDataParallel(nn.Module):
         self._debug_level = dist.get_debug_level()
         self._exec_order_data = _ExecOrderData(self._debug_level)
         self._handles_prefetched: Dict[HandlesKey, bool] = {}
-        # Used for `BACKWARD_POST` prefetching
-        self._need_pre_backward_unshard: Dict[HandlesKey, bool] = {}
+        # Used for guarding against mistargeted backward prefetches
+        self._needs_pre_backward_unshard: Dict[HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
         # where a module's forward involves multiple handles. The two forward
         # order structures are populated and finalized in the first iteration.
@@ -1537,6 +1536,8 @@ class FullyShardedDataParallel(nn.Module):
         give whether the corresponding handle should free its padded unsharded
         flattened parameter.
         """
+        if not handles:
+            return
         assert len(handles) == len(free_unsharded_flat_params), (
             "Expects both lists to have equal length but got "
             f"{len(handles)} and {len(free_unsharded_flat_params)}"
@@ -1555,6 +1556,11 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 self._free_event_queue.enqueue(free_event, size_in_bytes)
             handle.post_reshard()
+        # Since we prefetch entire handles keys at a time, conservatively mark
+        # the entire key as no longer prefetched once we free at least one
+        handles_key = tuple(handles)
+        if any(free_unsharded_flat_params):
+            self._handles_prefetched.pop(handles_key, None)
 
     @property
     def module(self) -> nn.Module:
@@ -1816,7 +1822,7 @@ class FullyShardedDataParallel(nn.Module):
                     fsdp_module.limit_all_gathers = self.limit_all_gathers
                 fsdp_module._free_event_queue = self._free_event_queue
                 fsdp_module._handles_prefetched = self._handles_prefetched
-                fsdp_module._need_pre_backward_unshard = self._need_pre_backward_unshard
+                fsdp_module._needs_pre_backward_unshard = self._needs_pre_backward_unshard
                 for handle in fsdp_module._handles:
                     fsdp_module._init_param_attributes(handle)
         if inconsistent_limit_all_gathers:
@@ -1977,25 +1983,24 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not current_handles_key:
             return
-        out = self._get_handles_to_prefetch(current_handles_key)
-        if out is not None:
-            handles_to_prefetch, current_training_state = out
-            # Prefetch the next set of parameters without synchronizing to
-            # allow the sync to happen as late as possible to maximize overlap
+        handles_to_prefetch = self._get_handles_to_prefetch(current_handles_key)
+        if handles_to_prefetch is not None:
+            # Prefetch the next set of handles without synchronizing to allow
+            # the sync to happen as late as possible to maximize overlap
             self._unshard(handles_to_prefetch)
             self._handles_prefetched[handles_to_prefetch] = True
 
     def _get_handles_to_prefetch(
         self,
         current_handles_key: HandlesKey,
-    ) -> Optional[Tuple[HandlesKey, HandleTrainingState]]:
+    ) -> Optional[HandlesKey]:
         """
-        Returns a tuple of the handles to prefetch and the *current* handles'
-        training state if this FSDP instance should prefetch the next FSDP
-        instance's parameters and ``None`` otherwise.
+        Returns the handles to prefetch if the module corresponding to
+        ``current_handles_key`` should prefetch for the next module and
+        ``None`` otherwise.
 
         "Prefetching" refers to running the unshard logic early (without
-        synchronization), and the "next" FSDP instance depends on the recorded
+        synchronization), and the "next" module depends on the recorded
         execution order and the current training state.
         """
         training_state = self._get_training_state(current_handles_key)
@@ -2018,8 +2023,11 @@ class FullyShardedDataParallel(nn.Module):
             )
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
-                if target_training_state != HandleTrainingState.POST_BACKWARD:
-                    return target_handles_key, training_state
+                if (
+                    target_training_state != HandleTrainingState.POST_BACKWARD
+                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
+                ):
+                    return target_handles_key
         elif (
             training_state == HandleTrainingState.POST_BACKWARD
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
@@ -2029,15 +2037,11 @@ class FullyShardedDataParallel(nn.Module):
             )
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
-                # TODO (awgu): I think we should check that the target training
-                # state is not even pre-backward yet too or else it will have
-                # already unsharded, which means the unshard call from the prefetch
-                # is a no-op.
                 if (
                     target_training_state != HandleTrainingState.POST_BACKWARD
-                    and self._need_pre_backward_unshard.get(target_handles_key, False)
+                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
                 ):
-                    return target_handles_key, training_state
+                    return target_handles_key
         return None
 
     def _get_training_state(
@@ -3062,10 +3066,12 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root:
             self._post_backward_callback_queued = False  # only defined on the root
 
+        handles_key = tuple(handles)
+        if not handles_key:
+            return outputs  # no handles to prepare for backward computation
         # Since these handles' `FlatParameter`s participated in a forward,
         # we conservatively assume that they will be used in the backward
-        handles_key = tuple(handles)
-        self._need_pre_backward_unshard[handles_key] = False
+        self._needs_pre_backward_unshard[handles_key] = False
         self._pre_backward_hook_has_run[handles_key] = False
 
         def _pre_backward_hook(_handles: List[FlatParamHandle], *unused: Any) -> None:
@@ -3091,24 +3097,23 @@ class FullyShardedDataParallel(nn.Module):
                 for handle in _handles:
                     handle._training_state = HandleTrainingState.PRE_BACKWARD
 
-                params_prefetched = self._handles_prefetched.get(_handles_key, False)
-                if not params_prefetched:
-                    self._unshard(_handles)
+                # If the handles have been prefetched, this `_unshard()` simply
+                # switches to using the unsharded parameter
+                self._unshard(_handles)
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-                # TODO (awgu): This is not necessarily the best place to reset
-                # the flag, but it works because the pre-backward hook logic is
-                # guaranteed to only run once per iteration.
-                self._handles_prefetched.pop(_handles_key, None)
+                # Set this to `False` to ensure that a mistargeted prefetch
+                # does not actually unshard these handles
+                self._needs_pre_backward_unshard[_handles_key] = False
                 self._prefetch_handles(_handles_key)
-                for handle in self._handles:
+                for handle in _handles:
                     handle.prepare_gradient()
                 self._pre_backward_hook_has_run[_handles_key] = True
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
                 t.register_hook(functools.partial(_pre_backward_hook, handles))
-                self._need_pre_backward_unshard[handles_key] = True
+                self._needs_pre_backward_unshard[handles_key] = True
             return t
 
         return _apply_to_tensors(_register_hook, outputs)
@@ -3444,14 +3449,7 @@ class FullyShardedDataParallel(nn.Module):
             m.training_state = TrainingState_.IDLE
             for handle in m._handles:
                 handle._training_state = HandleTrainingState.IDLE
-
-            # TODO (awgu): We could replace this with an assert, but it may
-            # trigger for dynamic execution order across ranks. If the backward
-            # prefetch mismatches the pre-backward order, we may incorrectly
-            # have some parameters marked as prefetched (from the pre-backward)
-            # when they have been resharded in the post-backward already.
             m._handles_prefetched.clear()
-
             if m._is_root:
                 # reset this flag for cases like "one forward pass + multiple backward passes"
                 self._post_backward_callback_queued = False

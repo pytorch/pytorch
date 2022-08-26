@@ -940,8 +940,6 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
-        if self.flat_param.numel() != self.flat_param._unpadded_unsharded_size.numel():
-            print(self)
         views = self._get_unflat_views(self.flat_param)
         for view, (param_name, module, _) in zip(views, self.flat_param._param_infos):
             if hasattr(module, param_name):
