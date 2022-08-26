@@ -78,6 +78,7 @@ nvprim_names = [
     "remainder",
     "sub",
     "squeeze",
+    "view_of",
     "broadcast_in_dim",
     "where",
     "convert_element_type",
@@ -223,6 +224,10 @@ def _squeeze_nvfuser(
     return a
 
 
+def _view_of_nvfuser(fd: Any, a: TensorLikeType) -> TensorLikeType:
+    return fd.ops.set(a)
+
+
 def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -265,6 +270,7 @@ def _amin_nvfuser(
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
+_nvfuser_impls["view_of"] = _view_of_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
