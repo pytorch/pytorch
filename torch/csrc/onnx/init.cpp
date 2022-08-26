@@ -237,10 +237,9 @@ void initONNXBindings(PyObject* module) {
       "_check_onnx_proto",
       ::torch::wrap_pybind_function(
           [](const std::string& proto_string, bool full_check) {
-            check_onnx_proto(proto_string, full_check);
+            check_onnx_proto(proto_string);
           }),
-      py::arg("proto_string"),
-      py::arg("full_check") = false);
+      py::arg("proto_string"));
 
   auto onnx = m.def_submodule("_onnx");
   py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")
