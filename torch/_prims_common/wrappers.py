@@ -7,8 +7,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
@@ -337,22 +336,3 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
     return _fn
-
-
-def wrap_tensor_meta(f):
-    def wrap(t):
-        if (
-            isinstance(t, torch.Tensor)
-            and not isinstance(t, FakeTensor)
-            and not t.device.type == "meta"
-        ):
-            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
-        else:
-            return t
-
-    def wrapper(*args, **kwargs):
-        wrapped_args = tree_map(wrap, args)
-        wrapped_kwargs = tree_map(wrap, kwargs)
-        return f(*wrapped_args, **wrapped_kwargs)
-
-    return wrapper

@@ -199,6 +199,27 @@ __all__ = [
 ]
 
 
+# In order to keep things like aliasing relationships and storage
+# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
+# which caches conversions to Meta Tensors. We would like to use
+# one consistent mode among along FakeTensors, which we store here.
+# We store a weakref, so that when all previous FakeTensors are
+# the present mode will also deallocate. FakeTensorMode holds onto
+# tensors that are converted to Meta so we don't want to persist it
+# longer than necessary.x
+prim_fake_mode_ref = None
+
+
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()
+
+
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
@@ -242,7 +263,7 @@ def TensorMeta(
     if isinstance(tensorlike, FakeTensor):
         mode = tensorlike.fake_mode
     else:
-        mode = utils.get_prim_fake_mode()
+        mode = get_prim_fake_mode()
 
     if device.type == "meta":
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
@@ -260,6 +281,23 @@ def TensorMeta(
 #
 # Common datastructures and helpers
 #
+def _wrap_tensor_meta(f):
+    def wrap(t):
+        if (
+            isinstance(t, torch.Tensor)
+            and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
+        ):
+            return FakeTensor.from_tensor(t, get_prim_fake_mode())
+        else:
+            return t
+
+    def wrapper(*args, **kwargs):
+        wrapped_args = tree_map(wrap, args)
+        wrapped_kwargs = tree_map(wrap, kwargs)
+        return f(*wrapped_args, **wrapped_kwargs)
+
+    return wrapper
 
 
 def _make_prim(
@@ -291,7 +329,7 @@ def _make_prim(
     def _autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
 
-    _meta_impl = utils.wrappers.wrap_tensor_meta(meta)
+    _meta_impl = _wrap_tensor_meta(meta)
 
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
@@ -318,7 +356,7 @@ def _make_prim(
 
         p.schema = schema
         p.prim_impl = _prim_impl
-        p.prim_meta_impl = utils.wrappers.wrap_tensor_meta(meta)
+        p.prim_meta_impl = _wrap_tensor_meta(meta)
 
     return _prim
 
