@@ -181,7 +181,7 @@ class profile(object):
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
-        
+
         if use_hpu:
             assert use_kineto, \
                 "HPU events supported only with Kineto (use_kineto=True)"
