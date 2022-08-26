@@ -623,10 +623,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
-                report("Copying {} from {} to {}".format(ext.name, src, filename))
-                self.copy_file(src, filename)
-                del self.extensions[i]
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
         setuptools.command.build_ext.build_ext.build_extensions(self)
 
 
