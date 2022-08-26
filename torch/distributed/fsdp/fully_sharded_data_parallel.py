@@ -1060,8 +1060,6 @@ class FullyShardedDataParallel(nn.Module):
                 with torch.no_grad():
                     handle._flat_param_to(torch.device("cpu"))
 
-        self.gradient_predivide_factor: float = self._get_gradient_predivide_factor(self.world_size)
-        self.gradient_postdivide_factor: float = self.world_size / self.gradient_predivide_factor
         self._sync_gradients = True
         self._communication_hook = self._get_default_comm_hook()
         self._communication_hook_state = self._get_default_comm_hook_state()
