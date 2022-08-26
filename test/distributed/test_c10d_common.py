@@ -1391,14 +1391,10 @@ class CommTensor(torch.Tensor):
     """
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
             cls,
-            tensor.size(),
-            strides=list(tensor.stride()),
-            dtype=tensor.dtype,
-            device=tensor.device,
-            layout=tensor.layout,
-            requires_grad=tensor.requires_grad,
+            tensor,
+            require_grad=tensor.requires_grad,
         )
         # The tensor object wrapped by this CommTensor
         r._tensor: torch.Tensor = tensor
