@@ -3959,9 +3959,9 @@ def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
 
     # Number of elements in top trapezoid
     trapezoid_size = (m_first_row + m_last_row) * n_row_trapezoid // 2
-    # Number of elemetns in bottom rectangle
+    # Number of elements in bottom rectangle
     diff_row = n_row_all - n_row_trapezoid
-    rectangle_size = max(0, (n_row_all - n_row_trapezoid) * col)
+    rectangle_size = max(0, diff_row * col)
 
     return trapezoid_size, rectangle_size, m_first_row
 

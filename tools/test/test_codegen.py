@@ -314,6 +314,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 dispatch_key=k,
                 use_out_as_primary=True,
                 external=False,
+                symint=False,
                 device_guard=False,
                 index=backend_indices[k],
             )
