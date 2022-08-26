@@ -16,12 +16,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM, gradcheck, gradgradcheck
+    TEST_WITH_ROCM, gradcheck, gradgradcheck, get_function_arglist
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
+from torch.testing._internal.common_cuda import tf32_is_not_fp32, tf32_off, tf32_on
 
 from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
 
@@ -6479,3 +6480,77 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
             if p.requires_grad:
                 test_case.assertEqual(p.grad, torch.zeros_like(p.grad))
         test_case.assertEqual(inp.grad, torch.zeros_like(inp))
+
+def add_test_to_test_class(test, decorator=None, *, test_class=None):
+    assert test_class is not None, "Please pass `test_class` to add test onto."
+
+    def add(test_name, fn):
+        if hasattr(test_class, test_name):
+            raise RuntimeError('Found two tests with the same name: ' + test_name)
+        if decorator is not None:
+            fn = decorator(fn)
+        setattr(test_class, test_name, fn)
+
+    test_name = test.get_name()
+    if not hasattr(test, 'test_cpu') or test.test_cpu:
+        add(test_name, lambda self, test=test: test(self))
+    cuda_test_name = test_name + '_cuda'
+    # With dtype enable, it's good enough to test against three floating types
+    kwargs = {}
+    if 'extra_args' in get_function_arglist(test.test_cuda):
+        kwargs['extra_args'] = test.extra_args
+
+    if 'dtype' in get_function_arglist(test.test_cuda):
+        if tf32_is_not_fp32() and test.with_tf32:
+
+            def with_tf32_off(self, test=test, kwargs=kwargs):
+                with tf32_off():
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+
+            add(cuda_test_name + '_fp32', with_tf32_off)
+
+            def with_tf32_on(self, test=test, kwargs=kwargs):
+                with tf32_on(self, test.tf32_precision):
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+
+            add(cuda_test_name + '_tf32', with_tf32_on)
+        else:
+            add(cuda_test_name + '_float', lambda self,
+                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
+        add(cuda_test_name + '_double', lambda self,
+            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
+
+        def test_half(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.half, **kwargs)
+        if getattr(test, 'check_half', True):
+            add(cuda_test_name + '_half', test_half)
+
+        def test_bfloat16(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
+        if getattr(test, 'check_bfloat16', True):
+            add(cuda_test_name + '_bfloat16', test_bfloat16)
+
+        def test_cfloat(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+
+        def test_cdouble(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
+        if getattr(test, 'check_complex', False):
+            add(cuda_test_name + '_cfloat', test_cfloat)
+            add(cuda_test_name + '_cdouble', test_cdouble)
+
+    else:
+        def with_tf32_off(self, test=test, kwargs=kwargs):
+            with tf32_off():
+                test.test_cuda(self, **kwargs)
+
+        if tf32_is_not_fp32() and test.with_tf32:
+            add(cuda_test_name + '_fp32', with_tf32_off)
+
+            def with_tf32_on(self, test=test, kwargs=kwargs):
+                with tf32_on(self, test.tf32_precision):
+                    test.test_cuda(self, **kwargs)
+
+            add(cuda_test_name + '_tf32', with_tf32_on)
+        else:
+            add(cuda_test_name, with_tf32_off)

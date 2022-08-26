@@ -43,14 +43,14 @@ from torch.testing._internal.common_dtype import integral_types, floating_types_
     floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, skipIfMps,\
+    download_file, load_tests, skipIfMps,\
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype, IS_WINDOWS, \
     skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, loss_reference_fns, \
-    ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
+    module_tests, criterion_tests, loss_reference_fns, add_test_to_test_class, \
+    ctcloss_reference, new_module_tests, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import expectedFailureXLA, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
@@ -64,7 +64,7 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.types import _TensorOrTensors
 
 
@@ -11775,78 +11775,7 @@ class TestAddRelu(TestCase):
 
         self.assertEqual(broadcasted_res, res)
 
-
-def add_test(test, decorator=None):
-    def add(test_name, fn):
-        if hasattr(TestNN, test_name):
-            raise RuntimeError('Found two tests with the same name: ' + test_name)
-        if decorator is not None:
-            fn = decorator(fn)
-        setattr(TestNN, test_name, fn)
-
-    test_name = test.get_name()
-    if not hasattr(test, 'test_cpu') or test.test_cpu:
-        add(test_name, lambda self, test=test: test(self))
-    cuda_test_name = test_name + '_cuda'
-    # With dtype enable, it's good enough to test against three floating types
-    kwargs = {}
-    if 'extra_args' in get_function_arglist(test.test_cuda):
-        kwargs['extra_args'] = test.extra_args
-
-    if 'dtype' in get_function_arglist(test.test_cuda):
-        if tf32_is_not_fp32() and test.with_tf32:
-
-            def with_tf32_off(self, test=test, kwargs=kwargs):
-                with tf32_off():
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
-
-            add(cuda_test_name + '_fp32', with_tf32_off)
-
-            def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
-
-            add(cuda_test_name + '_tf32', with_tf32_on)
-        else:
-            add(cuda_test_name + '_float', lambda self,
-                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
-        add(cuda_test_name + '_double', lambda self,
-            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
-
-        def test_half(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.half, **kwargs)
-        if getattr(test, 'check_half', True):
-            add(cuda_test_name + '_half', test_half)
-
-        def test_bfloat16(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
-        if getattr(test, 'check_bfloat16', True):
-            add(cuda_test_name + '_bfloat16', test_bfloat16)
-
-        def test_cfloat(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
-
-        def test_cdouble(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
-        if getattr(test, 'check_complex', False):
-            add(cuda_test_name + '_cfloat', test_cfloat)
-            add(cuda_test_name + '_cdouble', test_cdouble)
-
-    else:
-        def with_tf32_off(self, test=test, kwargs=kwargs):
-            with tf32_off():
-                test.test_cuda(self, **kwargs)
-
-        if tf32_is_not_fp32() and test.with_tf32:
-            add(cuda_test_name + '_fp32', with_tf32_off)
-
-            def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, **kwargs)
-
-            add(cuda_test_name + '_tf32', with_tf32_on)
-        else:
-            add(cuda_test_name, with_tf32_off)
+add_test = partial(add_test_to_test_class, test_class=TestNN)
 
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
@@ -11946,61 +11875,6 @@ for test_params in criterion_tests:
         test_params['constructor'] = gen_sum_reduction_constructor(test_params['constructor'])
         test = CriterionTest(**test_params)
         add_test(test, decorator)
-
-
-class UnpoolingNet(nn.Module):
-    def __init__(self, pool, unpool):
-        super(UnpoolingNet, self).__init__()
-        self.pool = pool
-        self.unpool = unpool
-
-    def forward(self, input):
-        return self.unpool(*self.pool(input))
-
-
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool1d(2, return_indices=True),
-        nn.MaxUnpool1d(2)),
-    input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool2d(2, return_indices=True),
-        nn.MaxUnpool2d(2)),
-    input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool3d(2, return_indices=True),
-        nn.MaxUnpool3d(2)),
-    input_size=(1, 1, 2, 4, 6),
-    fullname='MaxUnpool3d_net',
-    check_gradgrad=False,))
-
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool1d(2, return_indices=True),
-        nn.MaxUnpool1d(2)),
-    input_size=(1, 4),
-    reference_fn=single_batch_reference_fn,
-    fullname='MaxUnpool1d_net_no_batch_dim',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool2d(2, return_indices=True),
-        nn.MaxUnpool2d(2)),
-    input_size=(1, 2, 4),
-    reference_fn=single_batch_reference_fn,
-    fullname='MaxUnpool2d_net_no_batch_dim',))
-
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool3d(2, return_indices=True),
-        nn.MaxUnpool3d(2)),
-    input_size=(1, 2, 4, 6),
-    reference_fn=single_batch_reference_fn,
-    fullname='MaxUnpool3d_net_no_batch_dim',
-    check_gradgrad=False))
 
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):

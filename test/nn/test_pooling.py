@@ -1,5 +1,5 @@
 # Owner(s): ["module: nn"]
-from functools import reduce
+from functools import reduce, partial
 from itertools import repeat
 import unittest
 import subprocess
@@ -12,9 +12,10 @@ import math
 from torch._six import inf, nan
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
+    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, freeze_rng_state
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
+from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input, \
+    add_test_to_test_class, single_batch_reference_fn, NewModuleTest
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
     TEST_WITH_ROCM
@@ -22,6 +23,7 @@ from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.autograd import gradcheck, gradgradcheck
+from torch.types import _TensorOrTensors
 
 
 class TestAvgPool(TestCase):
@@ -130,6 +132,38 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    def _forward(self, module, input: _TensorOrTensors):
+        with freeze_rng_state():
+            if isinstance(input, tuple):
+                return module(*input)
+            else:
+                return module(input)
+
+    def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
+        output.backward(grad_output, retain_graph=True, create_graph=create_graph)
+        if isinstance(input, tuple):
+            return tuple(i.grad.data if i.grad is not None else None for i in input)
+        else:
+            return input.grad.data if input.grad is not None else None
+
+    def _get_parameters(self, module):
+        params = []
+        d_params = []
+        for p in module.parameters():
+            params.append(p)
+            d_params.append(p.grad)
+        return params, d_params
+
+    def _zero_grad_parameters(self, module):
+        for p in module.parameters():
+            if p.grad is not None:
+                with torch.no_grad():
+                    p.grad.zero_()
+                p.grad.detach_()
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -1421,6 +1455,60 @@ torch.cuda.synchronize()
                 t, output_size = inp
                 m(output_size)(t)
 
+class UnpoolingNet(nn.Module):
+    def __init__(self, pool, unpool):
+        super(UnpoolingNet, self).__init__()
+        self.pool = pool
+        self.unpool = unpool
+
+    def forward(self, input):
+        return self.unpool(*self.pool(input))
+
+add_test = partial(add_test_to_test_class, test_class=TestPoolingNN)
+
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 1, 4),
+    fullname='MaxUnpool1d_net',), set_default_dtype(torch.double))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 1, 2, 4),
+    fullname='MaxUnpool2d_net',), set_default_dtype(torch.double))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d(2, return_indices=True),
+        nn.MaxUnpool3d(2)),
+    input_size=(1, 1, 2, 4, 6),
+    fullname='MaxUnpool3d_net',
+    check_gradgrad=False,), set_default_dtype(torch.double))
+
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool1d_net_no_batch_dim',), set_default_dtype(torch.double))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 2, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool2d_net_no_batch_dim',), set_default_dtype(torch.double))
+
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d(2, return_indices=True),
+        nn.MaxUnpool3d(2)),
+    input_size=(1, 2, 4, 6),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool3d_net_no_batch_dim',
+    check_gradgrad=False), set_default_dtype(torch.double))
 
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals())
 instantiate_parametrized_tests(TestPoolingNN)
