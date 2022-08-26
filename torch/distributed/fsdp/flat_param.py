@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._utils import p_assert
+from ._utils import _alloc_storage, _free_storage, p_assert
 
 __all__ = [
     "FlatParameter",
@@ -1066,42 +1066,3 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
-
-
-@torch.no_grad()
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
-    """
-    Allocate storage for ``tensor`` with the given size.
-
-    Returns:
-        bool: ``True`` if this method allocated storage and ``False`` if the
-        storage was already allocated.
-    """
-    already_allocated = tensor.storage().size() == size.numel()
-    if not already_allocated:
-        tensor_storage_size = tensor.storage().size()
-        p_assert(
-            tensor_storage_size == 0,
-            f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
-        )
-        tensor.storage().resize_(size.numel())
-    return not already_allocated
-
-
-@torch.no_grad()
-def _free_storage(tensor: torch.Tensor) -> bool:
-    """
-    Frees the underlying storage of ``tensor``.
-
-    Returns:
-        bool: ``True`` if the method freed the storage and ``False`` if the
-        storage was already freed.
-    """
-    already_freed = tensor.storage().size() == 0
-    if not already_freed:
-        p_assert(
-            tensor.storage_offset() == 0,
-            "Freeing a tensor's storage is unsafe when it is not the sole occupant",
-        )
-        tensor.storage().resize_(0)
-    return not already_freed
