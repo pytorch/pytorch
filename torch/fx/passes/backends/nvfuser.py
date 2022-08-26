@@ -30,12 +30,6 @@ def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
 aten2aten_decomp = {}
 aten2prim_decomp = {}
 
-for op, decomp_fn in decomposition_table.items():
-    if "torch._refs" in decomp_fn.__module__:
-        aten2prim_decomp[op] = decomp_fn
-    else:
-        aten2aten_decomp[op] = decomp_fn
-
 aten2aten_decomp_skips = {
     "aten.native_layer_norm_backward.default",
     "aten.embedding_dense_backward.default",   # This is hurting nvfuser's perf
