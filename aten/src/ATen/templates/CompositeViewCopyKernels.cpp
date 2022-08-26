@@ -55,8 +55,6 @@ void resize_out_helper(const at::TensorList& dst, const at::TensorList& src) {
 
 ${CompositeViewCopyKernel_Definitions}
 
-${SymIntViewCopyKernel_Definitions}
-
 ${GeneratedCompositeFunctional_Definitions}
 
 ${GeneratedCompositeOut_Definitions}
