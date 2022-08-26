@@ -2982,3 +2982,30 @@
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
+
+- name: special_cos_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_cosh_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_sin_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_sinc_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_sinh_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_sinhc(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_sinhc_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_tan_pi(Tensor z) -> Tensor
+  z: non_differentiable
+
+- name: special_tanh_pi(Tensor z) -> Tensor
+  z: non_differentiable

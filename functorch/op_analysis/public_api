@@ -123,6 +123,7 @@ signbit
 sin
 sinc
 sinh
+special.cos_pi
 special.entr
 special.erfcx
 special.i0e
@@ -132,6 +133,7 @@ special.log_ndtr
 special.ndtr
 special.ndtri
 special.polygamma
+special.sin_pi
 sqrt
 square
 tan

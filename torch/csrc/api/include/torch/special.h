@@ -1401,5 +1401,45 @@ inline Tensor spherical_bessel_j0(const Tensor& x) {
 inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
 }
+
+/// Cosine of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.cos_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::cos_pi(z);
+/// ```
+inline Tensor cos_pi(const Tensor& z) {
+  return torch::special_cos_pi(z);
+}
+
+inline Tensor& cos_pi(Tensor& out, const Tensor& z) {
+  return torch::special_cos_pi_out(out, z);
+}
+
+/// Sine of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sin_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sin_pi(z);
+/// ```
+inline Tensor sin_pi(const Tensor& z) {
+  return torch::special_sin_pi(z);
+}
+
+inline Tensor& sin_pi(Tensor& out, const Tensor& z) {
+  return torch::special_sin_pi_out(out, z);
+}
 } // namespace special
 } // namespace torch

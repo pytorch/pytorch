@@ -12,6 +12,8 @@ __all__ = [
     'chebyshev_polynomial_u',
     'chebyshev_polynomial_v',
     'chebyshev_polynomial_w',
+    'cos_pi',
+    'cosh_pi',
     'digamma',
     'entr',
     'erf',
@@ -47,15 +49,22 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'scaled_modified_bessel_k0',
+    'scaled_modified_bessel_k1',
     'shifted_chebyshev_polynomial_t',
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
-    'scaled_modified_bessel_k0',
-    'scaled_modified_bessel_k1',
+    'sin_pi',
     'sinc',
+    'sinc_pi',
+    'sinh_pi',
+    'sinhc',
+    'sinhc_pi',
     'softmax',
     'spherical_bessel_j0',
+    'tan_pi',
+    'tanh_pi',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1277,6 +1286,132 @@ Spherical Bessel function of the first kind of order :math:`0`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+cos_pi = _add_docstr(_special.special_cos_pi,
+                     r"""
+cos_pi(z, *, out=None) -> Tensor
+
+Cosine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+cosh_pi = _add_docstr(_special.special_cosh_pi,
+                      r"""
+cosh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic cosine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sin_pi = _add_docstr(_special.special_sin_pi,
+                     r"""
+sin_pi(z, *, out=None) -> Tensor
+
+Sine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sinc_pi = _add_docstr(_special.special_sinc_pi,
+                      r"""
+sinc_pi(z, *, out=None) -> Tensor
+
+Sinc of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sinh_pi = _add_docstr(_special.special_sinh_pi,
+                      r"""
+sinh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic sine of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sinhc = _add_docstr(_special.special_sinhc,
+                    r"""
+sinhc(z, *, out=None) -> Tensor
+
+Hyperbolic sinc of :math:`z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+sinhc_pi = _add_docstr(_special.special_sinhc_pi,
+                       r"""
+sinhc_pi(z, *, out=None) -> Tensor
+
+Hyperbolic sinc of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+tan_pi = _add_docstr(_special.special_tan_pi,
+                     r"""
+tan_pi(z, *, out=None) -> Tensor
+
+Tangent of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+tanh_pi = _add_docstr(_special.special_tanh_pi,
+                      r"""
+tanh_pi(z, *, out=None) -> Tensor
+
+Hyperbolic tangent of :math:`\pi z`.
+
+""" + r"""
+Args:
+    z (Tensor): input tensor.
 
 Keyword args:
     {out}

@@ -13,6 +13,8 @@ Functions
 -----------------------
 
 .. autofunction:: airy_ai
+.. autofunction:: cos_pi
+.. autofunction:: cosh_pi
 .. autofunction:: digamma
 .. autofunction:: entr
 .. autofunction:: erf
@@ -42,9 +44,16 @@ Functions
 .. autofunction:: round
 .. autofunction:: scaled_modified_bessel_k0
 .. autofunction:: scaled_modified_bessel_k1
+.. autofunction:: sin_pi
 .. autofunction:: sinc
+.. autofunction:: sinc_pi
+.. autofunction:: sinh_pi
+.. autofunction:: sinhc
+.. autofunction:: sinhc_pi
 .. autofunction:: softmax
 .. autofunction:: spherical_bessel_j0
+.. autofunction:: tan_pi
+.. autofunction:: tanh_pi
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

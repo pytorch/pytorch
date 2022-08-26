@@ -13733,3 +13733,120 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
+
+- func: special_cos_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_cos_pi.out
+  variants: function
+
+- func: special_cos_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_cos_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_cosh_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_cosh_pi.out
+  variants: function
+
+- func: special_cosh_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_cosh_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sin_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sin_pi.out
+  variants: function
+
+- func: special_sin_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sin_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sinc_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sinc_pi.out
+  variants: function
+
+- func: special_sinc_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sinc_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sinh_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sinh_pi.out
+  variants: function
+
+- func: special_sinh_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sinh_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sinhc(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sinhc.out
+  variants: function
+
+- func: special_sinhc.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sinhc_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sinhc_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sinhc_pi.out
+  variants: function
+
+- func: special_sinhc_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sinhc_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_tan_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_tan_pi.out
+  variants: function
+
+- func: special_tan_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_tan_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_tanh_pi(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_tanh_pi.out
+  variants: function
+
+- func: special_tanh_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_tanh_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function

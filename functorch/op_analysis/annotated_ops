@@ -488,21 +488,23 @@ isfinite, composite pointwise
 isinf, composite pointwise
 isposinf, composite pointwise
 isneginf, composite pointwise
+special_cos_pi, primitive pointwise
 special_entr, primitive pointwise
-special_expm1, alias
-special_exp2, alias
-special_gammaln, alias
 special_erf, alias
 special_erfc, alias
 special_erfinv, alias
-special_ndtr, primitive pointwise
-special_xlog1py, composite pointwise
+special_exp2, alias
+special_expit, composite pointwise
+special_expm1, alias
+special_gammaln, alias
 special_i0, alias
 special_i0e, composite pointwise
 special_i1, primitive pointwise
 special_i1e, composite pointwise
 special_logit, composite pointwise
-special_expit, composite pointwise
+special_ndtr, primitive pointwise
+special_sin_pi, primitive pointwise
+special_xlog1py, composite pointwise
 fft_fft, fft
 fft_ifft, fft
 fft_rfft, fft

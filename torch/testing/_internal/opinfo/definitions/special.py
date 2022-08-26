@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_dtype import all_types_and, floating_types
+from torch.testing._internal.common_dtype import all_types_and, floating_types, all_types_and_complex_and
 from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -645,6 +645,18 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.cos_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.sin_pi',
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=None,
         supports_autograd=False,
     ),
 ]
