@@ -22,6 +22,8 @@ using graph_rewrite_helper::PatternInfo;
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
 using DynamicQuantOps = std::tuple<Node*, Node*, Node*>;
 
+std::string kScalarType = "_scalar_type";
+
 c10::QScheme toAffine(c10::QScheme qscheme) {
   switch (qscheme) {
     case c10::kPerTensorAffine:
@@ -1044,8 +1046,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   if (isPlaceholderObserver(n->input(0))) {
     // get compute_dtype for dynamic quantization
     if (observer_module.hasattr("compute_dtype")) {
-      qparams.push_back(std::make_pair(
-          "_scalar_type", observer_module.attr("compute_dtype")));
+      qparams.push_back(
+          std::make_pair(kScalarType, observer_module.attr("compute_dtype")));
     }
     return std::make_tuple(qscheme, qparams);
   } else if (scalar_type == at::ScalarType::Half) {
@@ -1074,7 +1076,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
     qparams.push_back(
         std::make_pair("_zero_point", zero_point.item<int64_t>()));
   }
-  qparams.push_back(std::make_pair("_scalar_type", scalar_type));
+  qparams.push_back(std::make_pair(kScalarType, scalar_type));
   return std::make_tuple(qscheme, qparams);
 }
 
