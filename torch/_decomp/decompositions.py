@@ -1099,8 +1099,8 @@ def cudnn_batch_norm(
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
     return (
         a,
-        input.new_zeros((0,)),
-        input.new_zeros((0,)),
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
         input.new_zeros((0,), dtype=torch.uint8),
     )
 

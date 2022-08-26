@@ -1582,6 +1582,7 @@ class TestRefsOpsInfo(TestCase):
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
         '_refs.var',
         '_refs.rsub',
@@ -1589,7 +1590,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
-        '_refs.swap_axes',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',

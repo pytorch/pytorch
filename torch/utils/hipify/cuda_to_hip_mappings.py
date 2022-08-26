@@ -37,8 +37,6 @@ except subprocess.CalledProcessError:
 except (FileNotFoundError, PermissionError):
     # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
     pass
-except PermissionError:
-    pass
 
 rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm_version.h"
@@ -6503,22 +6501,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cublasZgetrfBatched",
             ("rocblas_zgetrf_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasSgetriBatched",
-            ("rocblas_sgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasDgetriBatched",
-            ("rocblas_dgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasCgetriBatched",
-            ("rocblas_cgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasZgetriBatched",
-            ("rocblas_zgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasSgetrsBatched",
