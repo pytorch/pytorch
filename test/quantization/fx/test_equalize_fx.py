@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.ao.quantization import default_qconfig
 from torch.ao.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
