@@ -1,6 +1,6 @@
 # nvFuser Python Frontend
 
-This frontend allows for a user to describe the set of operations for nvFuser to fuse via 1 or more kernels.  This frontend is intended to be an integration point with Pytorch or standalone applications.
+This frontend allows for a user to describe the set of operations for nvFuser to fuse via 1 or more kernels.  This frontend is intended to be an integration point with PyTorch or standalone applications.
 
 # Usage
 
