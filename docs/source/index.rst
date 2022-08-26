@@ -78,6 +78,7 @@ Features described in this documentation are classified by release status:
    torch.jit <jit>
    torch.linalg <linalg>
    torch.monitor <monitor>
+   torch.nested <nested>
    torch.special <special>
    torch.overrides
    torch.package <package>
