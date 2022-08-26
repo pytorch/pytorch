@@ -279,10 +279,12 @@ class FusionPrecomputedIntegers
   FusionPrecomputedIntegers(Fusion* fusion);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindFusionInputs(const at::ArrayRef<IValue>& aten_inputs);
+  void bindFusionInputs(const KernelArgumentHolder& args);
 
  private:
-  void bindTensorMetaData(TensorView* tv, const at::Tensor& at_tensor);
+  void bindTensorMetaData(
+      TensorView* tv,
+      const TensorArgAbstract* tensor_arg_abstract);
 
  private:
   Fusion* fusion_ = nullptr;
@@ -302,9 +304,7 @@ class KernelPrecomputedIntegers
   KernelPrecomputedIntegers(kir::Kernel* kernel);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindKernelInputs(
-      kir::Kernel* kernel,
-      const at::ArrayRef<IValue>& aten_inputs);
+  void bindKernelInputs(kir::Kernel* kernel, const KernelArgumentHolder& args);
 
   //! Bind concrete values from launch constraints
   void bindParallelExtents(
@@ -317,7 +317,9 @@ class KernelPrecomputedIntegers
   void bindConcreteParallelTypeValue(ParallelType pt, int64_t value);
 
  private:
-  void bindTensorMetaData(TensorView* tv, const at::Tensor& at_tensor);
+  void bindTensorMetaData(
+      TensorView* tv,
+      const TensorArgAbstract* tensor_arg_abstract);
 
   //! Iterate through all the named scalars corresponding
   //!  to thread sizes and pre-group them by their parallel

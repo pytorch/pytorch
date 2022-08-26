@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -16,6 +17,11 @@ bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
 
 bool is_cpu_scalar(const at::Tensor& tensor);
 bool is_cpu_scalar(const c10::TensorType& tensor_type);
+
+// TODO: merge these two
+// check if input is compatible with 32b index mode
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs);
+KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs);
 
 //! Types of debug print-outs
 //!

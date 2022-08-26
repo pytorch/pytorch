@@ -15197,7 +15197,13 @@ TEST_F(NVFuserTest, FusionDAGMerging_CUDA) {
   at::Tensor t0 = at::randn({2, 2, 2, 2, 2}, options);
   at::Tensor t1 = at::randn({2}, options);
 
-  auto fusion_segments = fusion.segment({t0, t1});
+  std::vector<at::Tensor> aten_inputs = {t0, t1};
+
+  KernelArgumentHolder args(KernelIndexMode::INT32);
+  args.setDeviceIndex(0);
+  args.push(aten_inputs);
+
+  auto fusion_segments = fusion.segment(args);
   TORCH_CHECK(fusion_segments->groups().size() <= 4);
 }
 
@@ -15567,8 +15573,12 @@ TEST_F(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({2, 2, 2}, options);
 
+  KernelArgumentHolder args(KernelIndexMode::INT32);
+  args.setDeviceIndex(0);
+  args.push(t0);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), {t0}, segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), args, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
@@ -15607,8 +15617,14 @@ TEST_F(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({2, 2, 2}, options);
 
+  KernelArgumentHolder args(KernelIndexMode::INT32);
+  args.setDeviceIndex(0);
+  args.push(t0);
+  c10::IValue scalar = 1.0;
+  args.push(scalar);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), {t0, 1.0}, segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), args, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
@@ -15646,8 +15662,12 @@ TEST_F(NVFuserTest, FusionSegmentMixReduction_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({2, 2, 2}, options);
 
+  KernelArgumentHolder args(KernelIndexMode::INT32);
+  args.setDeviceIndex(0);
+  args.push(t0);
+
   auto segmented_fusion =
-      SegmentCandidateFinder::segment(fusion.get(), {t0}, segment_options);
+      SegmentCandidateFinder::segment(fusion.get(), args, segment_options);
 
   TORCH_CHECK(segmented_fusion->groups().size() <= 2);
 }
@@ -18215,20 +18235,19 @@ TEST_F(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
   at::Tensor at_t17 = at::randn({128, 64, 1024}, options_half);
   double at_d56 = 1.1111;
 
-  std::vector<IValue> aten_inputs = {
-      at_t0,
-      at_t1,
-      at_t3,
-      at_t5,
-      at_t7,
-      at_t11,
-      at_t13,
-      at_t15,
-      at_t17,
-      at_d56};
+  std::vector<at::Tensor> aten_inputs = {
+      at_t0, at_t1, at_t3, at_t5, at_t7, at_t11, at_t13, at_t15, at_t17};
+
+  c10::IValue val = at_d56;
+
+  KernelArgumentHolder args(KernelIndexMode::INT32);
+  args.setDeviceIndex(0);
+  args.push(aten_inputs);
+  args.push(val);
+
   for (auto _ : c10::irange(5)) {
     auto segmented_fusion =
-        SegmentCandidateFinder::segment(fusion_ptr.get(), aten_inputs);
+        SegmentCandidateFinder::segment(fusion_ptr.get(), args);
   }
 }
 
@@ -23193,11 +23212,8 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
     tv->axis(-1)->parallelize(ParallelType::Serial);
   }
 
-  CompileOptions co;
-  co.index_mode = KernelIndexMode::INT32;
-
   FusionExecutor fe;
-  fe.compileFusion(&fusion, {}, LaunchParams(), co);
+  fe.compileFusion(&fusion, {}, LaunchParams());
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({X, Y, Y, Z}, options);
@@ -25553,6 +25569,65 @@ TEST_F(NVFuserTest, FusionPredicateUnshare_CUDA) {
   auto out = cg_outputs[0];
 
   testValidate(fusion, {out}, {t0}, {t0}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, AsyncCompilation_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = makeSymbolicTensor(1);
+  TensorView* tv2 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+
+  TensorView* tv3 = add(tv0, IrBuilder::create<Double>(1)); // Group 0
+  TensorView* tv4 =
+      max(tv3, {0}); // Group 0 (use max instead to avoid numerical issues)
+  TensorView* tv5 = add(tv4, tv1); //  Group 0 (Non Broadcast after reduce,
+                                   //  keeps normalization scheduler away)
+  TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
+
+  fusion->addOutput(tv6);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({8, 5}, options);
+  at::Tensor t1 = at::randn({5}, options);
+  at::Tensor t2 = at::randn({8, 5}, options);
+
+  auto t3 = t0.add(1.0);
+  auto t4 = std::get<0>(at::max(t3, 0));
+  auto t5 = t4.add(t1);
+  auto t6 = t5.add(t2);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  std::vector<IValue> aten_inputs = {t0, t1, t2};
+
+  executor_cache.compileFusionAsync(aten_inputs);
+
+  while (!executor_cache.isCompiled(aten_inputs)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    printf(".");
+  }
+
+  auto outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()->isSegmented(),
+      "segmentation didn't happen");
+  TORCH_CHECK(
+      executor_cache.getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() == 2,
+      "segmentation didn't happen as expected");
+
+  testValidate(
+      executor_cache.fusion(), outputs, aten_inputs, {t6}, __LINE__, __FILE__);
 }
 
 } // namespace jit

@@ -283,7 +283,11 @@ ExpressionEvaluator bindInputsAndLaunchParams(
     Fusion* fusion,
     const at::ArrayRef<IValue>& aten_inputs,
     const LaunchParams& launch_constraints) {
-  auto expr_eval = executor_utils::bindFusionInputs(aten_inputs, fusion);
+  // index_mode is not important here
+  KernelArgumentHolder argument_holder(KernelIndexMode::INT64);
+  argument_holder.push(aten_inputs);
+
+  auto expr_eval = executor_utils::bindFusionInputs(argument_holder, fusion);
   for (auto val : fusion->vals()) {
     if (!val->isA<TensorView>()) {
       continue;

@@ -1722,7 +1722,7 @@ class TranslateApplicableWelford {
   //!  returns true if any welford has been translated
   static bool run(
       SegmentedFusion* segmented_fusion,
-      const at::ArrayRef<IValue>& runtime_inputs) {
+      const KernelArgumentHolder& runtime_inputs) {
     TranslateApplicableWelford translate_welford(
         segmented_fusion, runtime_inputs);
     return translate_welford.translated_any_welford_;
@@ -1730,7 +1730,7 @@ class TranslateApplicableWelford {
 
   //! Try translation on complete fusion,
   //!  returns true if any welford has been translated
-  static bool run(Fusion* fusion, const at::ArrayRef<IValue>& runtime_inputs) {
+  static bool run(Fusion* fusion, const KernelArgumentHolder& runtime_inputs) {
     TranslateApplicableWelford translate_welford(fusion, runtime_inputs);
     return translate_welford.translated_any_welford_;
   }
@@ -1738,11 +1738,11 @@ class TranslateApplicableWelford {
  private:
   explicit TranslateApplicableWelford(
       SegmentedFusion* segmented_fusion,
-      const at::ArrayRef<IValue>& runtime_inputs);
+      const KernelArgumentHolder& runtime_inputs);
 
   explicit TranslateApplicableWelford(
       Fusion* fusion,
-      const at::ArrayRef<IValue>& runtime_inputs);
+      const KernelArgumentHolder& runtime_inputs);
 
   //! Given vector of welford ops from the same fusion,
   //!  checks if translating all of them result in a
@@ -1774,7 +1774,7 @@ class TranslateApplicableWelford {
   bool translated_any_welford_ = false;
 
   //! a reference to global fusion runtime inputs
-  const at::ArrayRef<IValue>& runtime_inputs_;
+  const KernelArgumentHolder& runtime_inputs_;
 
   //! For translation within group only,
   //!  group boundary at test copy
@@ -1785,7 +1785,7 @@ class TranslateApplicableWelford {
 
 TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& runtime_inputs)
+    const KernelArgumentHolder& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
   auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
@@ -1802,7 +1802,7 @@ TranslateApplicableWelford::TranslateApplicableWelford(
 
 TranslateApplicableWelford::TranslateApplicableWelford(
     SegmentedFusion* segmented_fusion,
-    const at::ArrayRef<IValue>& runtime_inputs)
+    const KernelArgumentHolder& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
   std::vector<SegmentedGroup*> translated_groups;
   std::vector<WelfordOp*> welford_to_translate;
@@ -2046,7 +2046,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
 bool SegmentCandidateFinder::TranslateWelfordInFusion(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& runtime_inputs) {
+    const KernelArgumentHolder& runtime_inputs) {
   return TranslateApplicableWelford::run(fusion, runtime_inputs);
 }
 
@@ -2616,7 +2616,7 @@ ScheduleHeuristic SegmentCandidateFinder::deriveHeuristic(
 
 SegmentCandidateFinder::SegmentCandidateFinder(
     std::unique_ptr<Fusion> fusion,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& inputs,
     SegmentCandidateFinderOptions options)
     : options_(options),
       runtime_info_(fusion.get(), inputs, true),
@@ -3100,7 +3100,7 @@ FusionKernelRuntime::SchedulerEntryPtr SegmentedFusion::
 }
 
 std::unique_ptr<FusionHeuristics> SegmentedFusion::makeInitialHeuristics(
-    const at::ArrayRef<IValue>& inputs) {
+    const KernelArgumentHolder& inputs) {
   auto ret = std::make_unique<FusionHeuristics>();
   SchedulerRuntimeInfo runtime_info(completeFusion(), inputs, true);
   for (auto g : groups()) {

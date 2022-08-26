@@ -383,19 +383,19 @@ KernelPrecomputedIntegers::KernelPrecomputedIntegers(kir::Kernel* kernel) {
   initializeIntegerMachine();
 }
 
+// TODO: put this to base class
 void KernelPrecomputedIntegers::bindTensorMetaData(
     TensorView* tv,
-    const at::Tensor& at_tensor) {
-  std::vector<std::pair<Val*, int64_t>> ret;
+    const TensorArgAbstract* tensor_arg_abstract) {
   const auto root_domain =
       TensorDomain::noReductions(tv->domain()->getMaybeRFactorDomain());
   TORCH_INTERNAL_ASSERT(
-      at_tensor.ndimension() == static_cast<int>(root_domain.size()),
+      tensor_arg_abstract->getRank() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
 
   for (const auto dim : c10::irange(root_domain.size())) {
     auto extent = root_domain[dim]->extent();
-    auto value = at_tensor.sizes()[dim];
+    auto value = tensor_arg_abstract->getSize(dim);
     bindValue(extent->evaluatorIndex(), value);
   }
 }
@@ -434,22 +434,37 @@ void KernelPrecomputedIntegers::initializeNamedScalars() {
   }
 }
 
+// TODO: merge this one with above.
 void KernelPrecomputedIntegers::bindKernelInputs(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& aten_inputs) {
+    const KernelArgumentHolder& args) {
   if (hasValidValues()) {
     invalidate();
   }
 
   const auto& inputs = kernel->inputs();
+  TORCH_INTERNAL_ASSERT(
+      args.size() == inputs.size(), "kernel inputs size does not match args");
 
   for (const auto i : c10::irange(inputs.size())) {
+    auto arg = args[i];
     const auto input = inputs[i];
     if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
-      const auto aten_tensor = aten_inputs[i].toTensor();
-      bindTensorMetaData(tensor_input, aten_tensor);
+      if (const auto& tensor_arg_abstract =
+              dynamic_cast<const TensorArgAbstract*>(arg)) {
+        bindTensorMetaData(tensor_input, tensor_arg_abstract);
+      } else {
+        // TODO: cpu scalar of int type should be bound as scalar int as well
+        TORCH_CHECK(
+            arg->isType(ArgType::CpuScalarTensor),
+            "binding input to TensorView expects input arg to be of tensor type");
+      }
     } else if (input->isScalar() && input->dtype() == DataType::Int) {
-      bindValue(input->evaluatorIndex(), aten_inputs[i].toInt());
+      TORCH_CHECK(
+          arg->isType(ArgType::Long),
+          "binding input to integer type expects input arg to be a scalar of Long type");
+      precomputedIntegersBaseType::bindValue(
+          input->evaluatorIndex(), *static_cast<const int64_t*>(arg->arg()));
     }
   }
 }
@@ -489,38 +504,51 @@ FusionPrecomputedIntegers::FusionPrecomputedIntegers(Fusion* fusion)
   initializeIntegerMachine();
 }
 
+// TODO: put this to base class
 void FusionPrecomputedIntegers::bindTensorMetaData(
     TensorView* tv,
-    const at::Tensor& at_tensor) {
+    const TensorArgAbstract* tensor_arg_abstract) {
   const auto root_domain =
       TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   TORCH_INTERNAL_ASSERT(
-      at_tensor.ndimension() == static_cast<int>(root_domain.size()),
+      tensor_arg_abstract->getRank() == static_cast<int>(root_domain.size()),
       "Something went wrong configuring launch. Inputs do not match.");
 
   for (const auto dim : c10::irange(root_domain.size())) {
     auto extent = root_domain[dim]->extent();
-    auto value = at_tensor.sizes()[dim];
+    auto value = tensor_arg_abstract->getSize(dim);
     precomputedIntegersBaseType::bindValue(extent->evaluatorIndex(), value);
   }
 }
 
 void FusionPrecomputedIntegers::bindFusionInputs(
-    const at::ArrayRef<IValue>& aten_inputs) {
+    const KernelArgumentHolder& args) {
   if (hasValidValues()) {
     precomputedIntegersBaseType::invalidate();
   }
 
   const auto& inputs = fusion_->inputs();
+  TORCH_INTERNAL_ASSERT(
+      args.size() == inputs.size(), "kernel inputs size does not match args");
 
   for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
+    const ArgAbstract* arg = args[i];
     if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
-      const auto aten_tensor = aten_inputs[i].toTensor();
-      bindTensorMetaData(tensor_input, aten_tensor);
+      if (const auto& tensor_arg_abstract =
+              dynamic_cast<const TensorArgAbstract*>(arg)) {
+        bindTensorMetaData(tensor_input, tensor_arg_abstract);
+      } else {
+        TORCH_CHECK(
+            arg->isType(ArgType::CpuScalarTensor),
+            "binding input to TensorView expects input arg to be of tensor type");
+      }
     } else if (input->isScalar() && input->getDataType() == DataType::Int) {
+      TORCH_CHECK(
+          arg->isType(ArgType::Long),
+          "binding input to integer type expects input arg to be a scalar of Long type");
       precomputedIntegersBaseType::bindValue(
-          input->evaluatorIndex(), aten_inputs[i].toInt());
+          input->evaluatorIndex(), *static_cast<const int64_t*>(arg->arg()));
     }
   }
 }

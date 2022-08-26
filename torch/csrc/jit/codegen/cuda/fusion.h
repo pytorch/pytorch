@@ -4,6 +4,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
+#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_container.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -168,8 +169,7 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   bool isStochastic();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
-  std::unique_ptr<SegmentedFusion> segment(
-      const at::ArrayRef<at::IValue>& inputs);
+  std::unique_ptr<SegmentedFusion> segment(const KernelArgumentHolder& args);
 
   const auto& inputs() const {
     return inputs_;

@@ -160,6 +160,7 @@ bool validateKernelArgTensor(
   at::ScalarType arg_data_type = arg.scalar_type();
   DataType param_data_type = *param->getDataType();
   bool match = false;
+  // TODO: remove this switch with `aten_to_data_type`
   switch (arg_data_type) {
     case at::ScalarType::Double:
       match = param_data_type == DataType::Double;
@@ -201,36 +202,36 @@ bool validateKernelArgTensor(
 
 // Return false if  arg_type doesn't match the type in param
 bool validateKernelArgScalar(
-    const c10::IValue& arg,
+    const ArgAbstract* arg,
     const Val* param,
     std::stringstream& msg) {
-  if (!arg.isScalar()) {
-    msg << "Argument is a scalar, but the parameter is not."
-        << "\n";
-    return false;
-  }
+  TORCH_INTERNAL_ASSERT(
+      param->getDataType().has_value(), "kernel param should have data type");
   DataType param_type = *param->getDataType();
   bool match = false;
-  switch (arg.toScalar().type()) {
-    case c10::ScalarType::Long:
+  switch (arg->type()) {
+    case ArgType::Long:
       match = param_type == DataType::Int || param_type == DataType::Int32;
       break;
-    case c10::ScalarType::ComplexDouble:
-      match = param_type == DataType::ComplexDouble ||
-          param_type == DataType::ComplexFloat;
-      break;
-    case c10::ScalarType::Double:
+    case ArgType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||
           param_type == DataType::Half || param_type == DataType::BFloat16;
       break;
-    case c10::ScalarType::Bool:
+    case ArgType::Bool:
       match = param_type == DataType::Bool;
       break;
+    case ArgType::ComplexDouble:
+      match = param_type == DataType::ComplexDouble ||
+          param_type == DataType::ComplexFloat;
+      break;
     default:
-      match = false;
+      // TODO: We need to verify that param is actually a scalar
+      msg << "Argument is not a scalar, but the parameter is."
+          << "\n";
+      return false;
   }
   if (!match) {
-    msg << "Argument type is " << arg.toScalar().type()
+    msg << "Argument type is " << argTypeToString(arg->type())
         << ", but the parameter is " << param_type << "\n";
   }
   return match;
@@ -239,12 +240,23 @@ bool validateKernelArgScalar(
 // Return false if arg and param don't match up and if arg's device (if a
 // tensor) doesn't match provided device
 bool validateKernelArg(
-    const c10::IValue& arg,
+    const ArgAbstract* arg,
     const Val* param,
     const c10::Device& device,
     std::stringstream& msg) {
-  if (arg.isTensor()) {
-    return validateKernelArgTensor(arg.toTensor(), param, device, msg);
+  if (auto tensor_arg_abstract = dynamic_cast<const TensorArgAbstract*>(arg)) {
+    // TODO: don't use get tensor here. We would want to remove tensor reference
+    // for async compilation
+    return validateKernelArgTensor(
+        tensor_arg_abstract->getTensor(), param, device, msg);
+  } else if (arg->isType(ArgType::CpuScalarTensor)) {
+    // TODO: merge this one with above
+    // TODO: we need to check cpu scalar dtyp matches param
+    bool match = param->as<TensorView>()->isCpuScalar();
+    if (!match) {
+      msg << "Argument is scalar type, but kernel parameter is not\n";
+    }
+    return match;
   } else {
     return validateKernelArgScalar(arg, param, msg);
   }
@@ -332,7 +344,7 @@ bool checkValidMisalignedTensors(
 
 void validateKernelInputs(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const c10::Device& device) {
   FUSER_PERF_SCOPE("executor_utils::ValidateKernelInputs");
 
@@ -340,13 +352,12 @@ void validateKernelInputs(
   FusionGuard fg(fusion);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
-      inputs.size() == fusion->inputs().size(),
-      "Wrong number of kernel inputs.");
+      args.size() == fusion->inputs().size(), "Wrong number of kernel inputs.");
 
   std::stringstream msg;
   bool mismatch = false;
-  for (const auto i : c10::irange(inputs.size())) {
-    const IValue& arg = inputs[i];
+  for (const auto i : c10::irange(args.size())) {
+    const ArgAbstract* arg = args[i];
     const Val* param = fusion->inputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
@@ -373,7 +384,7 @@ void validateKernelOutputs(
   for (const auto i : c10::irange(outputs.size())) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
-    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
+    mismatch = !validateKernelArgTensor(arg, param, device, msg) || mismatch;
   }
   TORCH_INTERNAL_ASSERT(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
@@ -557,13 +568,9 @@ void validateAlignedVectorizeExtents(
 }
 
 void validateAlignedVectorizedFusionInputOutput(
-    const IValue& aten_val,
+    const at::Tensor& aten_tensor,
     int word_size,
     TensorView* tv) {
-  TORCH_INTERNAL_ASSERT(aten_val.isTensor());
-
-  const auto& aten_tensor = aten_val.toTensor();
-
   TORCH_INTERNAL_ASSERT(
       reinterpret_cast<size_t>(aten_tensor.data_ptr()) %
               (word_size * aten_tensor.dtype().itemsize()) ==
@@ -614,7 +621,7 @@ void validateAlignedVectorizedFusionInputOutput(
 
 void validateAlignedVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
@@ -639,9 +646,12 @@ void validateAlignedVectorizedTensors(
                       .aligned_vectorized_inp_tensor_pos) {
     auto tv = kernel->inputs().at(pos)->as<TensorView>();
     auto word_size = kernel->summary().vectorized_accesses.at(tv);
-    validateAlignedVectorizedFusionInputOutput(inputs[pos], word_size, tv);
+    auto tensor_arg_abstract =
+        dynamic_cast<const TensorArgAbstract*>(args[pos]);
+    TORCH_INTERNAL_ASSERT(tensor_arg_abstract, "alias io only supports tensor");
+    validateAlignedVectorizedFusionInputOutput(
+        tensor_arg_abstract->getTensor(), word_size, tv);
   }
-
   if (!outputs.empty()) {
     for (auto pos : tensor_vectorization_validation_entry.get()
                         .aligned_vectorized_out_tensor_pos) {
@@ -657,7 +667,7 @@ void validateAlignedVectorizedTensors(
 // could be improved to include shared memory.
 void validateMisalignedVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
@@ -678,7 +688,13 @@ void validateMisalignedVectorizedTensors(
       inp_misaligned_tensors_pos.begin(),
       inp_misaligned_tensors_pos.end(),
       std::back_inserter(inp_misaligned_tensors),
-      [&inputs](int idx) { return inputs[idx]; });
+      [&args](int idx) {
+        auto tensor_arg_abstract =
+            dynamic_cast<const TensorArgAbstract*>(args[idx]);
+        TORCH_INTERNAL_ASSERT(
+            tensor_arg_abstract, "alias io only supports tensor");
+        return tensor_arg_abstract->getTensor();
+      });
 
   const auto& out_misaligned_tensors_pos =
       tensor_vectorization_validation_entry.get().out_misaligned_tensors_pos;
@@ -732,61 +748,62 @@ void validateVectorizedSplits(
 
 void validateVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::validateVectorizedTensors");
 
   validateAlignedVectorizedTensors(
-      kernel, inputs, outputs, data_cache, expr_eval);
+      kernel, args, outputs, data_cache, expr_eval);
 
   validateMisalignedVectorizedTensors(
-      kernel, inputs, outputs, data_cache, expr_eval);
+      kernel, args, outputs, data_cache, expr_eval);
 
   validateVectorizedSplits(kernel, expr_eval);
 }
 
-kir::ExpressionEvaluator bindKernelInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
-    kir::Kernel* kernel,
-    bool check_consistency) {
-  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
+namespace {
 
-  TORCH_INTERNAL_ASSERT(
-      kernel->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs no longer match.");
+template <typename EXPR_EVALUATOR>
+void bindInputForExprEvaluation(
+    Val* val,
+    const ArgAbstract* arg,
+    bool check_consistency,
+    EXPR_EVALUATOR& expr_eval) {
+  if (val->getValType() == ValType::TensorView) {
+    TensorView* cg_tensor = val->as<TensorView>();
+    auto root_domain =
+        TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
 
-  kir::ExpressionEvaluator expr_eval;
-  const auto& inputs = kernel->inputs();
-
-  for (const auto i : c10::irange(inputs.size())) {
-    const auto input = inputs[i];
-
-    if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
+    if (root_domain.size() == 0) {
       TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match at index:",
-          i);
-
-      const auto aten_tensor = aten_inputs[i].toTensor();
-      const auto root_domain = TensorDomain::noReductions(
-          tensor_input->domain()->getMaybeRFactorDomain());
+          arg->isType(ArgType::CpuScalarTensor) ||
+              (arg->isType(ArgType::Tensor) &&
+               dynamic_cast<const TensorArgAbstract*>(arg)->getRank() == 0),
+          "Something went wrong configuring launch. Inputs is not rank 0 tensor");
+    } else {
       TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
-          "Something went wrong configuring launch. Inputs no longer match.");
+          arg->isType(ArgType::Tensor),
+          "Something went wrong configuring launch. Inputs do not match.");
+
+      auto tensor_arg_abstract = dynamic_cast<const TensorArgAbstract*>(arg);
+      TORCH_INTERNAL_ASSERT(
+          tensor_arg_abstract &&
+              tensor_arg_abstract->getRank() == (int64_t)root_domain.size(),
+          "Something went wrong configuring launch. Inputs rank does not match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
+        const auto tensor_arg_size = tensor_arg_abstract->getSize(dim);
+        const auto tensor_arg_stride = tensor_arg_abstract->getStride(dim);
         const auto extent = root_domain[dim]->extent();
         if (root_domain[dim]->hasExpandedExtent()) {
           TORCH_INTERNAL_ASSERT(
-              aten_tensor.strides()[dim] == 0,
-              "Execting an expanded dimension on ",
-              inputs[i]->toString(),
-              " dimension ",
+              tensor_arg_stride == 0,
+              "Execting an expanded dimension on dimension ",
               dim,
               " but found stride ",
-              aten_tensor.strides()[dim]);
+              tensor_arg_stride);
           // Could support dynamic size on expanded dimension, so may not have
           // an inferable expanded extent here. This check might be better to do
           // once all values are bound.
@@ -794,18 +811,17 @@ kir::ExpressionEvaluator bindKernelInputs(
               expr_eval.evaluate(root_domain[dim]->expandedExtent());
           if (maybe_expanded_size.has_value()) {
             TORCH_CHECK(
-                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                *maybe_expanded_size == tensor_arg_size,
                 "Expecting expanded extent of ",
                 *maybe_expanded_size,
                 " but recieved value of ",
-                aten_tensor.sizes()[dim]);
+                tensor_arg_size);
           }
         }
 
-        const auto value = root_domain[dim]->hasExpandedExtent()
-            ? 1
-            : aten_tensor.sizes()[dim];
-        if (value == 0 && tensor_input->uses().empty()) {
+        const auto value =
+            root_domain[dim]->hasExpandedExtent() ? 1 : tensor_arg_size;
+        if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
@@ -829,104 +845,56 @@ kir::ExpressionEvaluator bindKernelInputs(
           expr_eval.bind(extent, value);
         }
       }
-      // NOLINTNEXTLINE: https://bugs.llvm.org/show_bug.cgi?id=48525
-    } else if (input->isScalar() && input->dtype() == DataType::Int) {
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
-          "kernel expected Scalar Int inputs, but found",
-          aten_inputs[i].type()->str());
-      expr_eval.bind(input, aten_inputs[i].toInt());
     }
+  } else if (
+      val->getValType().value() == ValType::Scalar &&
+      val->getDataType().value() == DataType::Int) {
+    TORCH_INTERNAL_ASSERT(
+        arg->isType(ArgType::Long),
+        "fusion expected Scalar Int inputs, but found",
+        argTypeToString(arg->type()));
+    expr_eval.bind(val, *static_cast<const int64_t*>(arg->arg()));
   }
+}
 
+} // namespace
+
+kir::ExpressionEvaluator bindKernelInputs(
+    const KernelArgumentHolder& args,
+    kir::Kernel* kernel,
+    bool check_consistency) {
+  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
+
+  TORCH_INTERNAL_ASSERT(
+      kernel->inputs().size() == args.size(),
+      "Something went wrong configuring launch. Inputs no longer match.");
+
+  kir::ExpressionEvaluator expr_eval;
+  const auto& inputs = kernel->inputs();
+
+  for (const auto i : c10::irange(inputs.size())) {
+    bindInputForExprEvaluation(
+        inputs[i], args[i], check_consistency, expr_eval);
+  }
   return expr_eval;
 }
 
 ExpressionEvaluator bindFusionInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
+    const KernelArgumentHolder& args,
     Fusion* fusion) {
   FUSER_PERF_SCOPE("executor_utils::BindFusionInputs");
 
+  auto inputs = fusion->inputs();
   TORCH_INTERNAL_ASSERT(
-      fusion->inputs().size() == aten_inputs.size(),
+      inputs.size() == args.size(),
       "Something went wrong configuring launch. Inputs do not match.");
 
   ExpressionEvaluator expr_eval(fusion);
-  auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (const auto i : c10::irange(fusion->inputs().size())) {
-    if (inputs[i]->getValType() == ValType::TensorView) {
-      TensorView* cg_tensor = inputs[i]->as<TensorView>();
-
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs do not match.");
-
-      auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_domain =
-          TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
-      TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == (int64_t)root_domain.size(),
-          "Something went wrong configuring launch. Inputs do not match.");
-      for (const auto dim : c10::irange(root_domain.size())) {
-        const auto extent = root_domain[dim]->extent();
-        if (root_domain[dim]->hasExpandedExtent()) {
-          TORCH_INTERNAL_ASSERT(
-              aten_tensor.strides()[dim] == 0,
-              "Execting an expanded dimension on ",
-              inputs[i]->toString(),
-              " dimension ",
-              dim,
-              " but found stride ",
-              aten_tensor.strides()[dim]);
-          // Could support dynamic size on expanded dimension, so may not have
-          // an inferable expanded extent here. This check might be better to do
-          // once all values are bound.
-          auto maybe_expanded_size =
-              expr_eval.evaluate(root_domain[dim]->expandedExtent());
-          if (maybe_expanded_size.has_value()) {
-            TORCH_CHECK(
-                *maybe_expanded_size == aten_tensor.sizes()[dim],
-                "Expecting expanded extent of ",
-                *maybe_expanded_size,
-                " but recieved value of ",
-                aten_tensor.sizes()[dim]);
-          }
-        }
-
-        const auto value = root_domain[dim]->hasExpandedExtent()
-            ? 1
-            : aten_tensor.sizes()[dim];
-        if (value == 0 && cg_tensor->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
-        }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
-        const auto prev_value = expr_eval.evaluate(extent);
-        if (prev_value.has_value()) {
-          TORCH_CHECK(
-              *prev_value == value,
-              "Attempting to bind ",
-              extent,
-              " to ",
-              value,
-              " but it's already set to ",
-              *prev_value);
-        } else {
-          expr_eval.bind(extent, value);
-        }
-      }
-    } else if (
-        inputs[i]->getValType().value() == ValType::Scalar &&
-        inputs[i]->getDataType().value() == DataType::Int) {
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
-          "fusion expected Scalar Int inputs, but found",
-          aten_inputs[i].type()->str());
-      expr_eval.bind(inputs[i], aten_inputs[i].toInt());
-    }
+  for (const auto i : c10::irange(inputs.size())) {
+    bindInputForExprEvaluation(inputs[i], args[i], true, expr_eval);
   }
   return expr_eval;
 }
