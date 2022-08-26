@@ -1512,7 +1512,7 @@ def _handle_reduce_dim_none(g, self, op_name):
 def dequantize_helper(
     g,
     qtensor: _C.Value,
-    qdtype: Optional[torch.onnx.TensorProtoDataType] = None,
+    qdtype: Optional[_C_onnx.TensorProtoDataType] = None,
 ) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
