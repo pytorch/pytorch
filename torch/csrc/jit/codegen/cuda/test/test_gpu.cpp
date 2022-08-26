@@ -24508,7 +24508,7 @@ TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
       __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
+TEST_F(NVFuserTest, FusionTransformPropagatorSelector_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -24923,7 +24923,7 @@ TEST_F(NVFuserTest, FusionRepro1860_CUDA) {
   fusion.addInput(tv22);
 
   auto tv3 = add(tv0, tv1);
-  auto tv4 = softmax(tv3, {0});
+  auto tv4 = softmax(tv3, 0);
   auto tv5 = add(tv4, tv22);
   fusion.addOutput(tv5);
 

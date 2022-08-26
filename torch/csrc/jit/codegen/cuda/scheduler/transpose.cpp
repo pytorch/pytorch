@@ -572,7 +572,7 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
   //    t0
   //    |
   //   cache
-  //   /  \
+  //   |  |
   //  t1  t2
   // if groups = {{t1, t2}, {t0}}, then removing {t0, cache} from the DAG will
   // make it disconnected.
