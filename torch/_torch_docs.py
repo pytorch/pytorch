@@ -11664,6 +11664,20 @@ If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
 resulting :attr:`out` tensor *does not* share the underlying storage
 with the :attr:`input` tensor.
 
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` with compressed 
+layout (SparseCSR, SparseBSR, SparseCSC or SparseBSC) the arguments 
+:attr:`dim0` and :attr:`dim1` must be both batch dimensions, or must 
+both be sparse dimensions. The batch dimensions of a sparse tensor are the 
+dimensions preceding the sparse dimensions.
+
+.. note:: 
+    Transpositions which interchange the sparse dimensions of a `SparseCSR` 
+    or `SparseCSC` layout tensor will result in the layout changing between 
+    the two options. Transposition of the sparse dimensions of a ` SparseBSR` 
+    or `SparseBSC` layout tensor will likewise generate a result with the 
+    opposite layout.
+
+
 Args:
     {input}
     dim0 (int): the first dimension to be transposed
