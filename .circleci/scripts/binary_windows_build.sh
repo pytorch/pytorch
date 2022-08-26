@@ -4,13 +4,13 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/c/w/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-export CUDA_VERSION="${DESIRED_CUDA/cu/}"
+export CUDA_VERSION="${GPU_ARCH_VERSION:-cpu}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
 export VC_YEAR=2019
 
-if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
+if [[ "${GPU_ARCH_VERSION}" == *"11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
