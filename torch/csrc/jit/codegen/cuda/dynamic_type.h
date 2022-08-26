@@ -23,8 +23,8 @@ class TORCH_CUDA_CU_API IntOrDouble {
 
   // Avoid using copy constructor of c10::variant as it's
   // deprecated.
-  IntOrDouble(const IntOrDouble& other)
-      : IntOrDouble(other.is_int() ? other.as<int64_t>() : other.as<double>()) {
+  IntOrDouble(const IntOrDouble& other) {
+    value_ = other.value_;
   }
 
   // Explicitly define copy assignment operator as its implicit definition is
