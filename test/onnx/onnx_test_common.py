@@ -96,7 +96,7 @@ class _TestONNXRuntime(common_utils.TestCase):
         remained_onnx_input_idx=None,
         verbose=False,
     ):
-        def _run_test(m, remained_onnx_input_idx, flatten=True):
+        def _run_test(m, remained_onnx_input_idx, flatten=True, ignore_none=True):
             return run_model_test(
                 self,
                 m,
@@ -113,6 +113,7 @@ class _TestONNXRuntime(common_utils.TestCase):
                 training=training,
                 remained_onnx_input_idx=remained_onnx_input_idx,
                 flatten=flatten,
+                ignore_none=ignore_none,
                 verbose=verbose,
             )
 
@@ -129,7 +130,11 @@ class _TestONNXRuntime(common_utils.TestCase):
 
         if self.is_script_test_enabled and self.is_script:
             script_model = model if is_model_script else torch.jit.script(model)
-            _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
-
+            _run_test(
+                script_model,
+                scripting_remained_onnx_input_idx,
+                flatten=False,
+                ignore_none=False,
+            )
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
