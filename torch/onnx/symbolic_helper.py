@@ -447,7 +447,7 @@ def quantized_args(
 
 
 @_beartype.beartype
-def _scalar(x: torch.Tensor):
+def _scalar(x: Any) -> Optional[Number]:
     """Convert a scalar tensor into a Python value."""
     if isinstance(x, torch.Tensor) and x.shape == ():
         return x.item()
