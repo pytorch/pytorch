@@ -1375,18 +1375,23 @@ void check_onnx_proto(const std::string& proto_string) {
   // And errors out exporting if that happens.
   onnx::checker::check_model(model);
   onnx::shape_inference::InferShapes(model);
-  // 2. full check 
-  // apply strict mode shape type inference check which examines
+  // 2. full check
+  / apply strict mode shape type inference check which examines
   // whether it's a valid ONNX graph or not. As for some users, they
   // don't need a fully valid ONNX graph to run their model, we simply
   // add this information as warning message if it fails.
   try {
-      auto* schema_registry = onnx::OpSchemaRegistry::Instance();
-      onnx::ShapeInferenceOptions options{
-          /*check_type=*/true,
-          /*error_mode=*/true};
-      onnx::shape_inference::InferShapes(
-          model, schema_registry, options);
+
+    uto* schema_registry = onnx::OpSchemaRegistry::Instance();
+
+    nnx::ShapeInferenceOptions options{
+
+        *check_type=*/true,
+
+        *error_mode=*/true};
+
+    nnx::shape_inference::InferShapes(
+odel, schema_registry, options);
   } catch (const onnx::InferenceError& ex) {
     TORCH_WARN(
         "The exported ONNX model failed ONNX shape inference."
@@ -1400,3 +1405,4 @@ void check_onnx_proto(const std::string& proto_string) {
 
 } // namespace jit
 } // namespace torch
+ 
