@@ -85,10 +85,8 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@register_meta(aten.copy_.default)
+@register_meta(aten.copy_.default, register_dispatcher=False)
 def meta_copy_(self, src, non_blocking=False):
-    if src.device.type == "meta":
-        raise NotImplementedError("Cannot copy out")
     return self
 
 
