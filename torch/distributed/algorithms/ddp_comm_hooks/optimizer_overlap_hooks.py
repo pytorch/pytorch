@@ -1,7 +1,9 @@
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 import torch
 import torch.distributed as dist
+
+__all__: List[str] = []
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
