@@ -1,8 +1,8 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
-from pytorch_test_common import skipIfNoCuda
 
 import torch
+from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
