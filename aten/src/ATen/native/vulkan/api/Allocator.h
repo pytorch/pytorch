@@ -47,7 +47,7 @@
 #pragma clang diagnostic ignored "-Wunused-variable"
 #endif /* __clang__ */
 
-#include <include/vk_mem_alloc.h>
+#include <ATen/native/vulkan/api/vk_mem_alloc.h>
 
 #ifdef __clang__
 #pragma clang diagnostic pop

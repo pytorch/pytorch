@@ -63,12 +63,10 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
       // Functions might resize zero-sized inputs, which we need to reflect ehre.
       unwrapped.resize_(wrapped_inner.sizes());
     }
-    // If the input tensor's metadata was mutated, then use as_strided_()
-    // to propagate the metadata change.
-    if (unwrapped.sizes() != wrapped_inner.sizes()) {
-      unwrapped.as_strided_(wrapped_inner.sizes(), wrapped_inner.strides());
-    }
-    unwrapped.copy_(wrapped_inner);
+      TORCH_INTERNAL_ASSERT(unwrapped.sizes() == wrapped_inner.sizes(),
+          "An inplace-mutation op (like transpose_() was called on an input to the functionalization pass."
+          " Propagating those mutations to the input is currently not supported.");
+      unwrapped.copy_(wrapped_inner);
   }
 }
 

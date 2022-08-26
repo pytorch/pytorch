@@ -9,7 +9,6 @@ import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-import yaml
 from typing import (
     Any,
     Callable,
@@ -964,7 +963,7 @@ class MergeRule:
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     from pathlib import Path
 
-    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
+    repo_relative_rules_path = Path(".github") / "merge_rules.json"
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -972,15 +971,15 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
             reader=json.load,
         )
         content = base64.b64decode(json_data["content"])
-        return [MergeRule(**x) for x in yaml.safe_load(content)]
+        return cast(List[MergeRule], json.loads(content, object_hook=lambda x: MergeRule(**x)))
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
             print(f"{rules_path} does not exist, returning empty rules")
             return []
         with open(rules_path) as fp:
-            rc = yaml.safe_load(fp)
-        return [MergeRule(**x) for x in rc]
+            rc = json.load(fp, object_hook=lambda x: MergeRule(**x))
+        return cast(List[MergeRule], rc)
 
 
 def find_matching_merge_rule(pr: GitHubPR,
