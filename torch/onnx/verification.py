@@ -153,8 +153,8 @@ def _compare_ort_pytorch_outputs(
     pt_outs_np = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
     ort_outs = _inline_flatten_list(ort_outs, [])
     assert len(ort_outs) == len(
-        pt_outs
-    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
+        pt_outs_np
+    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs_np)})"
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
     ):
@@ -168,7 +168,6 @@ def _compare_ort_pytorch_outputs(
             if not check_shape:
                 # Allow different but broadcastable output shapes.
                 ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
-                # pt_out = torch.from_numpy(pt_out_np)
             torch.testing.assert_close(
                 ort_out,
                 pt_out,
