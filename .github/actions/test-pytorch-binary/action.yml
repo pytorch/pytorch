@@ -16,7 +16,6 @@ runs:
           -e BUILDER_ROOT \
           -e BUILD_ENVIRONMENT \
           -e BUILD_SPLIT_CUDA \
-          -e DESIRED_CUDA \
           -e DESIRED_DEVTOOLSET \
           -e DESIRED_PYTHON \
           -e GITHUB_ACTIONS \

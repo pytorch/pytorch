@@ -23,10 +23,6 @@ on:
         required: true
         type: string
         description: Package type
-      DESIRED_CUDA:
-        required: true
-        type: string
-        description: Desired Cuda version
       GPU_ARCH_VERSION:
         required: false
         type: string
@@ -72,9 +68,6 @@ jobs:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
       DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
@@ -102,7 +95,6 @@ jobs:
             echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
 
-            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
             echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
             echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
