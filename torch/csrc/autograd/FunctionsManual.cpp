@@ -3489,7 +3489,7 @@ Tensor eig_backward(
     }
     // No support for complex eigenvalues for real inputs yet.
     TORCH_CHECK(
-        at::equal(is_imag_eigvals_zero, is_imag_eigvals_zero.new_ones({})),
+        at::is_scalar_tensor_true(is_imag_eigvals_zero),
         "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
   } else {
     // torch.eig returns 2d tensors for eigenvalues,
