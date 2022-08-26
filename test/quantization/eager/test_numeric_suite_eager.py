@@ -3,7 +3,7 @@
 import unittest
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.ao.quantization import (
     DeQuantStub,
     QuantStub,
