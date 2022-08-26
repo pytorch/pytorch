@@ -861,7 +861,9 @@ def native_group_norm_backward(
     group: int,
     output_mask: List[bool],
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
-    utils.check_same_device(grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False)
+    utils.check_same_device(
+        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    )
     utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     assert input.numel() == N * C * HxW
@@ -905,7 +907,10 @@ def native_group_norm_backward(
         )
         d_input = d_input.reshape(input.shape).to(input.dtype)
     if output_mask[1]:
-        d_gamma = ((ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1)) * rstd.unsqueeze(-1)).reshape(C)
+        d_gamma = (
+            (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+            * rstd.unsqueeze(-1)
+        ).reshape(C)
     if output_mask[2]:
         d_bias = db.sum(dim=[0])
 
