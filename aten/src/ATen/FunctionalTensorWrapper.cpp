@@ -10,6 +10,12 @@
 
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_to_copy.h>
+#endif
+
 namespace at {
 
 void FunctionalTensorWrapper::set_constructor_metadata() {
@@ -206,7 +212,9 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
-    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
+    // and we want _to_copy() to show up in the graph, not the composite .to() operator
+    // (this can happen if autograd has already run by the time we enter this code)
+    value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
 
@@ -495,19 +503,12 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
@@ -515,19 +516,12 @@ template <typename T>
 bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   if (list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto& tensor : list) {
     if (!tensor.defined()) continue;
     if (isFunctionalTensor(tensor)) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 

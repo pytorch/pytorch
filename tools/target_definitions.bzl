@@ -69,7 +69,7 @@ def add_torch_libs():
     ] + (
         ["-DUSE_C10D_MPI"] if use_mpi else []
     ) + (
-        ["-DUSE_KINETO", "-DUSE_KINETO_UPDATED"] if use_kineto() else []
+        ["-DUSE_KINETO"] if use_kineto() else []
     ) + (
         ["-DENABLE_LIBKINETO_CLIENT"] if native.read_config("kineto", "enable_libkineto_client", "1") == "1" else []
     )
@@ -168,7 +168,7 @@ def add_torch_libs():
                 "//gloo/fb/transport/tls:tls",
                 "//gloo/transport/tcp:tcp",
                 "//tensorpipe:tensorpipe_cpu",
-            ] + (["//kineto/libkineto:kineto"] if use_kineto() else []) +
+            ] + (["//kineto/libkineto:kineto"] if use_kineto() else ["//kineto/libkineto:kineto_activity_header"]) +
             (["//caffe2:mobile_bytecode"] if enable_flatbuffer else [])
         ),
         exported_external_deps = [
@@ -448,6 +448,13 @@ def add_torch_libs():
         ],
     )
 
+    cpp_library(
+        name = "headers_for_torch_python_hip_deps",
+        exported_deps = [
+            ":_C_impl_hip",
+        ],
+    ) if is_amd_build() else None
+
     # This target compiles torch_python bindings, but skips the deps on actual
     # torch and python since those will be integrated specially in the wrapper for
     # libinterpreter.so used in torch::deploy
@@ -524,6 +531,28 @@ def add_torch_libs():
     )
 
     cpp_library(
+        name = "torch_python_hip_without_torch",
+        srcs = [":fb_C_impl_hipify_gen={}".format(f) for f in (libtorch_python_hip_sources_hipified)] + libtorch_python_hip_sources + torch_cpp_srcs,
+        undefined_symbols = True,
+        preferred_linkage = "static",
+        exported_deps = [
+            ":headers_for_torch_python_hip_deps#headers",
+        ],
+        exported_external_deps = [
+            ("pybind11", None),
+            ("frozenpython", None, "python-headers"),
+        ],
+        compiler_flags = compiler_flags_cpu + [
+            "-DUSE_ROCM",
+            # some code in the Python bindings compiles differently
+            # when you are deploy
+            "-DUSE_DEPLOY",
+            "-Wno-error",
+        ],
+        compiler_specific_flags = common_flags["compiler_specific_flags"],
+    ) if is_amd_build() else None
+
+    cpp_library(
         name = "_C_impl_hip",
         srcs = [":fb_C_impl_hipify_gen={}".format(f) for f in (libtorch_python_hip_sources_hipified)] + libtorch_python_hip_sources,
         link_whole = True,
@@ -564,7 +593,7 @@ def add_torch_libs():
         deps = [
             ":_C_impl",
             "//caffe2:flatbuffer_loader",
-            "//caffe2:flatbuffer_serializer",
+            "//caffe2:flatbuffers_serializer_jit",
         ],
     )
 
