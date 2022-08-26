@@ -233,13 +233,14 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self,
-             c10::complex<double> val) -> nvfuser::Scalar {
+             std::complex<double> val) -> nvfuser::Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (complex)");
             nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(
                 new nvfuser::
                     ConstantRecord<Nvf::ComplexDouble, c10::complex<double>>(
-                        {self.recordingState(out())}, val));
+                        {self.recordingState(out())},
+                        static_cast<c10::complex<double>>(val)));
             return out;
           },
           py::return_value_policy::reference)

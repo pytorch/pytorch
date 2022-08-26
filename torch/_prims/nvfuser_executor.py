@@ -147,6 +147,15 @@ class PartitionedInterpreter(torch.fx.Interpreter):
             return super().call_module(target, args, kwargs)
 
 
+class NvfuserGraphModule(torch.nn.Module):
+    def __init__(self, gm):
+        super().__init__()
+        self.gm = gm
+
+    def __call__(self, *args):
+        return nvfuser_execute(self.gm, *args)
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache()  # type: ignore[arg-type]
 def maybe_partition_graph(gm: GraphModule):
@@ -171,6 +180,17 @@ def maybe_partition_graph(gm: GraphModule):
                 category=RuntimeWarning,
             )
         partitioned_graph = partitioner.fuse_partitions(partitions)
+
+        # Replacing graph's fused submodules with a wrapper module with
+        # __call__() method that calls nvfuser_execute.
+        # This avoids the need to call the interpreter on the graph
+        for node in partitioned_graph.graph.nodes:
+            # TODO: use a better way to identify fused submodule
+            if node.op == "call_module" and "fused_" in node.name:
+                nvfuser_submodule = getattr(partitioned_graph, node.name)
+                partitioned_graph.delete_submodule(node.target)
+                gm.add_submodule(node.target, NvfuserGraphModule(nvfuser_submodule))
+
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
@@ -181,11 +201,6 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args):
     # because it avoids PartitionedInterpreter's overhead
     gm, is_partitioned = maybe_partition_graph(gm)
     if is_partitioned:
-        result = PartitionedInterpreter(gm).run(*args)
-        # PartitionedInterpreter doesn't run unflatten using out_spec
-        if getattr(gm, "_out_spec", None) is not None:
-            assert gm._out_spec is not None  # for mypy
-            return tree_unflatten(result, gm._out_spec)
-        return result
+        return gm(*args)
     else:
         return nvfuser_execute(gm, *args)
