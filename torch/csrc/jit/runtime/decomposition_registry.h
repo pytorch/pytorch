@@ -25,5 +25,9 @@ TORCH_API Function* GetDecompositionExecutor(const char* schema_literal);
 
 TORCH_API Function* GetDecompositionExecutor(const FunctionSchema& schema);
 
+TORCH_API void run_jit_decomposition(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack);
+
 } // namespace jit
 } // namespace torch

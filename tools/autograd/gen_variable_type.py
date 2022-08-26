@@ -597,8 +597,15 @@ at::redispatch::${api_name}(${unpacked_args})"""
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate(
     """\
 auto ${tmp_var} = ([&]() {
-  ${guard}
-  return ${base_type_call};
+  if (${try_jit_decomposition_bool} && ${not_any_requires_grad} && ${any_has_forward_grad}) {
+    c10::OperatorName full_name("aten::${op_name}", "${op_overload}");  // Need: name and overload
+    const auto& opt_op = c10::Dispatcher::singleton().findSchema(full_name);
+    TORCH_CHECK(opt_op.has_value());
+    return impl::run_jit_decomposition_with_args<${returns_and_args}>(*opt_op, ks, ${arg_names});
+  } else {
+    ${guard}
+    return ${base_type_call};
+  }
 })();
 """
 )
@@ -972,6 +979,23 @@ def emit_body(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
 
+    if requires_derivative and not len(fw_derivatives) == 0:
+        assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
+            differentiable_outputs
+        ), (
+            "Expected the number of forward derivatives implemented to match the "
+            "number of differentiable outputs. NB: This only applies when at least "
+            "one forward derivative is implemented. Not implementing any forward "
+            "derivatives is also okay, and we would require inputs to the op to "
+            "not have associated tangents in that case."
+        )
+    try_jit_decomposition = (
+        requires_derivative
+        and len(fw_derivatives) == 0
+        and (not modifies_arguments(f))
+        and (not returns_void)
+    )
+
     def emit_save_inputs() -> List[str]:
         setup: List[str] = []
         if info is None or not info.has_derivatives:
@@ -1338,7 +1362,9 @@ def emit_body(
             )
         return call
 
-    def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
+    def emit_call(
+        f: NativeFunction, unpacked_bindings: List[Binding], try_jit_decomposition: bool
+    ) -> str:
         # We only care about adding `at::AutoDispatchBelowAutograd` guard for non-variable dispatch
         # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
@@ -1352,13 +1378,55 @@ def emit_body(
         else:
             guard = "at::AutoDispatchBelowADInplaceOrView guard;"
 
+        try_jit_decomposition_bool = "true" if try_jit_decomposition else "false"
+        any_has_forward_grad = (
+            f'({" || ".join(get_any_has_forward_grad_name(derivative.var_names) for derivative in fw_derivatives)})'
+            if len(fw_derivatives)
+            else "false"
+        )
+        not_any_requires_grad = (
+            "!_any_requires_grad" if requires_derivative else "false"
+        )
+        return_types = ", ".join(
+            [cpp.return_type(a, symint=True).cpp_type() for a in f.func.returns]
+        )
+        if len(f.func.returns) > 1:
+            return_types = f"std::tuple<{return_types}>"
+
+        arg_types = [
+            cpp.argument_type(a, binds="", symint=True).cpp_type()
+            for a in f.func.arguments.flat_all
+        ]
+        arg_names = [
+            a.name
+            for a in cpp.arguments(
+                f.func.arguments,
+                faithful=True,
+                symint=True,
+                method=False,
+                cpp_no_default_args=set(),
+            )
+        ]
+
         if not modifies_arguments(f) and not returns_void:
+            # Just to keep things simple here, we only care about this path
+            # and always emit the if/else for now
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call, tmp_var=TMP_VAR, guard=guard
+                base_type_call=base_type_call,
+                tmp_var=TMP_VAR,
+                guard=guard,
+                try_jit_decomposition_bool=try_jit_decomposition_bool,
+                not_any_requires_grad=not_any_requires_grad,
+                any_has_forward_grad=any_has_forward_grad,
+                op_name=cpp.name(f.func),
+                op_overload="",
+                returns_and_args=return_types + ", " + ", ".join(arg_types),
+                arg_names=arg_names,
             )
 
             call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:
+            assert not try_jit_decomposition
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call, guard=guard
             )
@@ -1560,6 +1628,9 @@ def emit_body(
         content.append("\n".join(fw_grad_setters))
         return content
 
+    # TODO(soulitzer):
+    #   this is still used for out_fn, but otherwise maybe we also want similar
+    #   message for the case when the decomposition does not exist?
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
         def get_msg() -> str:
             if is_out_fn:
@@ -1613,7 +1684,8 @@ def emit_body(
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
-    body.append(emit_call(f, unpacked_bindings))
+    # We will need to update this part
+    body.append(emit_call(f, unpacked_bindings, try_jit_decomposition))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -1623,20 +1695,8 @@ def emit_body(
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_derivative:
+        if requires_derivative and not len(fw_derivatives) == 0:
             body.extend(emit_fw_derivatives())
-            if len(fw_derivatives) == 0:
-                body.append(emit_forbid_fw_derivatives())
-            else:
-                assert sum(
-                    len(derivative.var_names) for derivative in fw_derivatives
-                ) == len(differentiable_outputs), (
-                    "Expected the number of forward derivatives implemented to match the "
-                    "number of differentiable outputs. NB: This only applies when at least "
-                    "one forward derivative is implemented. Not implementing any forward "
-                    "derivatives is also okay, and we would require inputs to the op to "
-                    "not have associated tangents in that case."
-                )
 
     if requires_derivative:
         # Save only after the forward AD has been set up
