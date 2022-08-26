@@ -57,12 +57,6 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
 #define ENABLE_NCCL_P2P_SUPPORT
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#endif
-
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
   do {                                                                        \
@@ -222,33 +216,6 @@ class NCCLComm {
   // better error messaging.
   c10::optional<std::string> commFailureReason_;
 };
-
-// Helper that automatically cleans up premul sums.
-struct ncclRedOpRAII {
-  ncclRedOpRAII() {}
-  ncclRedOpRAII(ncclRedOp_t op) : op_(op) {}
-  ncclRedOpRAII(ncclRedOp_t op, ncclComm_t comm) :
-    op_(op), comm_(comm), premul_sum_(true) {}
-  ncclRedOpRAII(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
-    std::swap(tmp.op_, this->op_);
-    std::swap(tmp.comm_, this->comm_);
-    std::swap(tmp.premul_sum_, this->premul_sum_);
-  }
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-  ~ncclRedOpRAII() {
-    if (premul_sum_) {
-      ncclRedOpDestroy(op_, comm_);
-    }
-  }
-#endif
-  operator ncclRedOp_t() const { return op_; }
-  ncclRedOp_t op_;
-  ncclComm_t comm_;
-  bool premul_sum_ = false;
-};
-
 
 } // namespace c10d
 
