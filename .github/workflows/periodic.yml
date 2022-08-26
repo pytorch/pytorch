@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn7-py3-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
   linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-test:
     name: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
