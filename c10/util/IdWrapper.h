@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <functional>
 #include <utility>
-#include <cstddef>
 
 namespace c10 {
 
