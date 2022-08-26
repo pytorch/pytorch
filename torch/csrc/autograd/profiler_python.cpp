@@ -1,5 +1,9 @@
 #include <torch/csrc/autograd/profiler_python.h>
 
+#include <ATen/core/TensorBase.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
+#include <c10/util/StringUtil.h>
 #include <cstdint>
 #include <deque>
 #include <iostream>
@@ -17,6 +21,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/util.h>
@@ -182,9 +187,11 @@ template <>
 struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
   using ephemeral_t = PyFrameObject*;
+  using info_t =
+      std::pair<PyModuleCls, std::vector<std::pair<std::string, void*>>>;
   struct cache_t {
     c10::optional<CodeLocation> module_forward_;
-    ska::flat_hash_map<PyModuleSelf, PyModuleCls> modules_;
+    ska::flat_hash_map<PyModuleSelf, info_t> modules_and_params_;
     ska::flat_hash_map<PyModuleCls, at::StringView> module_cls_names_;
   };
   static constexpr EventType event_type = EventType::PyCall;
@@ -280,16 +287,30 @@ void ValueCache::store<CallType::PyModuleCall>(
     const PyModuleCallKey& key,
     Config<CallType::PyModuleCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
-  if (C10_UNLIKELY(cache.modules_.find(key) == cache.modules_.end())) {
+  if (C10_UNLIKELY(
+          cache.modules_and_params_.find(key) ==
+          cache.modules_and_params_.end())) {
     if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
       auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
       TORCH_INTERNAL_ASSERT(code.get() == nnModuleCode());
       cache.module_forward_ = PyCallKey(frame);
       store<CallType::PyCall>(*cache.module_forward_, no_ephemeral_t());
     }
+
+    py::dict params = py::handle((PyObject*)key).attr("_parameters");
+    std::vector<std::pair<std::string, void*>> params_;
+    for (auto& it : params) {
+      auto t = it.second.ptr();
+      if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(t)) {
+        auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
+        if (storage) {
+          params_.emplace_back(it.first.cast<std::string>(), storage->data());
+        }
+      }
+    }
     auto cls_handle = py::handle((PyObject*)key).attr("__class__");
     auto cls = PyModuleCls(cls_handle.ptr());
-    cache.modules_[key] = cls;
+    cache.modules_and_params_[key] = make_pair(cls, params_);
 
     if (cache.module_cls_names_.find(cls) == cache.module_cls_names_.end()) {
       cache.module_cls_names_[cls] =
@@ -303,9 +324,15 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
     const PyModuleCallKey& key) const {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
   TORCH_INTERNAL_ASSERT(cache.module_forward_.has_value());
-  auto cls = cache.modules_.at(key);
+  auto cls = cache.modules_and_params_.at(key).first;
   auto fwd = std::get<CallType::PyCall>(state_).at(*cache.module_forward_);
-  return {fwd, NNModuleInfo{key, cls, cache.module_cls_names_.at(cls)}};
+  return {
+      fwd,
+      NNModuleInfo{
+          key,
+          cls,
+          cache.module_cls_names_.at(cls),
+          cache.modules_and_params_.at(key).second}};
 }
 
 template <>
