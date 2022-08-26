@@ -38,9 +38,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
@@ -58,9 +55,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps

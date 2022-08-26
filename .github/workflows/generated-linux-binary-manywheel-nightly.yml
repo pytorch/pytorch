@@ -43,9 +43,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
@@ -62,9 +59,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
@@ -80,9 +74,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
@@ -100,9 +91,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -120,9 +108,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -139,9 +124,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -160,9 +142,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -180,9 +159,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -199,9 +175,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -220,9 +193,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -240,9 +210,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -259,9 +226,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -280,9 +244,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -300,9 +261,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -319,9 +277,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -340,9 +295,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -361,9 +313,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -459,9 +408,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -480,9 +426,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -501,9 +444,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -599,9 +539,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -620,9 +557,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
@@ -639,9 +573,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
@@ -657,9 +588,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
@@ -677,9 +605,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -697,9 +622,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -716,9 +638,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -737,9 +656,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -757,9 +673,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -776,9 +689,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -797,9 +707,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -817,9 +724,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -836,9 +740,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -857,9 +758,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -877,9 +775,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -896,9 +791,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -917,9 +809,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -938,9 +827,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -1036,9 +922,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -1057,9 +940,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -1078,9 +958,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -1176,9 +1053,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -1197,9 +1071,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
@@ -1216,9 +1087,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
@@ -1234,9 +1102,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
@@ -1254,9 +1119,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1274,9 +1136,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1293,9 +1152,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1314,9 +1170,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1334,9 +1187,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1353,9 +1203,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1374,9 +1221,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -1394,9 +1238,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -1413,9 +1254,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -1434,9 +1272,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -1454,9 +1289,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -1473,9 +1305,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -1494,9 +1323,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -1515,9 +1341,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -1613,9 +1436,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -1634,9 +1454,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -1655,9 +1472,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -1753,9 +1567,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -1774,9 +1585,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
@@ -1793,9 +1601,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
@@ -1811,9 +1616,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
@@ -1831,9 +1633,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1851,9 +1650,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1870,9 +1666,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -1891,9 +1684,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1911,9 +1701,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1930,9 +1717,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -1951,9 +1735,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -1971,9 +1752,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -1990,9 +1768,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -2011,9 +1786,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -2031,9 +1803,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -2050,9 +1819,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -2071,9 +1837,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -2092,9 +1855,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -2190,9 +1950,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
@@ -2211,9 +1968,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -2232,9 +1986,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
@@ -2330,9 +2081,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.2
       GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
@@ -2351,9 +2099,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.11"
@@ -2370,9 +2115,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.11"
@@ -2388,9 +2130,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.11"
@@ -2408,9 +2147,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -2428,9 +2164,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -2447,9 +2180,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
@@ -2468,9 +2198,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -2488,9 +2215,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -2507,9 +2231,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
@@ -2528,9 +2249,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -2548,9 +2266,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -2567,9 +2282,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -2588,9 +2300,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -2608,9 +2317,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
@@ -2627,9 +2333,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7

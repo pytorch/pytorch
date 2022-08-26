@@ -40,9 +40,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
@@ -144,9 +141,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
@@ -244,9 +238,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.7"
       build_name: wheel-py3_7-cpu
@@ -264,9 +255,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -369,9 +357,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -470,9 +455,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.7"
@@ -491,9 +473,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -596,9 +575,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -697,9 +673,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.7"
@@ -718,9 +691,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -823,9 +793,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -924,9 +891,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.7"
@@ -945,9 +909,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
@@ -1049,9 +1010,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
@@ -1149,9 +1107,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.8"
       build_name: wheel-py3_8-cpu
@@ -1169,9 +1124,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1274,9 +1226,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1375,9 +1324,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.8"
@@ -1396,9 +1342,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1501,9 +1444,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1602,9 +1542,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.8"
@@ -1623,9 +1560,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1728,9 +1662,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -1829,9 +1760,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.8"
@@ -1850,9 +1778,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -1954,9 +1879,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -2054,9 +1976,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cpu
@@ -2074,9 +1993,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2179,9 +2095,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2280,9 +2193,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
@@ -2301,9 +2211,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2406,9 +2313,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2507,9 +2411,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
@@ -2528,9 +2429,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2633,9 +2531,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -2734,9 +2629,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
@@ -2755,9 +2647,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -2859,9 +2748,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -2959,9 +2845,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cpu
@@ -2979,9 +2862,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3084,9 +2964,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3185,9 +3062,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
@@ -3206,9 +3080,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3311,9 +3182,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3412,9 +3280,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
@@ -3433,9 +3298,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3538,9 +3400,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
@@ -3639,9 +3498,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
       GPU_ARCH_VERSION: 11.7
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"

@@ -13,9 +13,6 @@
       BUILDER_ROOT: /builder
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: !{{ config["desired_cuda"] }}
 {%- if config["gpu_arch_version"] %}
       GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
 {%- endif %}

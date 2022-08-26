@@ -42,9 +42,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
@@ -124,9 +121,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.7"
@@ -146,9 +140,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
@@ -228,9 +219,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
@@ -250,9 +238,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -332,9 +317,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
@@ -354,9 +336,6 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -436,9 +415,6 @@ jobs:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
