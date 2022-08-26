@@ -45,7 +45,11 @@ __all__ = [
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
     'new_subgroups_by_enumeration', 'recv', 'reduce', 'reduce_multigpu',
     'reduce_scatter', 'reduce_scatter_multigpu', 'scatter',
-    'scatter_object_list', 'send', 'supports_complex'
+    'scatter_object_list', 'send', 'supports_complex',
+    'AllreduceCoalescedOptions', 'AllreduceOptions', 'AllToAllOptions',
+    'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
+    'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
+    'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
 ]
 
 _MPI_AVAILABLE = True
@@ -57,29 +61,27 @@ _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
-_public_types_to_change_module = [
-    AllreduceCoalescedOptions,
-    AllreduceOptions,
-    AllToAllOptions,
-    BarrierOptions,
-    BroadcastOptions,
-    GatherOptions,
-    PrefixStore,
-    ProcessGroup,
-    ReduceOp,
-    ReduceOptions,
-    ReduceScatterOptions,
-    ScatterOptions,
-    Store,
-    DebugLevel,
-    get_debug_level,
-    Work
-]
-
 def _export_c_types():
+    _public_types_to_change_module = [
+        AllreduceCoalescedOptions,
+        AllreduceOptions,
+        AllToAllOptions,
+        BarrierOptions,
+        BroadcastOptions,
+        GatherOptions,
+        PrefixStore,
+        ProcessGroup,
+        ReduceOp,
+        ReduceOptions,
+        ReduceScatterOptions,
+        ScatterOptions,
+        Store,
+        DebugLevel,
+        get_debug_level,
+        Work
+    ]
     for type in _public_types_to_change_module:
         type.__module__ = "torch.distributed.distributed_c10d"
-        __all__.append(type.__name__)
 _export_c_types()
 
 try:
