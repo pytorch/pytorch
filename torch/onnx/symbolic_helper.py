@@ -33,6 +33,8 @@ from torch.types import Number
 #   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
 #   transparently dispatched to their non inplace versions in
 #   "run_symbolic_function".   See Note [Export inplace]
+# - REQUIRED: Annotate new symbolic functions with type annotations and decorate with
+#   _beartype.beartype to enable runtime type checking.
 #
 # ----------------------------------------------------------------------------------
 # A note on Tensor types
@@ -496,6 +498,7 @@ def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
+# Note: _C.JitType is not exposed to Python and cannot be checked in runtime.
 def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
     if isinstance(jit_type, _C.ListType):
         return jit_type

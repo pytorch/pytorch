@@ -77,6 +77,7 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
+@_beartype.beartype
 def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     r"""A context manager to temporarily set the training mode of ``model``
     to ``mode``, resetting it when we exit the with-block.
@@ -128,6 +129,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 
 
 @contextlib.contextmanager
+@_beartype.beartype
 def disable_apex_o2_state_dict_hook(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction]
 ):
@@ -161,7 +163,8 @@ def disable_apex_o2_state_dict_hook(
 
 
 @contextlib.contextmanager
-def setup_onnx_logging(verbose):
+@_beartype.beartype
+def setup_onnx_logging(verbose: bool):
     is_originally_enabled = torch.onnx.is_onnx_log_enabled()
     if is_originally_enabled or verbose:
         torch.onnx.enable_log()
@@ -173,7 +176,8 @@ def setup_onnx_logging(verbose):
 
 
 @contextlib.contextmanager
-def exporter_context(model, mode, verbose):
+@_beartype.beartype
+def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     with select_model_mode_for_export(
         model, mode
     ) as mode_ctx, disable_apex_o2_state_dict_hook(
