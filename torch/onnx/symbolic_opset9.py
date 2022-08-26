@@ -5529,6 +5529,11 @@ def broadcast_tensors(g, self):
     return g.op("prim::ListConstruct", *t_list)
 
 
+def is_pinned(g, self, device=None):
+    # Unused by ONNX.
+    return None
+
+
 class Prim:
     domain = "prim"
 
@@ -5578,6 +5583,11 @@ class Prim:
     @staticmethod
     def data(g, self):
         return self
+
+    @staticmethod
+    def layout(g, self):
+        # Unused by ONNX.
+        return None
 
     @staticmethod
     def ListConstruct(g, *inputs, **kwargs):
