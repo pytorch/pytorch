@@ -158,9 +158,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
