@@ -35,7 +35,7 @@ nvf_out1 = fm.execute([input1, input2])[0]
 ### `FusionManager` - Executes and Caches Defined Fusions
 #### `FusionManager` Methods
 * `get()`: Provides a global instance.  You cannot directly construct an instance of the `FusionManager`.
-* `execute([list of inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs.
+* `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs.
 * `print_ir()`: Prints the low level IR for the currently defined fusion.
 
 ### `FusionDefiniton` Context Manager - Interface for Defining Fusions
@@ -95,7 +95,7 @@ python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition
 ```
 #### Notating Outputs
 
-`fd.add_output(tensor/scalar)` is used to indicate an intermediate is an output to the fusion.
+`fd.add_output(tensor|scalar)` is used to indicate an intermediate is an output to the fusion.
 
 # Debug Information
 **Query a list of supported operations:**
