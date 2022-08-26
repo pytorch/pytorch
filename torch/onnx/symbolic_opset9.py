@@ -4608,15 +4608,15 @@ def narrow(g, input, dim, start, length):
     )
 
 
-@symbolic_helper.parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
-@symbolic_helper.parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
@@ -5060,14 +5060,14 @@ def index(g, self, index):
             return symbolic_helper._reshape_helper(g, self, final_shape)
 
 
-@symbolic_helper.parse_args("v", "v", "is", "i", "v")
+@symbolic_helper.parse_args("v", "v", "is", "b", "v")
 @_beartype.beartype
 def linalg_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
     dim: Optional[List[int]],
-    keepdim: int,
+    keepdim: bool,
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
@@ -5095,20 +5095,20 @@ def linalg_norm(
     return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
 
 
-@symbolic_helper.parse_args("v", "f", "is", "i", "v")
+@symbolic_helper.parse_args("v", "f", "is", "b", "v")
 @_beartype.beartype
 def linalg_vector_norm(
     g,
     self: torch._C.Value,
     ord: float,
     dim: Optional[List[int]],
-    keepdim: int,
+    keepdim: bool,
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
         self = symbolic_helper._reshape_helper(g, self, [-1])
-        keepdim = 0
+        keepdim = False
 
     if ord == math.inf:
         result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
@@ -5135,14 +5135,14 @@ def linalg_vector_norm(
     return result
 
 
-@symbolic_helper.parse_args("v", "v", "is", "i", "v")
+@symbolic_helper.parse_args("v", "v", "is", "b", "v")
 @_beartype.beartype
 def linalg_matrix_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
     dim: List[int],
-    keepdim: int,
+    keepdim: bool,
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
@@ -5202,7 +5202,7 @@ def linalg_cross(g, input, other, dim=-1):
     return cross(g, input, other, dim)
 
 
-@symbolic_helper.parse_args("v", "is", "i")
+@symbolic_helper.parse_args("v", "is", "b")
 @_beartype.beartype
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)

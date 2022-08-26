@@ -754,6 +754,7 @@ def _is_bool(value) -> bool:
     return _is_in_type_group(value, {_type_utils.JitScalarType.BOOL})
 
 
+@_beartype.beartype
 def _generate_wrapped_number(g, scalar):
     """Creates a wrapped number based on https://github.com/pytorch/pytorch/issues/9515.
 
@@ -824,6 +825,7 @@ def _lt_helper(g, input, other):
         return _lt9(g, input, other)
 
 
+@_beartype.beartype
 def _interpolate_warning(interpolate_mode):
     onnx_op = (
         "onnx:Resize" if GLOBALS.export_onnx_opset_version >= 10 else "onnx:Upsample"
@@ -964,6 +966,7 @@ def _get_interpolate_attributes(g, mode, args):
     return scales, align_corners
 
 
+@_beartype.beartype
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
     scale_factor_rank = _get_tensor_rank(scale_factor)
@@ -981,6 +984,7 @@ def _interpolate_get_scales(g, scale_factor, dim):
     return scale_factor
 
 
+@_beartype.beartype
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_corners):
     mode = _maybe_get_const(mode, "s")
     if "linear" in mode:
@@ -1014,8 +1018,9 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_c
     return scale_factor, mode
 
 
+@_beartype.beartype
 def _argmin_argmax_helper(
-    g, input: torch._C.Value, dim: torch._C.Value, keepdim: int, op_name: str
+    g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool, op_name: str
 ):
     def op_wrapper(input, axis_i, keepdims_i):
         if GLOBALS.export_onnx_opset_version >= 12:
@@ -1048,6 +1053,7 @@ def _argmin_argmax_helper(
     return op_wrapper(input, axis_i=dim, keepdims_i=keepdim)
 
 
+@_beartype.beartype
 def _interpolate_helper(name, dim, interpolate_mode):
     @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
@@ -1115,6 +1121,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
     return symbolic_fn
 
 
+@_beartype.beartype
 def __interpolate_helper(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor
 ):
@@ -1208,6 +1215,7 @@ def __interpolate_helper(
         )  # only valid when mode="nearest"
 
 
+@_beartype.beartype
 def _unbind_helper(g, self, dim, _outputs):
     if GLOBALS.export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
@@ -1218,6 +1226,7 @@ def _unbind_helper(g, self, dim, _outputs):
     return unbind(g, self, dim, _outputs)
 
 
+@_beartype.beartype
 def _scatter_helper(g, self, dim, index, src):
     if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
@@ -1227,6 +1236,7 @@ def _scatter_helper(g, self, dim, index, src):
     return scatter(g, self, dim, index, src)
 
 
+@_beartype.beartype
 def _repeat_interleave_split_helper(g, self, reps, dim):
     if GLOBALS.export_onnx_opset_version <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
@@ -1238,6 +1248,7 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
     return split_out if reps > 1 else [split_out]
 
 
+@_beartype.beartype
 def _arange_cast_helper(
     g, end, start=None, step=None, dtype=None
 ) -> Tuple[
@@ -1279,6 +1290,7 @@ def _arange_cast_helper(
     return scalar_type, end, start, step
 
 
+@_beartype.beartype
 def _arange_helper(g, *args):
     if GLOBALS.export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
@@ -1287,6 +1299,7 @@ def _arange_helper(g, *args):
     return arange(g, *args)
 
 
+@_beartype.beartype
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
     from torch.onnx.symbolic_opset9 import select
@@ -1294,6 +1307,7 @@ def _size_helper(g, self, dim):
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
 
+@_beartype.beartype
 def _index_fill_reshape_helper(g, self, dim, index):
     # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
     # 2. expand index => [..., dim, ...], same shape as self except for dim.
@@ -1327,6 +1341,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
 # allowzero=1 indicates that if any value in the 'shape' input is set to zero,
 # the zero value is honored, similar to NumPy.
 # allowzero=1 is only supported for opset version >= 14.
+@_beartype.beartype
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
@@ -1341,6 +1356,7 @@ def _reshape_helper(g, input, shape, allowzero=0):
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 
+@_beartype.beartype
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     from torch.onnx.symbolic_opset9 import _var_mean
 
@@ -1440,6 +1456,7 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     )
 
 
+@_beartype.beartype
 def _flatten_helper(g, input, start_dim, end_dim, dim):
     input_size = g.op("Shape", input)
     slice1 = _slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
@@ -1460,6 +1477,7 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
     return _reshape_from_tensor(g, input, final_shape)
 
 
+@_beartype.beartype
 def _is_split_static(split_size_or_sizes, _outputs):
     if _outputs is None:
         return False
@@ -1471,12 +1489,14 @@ def _is_split_static(split_size_or_sizes, _outputs):
     return True
 
 
+@_beartype.beartype
 def _optional_input_placeholder_tensor(g):
     n = g.op("prim::Constant")
     n.setType(_C.OptionalType.ofTensor())
     return n
 
 
+@_beartype.beartype
 def _handle_reduce_dim_none(g, self, op_name):
     rank = _get_tensor_rank(self)
     if rank is not None and any(
@@ -1488,6 +1508,7 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
+@_beartype.beartype
 def dequantize_helper(
     g,
     qtensor: _C.Value,
@@ -1538,6 +1559,7 @@ def dequantize_helper(
     )
 
 
+@_beartype.beartype
 def quantize_helper(
     g,
     tensor: _C.Value,
@@ -1591,6 +1613,7 @@ def quantize_helper(
     return g.op("prim::TupleConstruct", *args)
 
 
+@_beartype.beartype
 def requantize_bias_helper(g, bias, input_scale, weight_scale, axis=None):
     """In PyTorch, bias is float and is quantized to int32 implicitly inside the quantized ATen op kernel.
     In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
@@ -1611,6 +1634,7 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale, axis=None):
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point, *axis_args)
 
 
+@_beartype.beartype
 def args_have_same_dtype(args):
     assert args
     base_dtype = args[0].type().scalarType()

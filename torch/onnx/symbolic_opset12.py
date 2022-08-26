@@ -247,15 +247,15 @@ def celu(g, self, alpha):
     return g.op("Celu", self, alpha_f=alpha)
 
 
-@symbolic_helper.parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
-@symbolic_helper.parse_args("v", "v", "i")
+@symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: int):
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
