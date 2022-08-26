@@ -13,7 +13,7 @@ T_co = TypeVar('T_co', covariant=True)
 # @functional_datapipe('shuffle')
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Shuffle the input DataPipe via its indices (functional name: ``shuffle``).
+    Shuffle the input MapDataPipe via its indices (functional name: ``shuffle``).
 
     When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
     set up random seed are different based on :attr:`num_workers`.
@@ -31,9 +31,21 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
-        >>> shuffle_dp = dp.shuffle()
+        >>> shuffle_dp = dp.shuffle().set_seed(0)
         >>> list(shuffle_dp)
-        [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
+        [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]
+        >>> list(shuffle_dp)
+        [6, 1, 9, 5, 2, 4, 7, 3, 8, 0]
+        >>> # Reset seed for Shuffler
+        >>> shuffle_dp = shuffle_dp.set_seed(0)
+        >>> list(shuffle_dp)
+        [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]
+
+    Note:
+        Even thought this ``shuffle`` operation takes a ``MapDataPipe`` as the input, it would return an
+        ``IterDataPipe`` rather than a ``MapDataPipe``, because ``MapDataPipe`` should be non-sensitive to
+        the order of data order for the sake of random reads, but ``IterDataPipe`` depends on the order
+        of data during data-processing.
     """
     datapipe: MapDataPipe[T_co]
     _enabled: bool

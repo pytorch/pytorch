@@ -604,7 +604,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         {self.lazy_tensor_decls(func, schema)}
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
-    }};\n
+    }}\n
     """
         ]
 
