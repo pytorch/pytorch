@@ -285,6 +285,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
+
     out = flat_fn(*flat_args)
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
@@ -297,15 +298,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         _num_outs = 1
 
     joint_inputs = (flat_args, out)
-    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.use_functionalize:
-        # Functionalize the foward backward graph. First create a
-        # fake fn to make functionalize happy
+        # Trace once without decompositions, into a graph of ATen ops.
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
         def fake_fn(primals, tangents):
             return fx_g(primals, tangents)
 
-        fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        # Trace a second time, running functionalization, and THEN running decompositions.
+        # functionalization only acts on ATen today, and doesn't currently handle
+        # view and inplace ops that come from primtorch.
+        # Eventually, functionalization should support primtorch view/inplace ops,
+        # which will make it ok to run decompositions before functionalization.
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+    else:
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")
@@ -410,9 +418,12 @@ def create_aot_dispatcher_function(
                 # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
                 # because they use a "running-mean" style op that requires
                 # resizing the running counter buffers stored on the module.
+                def make_input(x):
+                    return x.detach().requires_grad_(x.requires_grad)
+
                 fake_flat_tensor_args = pytree.tree_map_only(
                     Tensor,
-                    lambda x: x.detach().requires_grad_(x.requires_grad),
+                    make_input,
                     flat_args,
                 )
             return fake_flat_tensor_args
