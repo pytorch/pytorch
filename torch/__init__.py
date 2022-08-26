@@ -972,6 +972,6 @@ if sys.executable != 'torch_deploy':
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:
-    import torch._cuda_sanitizer
+    import torch._cuda_sanitizer.enable
 
     __all__.append('cuda_sanitizer')
