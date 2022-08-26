@@ -561,8 +561,7 @@ def soft_margin_loss_backward(
     target: Tensor,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    z = torch.exp(-target * self)
-    grad_input = -target * z / (1.0 + z) * grad_output
+    grad_input = target * grad_output * (torch.sigmoid(target * self) - 1)
     if reduction == Reduction.MEAN.value:
         grad_input = grad_input / self.numel()
     return grad_input
