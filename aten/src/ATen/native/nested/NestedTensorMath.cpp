@@ -721,8 +721,8 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c
   }
   // regular tensor dropout reuses input size and stride
   // i.e. if input is not contiguous, then output is also discontiguous
-  Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets),
-      mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), offsets);
+  Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets)),
+      mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
   return std::make_tuple(output, mask);
 }
 
@@ -1171,7 +1171,7 @@ Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   std::tie(reshape_as_view, sizemat_reshaped, stridemat_reshaped) = NestedTensor_reshape_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   if (reshape_as_view) {
-    return wrap_buffer(buffer, sizemat_reshaped, stridemat_reshaped, offsets);
+    return wrap_buffer(buffer, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(offsets));
   }
   Tensor buffer_reshaped = buffer.new_empty(buffer.sizes());
   Tensor output = wrap_buffer(buffer_reshaped, sizemat_reshaped);

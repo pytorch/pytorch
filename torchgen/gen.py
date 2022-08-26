@@ -37,7 +37,6 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
-    gen_symint_view_copy_kernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -160,6 +159,9 @@ def parse_native_yaml_struct(
             use_out_as_primary=True,
             external=False,
             device_guard=False,
+            # I'm actually not sure about this; undefined could be hit on
+            # empty TensorList, hypothetically that could have sizes in it
+            symint=False,
             index={},
         )
     )
@@ -174,6 +176,16 @@ def parse_native_yaml_struct(
             # Only cuda-like devices in tree require device guards
             device_guard=is_cuda_dispatch_key(k),
             index=v,
+            # Which dispatch keys natively support symint
+            # Note: DispatchKey.CompositeExplicitAutograd has to match out
+            # composites; I think there's some factoring problem here
+            symint=k
+            in [
+                DispatchKey.Meta,
+                DispatchKey.CompositeImplicitAutograd,
+                DispatchKey.CompositeExplicitAutograd,
+                DispatchKey.CompositeExplicitAutogradNonFunctional,
+            ],
         )
     return ParsedYaml(rs, indices)
 
@@ -862,7 +874,8 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature(f.func)
+        # BackendSelect can go to Meta, so it must preserve symints
+        native_sig = NativeSignature(f.func, symint=True)
 
         native_tensor_args = [
             a
@@ -966,7 +979,10 @@ def dynamic_type(t: Type) -> str:
     # also include Tensor[]
     if str(t) == "Tensor":
         return "at::Tensor"
-    return cpp.argumenttype_type(t, mutable=False, binds="__placeholder__").cpp_type()
+    # This is a legacy concept, so never report SymInt
+    return cpp.argumenttype_type(
+        t, mutable=False, binds="__placeholder__", symint=False
+    ).cpp_type()
 
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
@@ -1031,7 +1047,8 @@ def compute_returns_yaml(
         ret = {
             "dynamic_type": dynamic_type(r.type),
             "name": name,
-            "type": cpp.return_type(r).cpp_type(),
+            # legacy, report ints
+            "type": cpp.return_type(r, symint=False).cpp_type(),
         }
 
         if r.name:
@@ -1091,7 +1108,8 @@ def compute_argument_yaml(
         "dynamic_type": dynamic_type(a.type),
         "is_nullable": a.type.is_nullable(),
         "name": a.name,
-        "type": cpp.argument_type(a, binds="__placeholder__").cpp_type(),
+        # legacy, report ints
+        "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
         arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
@@ -1157,11 +1175,13 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
             method=False,
             cpp_no_default_args=set(),
             faithful=False,
+            symint=False,
             has_tensor_options=False,
         )
     ]
 
-    cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
+    # legacy, report ints
+    cpp_returns = cpp.returns_type(f.func.returns, symint=False).cpp_type()
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = (
@@ -2390,29 +2410,6 @@ def gen_source_files(
             )
         },
     )
-    view_copy_with_symint_pairs: List[Tuple[NativeFunction, NativeFunction]] = []
-    for g1 in view_groups:
-        for g2 in view_groups:
-            if g1.view_copy is None or g2.view_copy is None:
-                continue
-            # TODO: make this more first class in the data model
-            g1_base_name = str(g1.view_copy.func.name.name)
-            g2_base_name = str(g2.view_copy.func.name.name)
-
-            same_base_op = (
-                g1_base_name == g2_base_name
-                and g1.view_copy.func.arguments.symints_to_ints()
-                == g2.view_copy.func.arguments.symints_to_ints()
-            )
-            op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
-            op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
-            if same_base_op and op1_not_symint and op2_symint:
-                view_copy_with_symint_pairs.append(
-                    (
-                        g1.view_copy,
-                        g2.view_copy,
-                    )
-                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2452,12 +2449,6 @@ def gen_source_files(
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
-            ),
-            "SymIntViewCopyKernel_Definitions": list(
-                mapMaybe(
-                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
-                    view_copy_with_symint_pairs,
-                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
