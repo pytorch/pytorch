@@ -683,6 +683,8 @@ class _ExecOrderData:
             self.is_first_iter = False
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
+        self.handles_to_pre_forward_order_index.clear()
+        self.handles_pre_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
