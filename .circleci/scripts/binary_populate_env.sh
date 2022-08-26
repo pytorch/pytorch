@@ -64,7 +64,7 @@ fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
-  BUILD_SUFFIX="${GPU_ARCH_TYPE}${GPU_ARCH_VERSION}"
+  BUILD_SUFFIX="${GPU_ARCH_TYPE}${GPU_ARCH_VERSION:-}"
   if [[ ${GPU_ARCH_TYPE} = "cuda" ]]; then
     BUILD_SUFFIX="cu${GPU_ARCH_VERSION}"
   fi
