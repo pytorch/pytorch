@@ -172,7 +172,7 @@ test_jit_hooks() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
