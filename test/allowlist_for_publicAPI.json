@@ -414,18 +414,6 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks": [
-    "Any",
-    "GradBucket"
-  ],
-  "torch.distributed.algorithms.ddp_comm_hooks.default_hooks": [
-    "Any",
-    "Callable"
-  ],
-  "torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks": [
-    "Any",
-    "Callable"
-  ],
   "torch.distributed.algorithms.model_averaging.utils": [
     "Dict",
     "Iterable",
