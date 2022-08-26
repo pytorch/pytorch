@@ -1225,7 +1225,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten._adaptive_avg_pool2d)
+@register_decomposition(aten._adaptive_avg_pool2d, disabe_meta=True)
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # Preconditions
     device = input.device
