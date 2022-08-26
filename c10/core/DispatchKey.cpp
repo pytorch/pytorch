@@ -42,6 +42,19 @@ const char* toString(BackendComponent t) {
   }
 }
 
+BackendComponent toBackendComponent(DeviceType device_type) {
+  switch (device_type) {
+#define DO_CASE(device, _)                          \
+  case DeviceType::device: {                        \
+    return toBackendComponent(DispatchKey::device); \
+  }
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    default:
+      return BackendComponent::InvalidBit;
+  }
+}
+
 const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:

@@ -118,7 +118,7 @@ Tensor cat_feature_mult4ch(
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images
@@ -158,7 +158,7 @@ Tensor cat_height(
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
