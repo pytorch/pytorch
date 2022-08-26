@@ -436,10 +436,10 @@ class TestOptim(TestCase):
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=5e-3)
+                lambda params: optimizer(params, lr=4.8e-3)
             )
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=0.005),
+                lambda params: optimizer(params, lr=0.0048),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
