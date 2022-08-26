@@ -6,7 +6,7 @@ This frontend allows for a user to describe the set of operations for nvFuser to
 
 ## Example
 
-```
+```python
 import torch
 from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
 
