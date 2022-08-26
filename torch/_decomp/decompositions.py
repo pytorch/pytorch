@@ -1013,6 +1013,8 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
+    if memory_format is not None:
+        return NotImplemented
     assert device is not None or dtype is not None
     dtype_converted = False
     if device is not None and device != x.get_device():
@@ -1023,8 +1025,6 @@ def _to_copy(
         x = torch._prims.device_put(x, device)
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
-    if memory_format is not None:  # no ref/prim for memory format
-        x = x.to(memory_format=memory_format)  # type: ignore[call-overload]
     return x
 
 
