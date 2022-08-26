@@ -215,16 +215,14 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _squeeze_nvfuser(
-    fd: Any, a: TensorLikeType, a_shape, dimensions: DimsSequenceType
-) -> TensorLikeType:
+def _squeeze_nvfuser(fd, a, a_shape, dimensions):
     for idx in reversed(sorted(dimensions)):
         a = fd.ops.squeeze(a, a_shape, idx)
         a_shape = a_shape[:idx] + a_shape[idx + 1 :]
     return a
 
 
-def _view_of_nvfuser(fd: Any, a: TensorLikeType) -> TensorLikeType:
+def _view_of_nvfuser(fd, a):
     return fd.ops.set(a)
 
 
