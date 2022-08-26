@@ -87,6 +87,8 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    if src.device.type == "meta":
+        raise NotImplementedError("Cannot copy out")
     return self
 
 
