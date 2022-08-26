@@ -108,6 +108,7 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
+      .def_readonly("unique_tensor_id", &TensorMetadata::unique_tensor_id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {

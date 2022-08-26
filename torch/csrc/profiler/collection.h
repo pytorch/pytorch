@@ -49,7 +49,10 @@ struct TorchOpBasicFields {
 };
 
 struct TensorMetadata {
-  void* ptr_;
+  c10::TensorImpl* UNSAFE_tensor_impl_ptr_;
+
+  // Until the postprocessing step, this holds an unsafe data pointer
+  size_t unique_tensor_id_;
   // Device is separated into DeviceType and DeviceIndex as Device
   // doesn't have a default initializer (which the std::array initializer needs)
   c10::DeviceType device_type_;
