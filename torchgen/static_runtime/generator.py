@@ -98,7 +98,9 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             return False
 
     if isinstance(g, NativeFunctionsViewGroup):
-        if "at::Tensor" != cpp.returns_type(func.returns).cpp_type():
+        # TODO: stop doing type tests by converting to C++ and then testing
+        # the string, just test the dang thing directly
+        if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
             logger.info(f"NON-TENSOR RET TYPE: {str(func)}")
             return False
@@ -122,7 +124,8 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             or not str(func.name).endswith(".out")
         ):
             return False
-    if "at::Tensor &" != cpp.returns_type(func.returns).cpp_type():
+    # TODO: stop type testing by converting to C++
+    if "at::Tensor &" != cpp.returns_type(func.returns, symint=False).cpp_type():
         logger.info(f"NON_TENSOR RET TYPE: {str(func)}")
         return False
     if has_alias(func.arguments.non_out):
