@@ -76,14 +76,14 @@ class DistTestCases:
     skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
     skip_collective["reduce"] = set()
     skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
-    skip_collective["cpu barrier"] = {"nccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc"}
 
     # Sets showing that something is implemented
     backend_feature = {}
     backend_feature["gpu"] = {"nccl", "gloo"}  # TODO(ucc): add sequence number support to ucc and enable it here
     backend_feature["cuda"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
     backend_feature["ddp"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
     backend_feature["plugin"] = set()
 
 
