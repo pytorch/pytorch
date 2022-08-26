@@ -10962,7 +10962,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
