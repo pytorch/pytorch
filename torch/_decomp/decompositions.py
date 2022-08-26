@@ -866,9 +866,24 @@ def native_group_norm_backward(
     )
     utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
-    assert input.numel() == N * C * HxW
-    assert mean.shape == (N, group)
-    assert gamma is None or gamma.numel() == C
+    utils.check(
+        input.numel() == N * C * HxW,
+        lambda: f"Expect input to have { N * C * HxW} elements",
+    )
+    utils.check(
+        mean.shape == (N, group),
+        lambda: f"Expect mean to have shape ({N}, {group}, but got {mean.shape}",
+    )
+    utils.check(
+        gamma is None or gamma.numel() == C,
+        lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
+    )
+
+    cpg, _rem = divmod(C, group)
+    utils.check(
+        _rem == 0,
+        lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
+    )
 
     # Compute Internal gradients
     ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
@@ -877,7 +892,6 @@ def native_group_norm_backward(
     d_input: Optional[Tensor] = None
     d_gamma: Optional[Tensor] = None
     d_bias: Optional[Tensor] = None
-    cpg = C // group
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if gamma is not None:
@@ -908,9 +922,13 @@ def native_group_norm_backward(
         d_input = d_input.reshape(input.shape).to(input.dtype)
     if output_mask[1]:
         d_gamma = (
-            (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
-            * rstd.unsqueeze(-1)
-        ).reshape(C)
+            (
+                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+                * rstd.unsqueeze(-1)
+            )
+            .sum(dim=[0])
+            .reshape(C)
+        )
     if output_mask[2]:
         d_bias = db.sum(dim=[0])
 
