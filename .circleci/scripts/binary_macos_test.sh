@@ -30,5 +30,7 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   $workdir/builder/check_binary.sh
 else
   pushd "$workdir/pytorch"
-  $workdir/builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
+  PACKAGE_TYPE="${PACKAGE_TYPE}" \
+    DESIRED_PYTHON="${DESIRED_PYTHON}" \
+    $workdir/builder/run_tests.sh
 fi

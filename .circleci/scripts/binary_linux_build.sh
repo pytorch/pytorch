@@ -11,16 +11,16 @@ NUM_CPUS=$(( $(nproc) - 2 ))
 # Defaults here for **binary** linux builds so they can be changed in one place
 export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
 
-if [[ "${DESIRED_CUDA}" =~ cu11[0-9] ]]; then
+if [[ "${GPU_ARCH_VERSION}" =~ 11.[0-9] ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
 # Parse the parameters
-if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+if [[ "$PACKAGE_TYPE" == "conda" ]]; then
   build_script='conda/build_pytorch.sh'
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
+elif [[ "$GPU_ARCH_TYPE" == "cpu" ]]; then
   build_script='manywheel/build_cpu.sh'
-elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+elif [[ "$GPU_ARCH_TYPE" == "rocm" ]]; then
   build_script='manywheel/build_rocm.sh'
 else
   build_script='manywheel/build.sh'

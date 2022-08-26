@@ -83,13 +83,13 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       typing-extensions \
       ${PROTOBUF_PACKAGE} \
       six
-    if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
+    if [[ "$GPU_ARCH_TYPE" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
 
-      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+      cu_ver="${GPU_ARCH_VERSION}"
       CUDA_PACKAGE="cudatoolkit"
-      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" ]]; then
+      if [[ "$GPU_ARCH_VERSION" == "11.6" || "$GPU_ARCH_VERSION" == "11.7" ]]; then
         CUDA_PACKAGE="cuda"
       fi
 
