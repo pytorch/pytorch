@@ -121,7 +121,7 @@ class ConvNormRelu(MinMaxObserver):
         weight_scale, weight_zp = _minmax_scale_zeropoint(min_val, max_val)
         qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zp, torch.qint8)
 
-        ctor = torch.nn.intrinsic.quantized.ConvReLU2d if self.relu_node is not None else torch.nn.quantized.Conv2d
+        ctor = torch.nn.intrinsic.quantized.ConvReLU2d if self.relu_node is not None else torch.ao.nn.quantized.Conv2d
 
         qconv = ctor(mod.in_channels, mod.out_channels, mod.kernel_size,
                      mod.stride, mod.padding, mod.dilation, mod.groups,
