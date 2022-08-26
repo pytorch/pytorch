@@ -686,6 +686,8 @@ class _ExecOrderData:
             self.is_first_iter = False
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
+        self.handles_to_pre_forward_order_index.clear()
+        self.handles_pre_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
@@ -1023,7 +1025,7 @@ class FullyShardedDataParallel(nn.Module):
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         self._max_inflight_all_gather_size = (
             torch.cuda.get_device_properties(self.compute_device).total_memory
-            * 0.05  # empirically chosen
+            * 0.005  # empirically chosen, e.g. 200 MB limit for 40 GB GPU
         )  # should always be non-negative
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
         if sync_module_states:
