@@ -29,7 +29,7 @@ namespace c10d {
 namespace {
 
 // Op mapping
-std::map<ReduceOp::RedOpType, MPI_Op> mpiOp = {
+std::map<ReduceOp, MPI_Op> mpiOp = {
     {ReduceOp::MIN, MPI_MIN},
     {ReduceOp::MAX, MPI_MAX},
     {ReduceOp::SUM, MPI_SUM},

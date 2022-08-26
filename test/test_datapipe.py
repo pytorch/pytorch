@@ -1218,6 +1218,24 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        def fn_n1_sep_pos(d0, *args, d1):
+            return d0 + d1
+
+        def fn_cmplx(d0, d1=1, *args, d2, **kwargs):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+        p_fn_cmplx = partial(fn_cmplx, d2=2)
+
         def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
@@ -1231,6 +1249,12 @@ class TestFunctionalIterDataPipe(TestCase):
                     self.assertEqual(list(res_dp), list(ref_dp))
                     # Reset
                     self.assertEqual(list(res_dp), list(ref_dp))
+        _helper(lambda data: data, fn_n1_def, 0, 1)
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]), fn_n1_def, [0, 1], 2)
+        _helper(lambda data: data, p_fn_n1, 0, 1)
+        _helper(lambda data: data, p_fn_cmplx, 0, 1)
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]), p_fn_cmplx, [0, 1], 2)
+        _helper(lambda data: (data[0] + data[1], ), fn_n1_pos, [0, 1, 2])
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
@@ -1238,7 +1262,20 @@ class TestFunctionalIterDataPipe(TestCase):
         # The index of input column is out of range
         _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, 1, error=TypeError)
+        _helper(None, fn_n1, 1, error=ValueError)
+        _helper(None, fn_n1, [0, 1, 2], error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
+        _helper(None, fn_cmplx, 0, 1, ValueError)
+        _helper(None, fn_n1_pos, 1, error=ValueError)
+        _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
+        _helper(None, p_fn_n1, [0, 1], error=ValueError)
+        _helper(None, fn_1n, [1, 2], error=ValueError)
+        # _helper(None, p_fn_cmplx, [0, 1, 2], error=ValueError)
+        _helper(None, fn_n1_sep_pos, [0, 1, 2], error=ValueError)
+        # Fn has keyword-only arguments
+        _helper(None, fn_n1_kwargs, 1, error=ValueError)
+        _helper(None, fn_cmplx, [0, 1], 2, ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
@@ -1278,6 +1315,28 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_kwonly(*, d0, d1):
+            return d0 + d1
+
+        def fn_has_nondefault_kwonly(d0, *, d1):
+            return d0 + d1
+
+        def fn_cmplx(d0, d1=1, *args, d2, **kwargs):
+            return d0 + d1
+
+        p_fn_cmplx = partial(fn_cmplx, d2=2)
+
         # Prevent modification in-place to support resetting
         def _dict_update(data, newdata, remove_idx=None):
             _data = dict(data)
@@ -1304,13 +1363,33 @@ class TestFunctionalIterDataPipe(TestCase):
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
 
+        _helper(lambda data: data, fn_n1_def, 'x', 'y')
+        _helper(lambda data: data, p_fn_n1, 'x', 'y')
+        _helper(lambda data: data, p_fn_cmplx, 'x', 'y')
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
+                p_fn_cmplx, ["x", "y", "z"], "z")
+
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
+
+        _helper(None, fn_n1_pos, 'x', error=ValueError)
+        _helper(None, fn_n1_kwargs, 'x', error=ValueError)
+        # non-default kw-only args
+        _helper(None, fn_kwonly, ['x', 'y'], error=ValueError)
+        _helper(None, fn_has_nondefault_kwonly, ['x', 'y'], error=ValueError)
+        _helper(None, fn_cmplx, ['x', 'y'], error=ValueError)
+
+
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
         # The key of input column is not in dict
         _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, "y", error=TypeError)
+        _helper(None, fn_n1, "y", error=ValueError)
+        _helper(None, fn_1n, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_def, ["x", "y", "z"], error=ValueError)
+        _helper(None, p_fn_n1, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_kwargs, ["x", "y", "z"], error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
@@ -1507,6 +1586,32 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_col_2_dp = tuple_input_ds.filter(_mul_filter_fn, input_col=[0, 2])
         self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
+
+        # invalid input col
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn, input_col=0)
+
+        p_mul_filter_fn = partial(_mul_filter_fn, b=1)
+        out = tuple_input_ds.filter(p_mul_filter_fn, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        def _mul_filter_fn_with_defaults(a, b=1):
+            return a + b < 10
+
+        out = tuple_input_ds.filter(_mul_filter_fn_with_defaults, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        def _mul_filter_fn_with_kw_only(*, a, b):
+            return a + b < 10
+
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn_with_kw_only, input_col=0)
+
+        def _mul_filter_fn_with_kw_only_1_default(*, a, b=1):
+            return a + b < 10
+
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn_with_kw_only_1_default, input_col=0)
 
         # __len__ Test: DataPipe has no valid len
         with self.assertRaisesRegex(TypeError, r"has no len"):
