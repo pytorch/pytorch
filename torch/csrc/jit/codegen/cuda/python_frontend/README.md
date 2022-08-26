@@ -59,14 +59,14 @@ nvFuser translates the concrete sizes and strides into symbolic sizes and contig
 t0 = fd.define_tensor(sizes=[2, 4, 6], strides=[24, 6, 1], dtype=DataType.Half)
 ```
 
-##### Defining tensors by a list of symbolic sizes and a list of contiguity information
+##### 3.) Defining tensors by a list of symbolic sizes and a list of contiguity information
 The list of symbolic sizes defines the number of dimensions and `-1` is given for each dimension unless it is a broadcast dimension that is defined with a `1`.  The contiguity information is viewed from right to left.  A `True` definition indicates the current dimension is contiguous with the dimension to its right.
 
 ```
 t0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1], contiguous=[True, True, True], dtype=DataType.Float)
 ```
 
-#### 3.) Defining Input Scalars
+#### Defining Input Scalars
 _All intermediate scalars, except for constants, are created by operations._
 
 The only thing the user has to define for a scalar is its type.
