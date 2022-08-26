@@ -114,22 +114,17 @@
 //  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
 //  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#define C10_NODISCARD
-#if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
+#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
 #define C10_NODISCARD [[nodiscard]]
-#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
+#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
 // TODO: It's possible this is still triggering
 // https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
 // fix it.
-#undef C10_NODISCARD
 #define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+#else
+#define C10_NODISCARD
 #endif
 
 // suppress an unused variable.
