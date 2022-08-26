@@ -14,7 +14,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -30,6 +30,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+HAS_CUDA = torch.cuda.is_available()
 
 
 def process_failures():
@@ -614,8 +615,34 @@ def forward(self, x_1):
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_amp_cache(self):
+        layer = torch.nn.Conv2d(3, 3, 3).cuda()
 
+        def f(x, w):
+            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
 
+        inp = torch.randn(4, 3, 10, 10, device='cuda')
+        with torch.autocast('cuda'):
+            out_graph = make_fx(f)(inp, layer.weight).graph
+            out_graph2 = make_fx(f)(inp, layer.weight).graph
+
+        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
+        for a, b in zip(out_graph.nodes, out_graph2.nodes):
+            self.assertEqual(a.op, b.op)
+
+    def test_has_proxy(self):
+        foo = torch.randn(5)
+
+        def f(x):
+            self.assertFalse(has_proxy(foo))
+            self.assertTrue(has_proxy(x))
+            y = x.cos()
+            self.assertTrue(has_proxy(y))
+            return y
+
+        self.assertFalse(has_proxy(torch.randn(5)))
+        make_fx(f)(torch.randn(5))
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -735,7 +762,7 @@ class TestSymbolicTracing(TestCase):
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
-    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     return empty""")
 
@@ -937,7 +964,6 @@ symbolic_tensor_failures = {
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('int', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('inverse', ''),  # Tensors of type TensorImpl do not have numel
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('isreal', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition

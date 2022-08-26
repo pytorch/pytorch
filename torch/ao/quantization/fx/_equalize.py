@@ -28,6 +28,11 @@ def reshape_scale(scale: torch.Tensor, axis: int, input: torch.Tensor) -> torch.
     new_shape[axis] = input.size(axis)
     return scale.view(new_shape)
 
+qsheme_mapping_per_tensor_to_per_channel = {
+    torch.per_tensor_affine: torch.per_channel_affine,
+    torch.per_tensor_symmetric: torch.per_channel_symmetric,
+}
+
 
 class _InputEqualizationObserver(nn.Module):
     r"""Observer for tracking the running min/max values of input columns, and
@@ -58,8 +63,9 @@ class _InputEqualizationObserver(nn.Module):
         self.dtype = dtype
         self.qscheme = qscheme
 
+        per_channel_qscheme = qsheme_mapping_per_tensor_to_per_channel[qscheme]
         self.input_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
-                                                  qscheme=qscheme,
+                                                  qscheme=per_channel_qscheme,
                                                   quant_min=quant_min,
                                                   quant_max=quant_max,
                                                   factory_kwargs=factory_kwargs)
@@ -139,8 +145,11 @@ class _WeightEqualizationObserver(nn.Module):
         self.qscheme = qscheme
         self.ch_axis = 1
 
+        per_channel_qscheme = qscheme
+        if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+            per_channel_qscheme = qsheme_mapping_per_tensor_to_per_channel[qscheme]
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
-                                                       qscheme=qscheme,
+                                                       qscheme=per_channel_qscheme,
                                                        quant_min=quant_min,
                                                        quant_max=quant_max,
                                                        factory_kwargs=factory_kwargs)
