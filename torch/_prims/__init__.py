@@ -1669,7 +1669,9 @@ split_dim = _make_prim(
 )
 
 # Note: allows dimensions to be specified redundantly
-def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
+def _squeeze_meta(
+    a: TensorLikeType, original_shape: ShapeType, dimensions: Sequence
+) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     for idx in dimensions:
@@ -1688,7 +1690,7 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
-def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
+def _squeeze_aten(a: Tensor, original_shape: ShapeType, dimensions: Sequence) -> Tensor:
     for idx in reversed(sorted(dimensions)):
         a = torch.squeeze(a, dim=idx)
 
@@ -1702,7 +1704,7 @@ _squeeze_doc = """
   """
 
 squeeze = _make_prim(
-    schema="squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)",
+    schema="squeeze(Tensor(a) a, SymInt[] original_shape, int[] dimensions) -> Tensor(a)",
     meta=_squeeze_meta,
     impl_aten=_squeeze_aten,
     return_type=RETURN_TYPE.VIEW,

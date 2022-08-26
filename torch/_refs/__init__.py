@@ -642,7 +642,9 @@ def logsumexp(
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
         a_max = amax(a, dim, keepdim=True)
         a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
+        a_max_squeezed = (
+            prims.squeeze(a_max, a_max.shape, dim) if not keepdim else a_max
+        )
         result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
     else:
         # This case covers boolean and integer dtypes and we use non-stabilized computation
@@ -2792,10 +2794,10 @@ def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
         # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
         if a.shape[dim] != 1:
             return prims.view_of(a)
-        return prims.squeeze(a, (dim,))
+        return prims.squeeze(a, a.shape, (dim,))
 
     dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
-    return prims.squeeze(a, dims)
+    return prims.squeeze(a, a.shape, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow

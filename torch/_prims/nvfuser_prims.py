@@ -77,6 +77,7 @@ nvprim_names = [
     "pow",
     "remainder",
     "sub",
+    "squeeze",
     "broadcast_in_dim",
     "where",
     "convert_element_type",
@@ -213,6 +214,15 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
+def _squeeze_nvfuser(
+    fd: Any, a: TensorLikeType, a_shape, dimensions: DimsSequenceType
+) -> TensorLikeType:
+    for idx in reversed(sorted(dimensions)):
+        a = fd.ops.squeeze(a, a_shape, idx)
+        a_shape = a_shape[:idx] + a_shape[idx + 1 :]
+    return a
+
+
 def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -254,6 +264,7 @@ def _amin_nvfuser(
 
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser

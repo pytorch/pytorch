@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/complex.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 
@@ -83,6 +84,32 @@ struct OpRecord : RecordFunctor {
  private:
   //! An nvFuser Arith Operation function signature
   std::function<OutType(ArgTypes...)> fusion_op_;
+};
+
+struct SqueezeOpRecord : RecordFunctor {
+  SqueezeOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int64_t>& original_shape,
+      int64_t dim)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        original_shape_(std::move(original_shape)),
+        dim_(dim) {}
+  virtual ~SqueezeOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+
+    auto output = torch::jit::fuser::cuda::squeeze(arg, original_shape_, dim_);
+
+    fd.setFusionState(outputs.at(0), output);
+  }
+
+ private:
+  //! Represents the tensor dimensions of the input tensor.
+  std::vector<int64_t> original_shape_;
+  //! Dimension to squeeze.
+  int64_t dim_;
 };
 
 //! Specialized Record Functor for the FusionDefinition's broadcast_in_dim op.
