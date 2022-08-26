@@ -575,7 +575,7 @@ class FakeTensorMode(TorchDispatchMode):
             if func in meta_table:
                 r = meta_table[func](*args, **kwargs)
                 return r
-            if func in decomposition_table:
+            if func in decomposition_table and func not in self.lift_functions:
                 return decomposition_table[func](*args, **kwargs)
             if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
                 return func.prim_impl(*args, **kwargs)
@@ -650,10 +650,7 @@ class FakeTensorMode(TorchDispatchMode):
             # this is generated from torch.tensor(), which does not use the
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
             # we need to handle before error checking
-            if func in [
-                aten.lift_fresh.default,
-                aten.lift_fresh_copy.default,
-            ]:
+            if func in self.lift_functions:
                 assert (
                     len(kwargs) == 0
                     and len(args) == 1
@@ -704,6 +701,10 @@ class FakeTensorMode(TorchDispatchMode):
                 return tree_map(partial(wrap, device=kwargs["device"]), r)
 
             return tree_map(partial(wrap), r)
+
+    @property
+    def lift_functions(self):
+        return aten.lift_fresh.default, aten.lift_fresh_copy.default
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
