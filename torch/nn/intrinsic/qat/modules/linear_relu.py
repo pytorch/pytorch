@@ -1,5 +1,5 @@
 import torch
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.nn.intrinsic as nni
 import torch.nn.functional as F
 
