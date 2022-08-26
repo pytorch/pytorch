@@ -1,7 +1,6 @@
 import functools
 import torch
 import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
 class DefaultState(object):
