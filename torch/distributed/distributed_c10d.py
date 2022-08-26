@@ -33,7 +33,6 @@ from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 __all__ = [
-    "ReduceOp",
     'Backend', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
     'all_gather_multigpu', 'all_gather_object', 'all_reduce',
     'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
@@ -58,7 +57,30 @@ _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
-ReduceOp.__module__ = "torch.distributed.distributed_c10d"
+_public_types_to_change_module = [
+    AllreduceCoalescedOptions,
+    AllreduceOptions,
+    AllToAllOptions,
+    BarrierOptions,
+    BroadcastOptions,
+    GatherOptions,
+    PrefixStore,
+    ProcessGroup,
+    ReduceOp,
+    ReduceOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
+    Store,
+    DebugLevel,
+    get_debug_level,
+    Work
+]
+
+def _export_c_types():
+    for type in _public_types_to_change_module:
+        type.__module__ = "torch.distributed.distributed_c10d"
+        __all__.append(type.__name__)
+_export_c_types()
 
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
