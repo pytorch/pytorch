@@ -14,7 +14,7 @@
 #include <c10/util/irange.h>
 
 #include <vector>
-#include "c10/core/SymIntArrayRef.h"
+#include <c10/core/SymIntArrayRef.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
