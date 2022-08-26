@@ -423,7 +423,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=dist._get_default_group())
         hook = default_hooks.fp16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
@@ -450,7 +450,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=dist._get_default_group())
         hook = default_hooks.bf16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.bfloat16, has_wrapping)
