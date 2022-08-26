@@ -721,6 +721,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/root_domain_map.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/transpose.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/normalization.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/reduction.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/matmul.cpp",
