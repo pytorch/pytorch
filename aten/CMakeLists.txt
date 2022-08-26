@@ -55,7 +55,7 @@ set(TH_CPU_INCLUDE
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
 if(USE_VULKAN)
-  list(APPEND ATen_CPU_INCLUDE ${CMAKE_BINARY_DIR}/vulkan)
+  list(APPEND ATen_CPU_INCLUDE ${CMAKE_BINARY_DIR}/vulkan ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/VulkanMemoryAllocator)
 endif()
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
