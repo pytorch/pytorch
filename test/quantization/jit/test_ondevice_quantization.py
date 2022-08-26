@@ -134,6 +134,7 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
         qconfig_dict = {"": default_dynamic_qconfig}
         inputs = model.get_example_inputs()
         orig_scripted_model = get_script_module(model, False, inputs)
+        torch._C._jit_pass_inline(orig_scripted_model.graph)
         orig_forward_graph = orig_scripted_model.graph.str()
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         quant_forward_graph = scripted_model.graph.str()
