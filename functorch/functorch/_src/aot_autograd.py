@@ -308,14 +308,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
 
     if config.debug_joint:
-        print(fx_g.code)
+        print("====== Joint graph ======")
+        fx_g.print_readable()
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
         if config.debug_graphs:
-            print(fw_module.code, bw_module.code)
+            print("====== Forward graph ======")
+            fw_module.print_readable()
+            print("====== Backward graph ======")
+            bw_module.print_readable()
 
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
