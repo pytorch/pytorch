@@ -33,6 +33,10 @@ nvf_out1 = fm.execute([input1, input2])[0]
 ## Components
 
 ### `FusionManager` - Executes and Caches Defined Fusions
+#### `FusionManager` Methods
+* `get()`: Provides a global instance.  You cannot directly construct an instance of the `FusionManager`.
+* `execute([list of inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs.
+* `print_ir()`: Prints the low level IR for the currently defined fusion.
 
 ### `FusionDefiniton` Context Manager - Interface for Defining Fusions
 
