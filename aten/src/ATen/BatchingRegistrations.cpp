@@ -565,6 +565,11 @@ Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntAr
   return reshape_batching_rule(self, sizes);
 }
 
+Tensor _reshape_alias_symint_batching_rule(const Tensor& self, c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+  return _reshape_alias_batching_rule(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides)) ;
+}
+
+
 Tensor _new_zeros_with_same_feature_meta_batching_rule(
     const Tensor& self,
     const Tensor& other,
@@ -1130,7 +1135,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_symint_batching_rule);
-  m.impl("_reshape_alias", _reshape_alias_batching_rule);
+  m.impl("_reshape_alias", _reshape_alias_symint_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
