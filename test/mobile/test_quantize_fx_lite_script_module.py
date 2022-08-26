@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.utils.bundled_inputs
 from torch.ao.quantization import (
     default_qconfig,
