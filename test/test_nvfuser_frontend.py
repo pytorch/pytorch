@@ -3,7 +3,6 @@
 import unittest
 
 import torch
-import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
