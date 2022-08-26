@@ -1259,55 +1259,6 @@ def find_node_with_name(nodes, name):
             return result
 
 class TestTorchTidyProfiler(TestCase):
-    def test_tensor_id(self):
-        a = torch.randn(4, 3)
-
-        # Views of tensors can share the same storage, but have different TensorImpls
-        b = a.view((1, 12))
-        c = torch.randn(4, 1)
-
-        # For future debuggers, this is how you get the data pointer in Python
-        # print(a.storage().data_ptr())
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = a + c
-            _ = b * c
-            # Resize should change the data_ptr but
-            # keep the TensorImpl the same
-            f = a.resize_(128, 129)
-            _ = torch.relu(f)
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-
-        def get_id(op_name, index):
-            node = find_node_with_name(nodes, op_name)
-            self.assertIsNotNone(node)
-            self.assertIsInstance(
-                node.extra_fields,
-                torch._C._profiler._ExtraFields_TorchOp)
-            tensor_info = node.extra_fields.inputs.tensor_metadata
-            return tensor_info[index].unique_tensor_id
-
-        # TODO: Figure out how to test if the logic to invalidate tensor and
-        # data pointer IDs during a deallocation works correctly.
-
-        c_1 = get_id("aten::add", 1)
-        c_2 = get_id("aten::mul", 1)
-
-        self.assertEqual(c_1, c_2)
-
-        a_id = get_id("aten::add", 0)
-        b_id = get_id("aten::mul", 0)
-        f_id = get_id("aten::relu", 0)
-
-        self.assertNotEqual(a_id, b_id)
-        self.assertNotEqual(a_id, c_1)
-
-        self.assertNotEqual(a_id, f_id)
-        self.assertNotEqual(b_id, c_1)
-        self.assertNotEqual(b_id, f_id)
-        self.assertNotEqual(c_1, f_id)
-
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
