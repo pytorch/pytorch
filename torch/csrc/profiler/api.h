@@ -66,6 +66,10 @@ struct TORCH_API ProfilerConfig {
         with_flops(with_flops),
         with_modules(with_modules) {}
   ~ProfilerConfig() = default;
+
+  bool disabled() const;
+  bool global() const;
+
   ProfilerState state;
   ExperimentalConfig experimental_config;
   bool report_input_shapes;
