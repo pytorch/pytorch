@@ -5066,7 +5066,7 @@ def linalg_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
-    dim: Optional[List[int]],
+    dim: Optional[Sequence[int]],
     keepdim: bool,
     dtype: torch._C.Value,
 ):
@@ -5101,7 +5101,7 @@ def linalg_vector_norm(
     g,
     self: torch._C.Value,
     ord: float,
-    dim: Optional[List[int]],
+    dim: Optional[Sequence[int]],
     keepdim: bool,
     dtype: torch._C.Value,
 ):

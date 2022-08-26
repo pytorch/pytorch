@@ -2,7 +2,7 @@
 
 import sys
 import warnings
-from typing import List, Optional, Sequence, Union
+from typing import Optional, Sequence, Union
 
 import torch
 from torch import _C
@@ -1194,15 +1194,17 @@ def flatten(g, input, start_dim, end_dim):
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@symbolic_helper.parse_args("v", "f", "is", "i", "v")
+@symbolic_helper.parse_args("v", "f", "is", "b", "v")
 @_beartype.beartype
-def linalg_vector_norm(g, self, ord, dim: Optional[List[int]], keepdim, dtype):
+def linalg_vector_norm(
+    g, self, ord, dim: Optional[Sequence[int]], keepdim: bool, dtype
+):
     if ord == 0:
         if dim is None:
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = 0
+            keepdim = False
 
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
