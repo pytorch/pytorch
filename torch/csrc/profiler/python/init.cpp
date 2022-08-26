@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/python/init.h>
 
+#include <ATen/record_function.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -13,6 +14,18 @@ void initPythonBindings(PyObject* module) {
   auto m = rootModule.def_submodule("_profiler");
 
   using namespace torch::profiler::impl;
+
+  py::enum_<at::RecordScope>(m, "RecordScope")
+      .value("FUNCTION", at::RecordScope::FUNCTION)
+      .value("BACKWARD_FUNCTION", at::RecordScope::BACKWARD_FUNCTION)
+      .value("TORCHSCRIPT_FUNCTION", at::RecordScope::TORCHSCRIPT_FUNCTION)
+      .value("KERNEL_FUNCTION_DTYPE", at::RecordScope::KERNEL_FUNCTION_DTYPE)
+      .value("CUSTOM_CLASS", at::RecordScope::CUSTOM_CLASS)
+      .value("BUILD_FEATURE", at::RecordScope::BUILD_FEATURE)
+      .value("LITE_INTERPRETER", at::RecordScope::LITE_INTERPRETER)
+      .value("USER_SCOPE", at::RecordScope::USER_SCOPE)
+      .value("STATIC_RUNTIME_OP", at::RecordScope::STATIC_RUNTIME_OP)
+      .value("STATIC_RUNTIME_MODEL", at::RecordScope::STATIC_RUNTIME_MODEL);
 
   py::enum_<ProfilerState>(m, "ProfilerState")
       .value("Disabled", ProfilerState::Disabled)
@@ -122,15 +135,27 @@ void initPythonBindings(PyObject* module) {
         return py::reinterpret_borrow<py::object>(thp_device);
       });
 
-  py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
-      .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
-      .def_readonly(
-          "allow_tf32_cublas",
-          &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
+  using torch_op_t = ExtraFields<EventType::TorchOp>;
+  py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
+      .def_readonly("inputs", &torch_op_t::inputs_)
+      .def_readonly("scope", &torch_op_t::scope_)
+      .def_readonly("sequence_number", &torch_op_t::sequence_number_)
+      .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
 
-  py::class_<ExtraFields<EventType::Allocation>>(m, "_ExtraFields_Allocation");
+  using allocation_t = ExtraFields<EventType::Allocation>;
+  py::class_<allocation_t>(m, "_ExtraFields_Allocation")
+      .def_property_readonly(
+          "ptr",
+          [](const allocation_t& a) {
+            return reinterpret_cast<intptr_t>(a.ptr_);
+          })
+      .def_readonly("alloc_size", &allocation_t::alloc_size_)
+      .def_readonly("device_type", &allocation_t::device_type_)
+      .def_readonly("device_index", &allocation_t::device_index_)
+      .def_readonly("total_allocated", &allocation_t::total_allocated_)
+      .def_readonly("total_reserved", &allocation_t::total_reserved_);
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
@@ -149,7 +174,8 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
       .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
-      .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
+      .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
 
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
@@ -161,6 +187,9 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("function_name", [](const PyFrameState& s) {
         return s.funcname_.str();
       });
+
+  py::class_<ExtraFields<EventType::OutOfMemory>>(
+      m, "_ExtraFields_OutOfMemory");
 
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
