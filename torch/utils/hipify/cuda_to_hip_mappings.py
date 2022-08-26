@@ -37,8 +37,6 @@ except subprocess.CalledProcessError:
 except (FileNotFoundError, PermissionError):
     # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
     pass
-except PermissionError:
-    pass
 
 rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm_version.h"
@@ -8270,6 +8268,9 @@ C10_MAPPINGS = collections.OrderedDict(
         ),
         ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
         ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
+        ("C10_CUDA_ERROR_HANDLED", ("C10_HIP_ERROR_HANDLED", API_C10)),
+        ("C10_CUDA_IGNORE_ERROR", ("C10_HIP_IGNORE_ERROR", API_C10)),
+        ("C10_CUDA_CLEAR_ERROR", ("C10_HIP_CLEAR_ERROR", API_C10)),
         ("c10::cuda", ("c10::hip", API_C10)),
         ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
         ("CUDAStream", ("HIPStream", API_C10)),
