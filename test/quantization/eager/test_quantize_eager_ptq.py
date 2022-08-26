@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -326,9 +326,9 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.ao.nn.quantized.QFunctional)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -776,7 +776,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             prepare(model, inplace=True)
             convert(model, inplace=True)
             self.assertTrue('QuantizedEmbedding' in str(model))
-            self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+            self.assertEqual(type(model.emb), torch.ao.nn.quantized.Embedding)
             self.checkScriptable(model, [[indices]], check_save_load=True)
 
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
@@ -836,7 +836,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             # Test to make sure module is quantized correctly.
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
             self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
             class EmbeddingBagWithLinear(torch.nn.Module):
@@ -857,7 +857,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
             self.checkLinear(model2.fc)
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
@@ -1287,8 +1287,8 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         }
 
         def checkQuantized(model, module_type):
-            mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
-                            'GRU': torch.nn.quantized.dynamic.GRU}
+            mod_type_map = {'LSTM': torch.ao.nn.quantized.dynamic.LSTM,
+                            'GRU': torch.ao.nn.quantized.dynamic.GRU}
             mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
                             'GRU': 'DynamicQuantizedGRU'}
             self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
@@ -1359,10 +1359,10 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
             def checkQuantized(model, module_type):
-                mod_type_map = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
-                                'GRUCell': torch.nn.quantized.dynamic.GRUCell,
-                                'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
-                                'RNNReLU': torch.nn.quantized.dynamic.RNNCell}
+                mod_type_map = {'LSTMCell': torch.ao.nn.quantized.dynamic.LSTMCell,
+                                'GRUCell': torch.ao.nn.quantized.dynamic.GRUCell,
+                                'RNNTanh': torch.ao.nn.quantized.dynamic.RNNCell,
+                                'RNNReLU': torch.ao.nn.quantized.dynamic.RNNCell}
 
                 mod_repr_map = {'LSTMCell': 'DynamicQuantizedLSTMCell',
                                 'GRUCell': 'DynamicQuantizedGRUCell',
