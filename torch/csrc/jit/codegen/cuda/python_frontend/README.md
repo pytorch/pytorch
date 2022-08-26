@@ -17,13 +17,13 @@ with FusionDefinition(fm) as fd :
                           dtype=DataType.Float)
     t1 = fd.define_tensor(3)
     c0 = fd.define_constant(3.0)
-  
+
     t2 = fd.ops.add(t0, t1)
     t3 = fd.ops.mul(t2, c0)
     t4 = fd.ops.sum(t3, [-1], False, DataType.Float)
-  
+
     fd.add_output(t4)
-    
+
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
