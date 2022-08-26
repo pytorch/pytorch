@@ -41,7 +41,6 @@ class TestShardedEmbedding(ShardedTensorTestBase):
         input_size,
         num_embeddings,
         embedding_dim,
-        sharded_dim=None,
         max_norm=None,
         norm_type=2.0,
         padding_idx=None,
@@ -91,6 +90,7 @@ class TestShardedEmbedding(ShardedTensorTestBase):
         # Compare local weight and shared one to ensure the renorm
         # as expected.
         if max_norm is not None:
+            sharded_dim = spec.dim
             sharded_weight = sharded_embedding.weight.local_shards()[0].tensor
             (start_pos, chunk_size) = generate_local_weight_sharding_params_for_test(
                 local_embedding.weight, sharded_dim, TEST_GPU_NUM, spec, self.rank
@@ -134,15 +134,15 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [34], 15, 14, padding_idx=10)
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, padding_idx=12)
             self._run_sharded_embedding(
-                spec, [4, 5, 6], 23, 13, max_norm=2.5, sharded_dim=1
+                spec, [4, 5, 6], 23, 13, max_norm=2.5,
             )
             self._run_sharded_embedding(
-                spec, [12, 7, 16], 23, 13, max_norm=2.5, sharded_dim=1
+                spec, [12, 7, 16], 23, 13, max_norm=2.5,
             )
             self._run_sharded_embedding(
-                spec, [8, 16, 20], 12, 12, max_norm=1.25, norm_type=1.0, sharded_dim=1
+                spec, [8, 16, 20], 12, 12, max_norm=1.25, norm_type=1.0,
             )
-            self._run_sharded_embedding(spec, [30], 15, 14, max_norm=2.0, sharded_dim=1)
+            self._run_sharded_embedding(spec, [30], 15, 14, max_norm=2.0)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -154,11 +154,11 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [5, 4], 32, 12)
             self._run_sharded_embedding(spec, [6, 7, 6], 64, 11)
             self._run_sharded_embedding(
-                spec, [5, 12], 16, 22, max_norm=2.5, sharded_dim=0
+                spec, [5, 12], 16, 22, max_norm=2.5,
             )
             self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, padding_idx=30)
             self._run_sharded_embedding(
-                spec, [6, 5, 3], 26, 11, max_norm=2.0, sharded_dim=0
+                spec, [6, 5, 3], 26, 11, max_norm=2.0,
             )
 
             # Test uneven split.
@@ -167,9 +167,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [4], 21, 11)
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 21, 11, padding_idx=10)
             self._run_sharded_embedding(
-                spec, [12, 16, 8], 27, 11, max_norm=2.0, sharded_dim=0
+                spec, [6, 5, 8], 28, 5, max_norm=2.0,
             )
-            self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5, sharded_dim=0)
+            self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5)
 
 
 if __name__ == "__main__":

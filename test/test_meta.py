@@ -634,6 +634,7 @@ aten = torch.ops.aten
 
 # these always fail
 meta_dispatch_expected_failures = {
+    aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten._fft_c2c.out : {f16, c64, i8, f64, c128, i32, i64, f32, c32, b8, i16, u8},
     aten._fft_r2c.out : {f16, i8, f64, i32, i64, f32, b8, i16, u8},
     aten.cholesky.default : {c64, c128, f64, f32},
@@ -726,7 +727,6 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
-    aten.empty.SymInt: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
@@ -870,6 +870,24 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
+
+    def test_empty_quantized(self):
+        r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
+        self.assertEqual(r.device.type, 'meta')
+
+    def test_map_location_deserialize(self):
+        import io
+
+        t = torch.rand(10)
+        b = io.BytesIO()
+
+        torch.save(t, b)
+        b.seek(0)
+        r = torch.load(b, map_location=torch.device("meta"))
+        self.assertEqual(r.device.type, 'meta')
+        self.assertEqual(r.shape, t.shape)
+        self.assertEqual(r.dtype, t.dtype)
+        self.assertEqual(r.storage().data_ptr(), 0)
 
 instantiate_device_type_tests(TestMeta, globals())
 
