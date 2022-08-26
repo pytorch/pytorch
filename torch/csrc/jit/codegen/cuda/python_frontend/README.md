@@ -95,7 +95,7 @@ python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition
 ```
 #### Notating Outputs
 
-`add_output(tensor/scalar)` is used to indicate an intermediate is an output to the fusion.
+`fd.add_output(tensor/scalar)` is used to indicate an intermediate is an output to the fusion.
 
 # Debug Information
 **Query a list of supported operations:**
