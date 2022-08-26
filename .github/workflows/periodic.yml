@@ -105,6 +105,26 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-with-debug: true
 
+  linux-bionic-cuda11_6-py3_9-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.9-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.9-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      build-with-debug: false
+
+  linux-bionic-cuda11_6-py3_9-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.9-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_9-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.9-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_9-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
+        ]}
+
   linux-bionic-cuda11_6-py3_7-gcc7-debug-test:
     name: linux-bionic-cuda11.6-py3.7-gcc7-debug
     uses: ./.github/workflows/_linux-test.yml
