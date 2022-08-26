@@ -1,6 +1,9 @@
 import torch
 import torch.fx
-from torch.fx import Node
+from torch.fx import (
+    Node,
+    GraphModule,
+)
 
 from torch.ao.ns.fx.utils import (
     get_target_type_str,
@@ -94,7 +97,7 @@ def _get_dedup_subgraphs(
     # instead
     seen_nodes = set()
     subgraphs_dedup = {}
-    for name, cur_match in reversed(matches.items()):
+    for name, cur_match in reversed(matches.items()):  # type: ignore[call-overload]
         was_seen = False
         for node_or_tuple in cur_match[1]:
 
@@ -131,7 +134,7 @@ def _get_dedup_subgraphs(
             continue
 
         # Start with the unusual type, convert it to [op_0, ..., op_n]
-        list_of_nodes = None
+        list_of_nodes = []
 
         if len(cur_match[1]) == 1:
             list_of_nodes = cur_match[1]
@@ -141,7 +144,7 @@ def _get_dedup_subgraphs(
             # cannot make any assumptions on order, not clear what the
             # find_matches function is doing to populate this
 
-            def _order_nodes(node_a, node_b, node_c) -> Tuple[Node, Node, Node]:
+            def _order_nodes(node_a, node_b, node_c) -> List[Node]:
                 nodes = [node_a, node_b, node_c]
                 first_node = None
                 mid_node = None
@@ -175,15 +178,15 @@ def _get_dedup_subgraphs(
                 node_c = cur_match[1][0]
                 list_of_nodes = _order_nodes(node_a, node_b, node_c)
 
-        subgraphs_dedup[name] = list_of_nodes
         # [node_n, ..., node_0], note that the order is reversed
         # to make it chronological for simple subgraphs
-        subgraphs_dedup[name].reverse()
+        list_of_nodes.reverse()
+        subgraphs_dedup[name] = list_of_nodes
 
     return subgraphs_dedup
 
 def _get_logger_for_subgraph(
-    model: torch.nn.Module,
+    model: GraphModule,
     first_node: Node,
     last_node: Node,
     subgraph_idx: int,
@@ -195,7 +198,9 @@ def _get_logger_for_subgraph(
     ending with `last_node`, creates a logger for the end of this
     subgraph.
     """
-    logger_mod_orig = torch.ao.ns._numeric_suite_fx.OutputLogger(
+    # TODO(before land): fix the circular dependency on this
+    from torch.ao.ns._numeric_suite_fx import OutputLogger
+    logger_mod_orig = OutputLogger(
         first_node.name,  # ref_node_name
         last_node.name,  # prev_node_name
         f'subgraph_{subgraph_idx}_{subgraph_candidate_idx}',  # model_name
@@ -212,7 +217,7 @@ def _get_logger_for_subgraph(
     return logger_mod_orig
 
 def _add_logger_to_subgraph_wrapper(
-    model: torch.nn.Module,
+    model: GraphModule,
     subgraph_idx: int,
     subgraph_candidate_idx: int,
     qconfig_str: str,
@@ -222,15 +227,16 @@ def _add_logger_to_subgraph_wrapper(
     to the end of this model.
     """
     first_node, last_node = None, None
-    for idx, node in enumerate(model.graph.nodes):
+    for idx, node in enumerate(model.graph.nodes):  # type: ignore[union-attr, arg-type]
         if idx == 0:
             first_node = node
-        elif idx == len(model.graph.nodes) - 1:
+        elif idx == len(model.graph.nodes) - 1:  # type: ignore[union-attr, arg-type]
             # last node is the output, so we want the first
             # arg of the output
             last_node = node.args[0]
+    assert first_node is not None and last_node is not None
     logger_mod = _get_logger_for_subgraph(
-        model, first_node, last_node, subgraph_idx,
+        model, first_node, last_node, subgraph_idx,  # type: ignore[arg-type]
         subgraph_candidate_idx, qconfig_str)
     attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
     assert not hasattr(model, attr_name)
@@ -244,7 +250,7 @@ def create_submodule_from_subgraph(
     model: torch.nn.Module,
     first_node: Node,
     last_node: Node,
-) -> torch.nn.Module:
+) -> GraphModule:
     """
     Input: a model, and a linear subgraph within the model from first_node to
       last_node.
@@ -327,6 +333,16 @@ def create_submodule_from_subgraph(
                     cur_name = arg.name + '_' + str(counter)
                     seen_names.add(cur_name)
                     cur_args_copy.append(g.placeholder(cur_name))
+                elif isinstance(arg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
+                    cur_names = []
+                    for inner_arg in arg:
+                        counter = 0
+                        while inner_arg.name + '_' + str(counter) in seen_names:
+                            counter += 1
+                        cur_name = inner_arg.name + '_' + str(counter)
+                        seen_names.add(cur_name)
+                        cur_names.append(cur_name)
+                    cur_args_copy.append([g.placeholder(x) for x in cur_names])
                 elif isinstance(arg, Node):
                     # arg_kwarg_idx >= num_passthrough args, we need to copy
                     assert arg.op == 'get_attr', f'{arg.op} not handled yet'
@@ -367,7 +383,7 @@ def create_submodule_from_subgraph(
 
                 arg_kwarg_idx += 1
 
-            cur_args_copy = tuple(cur_args_copy)
+            cur_args_copy = tuple(cur_args_copy)  # type: ignore[assignment]
         else:
             # we are not at first node, first arg is from the previous node,
             # and all other args are copied
@@ -382,11 +398,11 @@ def create_submodule_from_subgraph(
             # TODO(future): this is not handling complicated graphs correctly, need to
             # look at actual relationships instead of assuming sequential graph
             # print(cur_args_orig, cur_kwargs_orig)
-            cur_args_copy = [cur_node_copy]
+            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]
 
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
-                    if isinstance(arg, nn.Parameter):
+                    if isinstance(arg, torch.nn.Parameter):
                         new_arg = arg.clone().detach()
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
@@ -397,11 +413,11 @@ def create_submodule_from_subgraph(
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f'arg of type {type(arg)} not handled yet')
-            cur_args_copy = tuple(cur_args_copy)
+            cur_args_copy = tuple(cur_args_copy)  # type: ignore[assignment]
 
         # copy the node
         if cur_node_orig.op == 'call_module':
-            orig_mod = getattr_from_fqn(model, cur_node_orig.target)
+            orig_mod = getattr_from_fqn(model, cur_node_orig.target)  # type: ignore[arg-type]
             orig_mod_copy = copy.deepcopy(orig_mod)
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
@@ -424,7 +440,7 @@ def create_submodule_from_subgraph(
 
         # go to next node
         assert len(cur_node_orig.users.keys()) == 1, \
-            f'{cur_node} has more than 1 users, not supported yet'
+            f'{cur_node_orig} has more than 1 users, not supported yet'
         cur_node_orig = list(cur_node_orig.users.keys())[0]
         cur_args_orig = cur_node_orig.args
         cur_kwargs_orig = cur_node_orig.kwargs

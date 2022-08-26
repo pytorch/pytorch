@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 
 #include <ATen/Backtrace.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
@@ -981,7 +982,8 @@ void ArgumentStash::stashIntArrayRefElem(
   // TODO: check type?
   if (!isTracing())
     return;
-  auto& list_trace = stash.intlists.emplace(arg_name, size).first->second;
+  IntArrayRefTrace& list_trace =
+      stash.intlists.emplace(arg_name, size).first->second;
   AT_ASSERT(size == list_trace.size());
   AT_ASSERT(idx < list_trace.size());
   AT_ASSERT(list_trace[idx] == nullptr);
@@ -1059,7 +1061,8 @@ const char* WARN_CONSTRUCTOR =
 const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
-    "up as a constant in the graph.";
+    "up as a constant in the graph. Consider using `view` or `reshape` to make "
+    "it traceable.";
 const char* STRICT_TRACER_MSG =
     " might cause the trace to be incorrect, this is only valid if the container "
     "structure does not change based on the module's inputs. Consider using a constant "

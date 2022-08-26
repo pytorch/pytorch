@@ -290,9 +290,12 @@ auto handle_torch_function_no_python_arg_parser(
   PyObject* mode_obj = nullptr;
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  const auto& maybe_mode = is_torch_function
-      ? at::impl::PythonTorchFunctionTLS::get_mode()
-      : at::impl::TorchDispatchModeTLS::get_state();
+  auto get_mode = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
+                             : c10::impl::TorchDispatchModeTLS::get_state();
+  };
+
+  const auto& maybe_mode = get_mode();
   if (maybe_mode) {
     mode_obj = maybe_mode->ptr(getPyInterpreter());
     TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
@@ -335,6 +338,9 @@ auto handle_torch_function_no_python_arg_parser(
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
+      if (!torch_function) {
+        TORCH_INTERNAL_ASSERT(0);
+      }
 
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
@@ -385,8 +391,9 @@ auto handle_torch_function_no_python_arg_parser(
       // If a user forcibly changes the mode in a non-lexical way
       // in the inner context, the mode could be invalid here.  So just be
       // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-      TORCH_INTERNAL_ASSERT(mode_obj == maybe_mode->ptr(getPyInterpreter()));
+      const auto& maybe_mode = get_mode();
+      TORCH_INTERNAL_ASSERT(
+          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
       ss << " nor was it found on the currently active mode "
          << py::repr(mode_obj);
     }
@@ -649,12 +656,29 @@ bool is_float_or_complex_list(PyObject* obj) {
 
 static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+    auto len = PySequence_Size(obj);
+    if (len == 0) {
       return true;
     }
 
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+    bool int_first = false;
     if (THPUtils_checkIndex(item.ptr())) {
+      // we still have to check that the rest of items are NOT symint nodes
+      int_first = true;
+    }
+
+    // Make sure none of the later arguments are SymInt
+    // NB: do NOT check that the later arguments are ints, as this is
+    // BC-breaking for FX
+    for (int i = 1; i < len; i++) {
+      if (torch::is_symint_node(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+        return false;
+      }
+    }
+
+    if (int_first) {
       return true;
     }
 
@@ -1227,10 +1251,14 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
+  int int_list_overload = false;
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
+    if (params[0].type_ == ParameterType::INT_LIST) {
+      int_list_overload = true;
+    }
   }
 
   if (nargs > max_pos_args && !allow_varargs_intlist) {
@@ -1287,7 +1315,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        is_int_or_symint(obj)) {
+        ((int_list_overload ? is_int_list(args, param.size)
+                            : is_int_or_symint_list(args, param.size)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

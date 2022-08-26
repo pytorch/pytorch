@@ -128,7 +128,7 @@ from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_utils import generate_qconfig_map
+from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
     _get_attr_name,
@@ -141,7 +141,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     BINARY_FUNCTIONS,
 )
 
-from typing import Dict, Tuple, Callable, List, Optional, Set, Any
+from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -759,9 +759,9 @@ def prepare_n_shadows_model(
     patterns = get_pattern_to_quantize_handlers(backend_config_dict)
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
-    standalone_module_names = []
-    standalone_module_classes = []
-    custom_module_classes = []
+    standalone_module_names: List[str] = []
+    standalone_module_classes: List[Type] = []
+    custom_module_classes: List[Type] = []
     matches = find_matches(
         mt.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
@@ -796,8 +796,14 @@ def prepare_n_shadows_model(
         # We used output propagation to populate example values on each
         # node. Use the example values from the previous node as the input
         # to the current node.
-        prev_node = get_normalized_nth_input(first_node, model, 0)
-        example_inputs = (prev_node.traced_result,)
+        prev_node = get_normalized_nth_input(first_node, mt, 0)
+        # print('prev_node', prev_node)
+        if isinstance(prev_node, list):
+            example_inputs = [x.traced_result for x in prev_node]
+        elif isinstance(prev_node, tuple):
+            example_inputs = (x.traced_result for x in prev_node)
+        else:
+            example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
 
         for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
@@ -832,6 +838,7 @@ def prepare_n_shadows_model(
                 # create a copy of the submodule, wrapped in a separate module
                 orig_mod_copy_wrapped = create_submodule_from_subgraph(
                     mt, first_node, last_node)
+                # print('wrapped', orig_mod_copy_wrapped)
 
                 # add a logger to the end of this submodule
                 # get first and last nodes of the submodule
@@ -857,13 +864,16 @@ def prepare_n_shadows_model(
                     # TODO(future PR): adjust this for ops where it does not work
 
                     if first_node.target in BINARY_FUNCTIONS:
-                        prev_node_0 = get_normalized_nth_input(first_node, model, 0)
-                        prev_node_1 = get_normalized_nth_input(first_node, model, 1)
+                        prev_node_0 = get_normalized_nth_input(first_node, mt, 0)
+                        prev_node_1 = get_normalized_nth_input(first_node, mt, 1)
                         new_args = (prev_node_0, prev_node_1)
                     else:
-                        prev_node = get_normalized_nth_input(first_node, model, 0)
-                        new_args = (prev_node,)
-                    new_kwargs = {}
+                        prev_node = get_normalized_nth_input(first_node, mt, 0)
+                        if isinstance(prev_node, (list, tuple)):
+                            new_args = (*prev_node,)  # type: ignore[assignment]
+                        else:
+                            new_args = (prev_node,)  # type: ignore[assignment]
+                    new_kwargs: Dict[str, Any] = {}
 
                     new_node = mt.graph.call_module(
                         attr_name, args=new_args, kwargs=new_kwargs)
@@ -871,7 +881,7 @@ def prepare_n_shadows_model(
     mt.recompile()
     return mt
 
-def convert_n_shadows_model(model: torch.nn.Module) -> torch.nn.Module:
+def convert_n_shadows_model(model: GraphModule) -> GraphModule:
 
     for node in model.graph.nodes:
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
@@ -934,7 +944,7 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     TODO(future PR): add ref_node_target_type, will be useful
     """
 
-    subgraph_name_to_subgraph_results = collections.defaultdict(dict)
+    subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
     for subgraph_name_with_idx, subgraph_candidate_results in \
             results['model']['node_output'].items():

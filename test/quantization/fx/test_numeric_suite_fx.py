@@ -16,7 +16,7 @@ import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
-    convert_to_reference,
+    convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -81,7 +81,7 @@ from torch.ao.ns._numeric_suite_fx import (
     create_results_comparison,
     print_n_shadows_summary,
 )
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 
 
@@ -296,7 +296,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 
@@ -1774,9 +1774,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.Sigmoid(),
         ).eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        qconfig_mapping = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 1, 1, 1),)
-        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mq = torch.ao.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
 
         # extract weights
@@ -1993,7 +1993,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         example_inputs = (torch.randn(1, 4),)
         qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
         mp = prepare_fx(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
-        mq = convert_to_reference(mp)
+        mq = convert_to_reference_fx(mp)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
     def test_mul_add_cat_stack_skips_shadowing(self):
@@ -2076,10 +2076,11 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     """
 
     def _test_impl(self, m, example_input, qconfig_mappings):
-        backend_config_dict = get_native_backend_config_dict()
+        backend_config = get_native_backend_config()
 
         msp = prepare_n_shadows_model(
-            m, example_input, qconfig_mappings, backend_config_dict)
+            m, example_input, qconfig_mappings, backend_config)
+        # print('msp', msp)
 
         for _ in range(2):
             msp(*example_input)
@@ -2154,6 +2155,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 x = F.linear(x, self.w1, self.b1)
                 x = F.relu(x)
                 x = x + x
+                x = torch.cat([x,])
+                x = torch.cat((x,))
                 # TODO: enable below after FX graph mode quantization handles
                 # it, currently this is not supported
                 # x = F.linear(input=x, weight=self.w1, bias=self.b1)
@@ -2166,7 +2169,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             QConfigMapping().set_global(torch.quantization.default_qconfig),
             QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
         ]
-        backend_config_dict = get_native_backend_config_dict()
         self._test_impl(m, example_input, qconfig_mappings)
 
     @skip_if_no_torchvision
@@ -2180,7 +2182,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             QConfigMapping().set_global(torch.quantization.default_qconfig),
             QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig),
         ]
-        backend_config_dict = get_native_backend_config_dict()
         self._test_impl(m, example_input, qconfig_mappings)
 
 

@@ -4,11 +4,15 @@ from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
 
+__all__ = ['Future', 'collect_all', 'wait_all']
+
 T = TypeVar("T")
 S = TypeVar("S")
 
+
 class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
     pass
+
 
 class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     r"""
