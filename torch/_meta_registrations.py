@@ -195,16 +195,6 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@register_meta(aten.inverse.default)
-def meta_inverse(self):
-    # Bug: https://github.com/pytorch/pytorch/issues/77498
-    if self.numel() == 0:
-        return torch.empty_like(self)
-    r = self.new_empty(self.shape)
-    r.transpose_(-2, -1)
-    return r
-
-
 @torch.library.impl(meta_lib, "bernoulli.out")
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
