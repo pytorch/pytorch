@@ -45,7 +45,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
-  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    # TODO: there is a linking issue when building with UCC using clang,
+    # disable it for now and to be fix later.
     export USE_UCC=1
     export USE_SYSTEM_UCC=1
   fi
