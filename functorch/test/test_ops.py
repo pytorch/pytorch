@@ -596,7 +596,9 @@ class TestOperators(TestCase):
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
-        xfail("nn.functional.conv_transpose3d", device_type='cuda'),  # bias tensor has to be contiguous
+        # locally fails with `bias tensor has to be contiguous`
+        # but passes on CI, hence the skip.
+        skip("nn.functional.conv_transpose3d", device_type='cuda'),
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
