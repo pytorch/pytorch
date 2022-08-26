@@ -244,6 +244,11 @@ Module FinalizeOnDevicePTQ(
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);
+  // Clone the quantize_ method now.
+  // At this point the method should have quant, linear_prepack, paked_param,
+  // unpcak, dynamic_linear ops. This ops need to be traced.
+  std::string tracer_method = "trace_quantized_" + orig_method_name;
+  cloneMethod(module, method_name, tracer_method);
   auto packed_param_attr_names = RegisterPrePackingParams(module, method_name);
   GRAPH_DUMP("After QuantFusion + packed param registration:", graph);
 
@@ -258,7 +263,6 @@ Module FinalizeOnDevicePTQ(
   //    producin packed_params
   // 4. Modify quantized_forward to remove all the nodes except for SetAttrs
   cloneMethod(module, method_name, quantized_method_name);
-  // removeWeightSetAttrs(module, quantized_method_name);
   auto quantized_graph = module.get_method(quantized_method_name).graph();
   removePackedParamInsertionAndFPWeightsSetAttr(
       quantized_graph, packed_param_attr_names);

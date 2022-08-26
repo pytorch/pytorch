@@ -74,6 +74,9 @@ class OnDevicePTQUtils(object):
     def ptq_dynamic_quantize(model, qconfig_dict):
         inputs = model.get_example_inputs()
         m = get_script_module(model, False, inputs)
+        first_input, = inputs
+        rand_input = bundled_inputs.bundle_randn(first_input.size(), dtype=first_input.dtype)
+        m = bundled_inputs.bundle_inputs(m, inputs=[(rand_input, )])
         m = _quantize_ondevice_dynamic_jit(m, qconfig_dict, 'forward', True)
         return m
 
@@ -427,9 +430,9 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         else:
             # check for lite interpreter
             m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-            first_input, = inputs
-            rand_input = bundled_inputs.bundle_randn(first_input.size(), dtype=first_input.dtype)
-            m = bundled_inputs.bundle_inputs(m, inputs=[(rand_input, )])
+            print("---tracing method---")
+            print(m.trace_quantized_forward.graph)
+            print("---end tracing method---")
             buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
             buffer.seek(0)
             m = _load_for_lite_interpreter(buffer)  # Error here
@@ -475,9 +478,6 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         else:
             # check for lite interpreter
             m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-            first_input, = inputs
-            rand_input = bundled_inputs.bundle_randn(first_input.size(), dtype=first_input.dtype)
-            m = bundled_inputs.bundle_inputs(m, inputs=[(rand_input, )])
             buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
             buffer.seek(0)
             m = _load_for_lite_interpreter(buffer)  # Error here

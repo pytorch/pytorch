@@ -105,6 +105,7 @@ def bundle_inputs(
         raise Exception("Only ScriptModule is supported.")
 
     ignored_methods, ignored_attrs = _get_bundled_inputs_attributes_and_methods(model)
+    print(ignored_methods)
     clone = torch._C._hack_do_not_use_clone_module_with_class(  # type: ignore[attr-defined]
         model._c,
         ignored_methods,

@@ -4,6 +4,9 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quant_type import QuantType
 from torch.jit._recursive import wrap_cpp_module
 
+import copy
+import textwrap
+
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -146,9 +149,54 @@ def _convert_ondevice_dynamic_jit(model, method_name, inplace=False, debug=False
     return _convert_ondevice_jit(model, method_name, inplace, debug, quant_type=QuantType.DYNAMIC)
 
 
+def _insert_bundle_input_for_quantization_methods(model, method_name):
+    all_info = model.get_bundled_inputs_functions_and_info()
+    if method_name not in all_info.keys():
+        raise ValueError(f"Bundled inputs for method {method_name} not found")
+    expected_method_name = f"get_all_bundled_inputs_for_{method_name}"
+    bundled_inputs_fn = getattr(model, expected_method_name)
+    bundled_inputs = bundled_inputs_fn()
+    reset_observers_method = getattr(model, "reset_observers_" + method_name)
+    observe_method = getattr(model, "observe_" + method_name)
+    trace_quantized = getattr(model, "trace_quantized_" + method_name)
+    code = bundled_inputs_fn.code
+    substring = "_for_" + method_name
+    codelines = code.splitlines()
+    if not expected_method_name in codelines[0]:
+        raise ValueError(f"Expected method name {expected_method_name} in {codelines[0]}.")
+
+    # register bundled_input_for_observe_forward
+    substitute_string = "_for_observe_" + method_name
+    codelines_copy = copy.deepcopy(codelines)
+    codelines_copy[0] = codelines_copy[0].replace(substring, substitute_string)
+    new_method_code = "\n".join(codelines_copy)
+    new_method_code += "\n"
+    print(new_method_code.encode())
+    new_method_code = code.replace(substring, substitute_string, 1)
+    model.define(new_method_code)
+
+    # register bundled_input_for_quantize_forward
+    substitute_string = "_for_trace_quantized_" + method_name
+    codelines_copy = copy.deepcopy(codelines)
+    codelines_copy[0] = codelines_copy[0].replace(substring, substitute_string)
+    new_method_code = "\n".join(codelines_copy)
+    new_method_code = code.replace(substring, substitute_string, 1)
+    model.define(new_method_code)
+
+    reset_observers_inputs = [()]
+    method_inputs_dict = {}
+    method_inputs_dict[reset_observers_method] = reset_observers_inputs
+    bundled_model = torch.utils.bundled_inputs.bundle_inputs(model, method_inputs_dict)
+    return bundled_model
+
+
 def _quantize_ondevice_dynamic_jit_impl(model, qconfig_dict, method_name, inplace=False):
     model = _prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name, inplace)
     model = _convert_ondevice_dynamic_jit(model, method_name, inplace)
+    model = _insert_bundle_input_for_quantization_methods(model, method_name)
+    print(model.get_all_bundled_inputs_for_observe_forward)
+    print(model.trace_quantized_forward)
+    print(model.get_all_bundled_inputs_for_trace_quantized_forward)
     return model
 
 def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
