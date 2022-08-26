@@ -85,7 +85,7 @@ struct MetadataBase {
   }
 
   void addMetadata(const std::string& key, const std::string& value) {
-    if (kineto_activity_ && !value.empty()) {
+    if (kineto_activity_ && !value.empty() && value != "\"\"") {
       torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
     }
   }
