@@ -1099,8 +1099,8 @@ def cudnn_batch_norm(
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
     return (
         a,
-        input.new_zeros((0,)),
-        input.new_zeros((0,)),
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
         input.new_zeros((0,), dtype=torch.uint8),
     )
 
@@ -1267,17 +1267,21 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         assert dim == -2 or dim == -1
         in_size = x.dim(dim)
 
+        if out_size == 1:
+            return x.mean(dim=dim).unsqueeze(dim)
+
         orange = torch.arange(out_size, device=device)
         i0 = start_index(orange, out_size, in_size)
         i1 = end_index(orange, out_size, in_size)
         length = i1 - i0
-
-        # Select elements
-        # Doing this logic with arange is intrinsically data-dependent, as the length of the range
-        # is data-dependent. I don't think there's a way to do this that's not data-dependent really
-        maxlength = int(torch.max(length).item())
-        ones = torch.ones(maxlength - 1, dtype=i0.dtype, device=device)
-        idx = torch.cat([i0.unsqueeze(1), ones]).cumsum(dim=1)  # [size, max]
+        # The length.max() can be computed analytically
+        # This is the max length of the pooling kernel
+        maxlength = end_index(1, out_size, in_size) - start_index(0, out_size, in_size)
+        in_size_mod = in_size % out_size
+        if not (in_size_mod == 0 or out_size % in_size_mod == 0):
+            maxlength += 1
+        range_max = torch.arange(maxlength, device=device)
+        idx = i0.unsqueeze(-1) + range_max
 
         # index_select does not support indices of several dimensions (ugh)
         def index_select(x, dim, indices):
@@ -1289,11 +1293,13 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
 
         vals = index_select(x, dim, idx)
         # zero-out the things we didn't really want to select
-        mask_idx = torch.arange(maxlength, device=device)
         assert dim < 0
-        mask = _unsqueeze_to_dim(mask_idx >= i1, -dim)
+        mask = _unsqueeze_to_dim(range_max >= i1, -dim)
         vals = torch.masked_fill(vals, mask, 0.0)
+
+        # Compute the length of each window
         div = _unsqueeze_to_dim(length, -dim)
+        # Compute the means
         return vals.sum(dim) / div
 
     out = input
