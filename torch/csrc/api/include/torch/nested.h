@@ -6,6 +6,12 @@
 namespace torch {
 namespace nested {
 
+/// Nested to padded tensor
+///
+/// See
+/// https://pytorch.org/docs/master/nested.html#torch.nested.to_padded_tensor
+///
+/// ```
 inline Tensor to_padded_tensor(
     const Tensor& self,
     double padding,

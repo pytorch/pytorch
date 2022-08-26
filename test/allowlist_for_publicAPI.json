@@ -1225,6 +1225,9 @@
   "torch.multiprocessing.spawn": [
     "Optional"
   ],
+  "torch.nested": [
+    "to_padded_tensor"
+  ],
   "torch.nn.common_types": [
     "Optional",
     "Tensor",
