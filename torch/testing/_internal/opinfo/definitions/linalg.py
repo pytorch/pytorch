@@ -1389,10 +1389,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
-            # Pre-existing condition; Needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_operator"
-            ),
             # exits early on eager extremal value test
             DecorateInfo(
                 unittest.skip("Skipped!"),
