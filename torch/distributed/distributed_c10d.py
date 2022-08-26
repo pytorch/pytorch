@@ -32,41 +32,8 @@ from torch._six import string_classes
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
-_MPI_AVAILABLE = True
-_NCCL_AVAILABLE = True
-_GLOO_AVAILABLE = True
-_UCC_AVAILABLE = True
-
-_pickler = pickle.Pickler
-_unpickler = pickle.Unpickler
-
-try:
-    from torch._C._distributed_c10d import ProcessGroupMPI
-except ImportError:
-    _MPI_AVAILABLE = False
-
-try:
-    from torch._C._distributed_c10d import ProcessGroupNCCL
-except ImportError:
-    _NCCL_AVAILABLE = False
-
-try:
-    from torch._C._distributed_c10d import ProcessGroupGloo
-    from torch._C._distributed_c10d import _ProcessGroupWrapper
-except ImportError:
-    _GLOO_AVAILABLE = False
-
-try:
-    from torch._C._distributed_c10d import ProcessGroupUCC
-    ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
-except ImportError:
-    _UCC_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
-
-PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
-
 __all__ = [
+    "ReduceOp",
     'Backend', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
     'all_gather_multigpu', 'all_gather_object', 'all_reduce',
     'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
@@ -81,6 +48,50 @@ __all__ = [
     'reduce_scatter', 'reduce_scatter_multigpu', 'scatter',
     'scatter_object_list', 'send', 'supports_complex'
 ]
+
+_MPI_AVAILABLE = True
+_NCCL_AVAILABLE = True
+_GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
+
+_pickler = pickle.Pickler
+_unpickler = pickle.Unpickler
+
+# Change __module__ of all imported types from torch._C._distributed_c10d that are public
+ReduceOp.__module__ = "torch.distributed.distributed_c10d"
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupMPI
+    ProcessGroupMPI.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupMPI"]
+except ImportError:
+    _MPI_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupNCCL
+    ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL"]
+except ImportError:
+    _NCCL_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupGloo
+    from torch._C._distributed_c10d import _ProcessGroupWrapper
+    ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupGloo"]
+except ImportError:
+    _GLOO_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupUCC
+    ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupUCC"]
+except ImportError:
+    _UCC_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
