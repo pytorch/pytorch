@@ -322,9 +322,8 @@ def register_var_mean():
         correction = torch._prims_common.set_correction(unbiased, correction)
         return torch.var_mean(inp, dim, correction=correction, keepdim=keepdim)
 
-    _meta_impl = torch._prims_common.wrappers.wrap_tensor_meta(_meta_var_mean)
     nvprim_impl.impl(name, _prim_impl)
-    nvprim_meta_impl.impl(name, _meta_impl)
+    nvprim_meta_impl.impl(name, _meta_var_mean)
 
     prim_packet = torch.ops.nvprims.var_mean
     prim = prim_packet.main
