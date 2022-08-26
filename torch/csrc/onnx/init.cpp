@@ -235,10 +235,9 @@ void initONNXBindings(PyObject* module) {
 
   m.def(
       "_check_onnx_proto",
-      ::torch::wrap_pybind_function(
-          [](const std::string& proto_string, bool full_check) {
-            check_onnx_proto(proto_string);
-          }),
+      ::torch::wrap_pybind_function([](const std::string& proto_string) {
+        check_onnx_proto(proto_string);
+      }),
       py::arg("proto_string"));
 
   auto onnx = m.def_submodule("_onnx");
