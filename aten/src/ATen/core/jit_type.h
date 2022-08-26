@@ -1789,27 +1789,9 @@ struct getTypePtr_<SymInt> final {
   }
 };
 template <>
-struct getTypePtr_<c10::ScalarType> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
     return DeviceObjType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::Layout> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::MemoryFormat> final {
-  static decltype(auto) call() {
-    return IntType::get();
   }
 };
 template <>
@@ -2132,6 +2114,27 @@ static LayoutTypePtr get();
 private:
 LayoutType() : EnumerationType() {}
 };
+
+namespace detail {
+template <>
+struct getTypePtr_<c10::ScalarType> final {
+  static decltype(auto) call() {
+    return ScalarTypeType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Layout> final {
+  static decltype(auto) call() {
+    return LayoutType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::MemoryFormat> final {
+  static decltype(auto) call() {
+    return MemoryFormatType::get();
+  }
+};
+} // namespace detail
 
 // the common supertype of all lists,
 // List[T] <: AnyList for all T
