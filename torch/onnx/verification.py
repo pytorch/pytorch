@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -26,6 +26,8 @@ from torch.onnx._internal import _beartype
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
+
+_NumericType = Union[Number, torch.Tensor, np.ndarray]
 
 
 @_beartype.beartype
@@ -125,10 +127,8 @@ def _ort_session(
 
 @_beartype.beartype
 def _compare_ort_pytorch_outputs(
-    ort_outs: Union[np.ndarray, Sequence[np.ndarray], Sequence[Tuple[np.ndarray, ...]]],
-    pt_outs: Union[
-        Number, torch.Tensor, Sequence[torch.Tensor], Sequence[Tuple[torch.Tensor, ...]]
-    ],
+    ort_outs: Union[_NumericType, Sequence[_NumericType], Sequence, Dict],
+    pt_outs: Union[_NumericType, Sequence[_NumericType], Sequence, Dict],
     rtol: float,
     atol: float,
     check_shape: bool,
@@ -153,6 +153,9 @@ def _compare_ort_pytorch_outputs(
     """
     pt_outs, _ = torch.jit._flatten(pt_outs)
     pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
+
+    assert isinstance(ort_outs, tuple)
+    assert isinstance(pt_outs, tuple)
 
     assert len(ort_outs) == len(
         pt_outs
@@ -180,6 +183,7 @@ def _compare_ort_pytorch_outputs(
             )
         except AssertionError as e:
             if acceptable_error_percentage:
+                assert isinstance(ort_out, np.ndarray)
                 error_percentage = 1 - np.sum(
                     np.isclose(ort_out, pt_out, rtol=rtol, atol=atol)
                 ) / np.prod(ort_out.shape)
@@ -608,7 +612,9 @@ def verify(
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[Sequence[Union[torch.Tensor, Tuple[Any, ...]]]] = None,
+    additional_test_inputs: Optional[
+        Sequence[Union[torch.Tensor, Tuple[Any, ...]]]
+    ] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
     check_shape: bool = True,

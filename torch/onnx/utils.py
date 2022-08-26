@@ -1064,7 +1064,15 @@ def _model_to_graph(
 ) -> Tuple[
     _C.Graph,
     Dict[str, torch.Tensor],
-    Optional[Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]],
+    Optional[
+        Union[
+            torch.Tensor,
+            Tuple[torch.Tensor, ...],
+            List[torch.Tensor],
+            Dict[str, torch.Tensor],
+            Any,  # Can be nested tuples etc.
+        ]
+    ],
 ]:
     """Converts model into an ONNX graph.
 
@@ -1758,7 +1766,7 @@ def _get_aten_op_overload_name(n: _C.Node) -> str:
     return _C.parse_schema(schema).overload_name
 
 
-@_beartype.beartype
+# @_beartype.beartype
 def _run_symbolic_function(
     g: _C.Graph,
     block: _C.Block,
@@ -1766,7 +1774,7 @@ def _run_symbolic_function(
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-) -> Optional[Union[_C.Value, _C.Block, Tuple[_C.Value, ...]]]:
+) -> Optional[Union[_C.Value, _C.Block, Sequence[_C.Value]]]:
     """Runs a symbolic function.
 
     The function is used in C++ to export the node to ONNX.

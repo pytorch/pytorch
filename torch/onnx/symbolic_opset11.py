@@ -2,7 +2,7 @@
 
 import sys
 import warnings
-from typing import Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Union
 
 import torch
 from torch import _C
@@ -540,6 +540,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
+        assert isinstance(padding, tuple)
         if not stride:
             stride = kernel_size
         if count_include_pad:
@@ -1195,7 +1196,7 @@ def flatten(g, input, start_dim, end_dim):
 
 @symbolic_helper.parse_args("v", "f", "is", "i", "v")
 @_beartype.beartype
-def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+def linalg_vector_norm(g, self, ord, dim: Optional[List[int]], keepdim, dtype):
     if ord == 0:
         if dim is None:
             self = symbolic_helper._reshape_helper(

@@ -29,6 +29,7 @@ from torch.onnx._exporter_states import (
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
+from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -1542,6 +1543,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
+        assert isinstance(padding, tuple)
         adjusted_padding = padding
         if count_include_pad:
             input = g.op(
@@ -2481,7 +2483,7 @@ def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
 
 
 @symbolic_helper.quantized_args(True, False, False, False)
-@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "b")
 @_beartype.beartype
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
@@ -2490,7 +2492,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     return normalized
 
 
-@symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
+@symbolic_helper.parse_args("v", "v", "v", "v", "v", "b", "f", "f", "b")
 @_beartype.beartype
 def instance_norm(
     g,
@@ -2499,10 +2501,10 @@ def instance_norm(
     bias,
     running_mean,
     running_var,
-    use_input_stats: int,
-    momentum: float,
-    eps: float,
-    cudnn_enabled: int,
+    use_input_stats: bool,
+    momentum: Number,
+    eps: Number,
+    cudnn_enabled: bool,
 ):
     symbolic_helper.check_training_mode(use_input_stats, "instance_norm")
     channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
@@ -5064,7 +5066,7 @@ def linalg_norm(
     g,
     self: torch._C.Value,
     ord: torch._C.Value,
-    dim: List[int],
+    dim: Optional[List[int]],
     keepdim: int,
     dtype: torch._C.Value,
 ):
@@ -5099,7 +5101,7 @@ def linalg_vector_norm(
     g,
     self: torch._C.Value,
     ord: float,
-    dim: List[int],
+    dim: Optional[List[int]],
     keepdim: int,
     dtype: torch._C.Value,
 ):

@@ -95,14 +95,14 @@ def _dropout_returns_masked_input_and_mask(
     return r, mask
 
 
-@symbolic_helper.parse_args("v", "f", "i")
+@symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
 def dropout(g, input, p, train):
     masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
     return masked
 
 
-@symbolic_helper.parse_args("v", "f", "i")
+@symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
 def native_dropout(g, input, p, train):
     return _dropout_returns_masked_input_and_mask(g, input, p, train)

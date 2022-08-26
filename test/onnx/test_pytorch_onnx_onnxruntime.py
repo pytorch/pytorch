@@ -3582,7 +3582,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
-        self.run_test(MyModuleDynamic(), [x, k])
+        self.run_test(MyModuleDynamic(), (x, k))
 
     @skipScriptTest()  # Python builtin apply of FunctionMeta object is currently not supported in Torchscript.
     @skipIfUnsupportedMinOpsetVersion(11)  # Clip op min is an input since opset 11.

@@ -206,6 +206,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
+        assert isinstance(padding, tuple)
         if count_include_pad:
             input = opset9.op_with_optional_float_cast(
                 g,
