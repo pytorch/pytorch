@@ -2767,6 +2767,7 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     return a.view(tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :]))
 
 
+@register_decomposition(torch.ops.aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
@@ -3088,6 +3089,7 @@ def t(a: TensorLikeType):
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
+@register_decomposition(torch.ops.aten.transpose, disable_meta=True)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
@@ -3097,7 +3099,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _permutation = list(range(0, a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
-    return prims.transpose(a, _permutation)
+    return torch.permute(a, _permutation)
 
 
 # Aliases for transpose

@@ -612,7 +612,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.col2im_backward)
@@ -623,7 +623,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -1225,23 +1225,6 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.transpose.int, disable_meta=True)
-def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
-
-    # NB: these no-op views force this operator to return a
-    # fresh TensorImpl, which is important for autograd to
-    # work correctly (assert will fail if you don't do it)
-    if self.dim() <= 1:
-        return self.view(self.shape)
-
-    if dim0 == dim1:
-        return self.view(self.shape)
-    perm = list(range(self.dim()))
-    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
-    return torch.permute(self, perm)
-
-
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
@@ -1370,6 +1353,11 @@ def upsample_bilinear2d_vec(
 @register_decomposition(aten.is_same_size.default)
 def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
+
+
+@register_decomposition(aten._reshape_alias)
+def _reshape_alias(x, shape, strides):
+    return aten.view(x, shape)
 
 
 @register_decomposition(aten.nll_loss_forward)
