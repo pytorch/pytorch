@@ -848,6 +848,7 @@ def native_group_norm(
 
 
 @register_decomposition(aten.native_group_norm_backward)
+@pw_cast_for_opmath
 def native_group_norm_backward(
     grad_output: Tensor,
     input: Tensor,
@@ -867,9 +868,8 @@ def native_group_norm_backward(
     assert gamma is None or gamma.numel() == C
 
     # Compute Internal gradients
-    acc_dtype = utils.get_computation_dtype(input.dtype)
-    ds = torch.mul(grad_output, input.to(dtype=acc_dtype)).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2], dtype=acc_dtype)
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2])
 
     d_input: Optional[Tensor] = None
     d_gamma: Optional[Tensor] = None
@@ -882,14 +882,14 @@ def native_group_norm_backward(
             db_val = (db * gamma.reshape(1, C)).reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
                 rstd.reshape(N, group, 1),
-                gamma.to(dtype=acc_dtype).reshape(1, group, cpg),
+                gamma.reshape(1, group, cpg),
             )
         else:
-            ds_val = ds.reshape(N, group, cpg).sum(2, dtype=acc_dtype)
-            db_val = db.reshape(N, group, cpg).sum(2, dtype=acc_dtype)
+            ds_val = ds.reshape(N, group, cpg).sum(2)
+            db_val = db.reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
                 rstd.reshape(N, group, 1),
-                torch.ones((1, group, cpg), dtype=acc_dtype, device=rstd.device),
+                torch.ones((1, group, cpg), device=rstd.device),
             )
         c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
         c3 = -c2 * mean - db_val * rstd * s
