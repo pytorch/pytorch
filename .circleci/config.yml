@@ -750,6 +750,10 @@ jobs:
           name: upload
           command: |
             set -ex
+            if [ -z ${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD} ]; then
+              echo "No credentials found, cannot upload test stats (are you on a fork?)"
+              exit 0
+            fi
             cp -r ~/workspace/test-reports/* ~/project
             pip3 install requests==2.26 rockset==0.8.3 boto3==1.19.12 six==1.16.0
             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
