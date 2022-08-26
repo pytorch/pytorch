@@ -35,7 +35,8 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 
 namespace {
   void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
-    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
+    // TODO: figure out if we can just directly save real schema at def time
+    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def.cloneWithRealTypes(), inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
