@@ -49,7 +49,7 @@ def _to_numpy(elem):
         else:
             return elem.cpu().numpy()
     elif isinstance(elem, (list, tuple)):
-        return tuple(_to_numpy(inp) for inp in elem)
+        return tuple([_to_numpy(inp) for inp in elem])
     elif isinstance(elem, (bool, int, float)):
         return np.array(elem)
     elif isinstance(elem, dict):
@@ -61,7 +61,7 @@ def _to_numpy(elem):
 
 
 @_beartype.beartype
-def _inline_flatten_list(inputs, res_list):
+def _inline_flatten_list(inputs, res_list) -> list:
     for i in inputs:
         res_list.append(i) if not isinstance(
             i, (list, tuple)
@@ -70,13 +70,13 @@ def _inline_flatten_list(inputs, res_list):
 
 
 @_beartype.beartype
-def _unpack_to_numpy(values, cast_onnx_accepted=True):
+def _unpack_to_numpy(values, cast_onnx_accepted=True) -> tuple:
     value_unpacked = []
     for value in values:
         value_unpacked.extend(
             utils.unpack_quantized_tensor(value, cast_onnx_accepted=cast_onnx_accepted)
         )
-    return tuple(_to_numpy(v) for v in value_unpacked)
+    return tuple([_to_numpy(v) for v in value_unpacked])
 
 
 @_beartype.beartype
