@@ -2,6 +2,9 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/compile_time_info.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_heuristic.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_heuristic.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -158,11 +161,7 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   //! Heuristic comparison
   bool sameAs(const SchedulerEntry* other);
 
-  bool hasReductionParam() const {
-    return has_reduction_param_;
-  }
-
-  ScheduleHeuristic heuristc() const {
+  ScheduleHeuristic heuristic() const {
     return heuristc_;
   }
 
@@ -170,50 +169,44 @@ class TORCH_CUDA_CU_API SchedulerEntry {
     return index_mode_;
   }
 
+  const std::shared_ptr<HeuristicParams>& params() const {
+    return params_;
+  }
+
   const ReductionParams& reductionParams() const {
+    auto rparams = std::dynamic_pointer_cast<ReductionParams>(params_);
     TORCH_INTERNAL_ASSERT(
-        has_reduction_param_, "This schedule heuristic is not reduction.");
-    return rparams_;
+        rparams != nullptr, "Heuristic parameter is not a reduction parameter");
+    return *rparams;
   }
 
   const PointwiseParams& pointwiseParams() const {
+    auto pparams = std::dynamic_pointer_cast<PointwiseParams>(params_);
     TORCH_INTERNAL_ASSERT(
-        !has_reduction_param_, "This schedule heuristic is not pointwise.");
-    return pparams_;
+        pparams != nullptr, "Heuristic parameter is not a pointwise parameter");
+    return *pparams;
+  }
+
+  const TransposeParams& transposeParams() const {
+    auto tparams = std::dynamic_pointer_cast<TransposeParams>(params_);
+    TORCH_INTERNAL_ASSERT(
+        tparams != nullptr, "Heuristic parameter is not a transpose parameter");
+    return *tparams;
   }
 
   void updateLaunchConstraint(const LaunchParams& launch_params) {
-    if (hasReductionParam()) {
-      rparams_.lparams = launch_params;
-    } else {
-      pparams_.lparams = launch_params;
-    }
+    params_->lparams = launch_params;
   }
 
  protected:
-  explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_reduction_param)
-      : heuristc_(heuristic), has_reduction_param_(has_reduction_param) {}
+  explicit SchedulerEntry(ScheduleHeuristic heuristic) : heuristc_(heuristic) {}
 
-  ReductionParams& rparams() {
-    return rparams_;
-  }
-
-  PointwiseParams& pparams() {
-    return pparams_;
-  }
+  //! Heuristic parameters if applicable
+  std::shared_ptr<HeuristicParams> params_ = nullptr;
 
  private:
   //! What kind of heuristics does this entry have?
   const ScheduleHeuristic heuristc_;
-
-  //! Has reduction params if true, else has pointwise params
-  const bool has_reduction_param_;
-
-  //! Reduction parameters if applicable
-  ReductionParams rparams_;
-
-  //! Pointwise parameters if applicable
-  PointwiseParams pparams_;
 
   //! Kernel Index Mode
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
@@ -226,10 +219,12 @@ class TORCH_CUDA_CU_API SchedulerEntryHash {
 };
 
 //! Debug print function for heuristics
-std::string toString(ScheduleHeuristic sh);
+TORCH_CUDA_CU_API std::string toString(ScheduleHeuristic sh);
 
 //! Debug print function for heuristics
-std::ostream& operator<<(std::ostream& os, ScheduleHeuristic sh);
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    ScheduleHeuristic sh);
 
 } // namespace cuda
 } // namespace fuser
