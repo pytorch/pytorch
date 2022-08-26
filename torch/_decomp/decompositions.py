@@ -1263,52 +1263,57 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # What we do is to get the largest segment, and select all the elements from the initial points
     # up to the max length. Then we zero out the elements that we picked up and were not necessary if there were any such elements
 
+    print(input.shape)
+    print(output_size)
     def adaptive_avg_pool1d(x, dim, out_size):
         assert dim == -2 or dim == -1
-        in_size = x.dim(dim)
+        in_size = x.size(dim)
 
         orange = torch.arange(out_size, device=device)
         i0 = start_index(orange, out_size, in_size)
-        # Let length = end_index - start_index, i.e. length is the length of the pooling kernels
+        # Let length = end_index - start_index, i.e. the length of the pooling kernels
         # length.max() can be computed analytically as follows:
-        maxlength = out_size // in_size
+        maxlength = in_size // out_size + 1
         in_size_mod = in_size % out_size
         # adaptive = True iff there are kernels with different lengths
         adaptive = not (in_size_mod == 0 or out_size % in_size_mod == 0)
         if adaptive:
             maxlength += 1
+        elif in_size_mod == 0:
+            maxlength -= 1
 
         range_max = torch.arange(maxlength, device=device)
         idx = i0.unsqueeze(-1) + range_max
+        idx = idx.clamp(max=in_size - 1)  # Need to clamp to avoid accesing out-of-bounds memory
+        adv_idx_pad = tuple(slice(None) for _ in range(dim + ndim))
+        vals = x[(*adv_idx_pad, idx)]
 
-        # index_select does not support indices of several dimensions (ugh)
-        def index_select(x, dim, indices):
-            out = torch.index_select(x, dim, indices.view(-1))
-            out_shape = x.shape[:dim] + indices.shape
-            if dim != -1:
-                out_shape = out_shape + x.shape[dim + 1 :]
-            return out.view(out_shape)
-
-        vals = index_select(x, dim, idx)
         if adaptive:
             i1 = end_index(orange, out_size, in_size)
             length = i1 - i0
             # zero-out the things we didn't really want to select
             assert dim < 0
-            mask = _unsqueeze_to_dim(range_max >= i1, -dim)
+            mask = _unsqueeze_to_dim(range_max >= length.unsqueeze(-1), -dim + 1)
             vals = torch.masked_fill(vals, mask, 0.0)
 
             # Compute the length of each window
             div = _unsqueeze_to_dim(length, -dim)
-            # Compute the means
-            return vals.sum(dim) / div
+            return vals.sum(dim), div
         else:
-            return vals.mean(dim)
+            # No need to return div as we have already divided by the mean
+            return vals.mean(dim), None
 
-    out = input
-    for i in (-2, -1):
-        out = adaptive_avg_pool1d(out, i, output_size[i])
-    return out
+    out, div1 = adaptive_avg_pool1d(input, -1, output_size[-1])
+    out, div2 = adaptive_avg_pool1d(out, -2, output_size[-2])
+    # Filter the Nones
+    divs = tuple(div for div in (div1, div2) if div is not None)
+    # prod(divs) does not work because it accumulates with *=
+    if len(divs) == 0:
+        return out
+    elif len(divs) == 1:
+        return out / divs[0]
+    else:  # len(divs) == 2
+        return out / (divs[0] * divs[1])
 
 
 @register_decomposition(aten.transpose.int, disable_meta=True)
