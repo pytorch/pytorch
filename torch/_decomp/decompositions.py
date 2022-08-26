@@ -1251,10 +1251,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.nn.functional.avg_pool2d(input, kernel, stride)
 
     def start_index(a, b, c):
-        return (a * c).float().div(b).floor().long()
+        return (a * c) // b
 
     def end_index(a, b, c):
-        return ((a + 1) * c).float().div(b).ceil().long()
+        return (((a + 1) * c) / b).ceil().to(a.dtype)
 
     # Let's assume the reduction we want to apply is to sum all the elements (averaging from this is easy)
     # Even more, let's assume that we want to just do the 1d case.
@@ -1262,9 +1262,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # The issue here is that we may want to sum segments of different sizes.
     # What we do is to get the largest segment, and select all the elements from the initial points
     # up to the max length. Then we zero out the elements that we picked up and were not necessary if there were any such elements
+    # If all the elements have the same length, we compute the average already, otherwise, we return
+    # the sizes of each window, to compute the sizes of the rectrangles at the end.
+    # This function should recover the efficiency of avg_pool2d if the shape does not need the dynamic window shape
 
-    print(input.shape)
-    print(output_size)
     def adaptive_avg_pool1d(x, dim, out_size):
         assert dim == -2 or dim == -1
         in_size = x.size(dim)
@@ -1284,7 +1285,9 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
 
         range_max = torch.arange(maxlength, device=device)
         idx = i0.unsqueeze(-1) + range_max
-        idx = idx.clamp(max=in_size - 1)  # Need to clamp to avoid accesing out-of-bounds memory
+        if adaptive:
+            # Need to clamp to avoid accesing out-of-bounds memory
+            idx = idx.clamp(max=in_size - 1)
         adv_idx_pad = tuple(slice(None) for _ in range(dim + ndim))
         vals = x[(*adv_idx_pad, idx)]
 
