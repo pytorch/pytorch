@@ -3160,6 +3160,19 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ), kwargs=kwargs)
 
 
+def error_inputs_conv2d(opinfo, device, **kwargs):
+    msg = "should be the same"
+    weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
+    input = torch.randint(high=10, size=(2, 4, 4), device=device)
+    bias = torch.rand((3,), dtype=torch.float32, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+    weight = torch.rand(size=(3, 2, 3, 3), device=device, dtype=torch.float64)
+    input = torch.rand(size=(2, 4, 4), device=device, dtype=torch.float64)
+    bias = torch.rand((3,), dtype=torch.complex128, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10491,6 +10504,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
+           error_inputs_func=error_inputs_conv2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
