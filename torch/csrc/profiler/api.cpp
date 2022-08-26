@@ -12,7 +12,7 @@ ExperimentalConfig::ExperimentalConfig(
     : profiler_metrics{profiler_metrics},
       profiler_measure_per_kernel{profiler_measure_per_kernel} {}
 
-ExperimentalConfig::operator bool() const {
+/*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();
 }
 
