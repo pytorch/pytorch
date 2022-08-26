@@ -99,10 +99,21 @@ Tensor compressed_to_batched_compressed_indices(
   // If the compressed dimension has length zero there is 1 element in each
   // batch and it is zero we already have this result formed
   if (n_compressed_per_batch > 0) {
+    // Slice the compressed indices ignoring the leading 0 element and reshape
+    // to n-batch rows
     auto trailing_slice =
         compressed_in.slice(0, 1, c10::nullopt, 1).reshape({n_batch, -1});
+    // Slice the compressed indices again selecting the elements corresponding
+    // to the batch boundary. The values here will be increasing multiples of
+    // nnz per batch. Reshape to n-batch rows (1 col) for broadcasting.
+    // This is equivalent to arange(n_batch) * nnz_per_batch with the same
+    // reshape
     auto offsets = compressed_in.slice(0, 0, -1, n_compressed_per_batch)
                        .reshape({n_batch, -1});
+    // Subtracting the offsets from each row of the reshaped compressed indices
+    // gives us the compressed indices within the batch. The leading element of
+    // each row is not computed as it is always zero.  We copy into the view on
+    // the output buffer.
     batched_out.narrow(-1, 1, n_compressed_per_batch)
         .copy_(trailing_slice - offsets);
   }
