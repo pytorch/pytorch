@@ -23,6 +23,8 @@ bool isCompatibleScope(torch::jit::ScopePtr scope);
 
 } // namespace ONNXScopeName
 
+TORCH_API void AssignScopedNamesForNodeAndValue(std::shared_ptr<Graph>& graph);
+
 } // namespace onnx
 } // namespace jit
 } // namespace torch
