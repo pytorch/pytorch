@@ -36,20 +36,10 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
 fi
 
 # Pick docker image
-export DOCKER_IMAGE=${DOCKER_IMAGE:-}
-if [[ -z "$DOCKER_IMAGE" ]]; then
-  if [[ "$PACKAGE_TYPE" == conda ]]; then
-    export DOCKER_IMAGE="pytorch/conda-cuda"
-  elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux-cpu"
-  else
-    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
-  fi
-fi
 
 USE_GOLD_LINKER="OFF"
 # GOLD linker can not be used if CUPTI is statically linked into PyTorch, see https://github.com/pytorch/pytorch/issues/57744
-if [[ ${DESIRED_CUDA} == "cpu" ]]; then
+if [[ ${GPU_ARCH_TYPE} == "cpu" ]]; then
   USE_GOLD_LINKER="ON"
 fi
 
@@ -74,7 +64,11 @@ fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
-  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
+  BUILD_SUFFIX="${GPU_ARCH_TYPE}${GPU_ARCH_VERSION}"
+  if [[ ${GPU_ARCH_TYPE} = "cuda" ]]; then
+    BUILD_SUFFIX="cu${GPU_ARCH_VERSION}"
+  fi
+  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$BUILD_SUFFIX"
 fi
 export PYTORCH_BUILD_NUMBER=1
 
@@ -112,7 +106,6 @@ echo "Running on $(uname -a) at $(date)"
 
 export PACKAGE_TYPE="$PACKAGE_TYPE"
 export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
-export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
