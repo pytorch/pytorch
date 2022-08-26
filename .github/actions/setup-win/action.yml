@@ -58,3 +58,8 @@ runs:
       uses: actions/setup-python@v2
       with:
         python-version: "3.x"
+        cache: pip
+        cache-dependency-path: |
+          **/requirements.txt
+          **/.circleci/docker/requirements-ci.txt
+          **/.github/requirements-gha-cache.txt
