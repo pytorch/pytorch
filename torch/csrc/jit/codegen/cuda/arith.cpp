@@ -63,7 +63,11 @@ Val* promoteSize(Val* v1, Val* v2) {
   } else if (v1->isConstInt() && v2->isConstInt()) {
     TORCH_INTERNAL_ASSERT(
         v1->evaluateInt() == v2->evaluateInt(),
-        "Expected sizes to match but found ",
+        "Expected sizes of, ",
+        v1->toString(),
+        " and ",
+        v2->toString(),
+        " to match but found ",
         v1->evaluateInt(),
         " and ",
         v2->evaluateInt(),
