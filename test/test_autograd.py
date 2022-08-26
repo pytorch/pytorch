@@ -7430,6 +7430,7 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
+    @skipIfMps
     def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
         # tests that gradients are evenly distributed when there are multiple max/min values
         # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
@@ -7445,6 +7446,7 @@ class TestAutogradDeviceType(TestCase):
 
             gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
 
+    @skipIfMps
     def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
         # are scattered to the same position in self
@@ -8251,6 +8253,7 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertNotWarn(do_test)
 
+    @skipIfMps
     def test_to_r_to_c(self, device):
         def do_test():
             inp_r = torch.randn(3, 2, dtype=torch.double, device=device,

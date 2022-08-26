@@ -11,13 +11,14 @@ from functools import reduce
 import numpy as np
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfMps
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes)
 
 
 class TestIndexing(TestCase):
+    @skipIfMps
     def test_index(self, device):
 
         def consec(size, start=1):

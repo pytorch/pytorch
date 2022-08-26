@@ -93,7 +93,7 @@ MAX_NUM_RETRIES = 3
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta', 'mps')
 
 
 class _TestParametrizer(object):

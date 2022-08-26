@@ -54,10 +54,10 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_C
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn
-from torch.testing._internal.common_device_type import expectedFailureXLA, instantiate_device_type_tests, dtypes, \
+from torch.testing._internal.common_device_type import dtypesIfMPS, expectedFailureXLA, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types, \
+    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMPSIf, skipMeta, get_all_device_types, \
     disableMkldnn, skipCPUIfNoMkldnn, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen
 from torch.nn import MultiheadAttention
 
@@ -13826,6 +13826,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
             rtol, atol = 2e-6, 2e-6
@@ -13937,6 +13938,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
 
     @dtypes(torch.double, torch.cdouble)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
 
@@ -13998,6 +14000,7 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)
     @parametrize_test("mode", ('valid', 'same'))
     def test_conv1d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 10), device=device, dtype=dtype)
@@ -14036,7 +14039,7 @@ class TestNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @dtypes(torch.float, torch.cfloat)
+    @dtypes(torch.float)
     @parametrize_test("mode", ('valid', 'same'))
     def test_conv2d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 10), device=device, dtype=dtype)
@@ -14078,6 +14081,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ('valid', 'same'))
+    @skipIfMps
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
         weight_even = make_tensor((1, 1, 2, 2, 4), device=device, dtype=dtype)
@@ -14134,7 +14138,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
 
@@ -14154,6 +14159,7 @@ class TestNNDeviceType(NNTestCase):
         gradgradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_fwd_over_rev=check_forward_ad)
 
     @parametrize_test("N", range(2, 4), name_fn=lambda N: 'ConvTranspose{}d'.format(N))
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
         # See https://github.com/pytorch/pytorch/issues/75889
@@ -14303,6 +14309,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv_backend(
             self, device, input_shape, has_bias, strided, contiguous, transposed, dilated, groups,
             layout, backend_expected):
@@ -14428,6 +14435,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_Dropout1d(self, device):
         N, C, L = random.randint(10, 15), random.randint(10, 15), random.randint(10, 15)
         input = torch.empty(N, C, L)
@@ -14450,6 +14458,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropoutNd_channel_zero(nn.Dropout1d(p=0.5, inplace=True), input)
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -14554,6 +14563,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x).to(device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_instancenorm_raises_error_for_single_spatial_element_during_training(self, device):
         BATCH_SIZE = 10
         NUM_CHANNELS = 3
@@ -14641,6 +14651,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.GroupNorm(10, 10)(x).to(device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
         inp = torch.randn(0, 4, 2, 2, device=device)
@@ -14716,6 +14727,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
@@ -14747,6 +14759,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
@@ -14769,6 +14782,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -14793,6 +14807,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -14858,6 +14873,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
+
     def test_Bilinear_empty(self, device):
         mod = torch.nn.Bilinear(20, 30, 40).to(device)
         inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
@@ -14874,6 +14891,7 @@ class TestNNDeviceType(NNTestCase):
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_TransformerEncoderLayer_empty(self, device):
         for training in (True, False):
             for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -14901,6 +14919,7 @@ class TestNNDeviceType(NNTestCase):
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
                                          (False, (10, 0, 512))]:
@@ -14911,6 +14930,7 @@ class TestNNDeviceType(NNTestCase):
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
@@ -14932,6 +14952,7 @@ class TestNNDeviceType(NNTestCase):
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
@@ -14941,6 +14962,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64)
+    @dtypesIfMPS(torch.float32)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
@@ -14985,6 +15007,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, ref_x.grad)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
         inp = torch.ones(0, 5, 24, 24, device=device)
@@ -15013,6 +15036,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_MarginLoss_empty(self, device, dtype):
         for mod, x, y in [
                 (torch.nn.MultiMarginLoss().to(device),
@@ -15040,6 +15064,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
         mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
@@ -15054,6 +15079,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_module_empty_input(mod, inp, check_size=False)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
@@ -15074,6 +15100,7 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_FractionalMaxPool2d_zero_out_size(self, device):
         mod = nn.FractionalMaxPool2d([2, 2], output_size=[0, 1])
         inp = torch.rand([16, 50, 32, 32], device=device)
@@ -15081,6 +15108,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out, torch.empty((16, 50, 0, 1), device=device))
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_FractionalMaxPool3d_zero_out_size(self, device):
         mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[0, 1, 1])
         inp = torch.rand([16, 50, 32, 32], device=device)
@@ -15088,6 +15116,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
@@ -15099,6 +15128,7 @@ class TestNNDeviceType(NNTestCase):
             unfold(inp)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
@@ -15124,6 +15154,7 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_MaxUnpool_zero_batch_dim(self, device):
         pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
         unpool = torch.nn.MaxUnpool1d(2, stride=2).to(device)
@@ -15317,6 +15348,7 @@ torch.cuda.synchronize()
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device)
@@ -15331,6 +15363,7 @@ torch.cuda.synchronize()
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
     @dtypes(torch.float, torch.cfloat)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv_empty_channel(self, device, dtype):
         in_channels = 0
         mod = torch.nn.Conv1d(in_channels, 8, 2, stride=2, dtype=dtype).to(device)
@@ -15357,6 +15390,7 @@ torch.cuda.synchronize()
             inp = torch.randn(2, 1, 50, 0, 40, device=device)
             mod(inp)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -15365,6 +15399,7 @@ torch.cuda.synchronize()
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_group_convTranspose_empty(self, device):
         mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -15373,6 +15408,7 @@ torch.cuda.synchronize()
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_convTranspose_empty(self, device):
         mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -15381,13 +15417,13 @@ torch.cuda.synchronize()
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
-    @onlyNativeDeviceTypes
+    # @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
-        inp = torch.randn(0, 16, 20, 32, device=device)
+        inp = torch.randn(0, 16, 20, 32, device="mps")
         self._test_module_empty_input(avgpool, inp, check_size=False)
 
-        clast_inp = torch.randn(0, 16, 20, 32, device=device).contiguous(memory_format=torch.channels_last)
+        clast_inp = torch.randn(0, 16, 20, 32, device="mps").contiguous(memory_format=torch.channels_last)
         self._test_module_empty_input(avgpool, clast_inp, check_size=False)
 
         # test with empty non-batch input
@@ -15403,6 +15439,7 @@ torch.cuda.synchronize()
         output = m(input_)
         output.backward(input_)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_linear_empty(self, device):
         mod = torch.nn.Linear(7, 7).to(device)
         inp = torch.randn(0, 7, device=device)
@@ -15458,6 +15495,7 @@ torch.cuda.synchronize()
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nn_empty(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -15473,6 +15511,7 @@ torch.cuda.synchronize()
                 output = m(input)
                 verify_scalars(input, output)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -15492,6 +15531,7 @@ torch.cuda.synchronize()
                 output = m(input)
                 verify_scalars(input, output)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nn_scalars_reductions(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_reduction_scalars(input, reduction, output):
@@ -15517,6 +15557,7 @@ torch.cuda.synchronize()
 
     # verify that bogus reduction strings are errors
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
         cinput = torch.randn(3, 5, requires_grad=True, device=device, dtype=torch.cfloat)
@@ -15565,6 +15606,7 @@ torch.cuda.synchronize()
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_smooth_l1_loss_vs_huber_loss(self, device):
         def _make_test_tensor(shape, contiguous=True):
             if contiguous:
@@ -15653,6 +15695,7 @@ torch.cuda.synchronize()
 
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nonlinearity_propagate_nan(self, device):
         def test(nonlinearity, *args, **kwargs):
             x = torch.tensor([nan], device=device)
@@ -15685,6 +15728,7 @@ torch.cuda.synchronize()
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_pooling_shape(self, device):
         ''' Test the output shape calculation for pooling functions '''
 
@@ -15753,6 +15797,7 @@ torch.cuda.synchronize()
     @expectedFailureMeta  # Runtime Error not raised for meta
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -15767,6 +15812,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.half, torch.float)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None,
                    count_include_pad=True, divisor_override=None, padding=0):
@@ -15898,6 +15944,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.half, torch.float)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
@@ -16073,6 +16120,7 @@ torch.cuda.synchronize()
         helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
         helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingNearest1d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
@@ -16178,6 +16226,7 @@ torch.cuda.synchronize()
         helper(20, 11)
         helper(10, 15)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingNearest2d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
@@ -16296,6 +16345,7 @@ torch.cuda.synchronize()
         helper(torch.contiguous_format, 10, 15)
         helper(torch.channels_last, 10, 15)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingNearest3d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
@@ -16408,6 +16458,7 @@ torch.cuda.synchronize()
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingBilinear2d(self, device, antialias, align_corners):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
@@ -16486,6 +16537,7 @@ torch.cuda.synchronize()
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingBicubic2d(self, device, antialias, align_corners):
         kwargs = dict(mode='bicubic', align_corners=align_corners, antialias=antialias)
         # test float scale factor up & downsampling
@@ -16505,6 +16557,7 @@ torch.cuda.synchronize()
             inpt = torch.ones(2, 3, 8, 8, requires_grad=True, device=device)
             gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [inpt], nondet_tol=nondet_tol)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8., device=device).view(1, 2, 2, 2)
@@ -16539,6 +16592,7 @@ torch.cuda.synchronize()
         self.assertEqual(expected_out, t_out)
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, output_height, output_width, contig):
             input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
@@ -16574,6 +16628,7 @@ torch.cuda.synchronize()
             helper(4, 8, 11, 11, 1, 1, contig)
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
             output_height = math.floor((h + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
@@ -16615,6 +16670,7 @@ torch.cuda.synchronize()
             helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
             helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
         weight = embd.weight
@@ -16628,6 +16684,7 @@ torch.cuda.synchronize()
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weights = [
@@ -16641,6 +16698,7 @@ torch.cuda.synchronize()
 
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypes(torch.float64)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_embedding_backward(self, device, dtype):
         embedding = nn.Embedding(10, 3, sparse=True)
         tensor = torch.tensor([[7, 1, 3]])
@@ -16779,6 +16837,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
+    @dtypesIfMPS(torch.half)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
         num_features = 3
         max_indices_per_bag = 10
@@ -16912,6 +16971,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
+    @dtypesIfMPS(torch.half)
     def test_embedding_bag_2D_padding_idx(self, device, dtype):
         # Use a Python implementation of embedding_bag with padding_idx support
         # to check torch.nn.functional.embedding_bag correctness
@@ -17230,6 +17290,7 @@ torch.cuda.synchronize()
         input_large = torch.randn(1, 1, 2048, 1024 , dtype=dtype, device=device)
         conv2(input_large)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
@@ -17493,6 +17554,7 @@ torch.cuda.synchronize()
         num_draws = 100
 
         logits = torch.tensor([[0.2, 0.8, 0.1]], device=device)
+
         logits = logits.reshape([1, 3])
         logits = logits.to(dtype).requires_grad_()
         probs = logits.softmax(dim=-1)
@@ -17532,9 +17594,9 @@ torch.cuda.synchronize()
         tol = 2 * torch.finfo(dtype).eps
         self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
-    @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=-1, count_expected=1)
@@ -17561,6 +17623,7 @@ torch.cuda.synchronize()
                 self.assertEqual(grads, grads2)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.double)
     def test_rnn_retain_variables(self, device, dtype):
         self._test_rnn_retain_variables(device, dtype)
@@ -17611,6 +17674,7 @@ torch.cuda.synchronize()
     # Merge into OpInfo?
     @skipMeta  # LSTM cell reuses output which was resized
     @dtypes(torch.double)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_LSTM_grad_and_gradgrad(self, device, dtype):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
@@ -17620,6 +17684,7 @@ torch.cuda.synchronize()
 
     @skipMeta  # GRU cell reuses output which was resized
     @dtypes(torch.double)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_GRU_grad_and_gradgrad(self, device, dtype):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
@@ -18006,6 +18071,7 @@ torch.cuda.synchronize()
 
         y.backward(grad)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_pooling_size_empty(self, device):
         t = torch.rand([1, 2, 3, 4], device=device)
         self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
@@ -18016,6 +18082,7 @@ torch.cuda.synchronize()
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_embedding_bag_empty_input(self, device, dtypes):
         m = 4
         n = 3
@@ -18032,6 +18099,7 @@ torch.cuda.synchronize()
 
     @skipCUDAIf(True, "no out-of-bounds check on CUDA for perf.")
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
+    @dtypesIfMPS(*itertools.product((torch.float, ), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
     def test_embedding_bag_out_of_bounds_idx(self, device, dtypes, padding_idx, mode):
@@ -18056,6 +18124,7 @@ torch.cuda.synchronize()
                                                   mode=mode)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
         es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float, device=device)
@@ -18151,6 +18220,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.half, torch.float, torch.double)))
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.half, torch.float)))
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
@@ -18190,6 +18260,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
@@ -18224,6 +18295,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
         def test_per_sample_weights_new_offsets(mode, trainable_scale, include_last_offset, has_weight=True):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtypes[2], device=device)
@@ -18337,6 +18409,7 @@ torch.cuda.synchronize()
 
     @skipCUDAIf(True, "Temporarily disabled. See t54369166")
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.half, torch.float, torch.double)))
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.half, torch.float)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device, dtypes):
         def run_tests(mode, sparse, trainable_per_sample_weights):
@@ -18489,6 +18562,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_embedding_bag_device(self, device, dtypes):
         self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
         self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
@@ -18524,6 +18598,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.half)))
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
         weight_tensor = torch.randn(3, 4, dtype=dtypes[2], device=device)
 
@@ -18636,6 +18711,7 @@ torch.cuda.synchronize()
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @dtypes(torch.double, torch.cdouble)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
         weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
@@ -18660,6 +18736,7 @@ torch.cuda.synchronize()
             _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
                                                               training, 0.1, 0.0001))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_batchnorm_grad(self, device):
         self._test_batchnorm_grad(device)
 
@@ -18698,6 +18775,7 @@ torch.cuda.synchronize()
         out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
         self.assertEqual(out_none_bias, out_zero_bias)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
@@ -18705,6 +18783,7 @@ torch.cuda.synchronize()
 
     # currently fails on XLA
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_hardswish_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
@@ -18978,32 +19057,32 @@ torch.cuda.synchronize()
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @skipIfMps
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMps
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMps
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMps
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
@@ -19054,6 +19133,7 @@ torch.cuda.synchronize()
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
         grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)
@@ -19064,6 +19144,7 @@ torch.cuda.synchronize()
 
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_fractional_max_pool2d(self, device):
         x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 2).uniform_()
@@ -19102,6 +19183,7 @@ torch.cuda.synchronize()
 
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_fractional_max_pool3d(self, device):
         x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
         samples = x.new(1, 2, 3).uniform_()
@@ -19154,6 +19236,7 @@ torch.cuda.synchronize()
             self.assertTrue(math.isinf(res2.item()))
 
     @onlyNativeDeviceTypes  # TODO: RuntimeError message different on XLA
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_pooling_zero_stride(self, device):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
@@ -19169,7 +19252,7 @@ torch.cuda.synchronize()
                                        lambda: fn_module(x))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMps
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -19184,7 +19267,7 @@ torch.cuda.synchronize()
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @skipIfMps
+    @dtypesIfMPS(torch.half, torch.float)
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -19226,6 +19309,7 @@ torch.cuda.synchronize()
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -19299,6 +19383,7 @@ torch.cuda.synchronize()
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_empty_dropout(self, device):
         x = torch.tensor([]).to(device)
         out = torch.nn.functional.dropout(x)
@@ -19423,6 +19508,7 @@ torch.cuda.synchronize()
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_multi_margin_loss_errors(self, device):
         self.assertRaises(RuntimeError,
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
@@ -19830,6 +19916,7 @@ torch.cuda.synchronize()
             out = model(input)
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
         # Test that _convolution_double_backward() outputs the correct grad shapes
         # for 3D input / weight when stride > 1. This is an ad-hoc regression test for a
@@ -19862,6 +19949,7 @@ torch.cuda.synchronize()
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
@@ -19869,18 +19957,21 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_out_of_bounds_ignore_index(self, device):
         x = torch.randn(6, 3, requires_grad=True, device=device)
         t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
         for reduction in ['mean', 'none']:
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_invalid_target_dim(self, device):
         x = torch.randn((10, 3), device=device)
         t = torch.zeros((10, 2), dtype=torch.int64, device=device)
         with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
             F.nll_loss(x, t)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_invalid_weights(self, device):
         x = torch.randn((10, 3), device=device)
         t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
@@ -19906,6 +19997,7 @@ torch.cuda.synchronize()
         output.sum().backward()
         self.assertEqual(input.grad.size(), input.size())
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_empty_tensor_reduction_none(self, device):
         self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device)
         self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device)
@@ -19913,6 +20005,7 @@ torch.cuda.synchronize()
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
@@ -19922,6 +20015,7 @@ torch.cuda.synchronize()
         self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_empty_tensor_reduction_sum(self, device):
         zero = torch.tensor(0, device=device)
         self._nll_loss_helper([0, 3], "sum", zero, device)
@@ -19931,6 +20025,7 @@ torch.cuda.synchronize()
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -19948,6 +20043,7 @@ torch.cuda.synchronize()
         helper([2, 3, 5, 7, 9])
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_all_ignored(self, device):
 
         def helper(input_size):
@@ -19963,6 +20059,7 @@ torch.cuda.synchronize()
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_nll_loss_byte_target_matches_long(self, device):
         N, C = 10, 4
         input = torch.randn(N, C, device=device, requires_grad=True)
@@ -19985,6 +20082,7 @@ torch.cuda.synchronize()
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20001,6 +20099,7 @@ torch.cuda.synchronize()
                     input, target, reduction=reduction, weight=w)
                 self.assertEqual(output, output_ref)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_loss_prob_target_unit_weights(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20020,6 +20119,7 @@ torch.cuda.synchronize()
 
     @parametrize_test('reduction', ['none', 'mean', 'sum'])
     @parametrize_test('weighted', [False, True])
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_loss_prob_target_no_batch_dim(self, device, reduction, weighted):
         C = 5
         input = torch.randn(C, device=device).log_softmax(dim=-1)
@@ -20032,6 +20132,7 @@ torch.cuda.synchronize()
             loss_batch = loss_batch.squeeze(0)
         self.assertEqual(loss_no_batch, loss_batch)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_loss_index_target_unit_weights(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20049,6 +20150,7 @@ torch.cuda.synchronize()
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_loss_one_hot_target(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -20076,6 +20178,7 @@ torch.cuda.synchronize()
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_label_smoothing_errors(self, device):
         N, C = 3, 4
         input_args = [
@@ -20088,6 +20191,7 @@ torch.cuda.synchronize()
                                         r"label_smoothing must be between 0\.0"):
                 loss(*input_arg)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_label_smoothing_consistent_index_target_and_probs(self, device):
         N, C = 10, 4
         ks = range(5)
@@ -20121,6 +20225,7 @@ torch.cuda.synchronize()
             self.assertEqual(output_with_prob, output_with_index,
                              rtol=1e-07, atol=1e-05)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_label_smoothing_with_probs(self, device):
         N, C = 10, 4
         ks = range(5)
@@ -20147,7 +20252,7 @@ torch.cuda.synchronize()
 
                 self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
 
-
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_cross_entropy_label_smoothing_weight_ignore_indices(self, device):
         reductions = ['none', 'sum', 'mean']
         label_smoothings = [0.05, 0.15]
@@ -20200,7 +20305,7 @@ torch.cuda.synchronize()
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
-
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
@@ -20208,6 +20313,7 @@ torch.cuda.synchronize()
                                     r'lambda must be greater or equal to 0, but found to be -1\.'):
             m(input)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_fold(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
@@ -20233,7 +20339,7 @@ torch.cuda.synchronize()
             if device == 'cpu':
                 test_dtype(func, x, torch.bfloat16)
 
-
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
         # https://github.com/pytorch/pytorch/issues/36499
@@ -20244,6 +20350,7 @@ torch.cuda.synchronize()
         noncontig_out = torch.randn(2, 3, device=device).t()
         self.assertEqual(F.logsigmoid(x), F.logsigmoid(x, out=noncontig_out))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
@@ -20257,6 +20364,7 @@ torch.cuda.synchronize()
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]
@@ -20381,6 +20489,7 @@ torch.cuda.synchronize()
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    @skipIfMps
     def test_elu_inplace_overlap(self, device):
         x = torch.randn((1, 6), dtype=torch.bfloat16, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -20390,6 +20499,7 @@ torch.cuda.synchronize()
 
     # Merge into OpInfo?
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_elu_inplace_with_neg_alpha(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.elu_(a.clone(), alpha=-2)
@@ -20402,27 +20512,32 @@ torch.cuda.synchronize()
             b.backward(torch.ones(2, device=device))
 
     @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.hardswish(x, inplace=True)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_silu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_mish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.mish(x, inplace=True)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_softplus_low_threshold(self, device):
         # Ensure gradients are computed correctly with a low threshold.
         model = torch.nn.Softplus(threshold=1).double()
@@ -20431,11 +20546,13 @@ torch.cuda.synchronize()
         output = model(input)
         torch.autograd.gradcheck(model, input)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softshrink(x, out=x)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_leaky_relu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -20444,6 +20561,7 @@ torch.cuda.synchronize()
             F.leaky_relu_(x)
 
     # Merge into OpInfo?
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -20456,6 +20574,7 @@ torch.cuda.synchronize()
             b.backward(torch.ones(2, device=device))
 
     # Merge into OpInfo?
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -20495,6 +20614,7 @@ torch.cuda.synchronize()
         out = softshrink(x)
         self.assertEqual(out, expected, atol=1e-2, rtol=0)
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_threshold_inplace_overlap(self, device):
         # Inplace threshold is okay, because it is idempotent
         x = torch.randn((1, 6), device=device).expand((6, 6))
@@ -20502,6 +20622,7 @@ torch.cuda.synchronize()
         F.threshold_(x, 0.5, 0.5)
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.  Checks
@@ -20536,6 +20657,7 @@ torch.cuda.synchronize()
                             (anchor, positive, negative)))
 
     @onlyNativeDeviceTypes
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.
@@ -20579,6 +20701,7 @@ torch.cuda.synchronize()
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
+    @skipIfMps  # the test doesn't work on MPS as double/complex types are not supported
     def test_to_complex(self, device):
         m = nn.Linear(3, 5).to(device)
         self.assertIs(m, m.to(device))
@@ -20597,6 +20720,7 @@ torch.cuda.synchronize()
 
     @skipMeta
     @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
     def test_module_to_empty(self, device, dtype):
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
@@ -20624,6 +20748,7 @@ torch.cuda.synchronize()
         m(input)
 
     @skipMeta
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_skip_init(self, device):
         torch.manual_seed(1)
         m_initialized = torch.nn.Linear(5, 1)
@@ -20635,6 +20760,7 @@ torch.cuda.synchronize()
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_adaptive_pool_invalid(self, device):
         inp_1d = (torch.randn(1, 1, 1, device=device), (-1,))
         inp_2d = (torch.randn(1, 1, 1, 1, device=device), (-1, 0))
@@ -20651,6 +20777,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_transformerencoderlayer(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
@@ -20831,6 +20958,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.double)
     @torch.no_grad()
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
         mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
         mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
@@ -20839,6 +20967,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.double)
     @torch.no_grad()
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_multihead_attn_fast_path_small_test(self, device, dtype):
         mha = torch.nn.MultiheadAttention(3, 3, batch_first=True, dtype=dtype, device=device).eval()
         query = torch.randn(3, 3, 3, dtype=dtype, device=device)
@@ -20846,6 +20975,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.double)
     @torch.no_grad()
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_multihead_attn_in_proj_bias_none(self, device, dtype):
         mha = torch.nn.MultiheadAttention(1, 1, bias=False, dtype=dtype, device=device)
         query = torch.rand(3, 2, 1, dtype=dtype, device=device)
@@ -20853,6 +20983,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.double)
     @torch.no_grad()
+    @skipMPSIf(True, "the test doesn't work on MPS as double types are not supported")
     def test_multihead_attn_in_proj_weight_none(self, device, dtype):
         # Setting kdim == vdim == 2 means that vdim != embed_dim
         # will cause the logic to use per-input project weights, thereby
