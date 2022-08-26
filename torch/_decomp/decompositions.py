@@ -878,17 +878,17 @@ def native_group_norm_backward(
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if gamma is not None:
-            ds_val = torch.mul(ds, gamma.reshape(1, C)).reshape(N, group, cpg).sum(2)
-            db_val = (db * gamma.reshape(1, C)).reshape(N, group, cpg).sum(2)
+            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
-                rstd.reshape(N, group, 1),
+                rstd.unsqueeze(-1),
                 gamma.reshape(1, group, cpg),
             )
         else:
             ds_val = ds.reshape(N, group, cpg).sum(2)
             db_val = db.reshape(N, group, cpg).sum(2)
             c1 = torch.mul(
-                rstd.reshape(N, group, 1),
+                rstd.unsqueeze(-1),
                 torch.ones((1, group, cpg), device=rstd.device),
             )
         c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
