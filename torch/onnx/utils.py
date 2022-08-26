@@ -1774,7 +1774,7 @@ def _run_symbolic_function(
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-) -> Optional[Union[_C.Value, _C.Block, Sequence[_C.Value]]]:
+) -> Optional[Union[_C.Value, Sequence[_C.Value]]]:
     """Runs a symbolic function.
 
     The function is used in C++ to export the node to ONNX.
