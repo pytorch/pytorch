@@ -33,6 +33,28 @@ IterDomainGraph::IterDomainGraph(Fusion* fusion) {
   build(fusion);
 }
 
+//! Map corresponding inputs and outputs of swizzle op together
+//!  on the given disjoint set, if the given id is an output
+//!  of a swizzle operator.
+//!
+//! The current usage of swizzle operator is local to each tensor
+//!  itself, so they should not affect exact or permissive mapping
+//!  between iterdomains on different tensor domains.
+//! TODO:
+//!   Exact mapping based index hoisting of swizzled iterdomains
+//!   is disabled currently and will be re-enabled in the next
+//!   few build out steps.
+void mapMaybeSwizzleOp(
+    DisjointSets<IterDomain*>& disjoint_sets,
+    IterDomain* id) {
+  if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
+    // Map each input to its corresponding output on the given
+    //  disjoint set.
+    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+  }
+}
+
 void IterDomainGraph::build(Fusion* fusion) {
   // Initialize a node for every iteration domain
   for (auto tv : ir_utils::allTvs(fusion)) {
@@ -156,6 +178,8 @@ void IterDomainGraph::build(Fusion* fusion) {
             BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map);
 
         const auto& permissive_c2p_map = permissive_replay_PasC.getReplay();
+        const auto permissive_disjoint_sets =
+            permissive_replay_PasC.getDisjointSets();
 
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
@@ -178,6 +202,12 @@ void IterDomainGraph::build(Fusion* fusion) {
           exact_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(exact_nodes_, p_id);
+          mapMaybeSwizzleOp(exact_nodes_, c_id);
         }
 
         for (auto entry : permissive_c2p_map) {
@@ -185,14 +215,31 @@ void IterDomainGraph::build(Fusion* fusion) {
           auto p_id = entry.second;
           if (idIsAComputeAtLeafDomain(p_id, p_tv)) {
             loop_nodes_.mapEntries(c_id, p_id);
+          } else {
+            // When there are trivial reductions merged with other dims, `p_id`
+            // might not be a compute at leaf domain of `p_tv`, but it actually
+            // has an equivalent compute at leaf domain. For that case, we map
+            // the equivalent compute at leaf domain.
+            for (int i = 0; i < p_tv->getComputeAtPosition(); i++) {
+              auto id = p_tv->axis(i);
+              if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
+                loop_nodes_.mapEntries(c_id, id);
+              }
+            }
           }
           permissive_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(permissive_nodes_, p_id);
+          mapMaybeSwizzleOp(permissive_nodes_, c_id);
         }
 
-        // Make sure we always get root mapping for the permissive map. Because
-        // of forwarding we could otherwise miss some root mappings.
+        // Make sure we always get root mapping for the permissive map.
+        // Because of forwarding we could otherwise miss some root mappings.
         for (auto entry : permissive_c2p_root_map) {
           auto c_id = entry.first;
           auto p_id = entry.second;
@@ -748,6 +795,10 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
 
 const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
     disjointSetOf(IterDomain* id, IdMappingMode mode) const {
+  TORCH_INTERNAL_ASSERT(
+      idExistsInMap(id),
+      id->toString(),
+      " has not been processed in this Compute At Map, yet the disjoint set for it was requested.");
   return getIdSets(mode).disjointSetMap().at(id);
 }
 
@@ -762,6 +813,11 @@ const DisjointSets<IterDomain*>& ComputeAtMap::getIdSets(
       return id_graph_.loopNodes();
   }
   TORCH_INTERNAL_ASSERT(false, "Error with mapping mode provided.");
+}
+
+bool ComputeAtMap::idExistsInMap(IterDomain* id) const {
+  return getIdSets(IdMappingMode::EXACT).disjointSetMap().find(id) !=
+      getIdSets(IdMappingMode::EXACT).disjointSetMap().end();
 }
 
 } // namespace cuda

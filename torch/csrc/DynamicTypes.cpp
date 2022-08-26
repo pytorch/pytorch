@@ -38,6 +38,8 @@ at::DeprecatedTypeProperties* get_type_properties(
     backend = at::Backend::CPU;
   } else if (device_type == at::kCUDA) {
     backend = at::Backend::CUDA;
+  } else if (device_type == at::kXPU) {
+    backend = at::Backend::XPU;
   } else if (device_type == at::kMPS) {
     backend = at::Backend::MPS;
   } else if (device_type == at::DeviceType::Meta) {
@@ -94,10 +96,10 @@ PyTypeObject* loadTypedStorageTypeObject() {
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
   PyObject* typed_storage_obj =
-      PyObject_GetAttrString(storage_module, "_TypedStorage");
+      PyObject_GetAttrString(storage_module, "TypedStorage");
   TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
   return reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(storage_module, "_TypedStorage"));
+      PyObject_GetAttrString(storage_module, "TypedStorage"));
 }
 
 PyTypeObject* getTypedStorageTypeObject() {
@@ -125,7 +127,7 @@ at::Storage createStorageGetType(
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
     // `_storage`, so we must decrement them. The refcounts will still stay
-    // nonzero since the `_TypedStorage` maintains a reference.
+    // nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
     Py_DECREF(dtype_obj);

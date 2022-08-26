@@ -9,6 +9,7 @@ import unittest
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
 import onnx
+import onnx.numpy_helper
 
 import torch
 import torch.nn.functional as F
@@ -121,9 +122,7 @@ class TestOptionalOutput(common_utils.TestCase):
             input_names=["x"],
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = symbolic_helper.scalar_type_to_onnx[
-            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)
-        ].value
+        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
@@ -168,7 +167,7 @@ class TestONNXExport(common_utils.TestCase):
         tm = TraceMe()
         tm = torch.jit.trace(tm, torch.rand(3, 4))
         f = io.BytesIO()
-        torch.onnx._export(tm, (torch.rand(3, 4),), f)
+        torch.onnx.export(tm, (torch.rand(3, 4),), f)
 
     def test_export_tensoroption_to(self):
         def foo(x):
@@ -761,6 +760,90 @@ class TestONNXExport(common_utils.TestCase):
             torch._C._check_onnx_proto(model.SerializeToString())
 
         self.assertRaises(RuntimeError, check_proto)
+
+    def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+            return g.op("com.microsoft::PythonOp")
+
+        torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "prim::PythonOp", 1)
+
+        # necessay parameters for transformer embeddings
+        hidden_size = 48
+        max_position_embeddings = 32
+        batch_size = 2
+
+        # issue found that autograd.function making downstream
+        # node unreliable but with static shape. The issue was first
+        # discovered with using Apex FusedLayerNorm in Transformers
+        class CustomLayerNorm(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, embedding):
+                layer_norm = torch.nn.LayerNorm(hidden_size, eps=1e-12)
+                return layer_norm(embedding)
+
+        class EmbeddingModule(torch.nn.Module):
+            def forward(
+                self,
+                embeddings=None,
+            ):
+                embedding_output = CustomLayerNorm.apply(embeddings)
+                query = embedding_output.transpose(0, 1)
+                target_len, batch_size, embedding_dim = query.size()
+                # Reshape is used for consuming batch_size, and if it is static,
+                # this will be a Constant node in the graph
+                query = query.reshape(target_len, batch_size, embedding_dim)
+                return query
+
+        embeddings = torch.randn(batch_size, max_position_embeddings, hidden_size)
+
+        f = io.BytesIO()
+        torch.onnx.export(
+            EmbeddingModule().eval(),
+            (embeddings,),
+            f,
+            input_names=["embeddings"],
+            dynamic_axes={
+                "embeddings": {
+                    0: "batch_size",
+                    1: "max_position_embeddings",
+                    2: "hidden_size",
+                }
+            },
+            custom_opsets={"com.microsoft": 1},
+        )
+        model = onnx.load(io.BytesIO(f.getvalue()))
+
+        # If there is a constant node with dim=3 and max_position_embeddings,
+        # batch_size, hidden_size as shape, it means the shape becomes static.
+        # Normally, with dynamic batch size, this constant node should not exist.
+        const_node = [n for n in model.graph.node if n.op_type == "Constant"]
+        self.assertNotEqual(len(const_node), 0)
+        for node in const_node:
+            for a in node.attribute:
+                if a.name == "value":
+                    shape = onnx.numpy_helper.to_array(a.t)
+                    self.assertNotEqual(
+                        shape.tolist(),
+                        [max_position_embeddings, batch_size, hidden_size],
+                    )
+
+    def test_is_fp_for_C_TypeList(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x.squeeze(1)
+                w = x.shape[2]
+                pos = x.view(2, -1).argmax(1)
+                x_int = pos % w
+                y_int = (pos - x_int) // w
+                return y_int, x_int
+
+        model = torch.jit.script(M())
+        inputs = torch.randn(2, 4, 6)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
+        )
 
 
 if __name__ == "__main__":

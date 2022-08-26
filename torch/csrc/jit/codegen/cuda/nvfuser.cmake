@@ -29,6 +29,7 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensorcore.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/memory.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/swizzle.cu
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/UnpackRaw.cuh
 )
@@ -44,7 +45,7 @@ foreach(src ${NVFUSER_RUNTIME_FILES})
   add_custom_command(
     COMMENT "Stringify NVFUSER runtime source file"
     OUTPUT ${dst}
-    DEPENDS ${src}
+    DEPENDS ${src} "${NVFUSER_STRINGIFY_TOOL}"
     COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
   )
   add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
