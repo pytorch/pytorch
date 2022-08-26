@@ -45,7 +45,7 @@ DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex, torch.SymIntNode)
+Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
