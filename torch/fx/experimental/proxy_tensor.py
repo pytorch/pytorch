@@ -452,7 +452,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         return out
 
 
-SymInt = torch._C.SymIntNode
+SymInt = torch.SymIntNode
 
 
 class ProxySymDispatchMode(SymDispatchMode):

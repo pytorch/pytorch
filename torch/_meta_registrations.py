@@ -214,7 +214,6 @@ def _to_copy(
     device = self.device if device is None else device
     layout = self.layout if layout is None else layout
     assert pin_memory is None
-    assert memory_format is None
     return self.new_empty(self.shape, dtype=dtype, device=device, pin_memory=pin_memory)
 
 
@@ -344,7 +343,7 @@ def meta_conv(
 
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] != input_tensor.shape[1] / groups:
+        if weight.shape[1] * groups != input_tensor.shape[1]:
             raise RuntimeError("Invalid channel dimensions")
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation
