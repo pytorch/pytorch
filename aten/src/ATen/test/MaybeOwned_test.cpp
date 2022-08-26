@@ -105,7 +105,7 @@ void assertOwn(
 
 template<>
 Tensor getSampleValue() {
-  return at::native::zeros({2, 2}).to(at::kCPU);
+  return at::zeros({2, 2}).to(at::kCPU);
 }
 
 template<>

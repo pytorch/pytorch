@@ -486,9 +486,7 @@ def _onnx_graph_from_model(
     if opset_version is None:
         opset_version = _constants.onnx_default_opset
 
-    export_modules_as_functions = utils._setup_trace_module_map(
-        model, export_modules_as_functions
-    )
+    utils._setup_trace_module_map(model, export_modules_as_functions)
 
     if not operator_export_type:
         if _C_onnx._CAFFE2_ATEN_FALLBACK:
