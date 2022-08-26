@@ -169,3 +169,11 @@ SymInt SymInt::operator*(int64_t sci) const {
 }
 
 } // namespace c10
+
+namespace std {
+// TODO: do we need to add `max` method to SymInt?
+template <>
+const c10::SymInt& max(const c10::SymInt& a, const c10::SymInt& b) {
+  return a >= b ? a : b;
+}
+} // namespace std

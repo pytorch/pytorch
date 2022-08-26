@@ -1283,7 +1283,7 @@ Tensor reshape(const Tensor& self, SymIntArrayRef proposed_shape) {
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(c10::asIntArrayRefSlow(self.sym_sizes()), c10::asIntArrayRefSlow(self.sym_strides()), c10::asIntArrayRefSlow(shape));
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -1302,7 +1302,7 @@ Tensor reshape(const Tensor& self, SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias(c10::asIntArrayRefSlow(shape), stride.value());
+      return _reshape_alias(self, shape, stride.value());
     } else {
       return self.view_symint(shape);
     }
@@ -1327,7 +1327,7 @@ Tensor _reshape_alias(const Tensor& self, at::IntArrayRef sizes, at::IntArrayRef
   // to `view`. This removes the overhead of calling `view` which duplicates some of
   // the work that's already been done (`infer_size_dv` and `computeStride`).
 
-  return at::_reshape_alias_symint(self, c10::SymIntArrayRef::fromIntArrayRef(sizes), c10::SymIntArrayRef::fromIntArrayRef(strides));
+  return _reshape_alias(self, c10::SymIntArrayRef::fromIntArrayRef(sizes), c10::SymIntArrayRef::fromIntArrayRef(strides));
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {

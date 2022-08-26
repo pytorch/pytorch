@@ -6,6 +6,9 @@
 
 #include <ostream>
 #include <sstream>
+#include <type_traits>
+#include <c10/util/DimVector.h>
+#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 
@@ -310,13 +313,17 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // templatized for DimVector and IntArrayRef use cases,
 // see overloads of computeStride() below.
 //
-template <typename ResultVec, typename NewShapeVec>
+template <typename ResultVec, typename OldShapeVec, typename NewShapeVec>
 inline c10::optional<ResultVec> computeStride_impl(
-    IntArrayRef oldshape,
-    IntArrayRef oldstride,
+    OldShapeVec oldshape,
+    OldShapeVec oldstride,
     const NewShapeVec& newshape,
-    ResultVec toResult(const IntArrayRef&)
+    ResultVec toResult(const OldShapeVec&)
 ) {
+
+  static_assert(std::is_same<typename ResultVec::value_type, typename OldShapeVec::value_type>::value, "Element types must be the same!");
+  static_assert(std::is_same<typename ResultVec::value_type, typename NewShapeVec::value_type>::value, "Element types must be the same!");
+
   if (oldshape.empty()) {
     return ResultVec(newshape.size(), 1);
   }
@@ -326,11 +333,12 @@ inline c10::optional<ResultVec> computeStride_impl(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  const int64_t numel = c10::multiply_integers(oldshape);
+  const auto numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return toResult(oldstride);
   }
 
+  typename ResultVec::value_type one = 1;
   ResultVec newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
@@ -338,7 +346,7 @@ inline c10::optional<ResultVec> computeStride_impl(
         newstride[view_d] = 1;
       } else {
         newstride[view_d] =
-          std::max<int64_t>(newshape[view_d+1], 1) * newstride[view_d+1];
+          std::max<typename ResultVec::value_type>(newshape[view_d+1], one) * newstride[view_d+1];
       }
     }
     return newstride;
@@ -346,16 +354,16 @@ inline c10::optional<ResultVec> computeStride_impl(
 
   int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
+  auto chunk_base_stride = oldstride.back();
   // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
+  typename ResultVec::value_type tensor_numel = 1;
+  typename ResultVec::value_type view_numel = 1;
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (oldshape[tensor_d - 1] != 1 &&
-         oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+         tensor_numel * chunk_base_stride != oldstride[tensor_d - 1])) {
       while (view_d >= 0 &&
             (view_numel < tensor_numel || newshape[view_d] == 1)) {
         newstride[view_d] = view_numel * chunk_base_stride;
@@ -383,7 +391,15 @@ c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldstride,
     IntArrayRef newshape) {
   auto toResult = [](const IntArrayRef& a) { return a.vec(); };
-  return computeStride_impl<std::vector<int64_t>, IntArrayRef>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<std::vector<int64_t>, IntArrayRef, IntArrayRef>(oldshape, oldstride, newshape, toResult);
+}
+
+c10::optional<std::vector<c10::SymInt>> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape) {
+  auto toResult = [](const SymIntArrayRef& a) { return a.vec(); };
+  return computeStride_impl<std::vector<c10::SymInt>, c10::SymIntArrayRef, c10::SymIntArrayRef>(oldshape, oldstride, newshape, toResult);
 }
 
 c10::optional<DimVector> computeStride(
@@ -391,7 +407,15 @@ c10::optional<DimVector> computeStride(
     IntArrayRef oldstride,
     const DimVector& newshape) {
   auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
-  return computeStride_impl<DimVector, DimVector>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<DimVector, IntArrayRef, DimVector>(oldshape, oldstride, newshape, toResult);
+}
+
+c10::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymDimVector newshape) {
+  auto toResult = [](const SymIntArrayRef& a) { return SymDimVector(a); };
+  return computeStride_impl<SymDimVector, c10::SymIntArrayRef, SymDimVector>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail

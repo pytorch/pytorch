@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 
 #include <iterator>
@@ -54,6 +55,19 @@ inline int64_t multiply_integers(const C& container) {
       container.end(),
       static_cast<int64_t>(1),
       std::multiplies<int64_t>());
+}
+
+template <
+    typename C,
+    typename std::enable_if<
+        std::is_same<typename C::value_type, c10::SymInt>::value,
+        int>::type = 0>
+inline c10::SymInt multiply_integers(const C& container) {
+  return std::accumulate(
+      container.begin(),
+      container.end(),
+      c10::SymInt(1),
+      [](c10::SymInt a, c10::SymInt b) { return a * b; });
 }
 
 /// Product of integer elements referred to by iterators; accumulates into the
