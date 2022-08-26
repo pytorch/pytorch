@@ -17,10 +17,12 @@ def _contains_batchnorm(module):
         isinstance(mod, _BatchNorm) for mod in module.modules()
     )
 
+
 def _override_batchnorm_mixed_precision(module):
     for mod in module.modules():
         if isinstance(mod, _BatchNorm):
             mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
+
 
 def _apply_to_tensors(
     fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
@@ -56,6 +58,7 @@ def _apply_to_tensors(
 
     return apply(container)
 
+
 def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
@@ -80,6 +83,46 @@ def _apply_to_modules(
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)
+
+
+@torch.no_grad()
+def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
+    """
+    Allocate storage for ``tensor`` with the given size.
+
+    Returns:
+        bool: ``True`` if this method allocated storage and ``False`` if the
+        storage was already allocated.
+    """
+    already_allocated = tensor.storage().size() == size.numel()
+    if not already_allocated:
+        tensor_storage_size = tensor.storage().size()
+        p_assert(
+            tensor_storage_size == 0,
+            f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
+        )
+        tensor.storage().resize_(size.numel())
+    return not already_allocated
+
+
+@torch.no_grad()
+def _free_storage(tensor: torch.Tensor) -> bool:
+    """
+    Frees the underlying storage of ``tensor``.
+
+    Returns:
+        bool: ``True`` if the method freed the storage and ``False`` if the
+        storage was already freed.
+    """
+    already_freed = tensor.storage().size() == 0
+    if not already_freed:
+        p_assert(
+            tensor.storage_offset() == 0,
+            "Freeing a tensor's storage is unsafe when it is not the sole occupant",
+        )
+        tensor.storage().resize_(0)
+    return not already_freed
+
 
 def p_assert(cond: Any, s: Any) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
