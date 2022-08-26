@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -1101,7 +1102,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
   const auto window_envelop_lowest = window_envelop.abs().min().lt(1e-11);
-  if (at::equal(window_envelop_lowest, window_envelop_lowest.new_ones({}))) {
+  if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
     AT_ERROR(ss.str());
