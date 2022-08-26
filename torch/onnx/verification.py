@@ -131,13 +131,13 @@ def _compare_ort_pytorch_outputs(
     Args:
         ort_outs: outputs from ONNX Runtime.
         pt_outs: outputs from PyTorch.
-        rtol (float): relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol (float): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        ignore_none (bool): Whether to ignore None type in
+        rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
+        ignore_none: Whether to ignore None type in
             torch output, which is usually the case with tracing. Set this to False, if
             torch output should keep None type, which is usually the case with exporting
             ScriptModules.
-        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+        acceptable_error_percentage: acceptable percentage of element mismatches in comparison.
             It should be a float of value between 0.0 and 1.0.
 
     Raises:
@@ -150,7 +150,7 @@ def _compare_ort_pytorch_outputs(
         pt_outs, _ = torch.jit._flatten(pt_outs)
     else:
         pt_outs = _inline_flatten_list([pt_outs], [])
-    pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
+    pt_outs_np = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
     ort_outs = _inline_flatten_list(ort_outs, [])
     assert len(ort_outs) == len(
         pt_outs
@@ -162,13 +162,13 @@ def _compare_ort_pytorch_outputs(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
         )
 
-    for ort_out, pt_out in zip(ort_outs, pt_outs):
+    for ort_out, pt_out in zip(ort_outs, pt_outs_np):
         try:
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not check_shape:
                 # Allow different but broadcastable output shapes.
-                ort_out, pt_out_np = np.broadcast_arrays(ort_out, pt_out)
-                pt_out = torch.from_numpy(pt_out_np)
+                ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
+                # pt_out = torch.from_numpy(pt_out_np)
             torch.testing.assert_close(
                 ort_out,
                 pt_out,
@@ -291,7 +291,7 @@ def _compare_ort_pytorch_model(
     atol,
     check_shape,
     check_dtype,
-    accetable_error_persentage: Optional[float],
+    acceptable_error_percentage: Optional[float],
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -314,14 +314,14 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs,
-            pt_outs,
-            rtol,
-            atol,
-            check_shape,
-            check_dtype,
-            ignore_none,
-            accetable_error_persentage,
+            ort_outs=ort_outs,
+            pt_outs=pt_outs,
+            rtol=rtol,
+            atol=atol,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            ignore_none=ignore_none,
+            acceptable_error_percentage=acceptable_error_percentage,
         )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
@@ -582,7 +582,7 @@ def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     input_args: Tuple[Any, ...],
     input_kwargs: Optional[Mapping[str, Any]] = None,
-    do_constant_folding: Optional[bool] = True,
+    do_constant_folding: bool = True,
     dynamic_axes: Optional[
         Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
     ] = None,
@@ -591,18 +591,18 @@ def verify(
     training: torch.onnx.TrainingMode = torch.onnx.TrainingMode.EVAL,
     opset_version: Optional[int] = None,
     keep_initializers_as_inputs: bool = True,
-    verbose: Optional[bool] = False,
-    fixed_batch_size: Optional[bool] = False,
-    use_external_data: Optional[bool] = False,
+    verbose: bool = False,
+    fixed_batch_size: bool = False,
+    use_external_data: bool = False,
     additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
-    flatten: Optional[bool] = True,
-    ignore_none: Optional[bool] = True,
-    check_shape: Optional[bool] = True,
-    check_dtype: Optional[bool] = True,
+    flatten: bool = True,
+    ignore_none: bool = True,
+    check_shape: bool = True,
+    check_dtype: bool = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
-    rtol: Optional[float] = 0.001,
-    atol: Optional[float] = 1e-7,
+    rtol: float = 0.001,
+    atol: float = 1e-7,
     acceptable_error_percentage: Optional[float] = None,
     **_,
 ):
@@ -686,17 +686,17 @@ def verify(
         ort_session = _ort_session(model_f, ort_providers)
 
         _compare_ort_pytorch_model(
-            model_copy,
-            ort_session,
-            input_args,
-            input_kwargs,
-            additional_test_inputs,
-            remained_onnx_input_idx,
-            flatten,
-            ignore_none,
-            rtol,
-            atol,
-            check_shape,
-            check_dtype,
-            acceptable_error_percentage,
+            model=model_copy,
+            ort_session=ort_session,
+            input_args=input_args,
+            input_kwargs=input_kwargs,
+            additional_test_inputs=additional_test_inputs,
+            remained_onnx_input_idx=remained_onnx_input_idx,
+            flatten=flatten,
+            ignore_none=ignore_none,
+            rtol=rtol,
+            atol=atol,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            acceptable_error_percentage=acceptable_error_percentage,
         )

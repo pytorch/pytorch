@@ -1364,32 +1364,37 @@ std::string serialize_model_proto_to_string(
   return model_proto->SerializeAsString();
 }
 
-void check_onnx_proto(const std::string& proto_string, bool full_check) {
+void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
-  // baseline check
+  // 1. baseline check
+  // These two checks prevent broken graph being generated
+  // And errors out exporting if that happens.
   onnx::checker::check_model(model);
   onnx::shape_inference::InferShapes(model);
-  // full check including strict shape inference check
-  // Note: onnx::checker::check_model doesn't
-  // include non-strict model onnx::shape_inference::InferShapes(model).
-  // That's why we need to write another onnx::checker::check_model(model,
-  // full_check) here.
-  if (full_check) {
-    try {
-      onnx::checker::check_model(model, full_check);
-    } catch (const onnx::InferenceError& ex) {
-      TORCH_WARN(
-          "The exported ONNX model failed ONNX shape inference."
-          "The model will not be executable by the ONNX Runtime."
-          "If this is unintended and you believe there is a bug,"
-          "please report an issue at https://github.com/pytorch/pytorch/issues."
-          "Error reported by the ONNX checker: ",
-          ex.what());
-    }
+  // 2. full check 
+  // apply strict mode shape type inference check which examines
+  // whether it's a valid ONNX graph or not. As for some users, they
+  // don't need a fully valid ONNX graph to run their model, we simply
+  // add this information as warning message if it fails.
+  try {
+      auto* schema_registry = onnx::OpSchemaRegistry::Instance();
+      onnx::ShapeInferenceOptions options{
+          /*check_type=*/true,
+          /*error_mode=*/true};
+      onnx::shape_inference::InferShapes(
+          model, schema_registry, options);
+  } catch (const onnx::InferenceError& ex) {
+    TORCH_WARN(
+        "The exported ONNX model failed ONNX shape inference."
+        "The model will not be executable by the ONNX Runtime."
+        "If this is unintended and you believe there is a bug,"
+        "please report an issue at https://github.com/pytorch/pytorch/issues."
+        "Error reported by strict ONNX shape inference: ",
+        ex.what());
   }
 }
 
