@@ -71,9 +71,7 @@ ATEN_NATIVE_CUDA_H_PATTERN = [
 ]
 
 # T66678203: Clang CUDA rollout
-ATEN_CUDA_CLANG_CU_PATTERN = [
-    "aten/src/ATen/native/cuda/DistributionBernoulli.cu",
-]
+ATEN_CUDA_CLANG_CU_PATTERN = []
 
 ### Cuda Files
 def get_aten_cuda_headers():
