@@ -61,8 +61,10 @@ def pin_memory(data, device=None):
             return {k: pin_memory(sample, device) for k, sample in data.items()}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return type(data)(*(pin_memory(sample, device) for sample in data))
+    elif isinstance(data, list):
+        return [pin_memory(sample, device) for sample in data]
     elif isinstance(data, tuple):
-        return [pin_memory(sample, device) for sample in data]  # Backwards compatibility.
+        return (pin_memory(sample, device) for sample in data)  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence):
         try:
             return type(data)([pin_memory(sample, device) for sample in data])  # type: ignore[call-arg]
