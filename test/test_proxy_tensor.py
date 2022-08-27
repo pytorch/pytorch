@@ -1038,7 +1038,8 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy_with_logits', ''),  # aten.binary_cross_entropy_with_logits.default - coul
     xfail('nn.functional.conv1d', ''),  # Cannot call sizes on a tensor with symbolic shapes/strides
     xfail('nn.functional.conv2d', ''),  # Cannot call sizes on a tensor with symbolic shapes/strides
-    xfail('nn.functional.cosine_embedding_loss', ''),  # aten.sqrt_.default - couldn't find symbolic meta function/decom
+    xfail('nn.functional.conv_transpose1d', ''),  # RuntimeError: required rank 4 tensor to use channels_last format
+    xfail('nn.functional.conv_transpose3d', ''),  # RuntimeError: required rank 4 tensor to use channels_last format
     xfail('nn.functional.cosine_similarity', ''),  # Cannot call sizes on a tensor with symbolic shapes/strides
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes on a tensor with symbolic shapes/strides
     xfail('nn.functional.dropout2d', ''),  # Tensors of type TensorImpl do not have numel
