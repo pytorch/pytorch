@@ -6075,7 +6075,19 @@ def error_inputs_reshape(op, device, **kwargs):
 
     make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
     for a, b in cases:
-        yield ErrorInput(SampleInput(make_arg(a), args=(b,)), error_type=Exception, error_regex="")
+        if b == (5, -1, -1):
+            error_regex = "only one dimension can be inferred"
+        elif a == (0, 5):
+            error_regex = ("cannot reshape tensor of 0 elements into shape "
+                           "\[0, -1\] because the unspecified dimension size "
+                           "-1 can be any value and is ambiguous")
+        else:
+            # to avoid having issues with a regex
+            shape = str(list(b))[1:-1]
+            size = a if type(a) is int else math.prod(a)
+            error_regex = rf"shape '\[{shape}\]' is invalid for input of size {size}"
+        yield ErrorInput(SampleInput(make_arg(a), args=(b,)), error_type=Exception,
+                         error_regex=error_regex)
 
 
 def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
