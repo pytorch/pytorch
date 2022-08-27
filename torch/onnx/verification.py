@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -42,21 +42,21 @@ def _flatten_tuples(elem):
 
 
 @_beartype.beartype
-def _to_numpy(elem):
+def _to_numpy(elem) -> Union[list, np.ndarray]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
         else:
             return elem.cpu().numpy()
     elif isinstance(elem, (list, tuple)):
-        return tuple([_to_numpy(inp) for inp in elem])
+        return [_to_numpy(inp) for inp in elem]
     elif isinstance(elem, (bool, int, float)):
         return np.array(elem)
     elif isinstance(elem, dict):
         flattened = []
         for k in elem:
             flattened.extend([_to_numpy(k), _to_numpy(elem[k])])
-        return tuple(flattened)
+        return flattened
     return elem
 
 
@@ -70,13 +70,13 @@ def _inline_flatten_list(inputs, res_list) -> list:
 
 
 @_beartype.beartype
-def _unpack_to_numpy(values, cast_onnx_accepted=True) -> tuple:
+def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     value_unpacked = []
     for value in values:
         value_unpacked.extend(
             utils.unpack_quantized_tensor(value, cast_onnx_accepted=cast_onnx_accepted)
         )
-    return tuple([_to_numpy(v) for v in value_unpacked])
+    return [_to_numpy(v) for v in value_unpacked]
 
 
 @_beartype.beartype
@@ -151,12 +151,12 @@ def _compare_ort_pytorch_outputs(
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
-    ort_outs = tuple(ort_outs)
+    ort_outs = list(ort_outs)
     pt_outs, _ = torch.jit._flatten(pt_outs)
     pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
 
-    assert isinstance(ort_outs, tuple)
-    assert isinstance(pt_outs, tuple)
+    assert isinstance(ort_outs, list)
+    assert isinstance(pt_outs, list)
 
     assert len(ort_outs) == len(
         pt_outs
