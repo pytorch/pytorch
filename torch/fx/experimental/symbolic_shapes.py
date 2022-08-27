@@ -121,6 +121,9 @@ class PySymInt(object):
     def __str__(self):
         return f"{self.expr}"
 
+    def __repr__(self):
+        return f"{self.expr}"
+
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     # In the future we'll probably need some explicit way of allowing this
     def __int__(self):
