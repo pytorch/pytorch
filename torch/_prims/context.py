@@ -1,6 +1,6 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict, Sequence, Union
 
 import torch
 
@@ -71,7 +71,9 @@ def nvfuser_decomp_table():
     decomposition table needed for nvfuser
     """
     aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = {
+    nvfuser_decompositions: Sequence[
+        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+    ] = {  # type: ignore[assignment]
         # AMP calls `to` in C++, which is not handled by torch mapping
         aten._to_copy,
     }
