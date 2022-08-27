@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+import torch._C_flatbuffer
 
 from torch.ao.quantization import (
     default_dynamic_qconfig,
@@ -22,11 +23,13 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 
-from torch.jit.mobile import _load_for_lite_interpreter
+from torch.jit.mobile import _load_for_lite_interpreter, LiteScriptModule
 
 from torch.testing import FileCheck
+from torch.utils import bundled_inputs as bundled_inputs
 
 import io
+from typing import Dict
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
@@ -396,7 +399,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         self.assertTrue(thrown)
 
 
-    def _check_serialization_deserialization(self, model):
+    def _check_serdes_and_device_side_api_helper(self, model, check_device_side_api=False):
         model.eval()
         inputs = model.get_example_inputs()
         ref_m = torch.jit.script(model)
@@ -410,27 +413,40 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         ref_m = torch.jit.load(buffer)
         ref_output = ref_m(*inputs)
 
-        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        m = torch.jit.load(buffer)
-        m.reset_observers_forward()
-        m.observe_forward(*inputs)
-        m.quantize_forward(*inputs)
-        output = m.quantized_forward(*inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+        if not check_device_side_api:
+            m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            m = torch.jit.load(buffer)
+            m.reset_observers_forward()
+            m.observe_forward(*inputs)
+            m.quantize_forward(*inputs)
+            output = m.quantized_forward(*inputs)
+            self.assertTrue(torch.allclose(ref_output, output))
+        else:
+            # check for lite interpreter
+            m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+            first_input, = inputs
+            rand_input = bundled_inputs.bundle_randn(first_input.size(), dtype=first_input.dtype)
+            m = bundled_inputs.bundle_inputs(m, inputs=[(rand_input, )])
+            buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+            buffer.seek(0)
+            m = _load_for_lite_interpreter(buffer)  # Error here
+            torch._C._quantize_ondevice_ptq_dynamic(m._c, "forward")
+            self.assertFalse(m.find_method("quantized_forward"))
+            self.assertFalse(m.find_method("quantize_forward"))
+            self.assertFalse(m.find_method("observe_forward"))
+            self.assertFalse(m.find_method("reset_observers_forward"))
+            output = m(*inputs)
+            self.assertTrue(torch.allclose(ref_output, output))
 
-        # check for lite interpreter
-        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
-        buffer.seek(0)
-        m = _load_for_lite_interpreter(buffer)  # Error here
-        m.run_method("reset_observers_forward")
-        m.run_method("observe_forward", *inputs)
-        m.run_method("quantize_forward", *inputs)
-        output = m.run_method("quantized_forward", *inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+            # Now serialize to flabuffer and load from fb and check
+            dict: Dict[str, str] = {}
+            bytes = torch._C_flatbuffer._save_mobile_module_to_bytes(m._c, dict)
+            m = LiteScriptModule(torch._C_flatbuffer._load_mobile_module_from_bytes(bytes))
+            fb_output = m(*inputs)
+            self.assertTrue(torch.allclose(ref_output, fb_output))
 
         model.eval()
         inputs = model.get_example_inputs()
@@ -445,27 +461,41 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         ref_m = torch.jit.load(buffer)
         ref_output = ref_m(*inputs)
 
-        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        m = torch.jit.load(buffer)
-        m.reset_observers_forward()
-        m.observe_forward(*inputs)
-        m.quantize_forward(*inputs)
-        output = m.quantized_forward(*inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+        if not check_device_side_api:
+            m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            m = torch.jit.load(buffer)
+            m.reset_observers_forward()
+            m.observe_forward(*inputs)
+            m.quantize_forward(*inputs)
+            output = m.quantized_forward(*inputs)
+            self.assertTrue(torch.allclose(ref_output, output))
+        else:
+            # check for lite interpreter
+            m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
+            first_input, = inputs
+            rand_input = bundled_inputs.bundle_randn(first_input.size(), dtype=first_input.dtype)
+            m = bundled_inputs.bundle_inputs(m, inputs=[(rand_input, )])
+            buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+            buffer.seek(0)
+            m = _load_for_lite_interpreter(buffer)  # Error here
+            torch._C._quantize_ondevice_ptq_dynamic(m._c, "forward")
+            self.assertFalse(m.find_method("quantized_forward"))
+            self.assertFalse(m.find_method("quantize_forward"))
+            self.assertFalse(m.find_method("observe_forward"))
+            self.assertFalse(m.find_method("reset_observers_forward"))
+            output = m(*inputs)
+            self.assertTrue(torch.allclose(ref_output, output))
 
-        # check for lite interpreter
-        m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
-        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
-        buffer.seek(0)
-        m = _load_for_lite_interpreter(buffer)  # Error here
-        m.run_method("reset_observers_forward")
-        m.run_method("observe_forward", *inputs)
-        m.run_method("quantize_forward", *inputs)
-        output = m.run_method("quantized_forward", *inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+
+    def _check_serialization_deserialization(self, model):
+        self._check_serdes_and_device_side_api_helper(model, False)
+
+
+    def _check_device_side_api(self, model):
+        self._check_serdes_and_device_side_api_helper(model, True)
 
 
     def test_quantize_forward(self):
@@ -492,3 +522,8 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
     def test_serialization_deserialization(self):
         model = MyConvLinearModule()
         self._check_serialization_deserialization(model)
+
+
+    def test_device_side_api(self):
+        model = MyConvLinearModule()
+        self._check_device_side_api(model)

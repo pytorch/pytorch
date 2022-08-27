@@ -1417,6 +1417,7 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",
