@@ -70,18 +70,15 @@ def nvfuser_decomp_table():
     """
     decomposition table needed for nvfuser
     """
-
-    def lower_to_copy(self, **kwargs):
-        if len(kwargs) == 1 and "dtype" in kwargs:
-            # note that prim here with decomposition table doesn't get dispatched to nvprim.
-            return torch.ops.nvprims.convert_element_type(self, kwargs["dtype"])
-        return NotImplemented
-
-    decomp_table = {
+    aten = torch.ops.aten
+    nvfuser_decompositions = {
         # AMP calls `to` in C++, which is not handled by torch mapping
-        torch.ops.aten._to_copy.default: lower_to_copy,
+        aten._to_copy
     }
 
+    from torch._decomp import get_decompositions
+
+    decomp_table = get_decompositions(nvfuser_decompositions)
     return decomp_table
 
 
