@@ -1214,6 +1214,7 @@ symbolic_tensor_failures = {
     xfail('vsplit', ''),  # Cannot call sizes on a tensor with symbolic shapes/strides
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
+    xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
 }
 
 symbolic_tensor_segfaults = {
