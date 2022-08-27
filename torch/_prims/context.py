@@ -12,6 +12,7 @@ import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
 import torch.overrides
+from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 
 from torch._prims_common import torch_function_passthrough
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
@@ -184,15 +185,42 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     ):
         gm = get_isolated_graphmodule(func, args, kwargs)
 
+    supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
     any_unsupported = any(
-        not _is_node_supported_nvfuser(node) for node in call_function_nodes
+        not supported_ops.is_node_supported(None, node) for node in call_function_nodes
     )
     return any_unsupported
 
 
-TorchRefsNvfuserCapabilityMode = functools.partial(
-    TorchRefsMode,
-    should_fallback_fn=_is_func_unsupported_nvfuser,
-    prims_mode_cls=NvfuserPrimsMode,
-)
+class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
+    def __init__(self):
+        super().__init__(
+            strict=False,
+            should_fallback_fn=_is_func_unsupported_nvfuser,
+            prims_mode_cls=NvfuserPrimsMode,
+        )
+
+    def _is_var_mean(self, func):
+        return "torch.var_mean" == torch.overrides.resolve_name(func) or (
+            (
+                isinstance(func, torch._ops.OpOverload)
+                or isinstance(func, torch._ops.OpOverloadPacket)
+            )
+            and "aten.var_mean" in str(func)
+        )
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
+        if self._is_var_mean(orig_func):
+            return torch.ops.nvprims.var_mean(*args, **kwargs)
+        # Then we use TorchRefsMode to interpret the rest
+        return super().__torch_function__(orig_func, types, args, kwargs)
