@@ -715,6 +715,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['cpp_ext']:
         os.environ['TORCH_DOCTEST_CPP_EXT'] = '1'
 
+    if 0:
+        os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
+
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
         'global_exec': r'\n'.join([
