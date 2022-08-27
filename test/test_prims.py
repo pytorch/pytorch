@@ -236,6 +236,28 @@ class TestPrims(TestCase):
         self.assertFalse(includes_prims_digamma)
         self.assertTrue(includes_nvprims_exp)
 
+
+    def test_aten_overload_to_prims(self, device):
+        # This test is to ensure that the torch.ops.aten calls are replaced with refs
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.ops.aten.sigmoid.default(torch.ops.aten.digamma.default(a))
+
+        with TorchRefsMode():
+            gm = make_fx(func)(a)
+
+        # Check that all call_function nodes are prims
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        all_prims_namespace = all(
+            node.target.name.startswith("prims") for node in call_function_nodes
+        )
+        self.assertTrue(all_prims_namespace)
+
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned(self, device):
@@ -330,6 +352,31 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, ())
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    @parametrize("correction", [0, 1])
+    @parametrize("keepdim", [True, False])
+    def test_var_mean(self, device, dtype, correction, keepdim):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+
+        def _wrapper(a):
+            return torch.var_mean(a, [0, 1], correction=correction, keepdim=keepdim)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(_wrapper)(make_arg((5, 5)))
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_nvprims_var_mean = any(
+            torch.ops.nvprims.var_mean.main == node.target
+            for node in call_function_nodes
+        )
+        self.assertTrue(includes_nvprims_var_mean)
 
     @onlyCUDA
     @skipCUDAIfRocm
