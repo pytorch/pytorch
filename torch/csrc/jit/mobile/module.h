@@ -43,7 +43,7 @@ class CompilationUnit {
   Function* find_function(const c10::QualifiedName& qn);
   const Function* find_function(const c10::QualifiedName& qn) const;
 
-  void unsafeRemoveFunction(const size_t index) {
+  void unsafeRemoveFunction(const int64_t index) {
     methods_.erase(methods_.begin() + index);
   }
 
