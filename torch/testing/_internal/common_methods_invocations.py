@@ -13641,39 +13641,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
            )),
-    OpInfo('cat',
-           ref=_cat_np,
-           aliases=('concat', 'concatenate'),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
-           sample_inputs_func=sample_inputs_cat_concat,
-           reference_inputs_func=reference_inputs_cat,
-           error_inputs_func=error_inputs_cat,
-           # https://github.com/pytorch/pytorch/issues/80411
-           gradcheck_fast_mode=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_autodiffed=True,
-           skips=(
-               # RuntimeError: Arguments for call not valid.
-               #               Expected a value of type 'List[Tensor]' for argument
-               #               'tensors' but instead found type 'Tensor (inferred)'.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-               # RuntimeError: Batching rule not implemented for aten::concatenate
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
-                            'test_op_has_batch_rule'),
-               # RuntimeError: Batching rule not implemented for aten::concatenate
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
-                            'test_vmap_exhaustive'),
-               # see https://github.com/pytorch/pytorch/issues/71286
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
-    OpInfo('unbind',
-           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
-           ref=reference_unbind,
-           sample_inputs_func=sample_inputs_unbind,
-           error_inputs_func=error_inputs_unbind,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_gradgrad=True,
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            op=lambda inp, *args, **kwargs:
@@ -14052,10 +14019,11 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('cat',
            ref=_cat_np,
-           aliases=('concat',),
+           aliases=('concat', 'concatenate'),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
            reference_inputs_func=reference_inputs_cat,
+           error_inputs_func=error_inputs_cat,
            # https://github.com/pytorch/pytorch/issues/80411
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14066,6 +14034,12 @@ op_db: List[OpInfo] = [
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
+               # RuntimeError: Batching rule not implemented for aten::concatenate
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
+                            'test_op_has_batch_rule'),
+               # RuntimeError: Batching rule not implemented for aten::concatenate
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
+                            'test_vmap_exhaustive'),
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
     OpInfo('unbind',
