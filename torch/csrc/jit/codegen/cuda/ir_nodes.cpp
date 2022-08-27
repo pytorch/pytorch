@@ -1434,13 +1434,17 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       "Merging IterDomains with ending values that are 0 is not supported at this time.");
   TORCH_CHECK(
       outer->isReduction() == inner->isReduction() ||
-          (!outer->isReduction() && inner->extent()->isOneInt()) ||
-          (outer->extent()->isOneInt() && !inner->isReduction()),
+          (!outer->isReduction() && inner->isTrivialReduction()) ||
+          (outer->isTrivialReduction() && !inner->isReduction()),
       "Merging IterDomains requires that their iteration types match.");
   TORCH_CHECK(
       (outer->isGather() && inner->isGather()) ||
           (!outer->isGather() && !inner->isGather()),
       "Merging gather and non-gather domains is not supported.");
+
+  TORCH_CHECK(
+      !outer->isStride() && !inner->isStride(),
+      "No support for merging stride domains");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
 
@@ -1448,8 +1452,27 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
 
   if (outer->isBroadcast() && inner->isBroadcast()) {
     itype = IterType::Broadcast;
-  } else if (outer->isBroadcast() || inner->isBroadcast()) {
+  }
+
+  if ((outer->isBroadcast() || inner->isBroadcast()) &&
+      (outer->getIterType() == IterType::Iteration ||
+       inner->getIterType() == IterType::Iteration)) {
     itype = IterType::Iteration;
+  }
+
+  // Merging trivial reduction with iter domain, that's fine, just make it an
+  // iter domain.
+  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
+      (outer->getIterType() == IterType::Iteration ||
+       inner->getIterType() == IterType::Iteration)) {
+    itype = IterType::Iteration;
+  }
+
+  // Merging trivial reduction with broadcasting, that's fine, just make it a
+  // broadcasting.
+  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
+      (outer->isBroadcast() || inner->isBroadcast())) {
+    itype = IterType::Broadcast;
   }
 
   Val* expanded_extent = nullptr;
@@ -1469,13 +1492,6 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
         expanded_extent = mul(outer->extent(), inner->expandedExtent());
       }
     }
-  }
-
-  // Merging trivial reduction with iter domain, that's fine, just make it an
-  // iter domain.
-  if ((outer->isReduction() || inner->isReduction()) &&
-      (!outer->isReduction() || !inner->isReduction())) {
-    itype = IterType::Iteration;
   }
 
   IterDomain* merged_id =

@@ -24872,7 +24872,7 @@ TEST_F(NVFuserTest, FusionInsertMagicZero1_CUDA) {
   tv2->reorder({{1, 2}, {2, 1}});
   tv2->merge(0);
 
-  TransformPropagator propagator(tv2);
+  TransformPropagatorWithCheck propagator(tv2);
   MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv0->computeAt(tv2, 1);
@@ -24992,7 +24992,7 @@ TEST_F(NVFuserTest, FusionExpandReduce2_CUDA) {
   // [iBIDx, iTIDx, rTIDy, rBIDy, rO]
   auto tv3 = tv2->rFactor({-1});
 
-  TransformPropagator propagator(tv3);
+  TransformPropagatorWithCheck propagator(tv3);
   MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
   scheduler_utils::parallelizeAllLike(tv3);
   tv0->computeAt(tv3, -1, ComputeAtMode::MostInlined);
@@ -25691,6 +25691,77 @@ TEST_F(NVFuserTest, AsyncCompilation_CUDA) {
 
   testValidate(
       executor_cache.fusion(), outputs, aten_inputs, {t6}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction1_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeConcreteTensor({1, 1});
+  TensorView* tv1 = makeConcreteTensor({-1});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv2, tv1);
+  fusion->addOutput(tv3);
+
+  tv0->merge(0);
+
+  MaxRootDomainInfoSpanningTree tree(tv0);
+  TransformPropagatorWithCheck tp(tv0);
+  tree.traverse(&tp);
+
+  InlinePropagator ip(tv0, -1, ComputeAtMode::MostInlined);
+  tree.traverse(&ip);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1, 1}, options);
+  at::Tensor t1 = at::randn({10}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+  auto out = cg_outputs[0];
+
+  testValidate(
+      fusion, {out}, {t0, t1}, {t1 + t0.flatten()}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction2_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeConcreteTensor({-1, 1, 1});
+  TensorView* tv1 = makeConcreteTensor({-1, -1});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv2, tv1);
+  fusion->addOutput(tv3);
+
+  tv2->merge(1);
+  tv2->merge(0);
+
+  MaxRootDomainInfoSpanningTree tree(tv0);
+  TransformPropagatorWithCheck tp(tv0);
+  tree.traverse(&tp);
+
+  InlinePropagator ip(tv0, -1, ComputeAtMode::MostInlined);
+  tree.traverse(&ip);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 1, 1}, options);
+  at::Tensor t1 = at::randn({10, 10}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+  auto out = cg_outputs[0];
+
+  testValidate(
+      fusion, {out}, {t0, t1}, {t1 + t0.squeeze(-1)}, __LINE__, __FILE__);
 }
 
 } // namespace jit
