@@ -358,7 +358,7 @@ std::shared_ptr<TransposeParams> getTransposeHeuristics(
         inferred_val.has_value(),
         "Error inferring size for pointwise scheduler: ",
         ref_root[ref_i]->extent()->toInlineString());
-    int64_t size = inferred_val.value().as<int64_t>();
+    int64_t size = inferred_val->as<int64_t>();
     n_elems *= size;
     shape_in_ref1.push_back(size);
   }

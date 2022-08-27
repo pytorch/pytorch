@@ -191,8 +191,8 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     std::vector<Val*> group_extent_binding_order;
   } runtime_workspace_;
 
-  //! Utility to speed up integer evaluation at runtime
-  std::unique_ptr<FusionPrecomputedIntegers> precomputed_integers_;
+  //! Utility to speed up value evaluation at runtime
+  std::unique_ptr<FusionPrecomputedValues> precomputed_values_;
 
   // States for profiling support
   bool profiling_ = false;

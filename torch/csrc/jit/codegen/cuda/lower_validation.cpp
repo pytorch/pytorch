@@ -714,7 +714,8 @@ std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets
           // is visible to outside of the fusion.
           map.insert(
               {consumer_root,
-               {consumer_start_offset.value(), consumer_stop_offset.value()}});
+               {consumer_start_offset->as<int64_t>(),
+                consumer_stop_offset->as<int64_t>()}});
         } else {
           // When the range of this root domain is already set, it
           // must be set by its consumers. Make sure the required
@@ -722,9 +723,9 @@ std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets
           // this root domain.
           auto& consumer_range = it->second;
           TORCH_INTERNAL_ASSERT(
-              consumer_start_offset.value() <= consumer_range.first);
+              consumer_start_offset->as<int64_t>() <= consumer_range.first);
           TORCH_INTERNAL_ASSERT(
-              consumer_stop_offset.value() <= consumer_range.second);
+              consumer_stop_offset->as<int64_t>() <= consumer_range.second);
         }
       }
 

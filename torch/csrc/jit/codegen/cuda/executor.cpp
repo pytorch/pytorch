@@ -308,7 +308,7 @@ at::Tensor inferAndAlloc(
         size->name(),
         ") for the buffer ",
         tv->toString());
-    inferred_sizes.push_back(inferred_val.value());
+    inferred_sizes.push_back(inferred_val->as<int64_t>());
     if (expanded_map.count(expanded_sizes.size())) {
       auto expanded_size = expanded_map.at(expanded_sizes.size());
       const auto inferred_expanded_size = expr_eval.evaluate(expanded_size);
@@ -328,9 +328,9 @@ at::Tensor inferAndAlloc(
       } else {
         expanded_dim = true;
       }
-      expanded_sizes.push_back(inferred_expanded_size.value());
+      expanded_sizes.push_back(inferred_expanded_size->as<int64_t>());
     } else {
-      expanded_sizes.push_back(inferred_val.value());
+      expanded_sizes.push_back(inferred_val->as<int64_t>());
     }
   }
 
@@ -401,7 +401,7 @@ uint64_t FusionExecutor::computeSharedMemory(
           const int align_size = 16; // always align to 16B/128b.
           total = ceilDiv(total, align_size) * align_size;
         }
-        total += inferred_val.value() * data_size;
+        total += inferred_val->as<int64_t>() * data_size;
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -470,10 +470,10 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   // TODO: Need to redesign this part a bit to
   //   find the right place to trigger evaluate
-  if (expr_eval.precomputedIntegers()) {
-    expr_eval.precomputedIntegers()->bindParallelExtents(
+  if (expr_eval.precomputedValues()) {
+    expr_eval.precomputedValues()->bindParallelExtents(
         parallel_iter_extents, launch_constraints);
-    expr_eval.precomputedIntegers()->evaluate();
+    expr_eval.precomputedValues()->evaluate();
   }
 
   // If any dimension was set in launch constraints we need to run through
@@ -495,7 +495,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 "Cannot validate parallelization scheme, "
                 "this may be due to mixed broadcast axes that are parallelized.");
           }
-        } else if (!expr_eval.precomputedIntegers()) {
+        } else if (!expr_eval.precomputedValues()) {
           expr_eval.bind(extent, launch_constraints.getDim(p_type));
         }
         if (!launch_params.hasDim(p_type)) {
@@ -547,7 +547,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
         TORCH_INTERNAL_ASSERT(
             *val <= 1024, "padded dimension larger than max block size");
       }
-      maximum_value = std::max(maximum_value, *val);
+      maximum_value = std::max(maximum_value, val->as<int64_t>());
     }
     // Protect for size-0 tensors, they still have a value so would prefer to
     // bind nothing than 0
@@ -559,8 +559,8 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   // Re-run the integer machine with all
   //  the thread sizes now determined.
-  if (expr_eval.precomputedIntegers()) {
-    expr_eval.precomputedIntegers()->evaluate();
+  if (expr_eval.precomputedValues()) {
+    expr_eval.precomputedValues()->evaluate();
   }
 
   const auto kernel = lowered_->kernel();
@@ -783,14 +783,14 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
   // would be resolved with FakeTensor
   // executor_utils::validateKernelInputs(fusion_, args, options_.device);
 
-  if (!evaluator_precomputed_integers_) {
-    evaluator_precomputed_integers_ =
-        std::make_unique<KernelPrecomputedIntegers>(lowered_->kernel());
+  if (!evaluator_precomputed_values_) {
+    evaluator_precomputed_values_ =
+        std::make_unique<KernelPrecomputedValues>(lowered_->kernel());
   }
 
   kir::ExpressionEvaluator expr_eval;
-  evaluator_precomputed_integers_->bindKernelInputs(lowered_->kernel(), args);
-  expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
+  evaluator_precomputed_values_->bindKernelInputs(lowered_->kernel(), args);
+  expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
   // I think this binds something to expr_eval, so even though we are not using
   // launch_params_, we still need this in order to infer output shapes.
@@ -945,14 +945,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     //   2. `executor_entry` is not initialized
     executor_utils::validateKernelInputs(fusion_, args, options_.device);
 
-    if (!evaluator_precomputed_integers_) {
-      evaluator_precomputed_integers_ =
-          std::make_unique<KernelPrecomputedIntegers>(lowered_->kernel());
+    if (!evaluator_precomputed_values_) {
+      evaluator_precomputed_values_ =
+          std::make_unique<KernelPrecomputedValues>(lowered_->kernel());
     }
 
     kir::ExpressionEvaluator expr_eval;
-    evaluator_precomputed_integers_->bindKernelInputs(lowered_->kernel(), args);
-    expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
+    evaluator_precomputed_values_->bindKernelInputs(lowered_->kernel(), args);
+    expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
     launch_params_ =
         computeLaunchParams(launch_constraints, expr_eval, warp_size_);

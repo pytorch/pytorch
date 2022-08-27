@@ -597,7 +597,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             vector_size_optional.has_value(),
             "Could not evaluate constant value bound to vectorized dim.");
 
-        vector_word_size = vector_size_optional.value();
+        vector_word_size = vector_size_optional->as<int64_t>();
 
         vectorize_op = id->getParallelType() == ParallelType::Vectorize;
         misaligned_op =
@@ -1267,7 +1267,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       TORCH_INTERNAL_ASSERT(
           id->getParallelType() != ParallelType::MisalignedVectorize,
           "LoadStoreOp: no support yet for mis-aligned vectorization");
-      vector_word_size = vector_size_optional.value();
+      vector_word_size = vector_size_optional->as<int64_t>();
       vectorize_op = true;
       break;
     }

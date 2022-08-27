@@ -307,7 +307,8 @@ Val* getProducerIndexWithPartialSplit(
   }
 
   return SimplifyingIrBuilder::addExpr(
-      producer_index, SimplifyingIrBuilder::create<Int>(diff_eval.value()));
+      producer_index,
+      SimplifyingIrBuilder::create<Int>(diff_eval->as<int64_t>()));
 }
 
 } // namespace

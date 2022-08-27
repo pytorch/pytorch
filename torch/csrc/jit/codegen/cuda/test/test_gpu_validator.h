@@ -248,7 +248,8 @@ class ReductionSizeMapper : private IterVisitor {
             id,
             " in ",
             tv);
-        reduction_elements = reduction_elements * inferred_extent.value();
+        reduction_elements =
+            reduction_elements * inferred_extent->as<int64_t>();
       }
     }
     return reduction_elements;

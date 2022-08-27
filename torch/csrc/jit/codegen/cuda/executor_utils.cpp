@@ -554,7 +554,7 @@ void validateAlignedVectorizeExtents(
         " as the extent of a vectorized root domain, ",
         id->toString(),
         ", is unknown.");
-    vectorized_merged_domain_extent *= extent_val.value();
+    vectorized_merged_domain_extent *= extent_val->as<int64_t>();
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -846,14 +846,20 @@ void bindInputForExprEvaluation(
         }
       }
     }
-  } else if (
-      val->getValType().value() == ValType::Scalar &&
-      val->getDataType().value() == DataType::Int) {
-    TORCH_INTERNAL_ASSERT(
-        arg->isType(ArgType::Long),
-        "fusion expected Scalar Int inputs, but found",
-        argTypeToString(arg->type()));
-    expr_eval.bind(val, *static_cast<const int64_t*>(arg->arg()));
+  } else if (val->getValType().value() == ValType::Scalar) {
+    if (val->getDataType().value() == DataType::Int) {
+      TORCH_INTERNAL_ASSERT(
+          arg->isType(ArgType::Long),
+          "fusion expected Scalar Int inputs, but found ",
+          argTypeToString(arg->type()));
+      expr_eval.bind(val, *static_cast<const int64_t*>(arg->arg()));
+    } else if (val->getDataType().value() == DataType::Double) {
+      TORCH_INTERNAL_ASSERT(
+          arg->isType(ArgType::Double),
+          "fusion expected Scalar Double inputs, but found ",
+          argTypeToString(arg->type()));
+      expr_eval.bind(val, *static_cast<const double*>(arg->arg()));
+    }
   }
 }
 
@@ -887,7 +893,11 @@ ExpressionEvaluator bindFusionInputs(
   auto inputs = fusion->inputs();
   TORCH_INTERNAL_ASSERT(
       inputs.size() == args.size(),
-      "Something went wrong configuring launch. Inputs do not match.");
+      "Something went wrong configuring launch. Inputs do not match.\n",
+      "inputs: ",
+      ir_utils::toString(inputs),
+      " args size: ",
+      args.size());
 
   ExpressionEvaluator expr_eval(fusion);
 
