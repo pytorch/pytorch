@@ -93,6 +93,17 @@ def get_proxy(obj):
 def has_proxy(obj):
     return get_proxy(obj) is not None
 
+def set_meta(proxy, val):
+    if isinstance(val, FakeTensor):
+        proxy.node.meta['fake'] = val
+    elif isinstance(val, PySymInt):
+        proxy.node.meta['sym_size'] = val
+    elif isinstance(val, torch.Tensor):
+        if not val.is_sparse:
+            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+    return proxy
+
+
 def track_tensor(tensor, proxy, *, constant, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -106,7 +117,9 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # TODO: improve naming
             # TODO: lazily insert this into the graph only on first
             # use?  Maybe complicated and DCE is a better idea
-            set_proxy_slot(inner_s, tracer, torch.ops.aten.sym_size(proxy, i))
+            s_proxy = torch.ops.aten.sym_size(proxy, i)
+            set_meta(s_proxy, inner_s)
+            set_proxy_slot(inner_s, tracer, s_proxy)
 
         # TODO: also do stride/numel
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
@@ -115,8 +128,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
-            if not e.is_sparse:
-                proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(e)
+            set_meta(proxy, e)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
@@ -232,12 +244,10 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
             # in the output.
             for i, a in enumerate(args[0]):
                 a.proxy = proxy_out[0][i]
-                proxy_out[0][i].node.meta['tensor_meta'] = _extract_tensor_metadata(a)
         else:
             # This makes DCE marginally less likely to DCE inplace operations.
             # It is not strictly necessary
             args[0].proxy = proxy_out
-            proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
     out = func_overload(*args, **kwargs)
 
@@ -499,6 +509,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
+        set_meta(p_out, out)
         assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
         set_proxy_slot(out, self.tracer, p_out)
         return out

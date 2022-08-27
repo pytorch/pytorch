@@ -219,13 +219,7 @@ def _to_copy(
     device = self.device if device is None else device
     layout = self.layout if layout is None else layout
     assert pin_memory is None
-    return torch.empty(
-        self.shape,
-        dtype=dtype,
-        device=device,
-        pin_memory=pin_memory,
-        memory_format=memory_format,
-    )
+    return self.new_empty(self.shape, dtype=dtype, device=device, pin_memory=pin_memory)
 
 
 @register_meta(aten.convolution.default)
