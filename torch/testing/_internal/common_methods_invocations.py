@@ -8694,8 +8694,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            ),
            supports_out=False),
     UnaryUfuncInfo('cos',
@@ -8773,12 +8771,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Float did not match double
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Jacobian mismatch
@@ -9370,25 +9362,6 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
-    OpInfo('inverse',
-           op=torch.inverse,
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', '.test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', '.test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-           )),
     OpInfo('isin',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
