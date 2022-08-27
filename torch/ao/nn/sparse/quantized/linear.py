@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from torch.ao.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 __all__ = ['LinearPackedParams', 'Linear']
 
