@@ -566,7 +566,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_symints = [
             i
             for i in tree_flatten((args, kwargs))[0]
-            if isinstance(i, torch.SymIntNode)
+            if isinstance(i, torch._C.SymIntNode)
         ]
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
@@ -581,12 +581,10 @@ class FakeTensorMode(TorchDispatchMode):
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
-                    print(
+                    raise RuntimeError(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
-                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
-                    return None
 
             with self.restore():
                 if func in meta_table:
