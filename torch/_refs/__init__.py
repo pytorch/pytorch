@@ -1667,7 +1667,6 @@ def to(
         and memory_format == torch.preserve_format
         and non_blocking is False
     ):
-        #return torch.ops.nvprims.convert_element_type(a, dtype)
         return prims.convert_element_type(a, dtype)
     result = torch.empty_like(
         a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format

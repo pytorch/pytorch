@@ -513,17 +513,34 @@ class TestDecomp(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
-    def test_decomposition_type_promotion(self, device, dtype):
+    def test_decomposition_type_promotion_nvprim_amp(self, device, dtype):
         x = torch.rand(5, device=device).to(dtype)
         y = torch.rand(5, device=device).to(dtype)
 
         from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
+        from torch.fx.experimental.proxy_tensor import make_fx
         op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
 
+        def fn0(*arg):
+            return _is_func_unsupported_nvfuser(mode, op, arg, {})
+
+        def fn1(x):
+            x = x * 2
+            x = x @ x
+            x = x * 2
+            return x
+
         with TorchRefsNvfuserCapabilityMode() as mode:
-            def fn(*arg):
-                return _is_func_unsupported_nvfuser(mode, op, arg, {})
-            assert(not fn(x, y, 0.3, False))
+            self.assertFalse(fn0(x, y, 0.3, False))
+
+            with torch.autocast("cuda"):
+                gm = make_fx(fn1, decomposition_table=torch._prims.context.nvfuser_decomp_table())(x)
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_aten_to_copy = any(
+                torch.ops.aten._to_copy.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_aten_to_copy)
 
 
 instantiate_device_type_tests(TestDecomp, globals())

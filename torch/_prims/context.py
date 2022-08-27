@@ -71,9 +71,9 @@ def nvfuser_decomp_table():
     decomposition table needed for nvfuser
     """
     aten = torch.ops.aten
-    nvfuser_decompositions = {
+    nvfuser_decompositions: Sequence[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = {
         # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy
+        aten._to_copy,
     }
 
     from torch._decomp import get_decompositions
