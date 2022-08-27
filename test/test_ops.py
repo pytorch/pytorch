@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
-    IS_ARM64
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -196,13 +195,33 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):
+    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
                 continue
             if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
+                continue
+
+            is_lower_than_cuda11_0 = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
+
+            if (
+                skip_bfloat
+                and is_lower_than_cuda11_0
+                and (
+                    (
+                        isinstance(sample.input, torch.Tensor)
+                        and sample.input.dtype == torch.bfloat16
+                    )
+                    or any(
+                        isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                        for arg in sample.args
+                    )
+                )
+            ):
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
@@ -355,6 +374,7 @@ class TestCommon(TestCase):
             op,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
+            skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
         )
 
     @skipMeta
@@ -1229,7 +1249,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
 
-@unittest.skipIf(IS_ARM64, "Not working on arm")
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1555,21 +1574,25 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
         '_refs.zeros',
-        '_refs.zeros_like'
+        '_refs.zeros_like',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.transpose',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
-        '_refs.swap_axes',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
         # CompositeImplicitAutograd
         '_refs.allclose',
         '_refs.atleast_1d',
@@ -1590,6 +1613,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.movedim',
         '_refs.narrow',
         '_refs.positive',
         '_refs.ravel',
@@ -1605,8 +1629,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
-        # CompositeExplicitAutograd,
-        '_refs.unbind',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
@@ -1624,6 +1646,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
+        '_refs.real',
+        '_refs.imag',
     }
 
     @parametrize("op", ref_ops_names)
@@ -1715,6 +1739,7 @@ aliasing_failures = (
 )
 
 fake_striding_skips = (
+    "diag_embed",
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
