@@ -62,7 +62,7 @@ bool Module::compareMethodSchemas(
 }
 
 void Module::unsafeRemoveMethod(const std::string& basename) {
-  size_t i = 0;
+  int64_t i = 0;
   for (; i < cu_->methods().size(); ++i) {
     if ((cu_->methods()[i])->name() == basename) {
       break;
