@@ -1,7 +1,9 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import _is_namedtuple
+from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
+    _is_namedtuple,
+)
 from typing import Dict, Any, List
 
 __all__ = []  # type: ignore[var-annotated]
