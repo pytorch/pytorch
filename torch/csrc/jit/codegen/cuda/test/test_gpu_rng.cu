@@ -112,24 +112,21 @@ TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
       auto fusion = fusion_ptr.get();
       FusionGuard fg(fusion);
 
-      TensorView* tv0 = makeSymbolicTensor(1, aten_to_data_type(dtype));
-      fusion->addInput(tv0);
-      auto tv1 = randlike(tv0);
-      fusion->addOutput(tv1);
+      Int* size_val = IrBuilder::create<Int>();
+      fusion->addInput(size_val);
+      TensorView* tv0 = rand({size_val}, aten_to_data_type(dtype));
+      fusion->addOutput(tv0);
 
       FusionExecutorCache fec(std::move(fusion_ptr));
 
-      auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
-      at::Tensor t0 = at::zeros({size}, options);
-
       at::manual_seed(0);
-      auto cg_outputs = fec.runFusionWithInputs({t0});
+      auto cg_outputs = fec.runFusionWithInputs({size});
       auto out = cg_outputs[0];
 
       at::manual_seed(0);
       auto ref = generate_uniform(size, dtype);
 
-      testValidate(fec.fusion(), {out}, {t0}, {ref}, __LINE__, __FILE__);
+      testValidate(fec.fusion(), {out}, {size}, {ref}, __LINE__, __FILE__);
     }
   }
 }

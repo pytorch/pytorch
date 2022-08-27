@@ -123,7 +123,7 @@ TORCH_CUDA_CU_API WelfordResult Welford(
 
 // TENSOR FACTORIES
 TORCH_CUDA_CU_API TensorView* rand(
-    const std::vector<Int*>& shape,
+    const std::vector<Val*>& shape,
     DataType dtype);
 
 // UNARY OPERATIONS
