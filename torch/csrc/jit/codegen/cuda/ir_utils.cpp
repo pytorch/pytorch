@@ -180,6 +180,26 @@ struct SubstituteInExpr : public OptInDispatch {
     OptInDispatch::handle(expr);
   }
 
+  void handle(ARangeOp* arange_expr) final {
+    auto start = reference_->sameAs(arange_expr->start())
+        ? substitute_
+        : arange_expr->start();
+    auto end = reference_->sameAs(arange_expr->end()) ? substitute_
+                                                      : arange_expr->end();
+    auto step = reference_->sameAs(arange_expr->step()) ? substitute_
+                                                        : arange_expr->step();
+    auto out = reference_->sameAs(arange_expr->output(0))
+        ? substitute_
+        : arange_expr->output(0);
+    expr_ = IrBuilder::create<ARangeOp>(
+        arange_expr->container(),
+        out,
+        start,
+        end,
+        step,
+        arange_expr->getLinearIndex());
+  }
+
   void handle(UnaryOp* unary_expr) final {
     auto in =
         reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();

@@ -68,6 +68,7 @@ class ComplexDouble;
 class NamedScalar;
 
 // Exprs
+class ARangeOp;
 class UnaryOp;
 class BinaryOp;
 class TernaryOp;
@@ -143,6 +144,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const kir::IntPair*);
 
   // Exprs
+  virtual void handle(const ARangeOp* stmt);
   virtual void handle(const UnaryOp* stmt);
   virtual void handle(const BinaryOp* stmt);
   virtual void handle(const TernaryOp* stmt);
@@ -209,6 +211,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(kir::IntPair*);
 
   // Exprs
+  virtual void handle(ARangeOp* stmt);
   virtual void handle(UnaryOp* stmt);
   virtual void handle(BinaryOp* stmt);
   virtual void handle(TernaryOp* stmt);
@@ -316,6 +319,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::IntPair*);
 
   // Exprs
+  virtual void mutate(ARangeOp*);
   virtual void mutate(UnaryOp*);
   virtual void mutate(BinaryOp*);
   virtual void mutate(TernaryOp*);

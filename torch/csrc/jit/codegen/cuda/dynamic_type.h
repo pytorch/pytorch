@@ -41,7 +41,8 @@ class TORCH_CUDA_CU_API IntOrDouble {
   template <typename T>
   T as() const {
     TORCH_CHECK(
-        c10::holds_alternative<T>(value_), "dtype not supported in evaluator");
+        c10::holds_alternative<T>(value_),
+        "The expected dtype and the actual dtype does not match in IntOrDouble");
     return c10::get<T>(value_);
   }
 

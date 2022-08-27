@@ -100,7 +100,7 @@ void IndexLowering::handle(const RNGOp* rop) {
 
   // TensorIndex for philox subsequence and component.
   auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getRandomTensorStridedIndices(out_tv, for_loops_));
+      out_tv, Index::getLinearIndex(out_tv, for_loops_));
 
   // TensorIndex for writing randlike output.
   const auto out = lowerDstIndex(out_tv);
@@ -110,6 +110,25 @@ void IndexLowering::handle(const RNGOp* rop) {
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(rop, back());
+}
+
+void IndexLowering::handle(const ARangeOp* aop) {
+  // Write linear tensor indices into the consumer
+  //  tensor index if the output is a tensor.
+  auto out_tv = dynamic_cast<TensorView*>(aop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // TensorIndex for philox subsequence and component.
+  auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
+      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+
+  // TensorIndex for writing randlike output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered = IrBuilder::create<ARangeOp>(
+      out, aop->start(), aop->end(), aop->step(), linear_index);
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(aop, back());
 }
 
 void IndexLowering::handle(const UnaryOp* uop) {

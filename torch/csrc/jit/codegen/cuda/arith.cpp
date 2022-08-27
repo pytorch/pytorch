@@ -453,6 +453,40 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+// TENSOR FACTORIES
+TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype) {
+  return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
+}
+
+TORCH_CUDA_CU_API TensorView* arange(Val* start, Val* end, DataType dtype) {
+  return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype) {
+  if (isIntegralType(dtype)) {
+    start = castOp(DataType::Int, start);
+    end = castOp(DataType::Int, end);
+    step = castOp(DataType::Int, step);
+  } else if (isFloatingPointType(dtype)) {
+    start = castOp(DataType::Double, start);
+    end = castOp(DataType::Double, end);
+    step = castOp(DataType::Double, step);
+  }
+  auto size = castOp(DataType::Int, ceilDiv(sub(end, start), step));
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({size})
+                 .build();
+  IrBuilder::create<ARangeOp>(out, start, end, step);
+  return out;
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \

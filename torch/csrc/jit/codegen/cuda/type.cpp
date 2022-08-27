@@ -290,6 +290,8 @@ static const char* predicate_type2string(PredicateType t) {
 
 static const char* expr_type2string(ExprType t) {
   switch (t) {
+    case ExprType::ARangeOp:
+      return "ARangeOp";
     case ExprType::UnaryOp:
       return "UnaryOp";
     case ExprType::BinaryOp:

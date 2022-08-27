@@ -30,6 +30,47 @@ struct AnalyzeViewResult;
 //! vals are `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
 bool areEqualScalars(Val* v1, Val* v2);
 
+class TORCH_CUDA_CU_API ARangeOp : public Expr {
+ public:
+  ARangeOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* start,
+      Val* end,
+      Val* step,
+      Val* linear_index = nullptr);
+
+  ARangeOp(const ARangeOp* src, IrCloner* ir_cloner);
+
+  bool sameAs(const Statement* other) const override;
+
+  Val* start() const {
+    return start_;
+  }
+
+  Val* end() const {
+    return end_;
+  }
+
+  Val* step() const {
+    return step_;
+  }
+
+  Val* getLinearIndex() const {
+    return linear_index_;
+  }
+
+  void setLinearIndex(Val* index) {
+    linear_index_ = index;
+  }
+
+ private:
+  Val* start_;
+  Val* end_;
+  Val* step_;
+  Val* linear_index_ = nullptr;
+};
+
 //! A specialization for Unary operations. Unary operations take in a single
 //! input and produce a single output. Examples include:
 //!   1) Casting operation i.e. float(a_val)

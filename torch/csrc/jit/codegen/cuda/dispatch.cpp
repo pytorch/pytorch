@@ -95,6 +95,9 @@ void Val::dispatch(T handler, Val* val) {
 template <typename T>
 void Expr::dispatch(T handler, Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::ARangeOp:
+      ptr(handler)->handle(expr->as<ARangeOp>());
+      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
       return;
@@ -278,6 +281,9 @@ void Val::constDispatch(T handler, const Val* val) {
 template <typename T>
 void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::ARangeOp:
+      ptr(handler)->handle(expr->as<ARangeOp>());
+      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
       return;
@@ -469,6 +475,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
 template <typename T>
 void Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::ARangeOp:
+      ptr(mutator)->mutate(expr->as<ARangeOp>());
+      return;
     case ExprType::UnaryOp:
       ptr(mutator)->mutate(expr->as<UnaryOp>());
       return;
@@ -725,6 +734,9 @@ void OptOutConstDispatch::handle(const kir::IntPair* stmt) {
 }
 
 // Exprs
+void OptOutConstDispatch::handle(const ARangeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const UnaryOp* stmt) {
   unhandled(stmt);
 }
@@ -878,6 +890,9 @@ void OptOutDispatch::handle(kir::IntPair* stmt) {
 }
 
 // Exprs
+void OptOutDispatch::handle(ARangeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(UnaryOp* stmt) {
   unhandled(stmt);
 }

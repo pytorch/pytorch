@@ -248,6 +248,31 @@ void IrPrinter::handle(const NamedScalar* ns) {
   os_ << ns->name();
 }
 
+void IrPrinter::handle(const ARangeOp* aop) {
+  if (!print_inline_) {
+    indent() << aop->output(0);
+    os_ << "\n";
+    indent_size_++;
+    indent();
+    os_ << " = ";
+  } else {
+    checkInlineable(aop);
+  }
+
+  os_ << "arange(";
+  handle(aop->start());
+  os_ << ", ";
+  handle(aop->end());
+  os_ << ", ";
+  handle(aop->step());
+  os_ << ")";
+
+  indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
+}
+
 void IrPrinter::handle(const UnaryOp* uop) {
   bool istvop = ir_utils::isTvOp(uop);
   if (!print_inline_) {

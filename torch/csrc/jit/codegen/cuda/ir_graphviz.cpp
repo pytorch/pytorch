@@ -407,6 +407,17 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   tensor_views_.push_back(tv);
 }
 
+void IrGraphGenerator::handle(const ARangeOp* uop) {
+  // node
+  printExpr(uop, "arange");
+
+  // inputs & outputs
+  addArc(uop->start(), uop);
+  addArc(uop->end(), uop);
+  addArc(uop->step(), uop);
+  addArc(uop, uop->output(0));
+}
+
 void IrGraphGenerator::handle(const UnaryOp* uop) {
   // node
   std::stringstream label;

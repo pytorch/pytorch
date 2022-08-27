@@ -125,6 +125,16 @@ TORCH_CUDA_CU_API WelfordResult Welford(
 TORCH_CUDA_CU_API TensorView* rand(
     const std::vector<Val*>& shape,
     DataType dtype);
+TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype = DataType::Int);
 
 // UNARY OPERATIONS
 // abs

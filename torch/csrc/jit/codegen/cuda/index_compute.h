@@ -365,10 +365,8 @@ class Index {
 
   //! Returns a vector of strided indices mapped onto the (rfactor)
   //! root domain of a consumer tensor. The returned index is intended
-  //! to be used to index into Philox pseudo random sequences so that
-  //! inlined multivisit to the same element in a random tensor returns
-  //! consistent values.
-  static std::vector<Val*> getRandomTensorStridedIndices(
+  //! to be used to index into arange or Philox pseudo random sequences
+  static std::vector<Val*> getLinearIndex(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops);
 

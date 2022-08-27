@@ -182,6 +182,58 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
+ARangeOp::ARangeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* start,
+    Val* end,
+    Val* step,
+    Val* linear_index)
+    : Expr(passkey, ExprType::ARangeOp),
+      start_(start),
+      end_(end),
+      step_(step),
+      linear_index_(linear_index) {
+  addInput(start);
+  addInput(end);
+  addInput(step);
+  addOutput(out);
+}
+
+ARangeOp::ARangeOp(const ARangeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      start_(ir_cloner->clone(src->start_)),
+      end_(ir_cloner->clone(src->end_)),
+      step_(ir_cloner->clone(src->step_)),
+      linear_index_(ir_cloner->clone(src->linear_index_)) {}
+
+bool ARangeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ARangeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ARangeOp>();
+  if (!start_->sameAs(other_op->start_)) {
+    return false;
+  }
+  if (!end_->sameAs(other_op->end_)) {
+    return false;
+  }
+  if (!step_->sameAs(other_op->step_)) {
+    return false;
+  }
+  if ((linear_index_ == nullptr) != (other_op->linear_index_ == nullptr)) {
+    return false;
+  }
+  if ((linear_index_ != nullptr) &&
+      !linear_index_->sameAs(other_op->linear_index_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 UnaryOp::UnaryOp(
     IrBuilderPasskey passkey,
     UnaryOpType type,
@@ -307,7 +359,8 @@ RNGOp::RNGOp(
 RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       rng_op_type_(src->rng_op_type_),
-      rng_offset_(src->rng_offset_) {}
+      rng_offset_(src->rng_offset_),
+      philox_index_(ir_cloner->clone(src->philox_index_)) {}
 
 bool RNGOp::sameAs(const Statement* other) const {
   if (this == other) {

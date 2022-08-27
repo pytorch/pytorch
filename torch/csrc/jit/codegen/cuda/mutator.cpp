@@ -126,6 +126,23 @@ void OptOutMutator::mutate(kir::TensorIndex*) {
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
+void OptOutMutator::mutate(ARangeOp* aop) {
+  Val* out = maybeMutated(aop->output(0));
+
+  if (out->sameAs(aop->output(0))) {
+    return;
+  }
+  auto container = aop->container();
+  container->removeExpr(aop);
+  IrBuilder::create<ARangeOp>(
+      container,
+      out,
+      aop->start(),
+      aop->end(),
+      aop->step(),
+      aop->getLinearIndex());
+}
+
 void OptOutMutator::mutate(UnaryOp* uop) {
   Val* out = maybeMutated(uop->out());
   Val* in = maybeMutated(uop->in());

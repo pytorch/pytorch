@@ -377,7 +377,7 @@ bool isConnectedFusionGraph(Fusion* fusion) {
     // Each expr maps all its inputs and
     //  outputs to the same component
     auto output0 = expr->output(0);
-    for (auto input : expr->inputs()) {
+    for (auto input : ir_utils::filterByType<TensorView>(expr->inputs())) {
       component_sets.mapEntries(output0, input);
     }
     for (auto output : expr->outputs()) {

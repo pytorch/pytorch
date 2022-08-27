@@ -560,6 +560,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           << "&" << gen(ldst->in()) << ");\n";
   }
 
+  void handle(const ARangeOp* aop) final {
+    auto index = genTensorIndex(aop->getLinearIndex()->as<kir::TensorIndex>());
+    indent() << gen(aop->output(0)) << " = arange<" << aop->output(0)->dtype()
+             << ">";
+    code_ << "(" << index << ", " << gen(aop->start()) << ", "
+          << gen(aop->step()) << ");\n";
+  }
+
   void handle(const UnaryOp* uop) final {
     bool is_vector_op = false;
     size_t vector_word_size = 1;

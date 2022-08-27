@@ -634,3 +634,8 @@ __device__ __bfloat print_impl(const char* name, __bfloat value) {
 #endif
 
 #define print(...) print_impl(#__VA_ARGS__, (__VA_ARGS__))
+
+template <typename OutT, typename IndexT, typename InputT>
+__device__ OutT arange(IndexT index, InputT start, InputT step) {
+  return start + step * index;
+}
