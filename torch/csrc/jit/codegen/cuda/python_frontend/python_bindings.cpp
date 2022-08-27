@@ -6,11 +6,13 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ops/composite.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
+#include <tuple>
 
 namespace torch {
 namespace jit {
@@ -179,11 +181,12 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self,
-             c10::complex<double> val) -> nvfuser::Scalar* {
+             std::complex<double> val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<
                               torch::jit::fuser::cuda::ComplexDouble,
-                              c10::complex<double>>({out->index}, val));
+                              c10::complex<double>>(
+                {out->index}, static_cast<c10::complex<double>>(val)));
             return out;
           },
           py::return_value_policy::reference)
@@ -292,6 +295,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("round", round)
   NVFUSER_PYTHON_BINDING_UNARY_OP("rsqrt", rsqrt)
   NVFUSER_PYTHON_BINDING_UNARY_OP("set", set)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("sign", sign)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sigmoid", sigmoid)
   NVFUSER_PYTHON_BINDING_UNARY_OP("silu", silu)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sin", sin)
@@ -925,6 +929,25 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
             {arg->index}, {output->index}, axes, correction, keepdim));
         return output;
+      },
+      py::return_value_policy::reference);
+
+  nvf_ops.def(
+      "var_mean",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int>& dims,
+         int64_t correction,
+         bool keepdim) -> decltype(auto) {
+        nvfuser::Tensor* var = self.fusion_definition->defineTensor();
+        nvfuser::Tensor* mean = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::VarianceMeanOpRecord(
+            {arg->index},
+            {var->index, mean->index},
+            dims,
+            correction,
+            keepdim));
+        return std::make_tuple(var, mean);
       },
       py::return_value_policy::reference);
 

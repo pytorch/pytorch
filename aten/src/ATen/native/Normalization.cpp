@@ -186,6 +186,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
     auto _mean_a = _mean.accessor<param_t, 1>();
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
+    auto momentum_ = static_cast<param_t>(momentum);
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
 
@@ -195,11 +196,11 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
         if (running_mean.defined()) {
-          running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
+          running_mean_a[f] = momentum_ * _mean_a[f] + (1 - momentum_) * running_mean_a[f];
         }
         if (running_var.defined()) {
-           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
-           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+          accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
+          running_var_a[f] = momentum_ * unbiased_var + (1 - momentum_) * running_var_a[f];
         }
       }
     });
@@ -523,7 +524,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled
                );
 
-  if (use_miopen) {
+  if (use_miopen && input.suggest_memory_format() != MemoryFormat::ChannelsLast && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),

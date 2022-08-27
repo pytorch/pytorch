@@ -81,9 +81,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<c10::complex<double>>(c_obj);
     }
     case TypeKind::SymIntType:
-      return torch::is_symint_node(obj)
-          ? obj.cast<c10::SymIntNodeImpl*>()->toSymInt()
-          : c10::SymInt{py::cast<int64_t>(obj)};
+      return py::cast<c10::SymInt>(obj);
     case TypeKind::IntType:
     // NB: Typically, these switches are completely dead, because
     // Argument::type() will always report IntType for these types.
@@ -194,9 +192,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::List<c10::SymInt> symints;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            auto si = torch::is_symint_node(elm)
-                ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-                : c10::SymInt{py::cast<int64_t>(elm)};
+            auto si = py::cast<c10::SymInt>(elm);
             symints.push_back(si);
           }
           return symints;
@@ -246,7 +242,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType(), N);
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();

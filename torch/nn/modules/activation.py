@@ -934,6 +934,7 @@ class MultiheadAttention(Module):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -1091,6 +1092,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "attn_mask was not None"
         elif query.is_nested and key_padding_mask is not None:
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
+        elif self.num_heads % 2 == 1:
+            why_not_fast_path = "num_heads is odd"
 
         if not why_not_fast_path:
             tensor_args = (
@@ -1112,19 +1115,37 @@ class MultiheadAttention(Module):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
-                return torch._native_multi_head_attention(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    key_padding_mask if key_padding_mask is not None else attn_mask,
-                    need_weights,
-                    average_attn_weights)
+                if not torch.jit.is_scripting():
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        key_padding_mask if key_padding_mask is not None else attn_mask,
+                        need_weights,
+                        average_attn_weights,
+                        1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+                elif attn_mask is None:
+                    # hack until 9/26/2022 for TS jit compatibility window
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        key_padding_mask if key_padding_mask is not None else attn_mask,
+                        need_weights,
+                        average_attn_weights)
+
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
@@ -1302,7 +1323,7 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1429,7 +1450,7 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
