@@ -1526,6 +1526,7 @@ Node* insertQuantDequantNodes<QuantOpParams>(
     Node* observer,
     QuantOpParams& qparams,
     const std::string& quantize_func) {
+  (void)self;
   Graph* g = observer->owningGraph();
   Value* observer_out = observer->output();
   Value* original_val = observer->input(1);
@@ -1622,12 +1623,12 @@ QuantOpParams InsertQuantDeQuantHelper::insertCalculateQParams(
 
 void InsertQuantDeQuantHelper::insertCalculateQParamsAndQuantizationOps(
     Module& module,
-    Graph* g,
+    Graph* graph,
     Value* self) {
-  if (!observer_nodes_for_graph_.count(g)) {
+  if (!observer_nodes_for_graph_.count(graph)) {
     return;
   }
-  for (auto* n : observer_nodes_for_graph_.at(g)) {
+  for (auto* n : observer_nodes_for_graph_.at(graph)) {
     Graph* g = n->owningGraph();
     // Observer output
     Value* observer_out = n->output();
