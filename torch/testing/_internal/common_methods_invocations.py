@@ -6057,7 +6057,7 @@ def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
     for a, b in irreversible_cases:
         yield SampleInput(make_arg(a), args=(b,))
 
-def error_inputs_reshape(op, device, **kwargs):
+def error_inputs_view_reshape(op, device, **kwargs):
 
     cases = (
         # Reshape to different numel
@@ -13126,7 +13126,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=True),
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=True),
-           error_inputs_func=error_inputs_reshape,
+           error_inputs_func=error_inputs_view_reshape,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13150,6 +13150,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=False),
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=False),
+           error_inputs_func=error_inputs_view_reshape,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
