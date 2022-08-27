@@ -387,6 +387,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2);
+  REDUCTION_BOXED_ARGS(linalg_matrix_norm, 2);
   REDUCTION_BOXED(log_softmax.int);
   REDUCTION_BOXED(logcumsumexp);
   REDUCTION_BOXED(logsumexp);
