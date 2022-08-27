@@ -145,6 +145,12 @@ def convert_dynamic_jit(model, inplace=False, debug=False, preserved_attrs=None)
 def _convert_ondevice_dynamic_jit(model, method_name, inplace=False, debug=False):
     return _convert_ondevice_jit(model, method_name, inplace, debug, quant_type=QuantType.DYNAMIC)
 
+
+def _quantize_ondevice_dynamic_jit_impl(model, qconfig_dict, method_name, inplace=False):
+    model = _prepare_ondevice_dynamic_jit(model, qconfig_dict, method_name, inplace)
+    model = _convert_ondevice_dynamic_jit(model, method_name, inplace)
+    return model
+
 def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
     # Always do inplace convert because the Tensor is already
     # copied in prepare_jit when inplace is False
@@ -255,3 +261,63 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
     """
     torch._C._log_api_usage_once("quantization_api.quantize_jit.quantize_dynamic_jit")
     return _quantize_jit(model, qconfig_dict, inplace=inplace, debug=debug, quant_type=QuantType.DYNAMIC)
+
+
+def _quantize_ondevice_dynamic_jit(model, qconfig_dict, method_name='forward', inplace=False):
+    r"""Prepares the input float TorchScript model with
+    *on-device* post training dynamic quantization.
+    Currently only qint8 quantization of torch.nn.Linear is supported.
+
+    Args:
+        `model`: input float TorchScript model
+        `qconfig_dict`: qconfig_dict is a dictionary with names of sub modules as key and
+        qconfig for that module as value, please see detailed
+        `method_name`: Name of the method within the model, to be prepared for quantization
+        descriptions in :func:`~torch.ao.quantization.quantize_jit`
+        `inplace`: carry out model transformations in-place, the original module is
+        mutated
+
+    Return:
+        TorchScript model that is ready for on device quantization.
+        This means that the returned
+        model has:
+        - Method is inlined.
+        - Model has observer modules inserted in the model.
+        - Model has packed params inserted in the model. However they are empty as in they dont
+          contain valid quantized weights.
+        - observe_<method_name> is added that observe the values to be quantized.
+        - reset_observers_<method_name> to reset observers.
+        - quantize_<method_name> is added to the model.
+          - This method extract scale, zero points.
+          - Quantizes observed weights.
+          - Creates packed params from it and update the attribute of the model with the new values
+            for the packed params.
+          - Reset the original fp32 weights with empty tensor using SetAttr.
+        - quantized_<method_name> is added to the model.
+          - This method uses quantized weights and quantized linear ops instead of fp32 op.
+          - This method should be used for inference post PTQ.
+        - Note that all method's signatures should be the same as method_name.
+
+        Later on device:
+        - Run reset_observers_<method_name>
+        - Run observe_<method_name>
+        - Run quantize_<method_name>
+        - Now model can be saved and loaded later.
+        - Run model with quantized_<method_name>
+
+    Example:
+    ```python
+    import torch
+    from torch.ao.quantization import per_channel_dynamic_qconfig
+    from torch.ao.quantization.quantize_jit import _quantize_ondevice_dynamic_jit
+
+    ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
+    qconfig = get_default_qconfig('fbgemm')
+    quant_ready_model = _quantize_ondevice_dynamic_jit(
+        ts_model,
+        {'': qconfig},
+        'forward',
+        True)
+    ```
+    """
+    return _quantize_ondevice_dynamic_jit_impl(model, qconfig_dict, method_name, inplace=inplace)
