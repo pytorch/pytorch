@@ -130,6 +130,11 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                   ),
     ]
 
+
+def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
+    raise FileNotFoundError("testing")
+
+
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -153,6 +158,14 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = DummyGitRepo()
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_raise)
+    def test_read_merge_rules_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
+        "Tests that PR fails to read the merge rules"
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        repo = DummyGitRepo()
+        self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)

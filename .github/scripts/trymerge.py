@@ -980,8 +980,10 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
-            print(f"{rules_path} does not exist, returning empty rules")
-            return []
+            reject_reason = (f"{rules_path} does not exist, no merge rule can be found. "
+                             f"Please run `@pytorchbot rebase -s` to rebase the PR "
+                             f"onto PyTorch stable branch before trying to merge again.")
+            raise FileNotFoundError(reject_reason)
         with open(rules_path) as fp:
             rc = yaml.safe_load(fp)
         return [MergeRule(**x) for x in rc]
@@ -996,8 +998,23 @@ def find_matching_merge_rule(pr: GitHubPR,
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-    rules = read_merge_rules(repo, pr.org, pr.project)
-    reject_reason = f"PR {pr.pr_num} does not match merge rules"
+
+    issue_link = (f"https://github.com/{pr.org}/{pr.project}/issues/new"
+                  f"?labels=module%3A%20ci&template=bug-report.yml")
+    bug_report = (f"Please help file a [bug report]({issue_link}) "
+                  f"to PyTorch DevX Team with the PR number.")
+
+    try:
+        # Any error here means that the script couldn't load the merge rules for
+        # some reasons, and the error should say so
+        rules = read_merge_rules(repo, pr.org, pr.project)
+    except FileNotFoundError as error:
+        raise RuntimeError(str(error))
+    except RuntimeError as error:
+        raise RuntimeError(f"{error}. {bug_report}")
+
+    reject_reason = (f"PR {pr.pr_num} does not match any merge rules. "
+                     f"This should not happen. {bug_report}")
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
@@ -1066,8 +1083,12 @@ def find_matching_merge_rule(pr: GitHubPR,
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
+
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason)
+
+    # Reaching here means the default reject reason will be used. This should not happen
+    # and is most likely a bug
     raise RuntimeError(reject_reason)
 
 
