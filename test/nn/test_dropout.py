@@ -33,7 +33,7 @@ class TestDropoutNN(NNTestCase):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
         self._test_alpha_dropout(nn.AlphaDropout, input)
-    
+
     def test_FeatureAlphaDropout(self):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
