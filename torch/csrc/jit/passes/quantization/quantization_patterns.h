@@ -1061,7 +1061,8 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
   };
 }
 
-std::vector<QuantFusionInfo> dynamic_quantized_linear_pattern_and_replacements() {
+inline std::vector<QuantFusionInfo>
+dynamic_quantized_linear_pattern_and_replacements() {
   std::string linear_dynamic = R"(
 graph(%packed_params, %a):
         %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
