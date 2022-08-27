@@ -339,6 +339,15 @@ TensorBase empty_symint_meta(
       }
       break;
     }
+    case MemoryFormat::ChannelsLast: {
+      TORCH_CHECK(dim == 4, "required rank 4 tensor to use channels_last format");
+      std::vector<int> order({1, 3, 2, 0});
+      strides.at(order[0]) = 1;
+      for (auto i = 1; i < dim; i++) {
+        strides.at(order[i]) = strides.at(order[i-1]) * size.at(order[i-1]);
+      }
+      break;
+    }
     default:
       TORCH_CHECK(0, "other memory format not implemented yet");
   }
