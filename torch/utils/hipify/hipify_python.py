@@ -413,7 +413,7 @@ def find_closure_group(input_string, start, group):
 
     Example:
         >>> find_closure_group("(hi)", 0, ["(", ")"])
-        0, 3
+        (0, 3)
     """
 
     inside_parenthesis = False

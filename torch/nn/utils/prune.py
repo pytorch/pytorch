@@ -1071,7 +1071,7 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
         ...     amount=10,
         ... )
         >>> print(sum(torch.nn.utils.parameters_to_vector(net.buffers()) == 0))
-        tensor(10, dtype=torch.uint8)
+        tensor(10)
 
     """
     # ensure parameters is a list or generator of tuples
