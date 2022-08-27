@@ -10,15 +10,17 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
 # TODO(#78694): Refactor the patching process to make it more transparent to users.
+@_beartype.beartype
 def _graph_op(
     g: _C.Graph,
     opname: str,
-    *raw_args: _C.Value,
+    *raw_args: Union[torch.Tensor, torch._C.Value],
     outputs: int = 1,
     **kwargs,
 ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
@@ -76,6 +78,7 @@ def _graph_op(
     return tuple(n.outputs())
 
 
+@_beartype.beartype
 def _const_if_tensor(g: _C.Graph, arg):
     if arg is None:
         return arg
@@ -85,6 +88,7 @@ def _const_if_tensor(g: _C.Graph, arg):
 
 
 # Generate an ONNX ATen op node.
+@_beartype.beartype
 def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
     return _graph_op(
         g,
@@ -96,6 +100,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
     )
 
 
+@_beartype.beartype
 def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     if "::" in opname:
         aten = False
@@ -115,6 +120,7 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     return outputs
 
 
+@_beartype.beartype
 def _new_node(
     g: _C.Graph, namespace: str, op: str, outputs: int, *args, **kwargs
 ) -> _C.Node:
@@ -138,6 +144,7 @@ def _new_node(
     return node
 
 
+@_beartype.beartype
 def _is_onnx_list(value):
     return (
         not isinstance(value, torch._six.string_classes)
@@ -146,12 +153,14 @@ def _is_onnx_list(value):
     )
 
 
+@_beartype.beartype
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
 
 
+@_beartype.beartype
 def _is_caffe2_aten_fallback():
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -159,6 +168,7 @@ def _is_caffe2_aten_fallback():
     )
 
 
+@_beartype.beartype
 def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _ATTR_PATTERN.match(key)
@@ -188,6 +198,7 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 @_deprecation.deprecated(
     "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
 )
+@_beartype.beartype
 def _graph_constant(
     g,
     value,

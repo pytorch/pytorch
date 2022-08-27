@@ -16,6 +16,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_opset9 as opset9,
 )
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -58,6 +59,7 @@ __all__ = [
 ]
 
 
+@_beartype.beartype
 def div(g, self, other, *args):
     if len(args) == 0:
         return opset9.true_divide(g, self, other)
@@ -66,6 +68,7 @@ def div(g, self, other, *args):
 
 
 @symbolic_helper.parse_args("v", "v", "s")
+@_beartype.beartype
 def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode == "floor":
         return _floor_divide(g, self, other)
@@ -73,6 +76,7 @@ def _div_rounding_mode(g, self, other, rounding_mode):
         return opset9._div_rounding_mode(g, self, other, rounding_mode)
 
 
+@_beartype.beartype
 def _floor_divide(g, self, other):
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
         out = opset9.true_divide(g, self, other)
@@ -94,20 +98,24 @@ def _floor_divide(g, self, other):
 
 
 @symbolic_helper.parse_args("v", "i", "i", "none")
+@_beartype.beartype
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 @symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
+@_beartype.beartype
 def topk(g, self, k, dim, largest, sorted, out=None):
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
     )
 
 
+@_beartype.beartype
 def _max_pool(name, tuple_fn, ndims, return_indices):
     @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
+    @_beartype.beartype
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
@@ -178,9 +186,11 @@ max_pool3d_with_indices = _max_pool(
 )
 
 
+@_beartype.beartype
 def _avg_pool(name, tuple_fn):
     @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
+    @_beartype.beartype
     def symbolic_fn(
         g,
         input: _C.Value,
@@ -196,6 +206,7 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
+        assert isinstance(padding, tuple)
         if count_include_pad:
             input = opset9.op_with_optional_float_cast(
                 g,
@@ -225,8 +236,10 @@ avg_pool2d = _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
 avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
+@_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
     @symbolic_helper.quantized_args(True, False, False)
+    @_beartype.beartype
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -252,6 +265,7 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
 
+@_beartype.beartype
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -261,6 +275,7 @@ def __interpolate(
     return g.op("Resize", input, scales, mode_s=mode)
 
 
+@_beartype.beartype
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = symbolic_helper._unsqueeze_helper(g, starts, [0])
@@ -288,6 +303,7 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
+@_beartype.beartype
 def slice(g, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor
@@ -336,6 +352,7 @@ def slice(g, self, *args):
 
 
 @symbolic_helper.parse_args("v", "is")
+@_beartype.beartype
 def flip(g, input, dims):
     return symbolic_helper._slice_helper(
         g,
@@ -347,11 +364,13 @@ def flip(g, input, dims):
     )
 
 
+@_beartype.beartype
 def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
 
 
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
+@_beartype.beartype
 def embedding_bag(
     g,
     embedding_matrix,
@@ -437,6 +456,7 @@ def embedding_bag(
 
 
 @symbolic_helper.parse_args("v", "v", "v", "i", "i")
+@_beartype.beartype
 def fake_quantize_per_tensor_affine(
     g, inputs, scale, zero_point, quant_min=-128, quant_max=127
 ):
@@ -478,10 +498,12 @@ def fake_quantize_per_tensor_affine(
     )
 
 
+@_beartype.beartype
 def isinf(g, input):
     return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
 
 
+@_beartype.beartype
 def isfinite(g, input):
     from torch.onnx.symbolic_opset9 import __not_, __or_
 
@@ -490,6 +512,7 @@ def isfinite(g, input):
     return __not_(g, __or_(g, inf_node, nan_node))
 
 
+@_beartype.beartype
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     # TODO(justinchuby): Extract all the cast ops into a helper function.
@@ -500,11 +523,13 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
 
 
+@_beartype.beartype
 def dequantize(g, input):
     return symbolic_helper.dequantize_helper(g, input)[0]
 
 
 @symbolic_helper.parse_args("v", "f", "f", "f")
+@_beartype.beartype
 def nan_to_num(g, input, nan, posinf, neginf):
     # Cannot create a int type tensor with inf/nan values, so we simply
     # return the original tensor
@@ -566,6 +591,7 @@ class Quantized:
     domain = "quantized"
 
     @staticmethod
+    @_beartype.beartype
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
         input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
         weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
@@ -579,6 +605,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def add(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -588,6 +615,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def add_relu(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -598,6 +626,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def mul(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -607,6 +636,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def hardswish(g, x, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -615,6 +645,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def sigmoid(g, x, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -623,6 +654,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -631,6 +663,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def layer_norm(g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -639,6 +672,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -648,6 +682,7 @@ class Quantized:
 
     @staticmethod
     @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
+    @_beartype.beartype
     def instance_norm(
         g,
         q_input,
@@ -660,12 +695,13 @@ class Quantized:
         input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
 
         output = opset9.instance_norm(
-            g, input, weight, bias, None, None, False, 0, eps, False
+            g, input, weight, bias, None, None, False, 0.0, eps, False
         )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def conv2d_relu(
         g,
         q_input,
@@ -693,6 +729,7 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    @_beartype.beartype
     def conv2d(
         g,
         q_input,
@@ -720,6 +757,7 @@ class Quantized:
 
     @staticmethod
     @symbolic_helper.parse_args("v", "i", "v", "v")
+    @_beartype.beartype
     def cat(
         g,
         q_inputs: _C.Value,
