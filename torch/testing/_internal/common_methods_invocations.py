@@ -11,7 +11,6 @@ import math
 import torch
 import numpy as np
 from torch._six import inf, nan
-import collections.abc
 
 from typing import Any, Dict, List, Tuple, Union
 from torch.testing import make_tensor
