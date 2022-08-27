@@ -1876,21 +1876,14 @@ def amax(
     )
 
 
-def _set_correction(
-    unbiased: Optional[bool] = None,
-    correction: Optional[int] = None,
-):
-    if correction is not None and unbiased is not None:
-        raise RuntimeError("cannot specify both correction and unbiased arguments")
-    elif correction is None and unbiased is None:
-        correction = 1
-    elif correction is None and unbiased is not None:
-        correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
-        raise ValueError("correction argument should be integer")
-    if correction < 0:
-        raise ValueError("correction argument should be non-negative")
-    return correction
+def _dim_var_dispatch(dim=None, unbiased=None):
+    # There's the following overload of torch.var:
+    # var(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    # We need to explicitly convert bool dims to unbiased arg
+    if unbiased is None and isinstance(dim, bool):
+        unbiased = dim
+        dim = None
+    return dim, unbiased
 
 
 @out_wrapper()
@@ -1902,7 +1895,8 @@ def var(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
-    correction = _set_correction(unbiased, correction)
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
+    correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -1929,7 +1923,8 @@ def std(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
-    correction = _set_correction(unbiased, correction)
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
+    correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2003,6 +1998,7 @@ def std_mean(
     keepdim: bool = False,
     correction: Optional[int] = None,
 ):
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     s = std(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return s, m
@@ -2017,6 +2013,7 @@ def var_mean(
     *,
     correction: Optional[int] = None,
 ):
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     v = var(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return v, m
@@ -2430,7 +2427,9 @@ def _normalize(
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
-    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    biased_var, mean = torch.var_mean(
+        a_acc, dim=norm_dims, unbiased=False, keepdim=True
+    )
     rstd = torch.rsqrt(biased_var + eps)
     out = (a - mean) * rstd
     return out, mean, rstd
