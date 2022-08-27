@@ -270,6 +270,7 @@ class inference_mode(_DecoratorContextManager):
         mode (bool): Flag whether to enable or disable inference mode
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> import torch
         >>> x = torch.ones(1, 2, 3, requires_grad=True)
         >>> with torch.inference_mode():

@@ -717,6 +717,9 @@ def run_doctests(test_module, test_directory, options):
 
     if 0:
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
+        os.environ['TORCH_DOCTEST_ANOMOLY'] = '1'
+        os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
+        os.environ['TORCH_DOCTEST_HUB'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {

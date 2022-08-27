@@ -57,6 +57,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
             >>> my_lib = Library("foo", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         '''

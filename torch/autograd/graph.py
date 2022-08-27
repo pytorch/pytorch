@@ -48,6 +48,7 @@ class saved_tensors_hooks():
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pack_hook(x):
         ...     print("Packing", x)
         ...     return x

@@ -246,6 +246,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
         ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
@@ -343,6 +344,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
         ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
@@ -544,6 +546,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
         ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(2, 2)
@@ -755,6 +758,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
         ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
@@ -858,6 +862,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
         ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
@@ -948,6 +953,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
         ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
