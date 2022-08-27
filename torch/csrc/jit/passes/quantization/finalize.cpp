@@ -63,11 +63,11 @@ void removePackedParamInsertionAndFPWeightsSetAttr(
       }
     }
   }
-  for (auto n : nodes_to_delete) {
-    n->removeAllInputs();
+  for (auto node : nodes_to_delete) {
+    node->removeAllInputs();
   }
-  for (auto n : nodes_to_delete) {
-    n->destroy();
+  for (auto node : nodes_to_delete) {
+    node->destroy();
   }
   ConstantPooling(g);
   EliminateDeadCode(g);
@@ -90,11 +90,11 @@ void removeObserverCallMethods(std::shared_ptr<Graph>& g) {
       }
     }
   }
-  for (auto n : nodes_to_delete) {
-    n->removeAllInputs();
+  for (auto node : nodes_to_delete) {
+    node->removeAllInputs();
   }
-  for (auto n : nodes_to_delete) {
-    n->destroy();
+  for (auto node : nodes_to_delete) {
+    node->destroy();
   }
   EliminateDeadCode(g);
 }
@@ -104,7 +104,7 @@ void keepOnlyPackedParamsGeneration(Module& m, const std::string& method_name) {
   Function& function = m.get_method(method_name).function();
   const auto& schema = function.getSchema();
   auto new_schema = schema.cloneWithReturns({Argument("", NoneType::get())});
-  for (int64_t i = 0, output_size = g->outputs().size(); i < output_size; i++) {
+  for (size_t i = 0, output_size = g->outputs().size(); i < output_size; i++) {
     g->eraseOutput(i);
   }
   Node* none_node = g->createNone();
