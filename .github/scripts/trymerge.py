@@ -9,6 +9,7 @@ import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
+import yaml
 from typing import (
     Any,
     Callable,
@@ -933,6 +934,7 @@ class GitHubPR:
                                       branch: str,
                                       force: bool = False,
                                       comment_id: Optional[int] = None,) -> str:
+        orig_branch = repo.current_branch()
         self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
         land_check_branch = f'landchecks/{self.pr_num}'
         try:
@@ -942,6 +944,9 @@ class GitHubPR:
         repo._run_git('checkout', "-b", land_check_branch)
         repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
+        # Important, return to original branch
+        if repo.current_branch() != orig_branch:
+            repo.checkout(orig_branch)
         return commit
 
 
@@ -963,7 +968,7 @@ class MergeRule:
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     from pathlib import Path
 
-    repo_relative_rules_path = Path(".github") / "merge_rules.json"
+    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -971,15 +976,15 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
             reader=json.load,
         )
         content = base64.b64decode(json_data["content"])
-        return cast(List[MergeRule], json.loads(content, object_hook=lambda x: MergeRule(**x)))
+        return [MergeRule(**x) for x in yaml.safe_load(content)]
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
             print(f"{rules_path} does not exist, returning empty rules")
             return []
         with open(rules_path) as fp:
-            rc = json.load(fp, object_hook=lambda x: MergeRule(**x))
-        return cast(List[MergeRule], rc)
+            rc = yaml.safe_load(fp)
+        return [MergeRule(**x) for x in rc]
 
 
 def find_matching_merge_rule(pr: GitHubPR,
@@ -1043,14 +1048,20 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = ("Refusing to merge as mandatory check(s) " +
-                                 checks_to_str(failed_checks) + f" failed for rule {rule_name}")
+                reject_reason = (
+                    f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
+                    + f"Refusing to merge as mandatory check(s) {checks_to_str(failed_checks)} failed for "
+                    + f"rule {rule_name}."
+                )
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)}"
-                reject_reason += f" are pending/not yet run for rule {rule_name}"
+                reject_reason = (
+                    f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
+                    + f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)} are pending/not yet run for "
+                    + f"rule {rule_name}."
+                )
             continue
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
@@ -1323,7 +1334,7 @@ def main() -> None:
         msg += f"\nReason: {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
-            msg += f"\nRaised by {run_url}"
+            msg += f"\nRaised by [workflow job]({run_url})"
         if args.land_checks:
             msg += get_land_check_troubleshooting_message()
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
