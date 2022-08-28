@@ -106,32 +106,33 @@ at::Tensor generate_uniform(int64_t size, at::ScalarType dtype) {
 } // namespace
 
 TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  Int* size_val = IrBuilder::create<Int>();
+  fusion->addInput(size_val);
+  TensorView* tv0 = rand({size_val}, DataType::Float);
+  TensorView* tv1 = rand({size_val}, DataType::Double);
+  fusion->addOutput(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
   for (int64_t size : {16, 1024, 10001, 10002, 10003, 100000, 10000001}) {
-    for (auto dtype : {kFloat, kDouble}) {
-      std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-      auto fusion = fusion_ptr.get();
-      FusionGuard fg(fusion);
+    at::manual_seed(0);
+    auto cg_outputs = fec.runFusionWithInputs({size});
 
-      Int* size_val = IrBuilder::create<Int>();
-      fusion->addInput(size_val);
-      TensorView* tv0 = rand({size_val}, aten_to_data_type(dtype));
-      fusion->addOutput(tv0);
+    at::manual_seed(0);
+    auto ref0 = generate_uniform(size, kFloat);
+    auto ref1 = generate_uniform(size, kDouble);
 
-      FusionExecutorCache fec(std::move(fusion_ptr));
-
-      at::manual_seed(0);
-      auto cg_outputs = fec.runFusionWithInputs({size});
-      auto out = cg_outputs[0];
-
-      at::manual_seed(0);
-      auto ref = generate_uniform(size, dtype);
-
-      testValidate(fec.fusion(), {out}, {size}, {ref}, __LINE__, __FILE__);
-    }
+    testValidate(
+        fec.fusion(), cg_outputs, {size}, {ref0, ref1}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionRNGSimpleValidateWithCURand_CUDA) {
+TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand_CUDA) {
   int64_t size = 128;
   auto dtype = kFloat;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();

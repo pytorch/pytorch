@@ -362,19 +362,6 @@ Val* getMaximumValue(DataType v) {
 
 } // namespace
 
-// TENSOR FACTORIES
-TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
-  auto n = shape.size();
-  auto out = TensorViewBuilder()
-                 .ndims(n)
-                 .dtype(dtype)
-                 .contiguity(std::vector<bool>(n, true))
-                 .shape(shape)
-                 .build();
-  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out);
-  return out;
-}
-
 Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype) {
     return set(v1);
@@ -454,19 +441,27 @@ TensorView* unaryOp(
 }
 
 // TENSOR FACTORIES
-TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype) {
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out);
+  return out;
+}
+
+TensorView* arange(Val* end, DataType dtype) {
   return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
 }
 
-TORCH_CUDA_CU_API TensorView* arange(Val* start, Val* end, DataType dtype) {
+TensorView* arange(Val* start, Val* end, DataType dtype) {
   return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
 }
 
-TORCH_CUDA_CU_API TensorView* arange(
-    Val* start,
-    Val* end,
-    Val* step,
-    DataType dtype) {
+TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
   if (isIntegralType(dtype)) {
     start = castOp(DataType::Int, start);
     end = castOp(DataType::Int, end);

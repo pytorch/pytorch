@@ -376,7 +376,8 @@ void Fusion::printMath(bool from_outputs_only) {
 std::vector<Val*> Fusion::inputsAndCreated() {
   auto result = inputs_;
   for (auto expr : exprs()) {
-    if (expr->inputs().empty()) {
+    auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
+    if (tv_inputs.empty()) {
       for (auto v : expr->outputs()) {
         result.emplace_back(v);
       }

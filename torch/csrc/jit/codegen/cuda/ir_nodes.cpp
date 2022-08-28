@@ -353,6 +353,11 @@ RNGOp::RNGOp(
       rng_op_type_(type),
       rng_offset_(rng_offset),
       philox_index_(philox_index) {
+  if (out->isA<TensorView>()) {
+    for (auto id : out->as<TensorView>()->getRootDomain()) {
+      addInput(id->extent());
+    }
+  }
   addOutput(out);
 }
 

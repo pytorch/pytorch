@@ -419,27 +419,28 @@ void IrPrinter::handle(const TernaryOp* top) {
 }
 
 void IrPrinter::handle(const RNGOp* rop) {
-  bool istvop = ir_utils::isTvOp(rop);
   if (!print_inline_) {
     indent();
-    os_ << rop->output(0);
-
-    // tensor operations tend to be long, break them up into multiple lines
-    if (istvop) {
-      os_ << "\n";
-      indent_size_++;
-      indent();
-    }
-
+    os_ << rop->output(0) << "\n";
+    indent_size_++;
+    indent();
     os_ << " = ";
   } else {
     checkInlineable(rop);
   }
 
-  os_ << rop->getRNGOpType() << "()";
+  os_ << rop->getRNGOpType() << "(";
+  bool first = true;
+  for (auto i : rop->inputs()) {
+    if (!first) {
+      os_ << ", ";
+    }
+    handle(i);
+    first = false;
+  }
+  os_ << ")";
 
-  if (istvop)
-    indent_size_--;
+  indent_size_--;
 
   if (!print_inline_)
     os_ << ";\n";
