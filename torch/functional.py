@@ -1604,6 +1604,7 @@ def chain_matmul(*matrices, out=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)

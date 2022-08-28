@@ -81,6 +81,8 @@ class IterableDataset(Dataset[T_co]):
 
     Example 1: splitting workload across all workers in :meth:`__iter__`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
+        >>> # xdoctest: +SKIP("Fails on MacOS12")
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -122,6 +124,7 @@ class IterableDataset(Dataset[T_co]):
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
