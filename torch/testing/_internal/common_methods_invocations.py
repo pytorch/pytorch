@@ -4615,10 +4615,6 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
         SampleInput(tensor_nd(), kwargs=dict(dim=(1,), correction=S // 2)),
         SampleInput(tensor_nd(), kwargs=dict(dim=None, correction=0, keepdim=True)),
-
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), args=(True,)),
-        SampleInput(tensor_nd(), args=(False,)),
     ]
 
 
@@ -16973,17 +16969,6 @@ python_ref_db = [
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
-    ),
-    PythonRefInfo(
-        "ops.nvprims.var_mean",
-        torch_opinfo_name="var_mean",
-        validate_view_consistency=False,
-        # Complex types are currently disabled
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        # This function is expected not to work with TorchRefsMode(strict=True)
-        decorators=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-        ),
     ),
     #
     # Linear Algebra Operators

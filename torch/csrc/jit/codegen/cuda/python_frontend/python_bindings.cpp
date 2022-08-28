@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
-#include <tuple>
 
 namespace torch {
 namespace jit {
@@ -929,25 +928,6 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
             {arg->index}, {output->index}, axes, correction, keepdim));
         return output;
-      },
-      py::return_value_policy::reference);
-
-  nvf_ops.def(
-      "var_mean",
-      [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor* arg,
-         std::vector<int>& dims,
-         int64_t correction,
-         bool keepdim) -> decltype(auto) {
-        nvfuser::Tensor* var = self.fusion_definition->defineTensor();
-        nvfuser::Tensor* mean = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::VarianceMeanOpRecord(
-            {arg->index},
-            {var->index, mean->index},
-            dims,
-            correction,
-            keepdim));
-        return std::make_tuple(var, mean);
       },
       py::return_value_policy::reference);
 
