@@ -6,6 +6,7 @@ from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeigh
 
 from torch.utils._pytree import tree_flatten
 
+
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
 def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
@@ -28,9 +29,9 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
           running mean across a batch. Must be "mean" or "sum". Default: "sum"
 
     Examples::
+        >>> # xdoctest: +SKIP
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> # xdoctest: +SKIP
         >>> res = call_for_per_sample_grads(model)(batched_input).sum()
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)

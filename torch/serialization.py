@@ -49,6 +49,7 @@ __all__ = [
     'StorageType',
 ]
 
+
 class SourceChangeWarning(Warning):
     pass
 
@@ -378,11 +379,13 @@ def _check_dill_version(pickle_module) -> None:
                 pickle_module.__version__
             ))
 
+
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
         raise AttributeError((
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute"))
+
 
 def save(
     obj: object,
@@ -423,6 +426,7 @@ def save(
         to use the old format, pass the kwarg ``_use_new_zipfile_serialization=False``.
 
     Example:
+        >>> # xdoctest: +SKIP("makes cwd dirty")
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')

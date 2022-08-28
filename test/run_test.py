@@ -721,6 +721,8 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
         os.environ['TORCH_DOCTEST_HUB'] = '1'
         os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+        os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
     xdoctest_config = {
