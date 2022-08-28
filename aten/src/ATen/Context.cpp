@@ -311,6 +311,15 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
+#if !AT_MKLDNN_ENABLED() && defined(USE_FBGEMM)
+    if (fbgemm::fbgemmSupportedCPU()) {
+      engines.push_back(at::kX86);
+    }
+#elif AT_MKLDNN_ENABLED()
+    engines.push_back(at::kX86);
+#endif
+
     return engines;
   }();
   return supported_qengines;

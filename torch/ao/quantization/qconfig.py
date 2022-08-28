@@ -244,6 +244,9 @@ def get_default_qconfig(backend='fbgemm', version=0):
         elif backend == 'onednn':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+                              weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
     else:
