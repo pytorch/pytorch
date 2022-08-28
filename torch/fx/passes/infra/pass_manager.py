@@ -31,6 +31,8 @@ def inplace_wrapper(fn: Callable) -> Callable:
         fn(gm)
         return PassResult(gm, True)
 
+    if wrapped_fn.__name__ == 'wrapped_fn':
+        wrapped_fn.__name__ = str(fn)
     return wrapped_fn
 
 @compatibility(is_backward_compatible=False)
@@ -172,6 +174,8 @@ class PassManager:
         steps (int): Max number of times we run the passes (default = 1).
         run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
+        suppress_check_failures (bool): Whether to raise errors when running
+            checks
     """
 
     passes: List[Callable[[nn.Module], PassResult]] = []
@@ -186,6 +190,7 @@ class PassManager:
         steps=None,
         run_checks_after_each_pass: bool = False,
         suppress_check_failures: bool = False,
+        debug: bool = False,
     ):
         if passes:
             self.passes = passes
@@ -196,6 +201,7 @@ class PassManager:
 
         self.run_checks_after_each_pass = run_checks_after_each_pass
         self.suppress_check_failures = suppress_check_failures
+        self.debug = debug
 
     def add_pass(self, _pass: Callable):
         """
@@ -273,8 +279,16 @@ class PassManager:
             modified = False
 
             # Run the set of passes on the graph module
-            for fn in self.passes:
-                res = fn(module)
+            for i, fn in enumerate(self.passes):
+                if self.debug:
+                    print(f"Running pass \'{fn.__name__}\'")
+
+                try:
+                    res = fn(module)
+                except Exception as e:
+                    prev_pass_names = [p.__name__ for p in self.passes[:i]]
+                    msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
+                    raise type(e)(msg) from e
 
                 module = res.graph_module
                 modified = modified or res.modified

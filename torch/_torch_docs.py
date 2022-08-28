@@ -7095,7 +7095,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     {input}
-    {dim} If `None`, reduces all dimensions. Default is `None`.
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -10806,7 +10806,7 @@ any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -10971,7 +10971,7 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -12188,7 +12188,7 @@ Otherwise, the sample variance is calculated, without any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -12228,7 +12228,7 @@ correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -13523,6 +13523,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,

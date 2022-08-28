@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
+import operator
+import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
 
@@ -78,17 +80,18 @@ def create_contiguous(shape):
 class FakeSymbolicTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device):
-        # sym_strides doesn't work yet
-        # TODO: this is wrong in general
         offset = 0
+        # TODO: this is wrong in general
+        sym_stride = create_contiguous(sym_shape)
         r = torch.Tensor._make_wrapper_subclass(
             cls, sym_shape,
-            create_contiguous(sym_shape), offset,
+            sym_stride, offset,
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
 
         r.sym_shape = sym_shape
+        r.sym_stride = sym_stride
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -104,6 +107,10 @@ class FakeSymbolicTensor(torch.Tensor):
         if func_overload == torch.ops.aten.sym_size.default:
             self = args[0]
             return self.sym_shape
+
+        if func_overload == torch.ops.aten.sym_stride.default:
+            self = args[0]
+            return self.sym_stride
 
         # some calls can be redirected to `sym_size` rather than
         # `sym_sizes`. `sym_size` uses `dim` to canonicalize an index
@@ -131,6 +138,32 @@ CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
 class TestPySymInt(TestCase):
+
+    @skipIfNoSympy
+    def test_arith_ops(self):
+        shape_env = ShapeEnv()
+        symints = []
+        for i in range(5):
+            symints.append((i, shape_env.create_symint(f"s{i}", i)))
+
+        ops = [operator.add, operator.sub, operator.floordiv, operator.mul, operator.mod]
+
+        for op in ops:
+            for args in itertools.permutations(symints, 2):
+                if not isinstance(args[0][1], int) and ((op != operator.mod or op != operator.floordiv) and args[1][0] != 0):
+                    self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
+
+
+    @skipIfNoSympy
+    def test_reverse_arith_ops(self):
+        shape_env = ShapeEnv()
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 // a == 5 // 2)
+
+        a = shape_env.create_symint("s1", 2)
+        self.assertTrue(5 * a == 5 * 2)
+
 
     @skipIfNoSympy
     def test_roundtrip(self):
@@ -232,6 +265,12 @@ class TestPySymInt(TestCase):
 
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
+
+    @skipIfNoSympy
+    def test_stride(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
+        self.assertIsInstance(x.stride()[0], CPP_SYMINT_CLASS)
 
     @skipIfNoSympy
     def test_size_expressions(self):

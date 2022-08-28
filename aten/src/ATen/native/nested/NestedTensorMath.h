@@ -3,6 +3,9 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <ATen/NestedTensorImpl.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
+#include <c10/core/DispatchKeySet.h>
 
 #include <vector>
 
@@ -21,11 +24,52 @@ inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) 
 
 inline at::Tensor wrap_buffer(
     at::Tensor buffer, at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor, const std::vector<int64_t>& offsets) {
+    at::Tensor nested_stride_tensor, std::vector<int64_t>&& offsets) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_size_tensor),
-      std::move(nested_stride_tensor), offsets);
+      std::move(nested_stride_tensor), std::move(offsets));
+}
+
+inline at::Tensor get_buffer(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
+  /**
+   * Create a new nested tensor that is a view of a base nested tensor
+   *
+   * create_view_tensor calls a specialized constructor that copys the
+   * the keys from base onto the new view tensor being created.
+   * The storage is shared between the base and the returned view tensor
+   *
+   * All callers of this helper must:
+   * - Only return a view of the input
+   * - Must be explicit and define a derivative
+   *
+   * @param base Base tensor to construct view from.
+   * @param nested_size_tensor View tensors' sizes.
+   * @param nested_stride_tensor View tensors' strides.
+   * @param offsets View tensors' offsets.
+   * @return A newly constructed view tensor
+   */
+inline at::Tensor create_nested_view_tensor(
+    const at::Tensor& base,
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    std::vector<int64_t>&& offsets) {
+  TORCH_INTERNAL_ASSERT(
+      base.is_nested(),
+      "This function can only be used to create nested tensor views");
+  TORCH_INTERNAL_ASSERT(
+      c10::impl::tls_local_dispatch_key_set().excluded_.has(
+          c10::DispatchKey::AutogradFunctionality),
+      "Creating a non differentiable nested tensor view in a CompositeImplicit function is not allowed.");
+  return at::detail::make_tensor<NestedTensorImpl>(
+      c10::TensorImpl::VIEW,
+      base,
+      nested_size_tensor,
+      nested_stride_tensor,
+      std::move(offsets));
 }
 
 // The sizes of the underlying tensors
@@ -42,7 +86,8 @@ inline std::vector<IntArrayRef> NestedTensor_get_sizes(const NestedTensorImpl* s
     return sizes;
   }
   const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
+
+  for(const auto i: c10::irange(ntensors)){
     sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
     sizemat_ptr += orig_dim;
   }
@@ -68,7 +113,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(const NestedTensorImpl*
     return strides;
   }
   const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for(const auto i: c10::irange(ntensors)) {
     strides[i] = IntArrayRef(stridemat_ptr, stridemat_ptr + orig_dim);
     stridemat_ptr += orig_dim;
   }
