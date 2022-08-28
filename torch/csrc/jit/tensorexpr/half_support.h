@@ -101,7 +101,8 @@ class HalfRewriter : public IRMutator {
     // just don't allow half casts we didn't insert.
     if (isHalf(v)) {
       if (inserted_half_casts_.count(v) < 1) {
-        return child;
+        v->set_dtype(v->dtype().cloneWithScalarType(c10::kFloat));
+        return v;
       }
     }
 
