@@ -1,6 +1,7 @@
 import functools
 import torch
 import torch.distributed as dist
+from torch.distributed import distributed_c10d
 
 
 class DefaultState(object):
@@ -21,11 +22,9 @@ class DefaultState(object):
 
     def __init__(
         self,
-        process_group: dist.ProcessGroup
+        process_group
     ):
-        if process_group is None:
-            raise ValueError(f"Expected to pass in an explicit ProcessGroup to {self}.")
-        self.process_group = process_group
+        self.process_group = process_group if process_group is not None else distributed_c10d._get_default_group()
         self.world_size = dist.get_world_size(process_group)
         # Setting two factors `self.gradient_predivide_factor`
         # and `self.gradient_postdivide_factor` to avoid underflow and overflow
