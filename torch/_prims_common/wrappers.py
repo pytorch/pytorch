@@ -118,11 +118,9 @@ class elementwise_type_promotion_wrapper(object):
 
             result = fn(**bound.arguments)
 
-            if isinstance(result, TensorLike):
-                return _maybe_convert_to_dtype(result, result_dtype)
-            if isinstance(result, Sequence):
-                return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
-            raise AssertionError(f"Unhandled result type: {type(result)}")
+            # FIXME?: assumes result is a single tensor
+            assert isinstance(result, TensorLike)
+            return _maybe_convert_to_dtype(result, result_dtype)
 
         _fn.__signature__ = sig  # type: ignore[attr-defined]
         return _fn

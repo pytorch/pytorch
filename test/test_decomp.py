@@ -188,7 +188,6 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
             1e-3,
         ),
-        (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]

@@ -355,31 +355,6 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @dtypes(torch.float16, torch.float32)
-    @parametrize("correction", [0, 1])
-    @parametrize("keepdim", [True, False])
-    def test_var_mean(self, device, dtype, correction, keepdim):
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsNvfuserCapabilityMode
-
-
-        def _wrapper(a):
-            return torch.var_mean(a, [0, 1], correction=correction, keepdim=keepdim)
-
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(_wrapper)(make_arg((5, 5)))
-
-        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-        includes_nvprims_var_mean = any(
-            torch.ops.nvprims.var_mean.main == node.target
-            for node in call_function_nodes
-        )
-        self.assertTrue(includes_nvprims_var_mean)
-
-    @onlyCUDA
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_pytree_input_output(self, device, dtype):
         @make_traced
