@@ -1616,7 +1616,7 @@ def all_gather_multigpu(
 
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
-    _pickler(f).dump(obj)
+    torch.save(obj, f, pickle_protocol=pickle.DEFAULT_PROTOCOL)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
@@ -1626,10 +1626,10 @@ def _object_to_tensor(obj, device):
     return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size):
+def _tensor_to_object(tensor, tensor_size, map_location=None):
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    return torch.load(io.BytesIO(buf),map_location=map_location)
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
@@ -1835,7 +1835,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None, device=None):
+def broadcast_object_list(object_list, src=0, group=None, device=None, map_location=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1852,6 +1852,10 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         device (``torch.device``, optional): If not None, the objects are
             serialized and converted to tensors which are moved to the
             ``device`` before broadcasting. Default is ``None``.
+        map_location (``torch.device``, optional): The device to load tensors contained
+            in the received objects; this argument does not affec the source rank. If ``None``,
+            the tensors are loaded into the same device they were on when passed into this function.
+            Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1931,7 +1935,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
-            object_list[i] = _tensor_to_object(obj_view, obj_size)
+            object_list[i] = _tensor_to_object(obj_view, obj_size, map_location)
 
 
 def scatter_object_list(

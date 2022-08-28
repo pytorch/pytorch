@@ -29,7 +29,6 @@ from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
 )
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD, AdamW
 from torch.testing._internal import common_distributed
@@ -671,11 +670,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             optimizer_state_dict = {}
 
         # Load the optimizer state on all ranks without any exceptions
-        optimizer_state_dict = _broadcast_object(
+        optimizer_state_dict = dist.broadcast_object_list(
             optimizer_state_dict,
-            src_rank=REFERENCE_RANK,
+            src=REFERENCE_RANK,
             group=dist.group.WORLD,
-            device=self.device,
+            map_location=self.device,
         )
         optimizer.load_state_dict(optimizer_state_dict)
 
@@ -975,9 +974,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # Broadcast the saved gradients and parameters to all of the other
         # ranks (which joined early)
         grads_and_params = [grads_at_each_iter, params_at_each_iter]
-        grads_and_params = _broadcast_object(
-            grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD,
-            device=device,
+        dist.broadcast_object_list(
+            grads_and_params, src=world_size - 1, group=dist.group.WORLD,
+            map_location=device,
         )
         grads_at_each_iter = grads_and_params[0]
         params_at_each_iter = grads_and_params[1]
