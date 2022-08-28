@@ -28,10 +28,8 @@ Updated operators:
 import torch
 from torch import _C
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import _beartype
 
 
-@_beartype.beartype
 def __is_(g, self, other):
     if symbolic_helper._is_none(other):
         if isinstance(self.type(), _C.OptionalType):
@@ -43,7 +41,6 @@ def __is_(g, self, other):
 
 
 @opset9.wrap_logical_op_with_negation
-@_beartype.beartype
 def __isnot_(g, self, other):
     return __is_(g, self, other)
 
@@ -52,7 +49,6 @@ class Prim:
     domain = "prim"
 
     @staticmethod
-    @_beartype.beartype
     def unchecked_cast(g, self):
         # exists to refine the type of the Value
         # if x is Optional[Tensor], unchecked_cast will cast

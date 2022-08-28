@@ -3582,7 +3582,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
-        self.run_test(MyModuleDynamic(), (x, k))
+        self.run_test(MyModuleDynamic(), [x, k])
 
     @skipScriptTest()  # Python builtin apply of FunctionMeta object is currently not supported in Torchscript.
     @skipIfUnsupportedMinOpsetVersion(11)  # Clip op min is an input since opset 11.
@@ -7396,28 +7396,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
-    @common_utils.parametrize(
-        "pad",
-        [
-            common_utils.subtest([2, 4], name="scalar_list"),
-            common_utils.subtest(
-                [
-                    torch.tensor(2, dtype=torch.int64),
-                    torch.tensor(4, dtype=torch.int64),
-                ],
-                name="scalar_tensor_list",
-            ),
-        ],
-    )
-    @skipIfUnsupportedMinOpsetVersion(11)  # Dynamic padding is added in opset 11
-    def test_pad_types(self, pad):
+    # Dynamic padding is added in opset 11
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
             def forward(self, x, pad: List[int]):
                 return torch.nn.functional.pad(x, pad)
 
         x = torch.randn(2, 2, 4, 4)
-        self.run_test(Pad(), (x, pad))
+        y = pad = [2, 4]
+        self.run_test(Pad(), (x, y))
+
+        y = pad = [
+            torch.tensor(2, dtype=torch.int64),
+            torch.tensor(4, dtype=torch.int64),
+        ]
+        self.run_test(Pad(), (x, y))
 
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
