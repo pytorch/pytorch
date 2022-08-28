@@ -39,14 +39,18 @@ enum class C10_API_ENUM ActiveProfilerType {
 };
 
 struct TORCH_API ExperimentalConfig {
-  ExperimentalConfig(
+  explicit ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false);
+      bool profiler_measure_per_kernel = false)
+      : profiler_metrics(std::move(profiler_metrics)),
+        profiler_measure_per_kernel(profiler_measure_per_kernel) {}
   ~ExperimentalConfig() = default;
-  explicit operator bool() const;
-
   std::vector<std::string> profiler_metrics;
-  bool profiler_measure_per_kernel;
+  bool profiler_measure_per_kernel = false;
+
+  bool hasOptions() const {
+    return profiler_metrics.size() > 0;
+  }
 };
 
 struct TORCH_API ProfilerConfig {

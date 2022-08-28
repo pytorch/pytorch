@@ -221,7 +221,7 @@ void prepareTrace(
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config && configWrap.assertValid(activities)) {
+  if (config.hasOptions() && configWrap.assertValid(activities)) {
     configWrap.prepareTraceWithExperimentalOptions();
     return;
   }
