@@ -14,14 +14,6 @@ ExperimentalConfig::ExperimentalConfig(
   return !profiler_metrics.empty();
 }
 
-bool ProfilerConfig::disabled() const {
-  return state == torch::profiler::impl::ProfilerState::Disabled;
-}
-
-bool ProfilerConfig::global() const {
-  return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
-}
-
 namespace {
 enum ProfilerIValueIdx {
   STATE = 0,
@@ -60,7 +52,9 @@ ProfilerConfig ProfilerConfig::fromIValue(
 
 bool profilerEnabled() {
   auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
-  return state_ptr && !state_ptr->config().disabled();
+  return state_ptr &&
+      state_ptr->config().state !=
+      torch::profiler::impl::ProfilerState::Disabled;
 }
 
 TORCH_API ActiveProfilerType profilerType() {
