@@ -37,8 +37,6 @@ except subprocess.CalledProcessError:
 except (FileNotFoundError, PermissionError):
     # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
     pass
-except PermissionError:
-    pass
 
 rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm_version.h"

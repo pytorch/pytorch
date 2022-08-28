@@ -612,7 +612,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.col2im_backward)
@@ -623,7 +623,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -847,6 +847,94 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+@register_decomposition(aten.native_group_norm_backward)
+@pw_cast_for_opmath
+def native_group_norm_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    utils.check_same_device(
+        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    )
+    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
+    utils.check(
+        input.numel() == N * C * HxW,
+        lambda: f"Expect input to have { N * C * HxW} elements",
+    )
+    utils.check(
+        mean.shape == (N, group),
+        lambda: f"Expect mean to have shape ({N}, {group}, but got {mean.shape}",
+    )
+    utils.check(
+        gamma is None or gamma.numel() == C,
+        lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
+    )
+
+    cpg, _rem = divmod(C, group)
+    utils.check(
+        _rem == 0,
+        lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
+    )
+
+    # Compute Internal gradients
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2])
+
+    d_input: Optional[Tensor] = None
+    d_gamma: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
+    if output_mask[0]:
+        s = 1.0 / (HxW * cpg)
+        if gamma is not None:
+            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                gamma.reshape(1, group, cpg),
+            )
+        else:
+            ds_val = ds.reshape(N, group, cpg).sum(2)
+            db_val = db.reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                torch.ones((1, group, cpg), device=rstd.device),
+            )
+        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - db_val * rstd * s
+
+        c1 = c1.unsqueeze(-1)
+        c2 = _unsqueeze_to_dim(c2, 4)
+        c3 = _unsqueeze_to_dim(c3, 4)
+        d_input = (
+            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
+            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
+            + c3
+        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
+    if output_mask[1]:
+        d_gamma = (
+            (
+                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+                * rstd.unsqueeze(-1)
+            )
+            .sum(dim=[0])
+            .reshape(C)
+        )
+    if output_mask[2]:
+        d_bias = db.sum(dim=[0])
+
+    return (d_input, d_gamma, d_bias)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
@@ -998,6 +1086,36 @@ def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
+
+
+@register_decomposition(aten._to_copy)
+def _to_copy(
+    x: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout=None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    non_blocking: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    assert not layout or layout == torch.strided, "TODO"
+    assert not pin_memory, "TODO"
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype_converted = False
+    if device is not None and device != x.get_device():
+        # avoid conversions on cpu
+        if dtype is not None and device.type == "cpu":
+            x = torch._prims.convert_element_type(x, dtype)
+            dtype_converted = True
+        x = torch._prims.device_put(x, device)
+    if dtype is not None and not dtype_converted:
+        x = torch._prims.convert_element_type(x, dtype)
+    if memory_format is not None:  # no ref/prim for memory format
+        out = torch.empty_like(x, memory_format=memory_format)
+        out.copy_(x)
+        return out  # type: ignore[call-overload]
+    return x
 
 
 @register_decomposition(aten.xlogy.Tensor)
@@ -1320,23 +1438,6 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return out / (divs[0] * divs[1])
 
 
-@register_decomposition(aten.transpose.int, disable_meta=True)
-def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
-
-    # NB: these no-op views force this operator to return a
-    # fresh TensorImpl, which is important for autograd to
-    # work correctly (assert will fail if you don't do it)
-    if self.dim() <= 1:
-        return self.view(self.shape)
-
-    if dim0 == dim1:
-        return self.view(self.shape)
-    perm = list(range(self.dim()))
-    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
-    return torch.permute(self, perm)
-
-
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
@@ -1465,6 +1566,11 @@ def upsample_bilinear2d_vec(
 @register_decomposition(aten.is_same_size.default)
 def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
+
+
+@register_decomposition(aten._reshape_alias)
+def _reshape_alias(x, shape, strides):
+    return aten.view(x, shape)
 
 
 @register_decomposition(aten.nll_loss_forward)
