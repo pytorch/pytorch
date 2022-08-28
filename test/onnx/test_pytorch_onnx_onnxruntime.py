@@ -1598,11 +1598,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # In tracing, None outputs are removed. In scripting they're kept but
-    # we don't know Optional.elem_type, so we can't construct a valid Optional.
+    # Outputs that are always None are removed.
+    # We don't know Optional.elem_type, so we can't construct a valid Optional.
     # Tests for Optional outputs (control flow with None in one branch,
     # not-None in another) are in test_pytorch_onnx_no_runtime.py.
-    @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -11729,7 +11728,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_linear(self):
-        model = torch.nn.quantized.Linear(4, 8)
+        model = torch.ao.nn.quantized.Linear(4, 8)
         # Set fixed weight to avoid flaky test.
         weight = torch.quantize_per_tensor(
             torch.arange(32, dtype=torch.float).view(8, 4), 0.5, 0, torch.qint8
@@ -11745,7 +11744,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
-        model = torch.nn.quantized.Conv2d(16, 33, 3, stride=2)
+        model = torch.ao.nn.quantized.Conv2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -11973,8 +11972,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x, y):
-                o = torch.nn.quantized.QFunctional().add(x, y)
-                o = torch.nn.quantized.QFunctional().mul(o, x)
+                o = torch.ao.nn.quantized.QFunctional().add(x, y)
+                o = torch.ao.nn.quantized.QFunctional().mul(o, x)
                 return o
 
         self.run_test(ArithmeticModel(), (x, y))
