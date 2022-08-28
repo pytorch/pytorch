@@ -193,7 +193,7 @@ thread_event_lists ProfilerLegacyThreadLocalState::consolidate() {
 }
 
 void ProfilerLegacyThreadLocalState::mark(std::string name, bool include_cuda) {
-  if (config_.disabled()) {
+  if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
@@ -225,7 +225,7 @@ void ProfilerLegacyThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
     std::vector<std::vector<int64_t>>&& shapes) {
-  if (config_.disabled()) {
+  if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
@@ -273,7 +273,7 @@ void ProfilerLegacyThreadLocalState::pushRange(
 void ProfilerLegacyThreadLocalState::popRange(
     const at::RecordFunction& fn,
     const bool record_cuda) {
-  if (config_.disabled()) {
+  if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
@@ -300,7 +300,8 @@ void ProfilerLegacyThreadLocalState::reportMemoryUsage(
     int64_t /* total_allocated, unused for legacy */,
     int64_t /* total_reserved, unused for legacy */,
     c10::Device device) {
-  if (config_.profile_memory && !config_.disabled()) {
+  if (config_.profile_memory &&
+      config_.state != torch::profiler::impl::ProfilerState::Disabled) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();
     LegacyEvent evt(
         EventKind::MemoryAlloc,
@@ -371,7 +372,9 @@ void pushProfilingCallbacksLegacy() {
           [](const at::RecordFunction& fn)
               -> std::unique_ptr<at::ObserverContext> {
             auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
-            if (!state_ptr || state_ptr->config().disabled()) {
+            if (!state_ptr ||
+                state_ptr->config().state ==
+                    torch::profiler::impl::ProfilerState::Disabled) {
               return nullptr;
             }
             bool record_cuda = state_ptr->config().state ==
@@ -393,7 +396,9 @@ void pushProfilingCallbacksLegacy() {
           },
           [](const at::RecordFunction& fn, at::ObserverContext*) {
             auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
-            if (!state_ptr || state_ptr->config().disabled()) {
+            if (!state_ptr ||
+                state_ptr->config().state ==
+                    torch::profiler::impl::ProfilerState::Disabled) {
               return;
             }
             bool record_cuda = state_ptr->config().state ==
@@ -449,7 +454,9 @@ thread_event_lists disableProfilerLegacy(
 
   auto state_ptr = static_cast<ProfilerLegacyThreadLocalState*>(state.get());
   TORCH_CHECK(
-      state_ptr && !state_ptr->config().disabled(),
+      state_ptr &&
+          state_ptr->config().state !=
+              torch::profiler::impl::ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
   if (cleanupTLSState) {
