@@ -1738,6 +1738,13 @@ struct getTypePtr_ final {
   }
 };
 
+template <typename T>
+struct getFakeTypePtr_ final {
+  static decltype(auto) call() {
+    return getTypePtr_<T>::call();
+  }
+};
+
 template <>
 struct getTypePtr_<at::IValue> final {
   static decltype(auto) call() {
@@ -1786,6 +1793,12 @@ template <>
 struct getTypePtr_<SymInt> final {
   static decltype(auto) call() {
     return SymIntType::get();
+  }
+};
+template <>
+struct getFakeTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return IntType::get();
   }
 };
 template <>
@@ -1962,6 +1975,16 @@ inline TypePtr getTypePtrCopy() {
   return getTypePtr<T>();
 }
 
+template <class T>
+inline decltype(auto) getFakeTypePtr() {
+  return detail::getFakeTypePtr_<T>::call();
+}
+
+template <class T>
+inline TypePtr getFakeTypePtrCopy() {
+  return getFakeTypePtr<T>();
+}
+
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
@@ -2132,6 +2155,24 @@ template <>
 struct getTypePtr_<c10::MemoryFormat> final {
   static decltype(auto) call() {
     return MemoryFormatType::get();
+  }
+};
+template <>
+struct getFakeTypePtr_<c10::ScalarType> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getFakeTypePtr_<c10::Layout> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getFakeTypePtr_<c10::MemoryFormat> final {
+  static decltype(auto) call() {
+    return IntType::get();
   }
 };
 } // namespace detail
