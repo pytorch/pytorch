@@ -8694,8 +8694,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            ),
            supports_out=False),
     UnaryUfuncInfo('cos',
@@ -8773,12 +8771,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Float did not match double
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Jacobian mismatch
@@ -17237,16 +17229,14 @@ def _compare_trilu_indices(
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
     else:
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
+                 .tril(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+                 .triu(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
