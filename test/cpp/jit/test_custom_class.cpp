@@ -45,6 +45,20 @@ TEST(CustomClassTest, TorchbindIValueAPI) {
   test_with_obj(new_stack_ivalue, "boo");
 }
 
+TEST(CustomClassTest, ScalarTypeClass) {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto cc = make_custom_class<ScalarTypeClass>(at::kFloat);
+  m.register_attribute("s", cc.type(), cc, false);
+
+  std::ostringstream oss;
+  m.save(oss);
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  auto loaded_module = torch::jit::load(iss, torch::kCPU);
+}
+
 class TorchBindTestClass : public torch::jit::CustomClassHolder {
  public:
   std::string get() {
