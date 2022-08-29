@@ -731,12 +731,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_report_path = os.path.join(test_report_path, test_filename)
         build_environment = os.environ.get("BUILD_ENVIRONMENT", "")
 
-        if (test_filename in ['test_nn', 'test_fake_tensor', 'test_cpp_api_parity', 'test_jit_cuda_fuser', 'test_reductions',
-                              'test_cuda', 'test_indexing', 'test_fx_backends', 'test_linalg', 'test_cpp_extensions_jit',
-                              'test_torch', 'test_tensor_creation_ops', 'test_sparse_csr', 'test_dispatch']
-                or test_filename in ["lazy.test_ts_opinfo", "test_foreach", "lazy.test_reuse_ir", "test_fx_backends",
-                                     "test_linalg", "distributions.test_distributions", 'nn.test_pooling',
-                                     'test_ao_sparsity', 'test_native_mha', 'test_nestedtensor']):
+        if test_filename in ['test_nn', 'test_fake_tensor', 'test_cpp_api_parity', 'test_jit_cuda_fuser', 'test_reductions',
+                             'test_cuda', 'test_indexing', 'test_fx_backends', 'test_linalg', 'test_cpp_extensions_jit',
+                             'test_torch', 'test_tensor_creation_ops', 'test_sparse_csr', 'test_dispatch']:
             exit(0)
         # exclude linux cuda tests because we run into memory issues when running in parallel
         import pytest
