@@ -26,6 +26,7 @@ from typing import (
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from warnings import warn
+from pathlib import Path
 
 from gitutils import (
     GitRepo,
@@ -401,6 +402,8 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
+MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -978,9 +981,7 @@ def get_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
-    from pathlib import Path
-
-    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
+    repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -1013,12 +1014,11 @@ def find_matching_merge_rule(pr: GitHubPR,
         project=pr.project,
         labels=["module: ci"],
     )
-    reject_reason = (f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team")
+    reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
     rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
-        reject_reason = ("No matching merge rule found in merge_rules.yaml. " +
-                         "Please verify the file content to ensure there are valid merge rules defined.")
+        reject_reason = "Rejecting the merge as no rule is defined for the repository."
         raise RuntimeError(reject_reason)
 
     #  Used to determine best rejection reason
