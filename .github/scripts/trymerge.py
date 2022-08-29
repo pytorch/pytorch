@@ -1267,6 +1267,21 @@ def merge(pr_num: int, repo: GitRepo,
 
     check_for_sev(org, project, force)
 
+    gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
+    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+
+    try:
+        # Important: check for merge rule once before starting land checks
+        # because we want to make sure that only approved PRs can start CI
+        # jobs. If there's missing approval, a RuntimeError will be raised
+        # here to stop the merge process right away
+        find_matching_merge_rule(pr, repo)
+    except MandatoryChecksMissingError:
+        # Missing mandatory checks is fine here because the merge job hasn't
+        # been started yet
+        pass
+
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message())
@@ -1274,10 +1289,6 @@ def merge(pr_num: int, repo: GitRepo,
 
     if land_checks:
         land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
-
-    gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
-    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
