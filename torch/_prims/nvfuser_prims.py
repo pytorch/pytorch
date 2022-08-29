@@ -5,7 +5,7 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -212,7 +212,7 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _split_dim_nvfuser(
     fd: Any,
     a: TensorLikeType,
-    a_shape: List[int],
+    a_shape: ShapeType,
     dim: int,
     outer_length: int,
 ):
@@ -224,7 +224,7 @@ def _split_dim_nvfuser(
 def _collapse_view_nvfuser(
     fd: Any,
     a: TensorLikeType,
-    a_shape: List[int],
+    a_shape: ShapeType,
     start: int,
     end: int,
 ):
@@ -244,8 +244,8 @@ def _collapse_view_nvfuser(
 def _reshape_nvfuser(
     fd: Any,
     a: TensorLikeType,
-    a_shape: List[int],
-    new_shape: List[int],
+    a_shape: ShapeType,
+    new_shape: ShapeType,
 ):
     return fd.ops.view(a, a_shape, new_shape)
 
