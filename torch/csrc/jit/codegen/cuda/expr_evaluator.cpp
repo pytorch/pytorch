@@ -105,6 +105,7 @@ c10::optional<IntOrDouble> ExpressionEvaluator::getValue(Val* value) {
 }
 
 void ExpressionEvaluator::handle(UnaryOp* uop) {
+  using namespace IntOrDouble_functions;
   const auto in = evaluate(uop->in());
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
@@ -122,6 +123,9 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
         } else {
           TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
         }
+        break;
+      case UnaryOpType::Abs:
+        known_values_[uop->out()] = abs(*in);
         break;
       default:
         TORCH_CHECK(

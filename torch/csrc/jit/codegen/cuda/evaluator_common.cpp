@@ -295,6 +295,7 @@ void NaiveValueMachine<IRContext>::runInstruction(int index) {
 
 template <typename IRContext>
 void NaiveValueMachine<IRContext>::runUnaryOp(int index) {
+  using namespace IntOrDouble_functions;
   int src_index = src0_[index];
   bool src_defined = precomputed_values_.defined_[src_index];
   bool src_is_const = precomputed_values_.is_constant_[src_index];
@@ -322,6 +323,9 @@ void NaiveValueMachine<IRContext>::runUnaryOp(int index) {
       } else {
         TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
       }
+      break;
+    case UnaryOpType::Abs:
+      dest = abs(src);
       break;
     default:
       TORCH_CHECK(!"Unexpected operator type ", uop_type_[index]);

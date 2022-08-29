@@ -471,7 +471,9 @@ TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
     end = castOp(DataType::Double, end);
     step = castOp(DataType::Double, step);
   }
-  auto size = castOp(DataType::Int, ceilDiv(sub(end, start), step));
+  // Make sure no negative value is passed to ceilDiv as the device
+  // implementation of ceilDiv assumes positive inputs
+  auto size = castOp(DataType::Int, ceilDiv(abs(sub(end, start)), abs(step)));
   auto out = TensorViewBuilder()
                  .ndims(1)
                  .dtype(dtype)

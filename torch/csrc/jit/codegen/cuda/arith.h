@@ -125,6 +125,10 @@ TORCH_CUDA_CU_API WelfordResult Welford(
 TORCH_CUDA_CU_API TensorView* rand(
     const std::vector<Val*>& shape,
     DataType dtype);
+
+//! WARNING: giving invalid combinations of the start, end and step
+//! arguments can result in undefined behavior. Specifically, the
+//! signs of `end - start` and step must be the same.
 TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype = DataType::Int);
 TORCH_CUDA_CU_API TensorView* arange(
     Val* start,
