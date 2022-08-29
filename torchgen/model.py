@@ -816,9 +816,6 @@ class NativeFunction:
             backend_metadata,
         )
 
-    def symints_to_ints(self) -> "NativeFunction":
-        return dataclasses.replace(self, func=self.func.symints_to_ints())
-
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
         # at once
@@ -881,8 +878,6 @@ class NativeFunction:
                 "foreach kernels fall back to slow path when tensor are on different devices, "
                 "device_check not allowed to be enabled"
             )
-        named_symint = "SymInt" in self.func.name.overload_name
-        assert named_symint == self.func.has_symint()
 
         # NB: if your function accidentally has rand/dropout/... in its name
         # but is not actually random, feel free to amend this to special case
@@ -1117,6 +1112,8 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
+    # Whether or not this backend handles symbolic ints or not
+    symint: bool
 
     @staticmethod
     def grow_index(
@@ -1234,9 +1231,6 @@ class FunctionSchema:
         )
 
     decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
-
-    def symints_to_ints(self) -> "FunctionSchema":
-        return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
 
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
@@ -1359,10 +1353,6 @@ class FunctionSchema:
 
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
-
-    def is_symint_fn(self) -> bool:
-        # TODO: make this more robust
-        return "SymInt" in self.name.overload_name
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1704,9 +1694,6 @@ class Type:
     def is_list_like(self) -> Optional["ListType"]:
         raise NotImplementedError
 
-    def symint_to_int(self) -> "Type":
-        raise NotImplementedError
-
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum(
@@ -1747,13 +1734,11 @@ class BaseType(Type):
     def is_nullable(self) -> bool:
         return False
 
-    def symint_to_int(self) -> "BaseType":
-        if self.name == BaseTy.SymInt:
-            return BaseType(BaseTy.int)
-        return self
-
     def is_list_like(self) -> Optional["ListType"]:
         return None
+
+    def is_symint_like(self) -> bool:
+        return self.name == BaseTy.SymInt
 
 
 # Optional types may be specified, or may also be validly given None
@@ -1767,11 +1752,11 @@ class OptionalType(Type):
     def is_base_ty_like(self, base_ty: BaseTy) -> bool:
         return self.elem.is_base_ty_like(base_ty)
 
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
+
     def is_nullable(self) -> bool:
         return True
-
-    def symint_to_int(self) -> "Type":
-        return dataclasses.replace(self, elem=self.elem.symint_to_int())
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1791,14 +1776,14 @@ class CustomClassType(Type):
     def is_base_ty_like(self, base_ty: BaseTy) -> bool:
         return False
 
+    def is_symint_like(self) -> bool:
+        return False
+
     def is_nullable(self) -> bool:
         """
         Assume a custom class is not nullable.
         """
         return False
-
-    def symint_to_int(self) -> "Type":
-        return self
 
     def is_list_like(self) -> Optional["ListType"]:
         return None
@@ -1823,11 +1808,11 @@ class ListType(Type):
     def is_base_ty_like(self, base_ty: BaseTy) -> bool:
         return self.elem.is_base_ty_like(base_ty)
 
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
+
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
-
-    def symint_to_int(self) -> "ListType":
-        return ListType(self.elem.symint_to_int(), self.size)
 
     def is_list_like(self) -> Optional["ListType"]:
         return self
@@ -1901,9 +1886,6 @@ class Argument:
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
-
-    def symint_to_int(self) -> "Argument":
-        return dataclasses.replace(self, type=self.type.symint_to_int())
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -2093,37 +2075,6 @@ class Arguments:
             for a in self.flat_all
             if a.annotation is not None and a.annotation.is_write
         ]
-
-    def symints_to_ints(self) -> "Arguments":
-        arguments = self
-
-        if arguments.self_arg:
-            arguments = dataclasses.replace(
-                arguments,
-                pre_self_positional=tuple(
-                    x.symint_to_int() for x in arguments.pre_self_positional
-                ),
-            )
-
-        if self.tensor_options:
-            arguments = dataclasses.replace(
-                arguments,
-                post_tensor_options_kwarg_only=tuple(
-                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ),
-            )
-
-        arguments = dataclasses.replace(
-            arguments,
-            post_self_positional=tuple(
-                x.symint_to_int() for x in arguments.post_self_positional
-            ),
-            pre_tensor_options_kwarg_only=tuple(
-                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ),
-        )
-
-        return arguments
 
     def has_tensor_arg(self) -> bool:
         return any(a.type.is_tensor_like() for a in self.flat_non_out)
