@@ -9,7 +9,7 @@ import torch
 from torch.profiler import profile
 import torch.utils.benchmark as benchmark
 from torch.profiler._utils import index_of_first_match
-from torch._C._autograd import (_ProfilerEvent, _ExtraFields_TorchOp,
+from torch._C._profiler import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
 

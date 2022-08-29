@@ -267,8 +267,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     return std::make_tuple(intersection_count, intersection_first_idx);
   }();
 
-  Tensor selected_source, selected_probably_coalesced;
-  std::tie(selected_source, selected_probably_coalesced) = [&]() -> std::tuple<Tensor, Tensor> {
+  Tensor selected_source, selected_source_sparse_indices, selected_probably_coalesced;
+  std::tie(selected_source, selected_source_sparse_indices, selected_probably_coalesced)
+    = [&]() -> std::tuple<Tensor, Tensor, Tensor> {
     // Thread offset = shifted_offset - shift.
     // This computation is fused in kernels below.
 
@@ -287,6 +288,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     auto selected_buffer = at::empty({2, intersection_nnz}, intersection_count.options());
     auto selected_source = selected_buffer.select(0, 0);
     auto selected_probably_coalesced = selected_buffer.select(0, 1);
+    const auto source_sparse_indices = source._indices();
+    auto selected_source_sparse_indices = at::empty({source.sparse_dim(), intersection_nnz},
+        source_sparse_indices.options().memory_format(at::MemoryFormat::Contiguous));
     const auto source_idx = nnz_arange.narrow(-1, 0, source._nnz());
     auto dummy = at::empty({1}, source_idx.options());
 
@@ -302,13 +306,40 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
     AT_DISPATCH_INDEX_TYPES(source_idx.scalar_type(), NAME,
         // Windows does not seem to like these nested captures without explicit names.
-        [&iter, &selected_source, &selected_probably_coalesced, argsort_hash]() {
+        [&iter, &selected_source,
+          &selected_probably_coalesced, &argsort_hash,
+          &source_sparse_indices, &selected_source_sparse_indices,
+          sdim]() {
         auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
         auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
         const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
+
+        auto* RESTRICT ptr_selected_source_sparse_indices = selected_source_sparse_indices.data_ptr<index_t>();
+        // Non-const because of Gcc5/Clang5 issues
+        auto selected_source_sparse_indices_nnz_stride = static_cast<offset_t>(
+            selected_source_sparse_indices.stride(1));
+        auto selected_source_sparse_indices_dim_stride = static_cast<offset_t>(
+            selected_source_sparse_indices.stride(0));
+
+        const auto* RESTRICT ptr_source_sparse_indices = source_sparse_indices.data_ptr<index_t>();
+        // Non-const because of Gcc5/Clang5 issues
+        auto source_sparse_indices_nnz_stride = static_cast<offset_t>(
+            source_sparse_indices.stride(1));
+        auto source_sparse_indices_dim_stride = static_cast<offset_t>(
+            source_sparse_indices.stride(0));
+
         KernelLauncher::launch(iter,
             // Windows does not seem to like these nested captures without explicit names.
-            [ptr_selected_source, ptr_selected_probably_coalesced, ptr_argsort]
+            [ptr_selected_source,
+              ptr_selected_probably_coalesced,
+              ptr_argsort,
+              ptr_selected_source_sparse_indices,
+              selected_source_sparse_indices_nnz_stride,
+              selected_source_sparse_indices_dim_stride,
+              ptr_source_sparse_indices,
+              source_sparse_indices_nnz_stride,
+              source_sparse_indices_dim_stride,
+              sdim]
             FUNCAPI (
               index_t idx,
               hash_t count,
@@ -318,19 +349,35 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
             auto* RESTRICT ptr_selected_source_idx_out = ptr_selected_source + offset;
             auto* RESTRICT ptr_selected_probably_coalesced_idx_out = ptr_selected_probably_coalesced + offset;
             const auto* RESTRICT ptr_argsort_idx = ptr_argsort + first_match_idx;
+
+            auto* RESTRICT ptr_selected_source_sparse_indices_out =
+              ptr_selected_source_sparse_indices + offset * selected_source_sparse_indices_nnz_stride;
+            const auto* RESTRICT ptr_source_sparse_indices_in =
+              ptr_source_sparse_indices + idx * source_sparse_indices_nnz_stride;
+
             for (hash_t i = 0; i < count; ++i) {
               *ptr_selected_source_idx_out++ = idx;
               *ptr_selected_probably_coalesced_idx_out++ = *ptr_argsort_idx++;
+
+              // res_indices = source._indices().index_select(1, selected_source)
+              // The code below fuses this computation with forming
+              // selected_source and selected_probably_coalesced.
+              for (uint32_t d = 0; d < sdim; ++d) {
+                ptr_selected_source_sparse_indices_out[d * selected_source_sparse_indices_dim_stride]
+                  = ptr_source_sparse_indices_in[d * source_sparse_indices_dim_stride];
+              }
+              ptr_selected_source_sparse_indices_out += selected_source_sparse_indices_nnz_stride;
             }
 
             return 0;
         });
     });
 
-    return std::make_tuple(selected_source, selected_probably_coalesced);
+    return std::make_tuple(selected_source, selected_source_sparse_indices, selected_probably_coalesced);
   }();
 
-  const auto res_indices = source._indices().index_select(1, selected_source);
+  const auto res_indices = selected_source_sparse_indices;
+  // TODO: fuse 3 next kernel calls into 1.
   const auto selected_source_values = source._values().index_select(0, selected_source);
   const auto selected_probably_coalesced_values = probably_coalesced._values().index_select(0, selected_probably_coalesced);
   const auto res_values = binary_op_t::apply(selected_source_values, selected_probably_coalesced_values)
