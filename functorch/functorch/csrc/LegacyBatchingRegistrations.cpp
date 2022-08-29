@@ -502,12 +502,9 @@ Tensor as_strided_batching_rule(
       "same length! Got size ", sizes, " and stride ", strides);
 
   // Sanity checks:
-  // 1. All batch dims are at the front in memory layout (not necessary for
-  // correctness, but we are worried the user might be doing crazy things)
-  // 2. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
+  // 1. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
   // is valid for a slice of the input tensor.
   // See Note: [When will the as_strided batching rule fail?] for details.
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), num_batch_dims);
   checkBasicAsStridedValidForSlice(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
@@ -700,12 +697,14 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
-    IntArrayRef size,
-    IntArrayRef stride,
+    c10::SymIntArrayRef sym_size,
+    c10::SymIntArrayRef sym_stride,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
+  auto size = asIntArrayRefSlow(sym_size);
+  auto stride = asIntArrayRefSlow(sym_stride);
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     return self.new_empty_strided(
