@@ -612,7 +612,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.col2im_backward)
@@ -623,7 +623,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -1000,6 +1000,36 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+@register_decomposition(aten._to_copy)
+def _to_copy(
+    x: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout=None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    non_blocking: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    assert not layout or layout == torch.strided, "TODO"
+    assert not pin_memory, "TODO"
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype_converted = False
+    if device is not None and device != x.get_device():
+        # avoid conversions on cpu
+        if dtype is not None and device.type == "cpu":
+            x = torch._prims.convert_element_type(x, dtype)
+            dtype_converted = True
+        x = torch._prims.device_put(x, device)
+    if dtype is not None and not dtype_converted:
+        x = torch._prims.convert_element_type(x, dtype)
+    if memory_format is not None:  # no ref/prim for memory format
+        out = torch.empty_like(x, memory_format=memory_format)
+        out.copy_(x)
+        return out  # type: ignore[call-overload]
+    return x
+
+
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1099,8 +1129,8 @@ def cudnn_batch_norm(
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
     return (
         a,
-        input.new_zeros((0,)),
-        input.new_zeros((0,)),
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
         input.new_zeros((0,), dtype=torch.uint8),
     )
 
@@ -1225,21 +1255,99 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.transpose.int, disable_meta=True)
-def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
+@register_decomposition(aten._adaptive_avg_pool2d, disable_meta=True)
+@pw_cast_for_opmath
+def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
+    # Preconditions
+    device = input.device
+    shape = input.shape
+    ndim = len(shape)
+    utils.check(
+        ndim in (3, 4),
+        lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
+    )
+    for d in input.shape[-2:]:
+        utils.check(
+            d != 0,
+            lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
+            f"non-batch dimensions, but input has shape {tuple(shape)}.",
+        )
 
-    # NB: these no-op views force this operator to return a
-    # fresh TensorImpl, which is important for autograd to
-    # work correctly (assert will fail if you don't do it)
-    if self.dim() <= 1:
-        return self.view(self.shape)
+    # Optimisation (we should also do this in the kernel implementation)
+    if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
+        stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
+        kernel = tuple(
+            i - (o - 1) * s for i, o, s in zip(shape[-2:], output_size, stride)
+        )
+        return torch.nn.functional.avg_pool2d(input, kernel, stride)
 
-    if dim0 == dim1:
-        return self.view(self.shape)
-    perm = list(range(self.dim()))
-    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
-    return torch.permute(self, perm)
+    def start_index(a, b, c):
+        return (a * c) // b
+
+    def end_index(a, b, c):
+        return (((a + 1) * c) / b).ceil().to(a.dtype)
+
+    # Let's assume the reduction we want to apply is to sum all the elements (averaging from this is easy)
+    # Even more, let's assume that we want to just do the 1d case.
+    # The 2d case is recovered by applying the 1d case along two dimensions
+    # The issue here is that we may want to sum segments of different sizes.
+    # What we do is to get the largest segment, and select all the elements from the initial points
+    # up to the max length. Then we zero out the elements that we picked up and were not necessary if there were any such elements
+    # If all the elements have the same length, we compute the average already, otherwise, we return
+    # the sizes of each window, to compute the sizes of the rectrangles at the end.
+    # This function should recover the efficiency of avg_pool2d if the shape does not need the dynamic window shape
+
+    def adaptive_avg_pool1d(x, dim, out_size):
+        assert dim == -2 or dim == -1
+        in_size = x.size(dim)
+
+        orange = torch.arange(out_size, device=device)
+        i0 = start_index(orange, out_size, in_size)
+        # Let length = end_index - start_index, i.e. the length of the pooling kernels
+        # length.max() can be computed analytically as follows:
+        maxlength = in_size // out_size + 1
+        in_size_mod = in_size % out_size
+        # adaptive = True iff there are kernels with different lengths
+        adaptive = not (in_size_mod == 0 or out_size % in_size_mod == 0)
+        if adaptive:
+            maxlength += 1
+        elif in_size_mod == 0:
+            maxlength -= 1
+
+        range_max = torch.arange(maxlength, device=device)
+        idx = i0.unsqueeze(-1) + range_max
+        if adaptive:
+            # Need to clamp to avoid accesing out-of-bounds memory
+            idx = idx.clamp(max=in_size - 1)
+        adv_idx_pad = tuple(slice(None) for _ in range(dim + ndim))
+        vals = x[(*adv_idx_pad, idx)]
+
+        if adaptive:
+            i1 = end_index(orange, out_size, in_size)
+            length = i1 - i0
+            # zero-out the things we didn't really want to select
+            assert dim < 0
+            mask = _unsqueeze_to_dim(range_max >= length.unsqueeze(-1), -dim + 1)
+            vals = torch.masked_fill(vals, mask, 0.0)
+
+            # Compute the length of each window
+            div = _unsqueeze_to_dim(length, -dim)
+            return vals.sum(dim), div
+        else:
+            # No need to return div as we have already divided by the mean
+            return vals.mean(dim), None
+
+    out, div1 = adaptive_avg_pool1d(input, -1, output_size[-1])
+    out, div2 = adaptive_avg_pool1d(out, -2, output_size[-2])
+    # Filter the Nones
+    divs = tuple(div for div in (div1, div2) if div is not None)
+    # prod(divs) does not work because it accumulates with *=
+    if len(divs) == 0:
+        return out
+    elif len(divs) == 1:
+        return out / divs[0]
+    else:  # len(divs) == 2
+        return out / (divs[0] * divs[1])
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
@@ -1370,6 +1478,11 @@ def upsample_bilinear2d_vec(
 @register_decomposition(aten.is_same_size.default)
 def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
+
+
+@register_decomposition(aten._reshape_alias)
+def _reshape_alias(x, shape, strides):
+    return aten.view(x, shape)
 
 
 @register_decomposition(aten.nll_loss_forward)

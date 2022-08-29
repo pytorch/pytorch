@@ -124,6 +124,7 @@ jobs:
       - name: Stop monitoring script
         if: always() && steps.monitor-script.outputs.monitor-script-pid
         shell: bash
+        continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
