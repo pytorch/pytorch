@@ -1,18 +1,19 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, Iterator, List, Optional, Sequence, Set, TypeVar, Union
+
 from torchgen.model import (
     Argument,
+    BackendIndex,
+    BaseTy,
     FunctionSchema,
     NativeFunction,
-    BackendIndex,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    ScalarType,
     SelfArgument,
     TensorOptionsArguments,
-    BaseTy,
-    ScalarType,
 )
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
-from enum import Enum
 
 _T = TypeVar("_T")
 
@@ -67,6 +68,7 @@ iTensorListRefT = BaseCppType("at", "ITensorListRef")
 iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
 dimnameT = BaseCppType("at", "Dimname")
 dimnameListT = BaseCppType("at", "DimnameList")
+dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
 scalarT = BaseCppType("at", "Scalar")
@@ -113,6 +115,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
     BaseTy.Dimname: dimnameT,
+    BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
     BaseTy.Scalar: scalarT,
@@ -501,29 +504,30 @@ class CppSignatureGroup:
         else:
             return self.signature
 
+    def signatures(self) -> Iterator[CppSignature]:
+        yield self.signature
+        if self.faithful_signature:
+            yield self.faithful_signature
+
     @staticmethod
     def from_native_function(
         f: NativeFunction, *, method: bool, fallback_binding: bool = False
     ) -> "CppSignatureGroup":
         func = f.func
-        faithful_signature: Optional[CppSignature]
-        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature(
+
+        def make_sig(*, faithful: bool) -> CppSignature:
+            return CppSignature(
                 func=func,
-                faithful=True,
+                faithful=faithful,
                 method=method,
                 fallback_binding=fallback_binding,
                 cpp_no_default_args=f.cpp_no_default_args,
             )
-        else:
-            faithful_signature = None
-        signature = CppSignature(
-            func=func,
-            faithful=False,
-            method=method,
-            fallback_binding=fallback_binding,
-            cpp_no_default_args=f.cpp_no_default_args,
-        )
+
+        faithful_signature: Optional[CppSignature] = None
+        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+            faithful_signature = make_sig(faithful=True)
+        signature = make_sig(faithful=False)
         return CppSignatureGroup(
             func=func,
             signature=signature,
@@ -750,8 +754,8 @@ def kernel_signature(
 from torchgen.api import (
     cpp,
     dispatcher,
-    native,
-    translate,
     functionalization,
+    native,
     structured,
+    translate,
 )

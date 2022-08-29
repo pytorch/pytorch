@@ -10,8 +10,6 @@ defaults:
 jobs:
   buck-build-test:
     runs-on: ubuntu-latest
-    env:
-      JOB_BASE_NAME: ubuntu-latest-buck
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -30,7 +28,7 @@ jobs:
           activate-environment: build
 
       - name: Install dependencies
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         with:
           timeout_minutes: 10
           max_attempts: 5
@@ -48,37 +46,34 @@ jobs:
               typing_extensions
 
       - name: Install Buck
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         with:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
+            sudo apt update -q
+            wget -q https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
             sudo apt install ./buck.2021.01.12.01_all.deb
 
       - name: Download third party libraries and generate wrappers
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         with:
           timeout_minutes: 10
           max_attempts: 5
           command: |
             sh scripts/buck_setup.sh
 
-      - name: Build glog
+      - name: Build tools
         run: |
-          buck build third_party:glog
+          buck build tools: --keep-going
 
-      - name: Build C10
+      - name: Run tools tests
+        run: |
+          buck test tools:selective_build_test tools:gen_oplist_test tools:gen_operators_yaml_test
+
+      - name: Build c10
         run: |
           buck build c10:c10
-
-      - name: Build cpuinfo
-        run: |
-          buck build third_party:cpuinfo
-
-      - name: Build pthreadpool
-        run: |
-          buck build third_party:pthreadpool
 
       - name: Build XNNPACK
         run: |
@@ -86,7 +81,11 @@ jobs:
 
       - name: Build QNNPACK
         run: |
-          buck build aten/src/ATen/native/quantized/cpu/qnnpack/... --keep-going
+          buck build aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack
+
+      - name: Test QNNPACK
+        run: |
+          buck test aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack_test
 
       - name: Build aten_cpu
         run: |
@@ -96,9 +95,9 @@ jobs:
         run: |
           buck build :torch_mobile_core
 
-      - name: Build torch_mobile_all_ops
+      - name: Build pt_ops_full
         run: |
-          buck build :torch_mobile_all_ops
+          buck build :pt_ops_full
 
       - name: Build mobile benchmark
         run: |

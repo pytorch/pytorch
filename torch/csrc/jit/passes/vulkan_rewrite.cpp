@@ -29,9 +29,9 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_pattern = R"(
     graph(%input, %weight, %bias):
         %weight_t = aten::t(%weight)
-        %packed_weight_bias = vulkan_prepack::linear_prepack(
+        %packed_weight_bias = vulkan_prepack::create_linear_context(
             %weight_t, %bias)
-        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::run_linear_context(%input, %packed_weight_bias)
         return (%res))";
 
   SubgraphRewriter linear_rewriter;
@@ -50,10 +50,10 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_conv2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
         %output_min_max : None = prim::Constant()
-        %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %r = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %r = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -70,10 +70,10 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_conv2d_transpose_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
         %output_min_max : None = prim::Constant()
-        %packed_weight_bias = vulkan_prepack::conv2d_transpose_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_tconv2d_context(
             %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %res = vulkan_prepack::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::run_tconv2d_context(%input, %packed_weight_bias)
         return (%res) )";
 
   SubgraphRewriter transpose_rewriter;
@@ -89,14 +89,44 @@ void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
         return (%y.1, %hn.1) )";
   std::string prepacked_ops_pattern = R"(
       graph(%input.1, %hx.1, %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
-        %packed_weights_biases = vulkan_prepack::gru_prepack(
+        %packed_weights_biases = vulkan_prepack::create_gru_context(
             %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
-        %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::gru_run(%input.1, %hx.1, %packed_weights_biases)
+        %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::run_gru_context(%input.1, %hx.1, %packed_weights_biases)
         return (%y.1, %hn.1) )";
+
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto node = match.values_map.at(vmap.at("params_cpu"))->node();
+    return node->output()->type()->str() == "Tensor[]";
+  };
 
   SubgraphRewriter gru_rewriter;
   gru_rewriter.RegisterRewritePattern(gru_pattern, prepacked_ops_pattern);
-  gru_rewriter.runOnGraph(graph);
+  gru_rewriter.runOnGraph(graph, filter);
+}
+
+void insertPrePackedLstmOp(std::shared_ptr<Graph>& graph) {
+  std::string lstm_pattern = R"(
+      graph(%input.1, %hx:Tensor[], %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
+        %y.1 : Tensor, %hn.1 : Tensor, %cn.1 : Tensor = aten::lstm(%input.1, %hx, %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
+        return (%y.1, %hn.1, %cn.1) )";
+  std::string prepacked_ops_pattern = R"(
+      graph(%input.1, %hx:Tensor[], %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
+        %packed_weights_biases = vulkan_prepack::create_lstm_context(
+            %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
+        %hx.1 : Tensor, %cx.1 : Tensor = prim::ListUnpack(%hx)
+        %y.1 : Tensor, %hn.1 : Tensor, %cn.1 : Tensor = vulkan_prepack::run_lstm_context(%input.1, %hx.1, %cx.1, %packed_weights_biases)
+        return (%y.1, %hn.1, %cn.1) )";
+
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto node = match.values_map.at(vmap.at("hx"))->node();
+    return node->output()->type()->str() == "Tensor[]";
+  };
+
+  SubgraphRewriter lstm_rewriter;
+  lstm_rewriter.RegisterRewritePattern(lstm_pattern, prepacked_ops_pattern);
+  lstm_rewriter.runOnGraph(graph, filter);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -105,19 +135,19 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   std::string conv2d_prepack_run_hardtanh_fused = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %output_min, %output_max, %dummy_min_max):
-        %packed_weight_bias : __torch__.torch.classes.vulkan.Conv2dOpContext = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min, %output_max)
-        %r = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %r = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         return (%r) )";
 
   std::string conv2d_prepack_run_hardtanh = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %output_min, %output_max, %dummy_min_max):
-        %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
-        %conv2d_res = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %conv2d_res = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         %r = aten::hardtanh(%conv2d_res, %output_min, %output_max)
         return (%r) )";
 
@@ -127,10 +157,10 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   std::string conv2d_prepack_run_hardtanh_inplace = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %output_min, %output_max, %dummy_min_max):
-        %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
-        %conv2d_res = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %conv2d_res = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         %r = aten::hardtanh_(%conv2d_res, %output_min, %output_max)
         return (%r) )";
 
@@ -148,19 +178,19 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
           %dilation:int[], %groups:int, %dummy_min_max):
         %output_min: float = prim::Constant[value=0.0]()
         %output_max: None = prim::Constant()
-        %packed_weight_bias : __torch__.torch.classes.vulkan.Conv2dOpContext = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min, %output_max)
-        %r = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %r = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         return (%r) )";
 
   std::string conv2d_prepack_run_relu = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %dummy_min_max):
-        %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
-        %conv2d_res = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %conv2d_res = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         %r = aten::relu(%conv2d_res)
         return (%r) )";
 
@@ -170,10 +200,10 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   std::string conv2d_prepack_run_relu_inplace = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %dummy_min_max):
-        %packed_weight_bias = vulkan_prepack::conv2d_clamp_prepack(
+        %packed_weight_bias = vulkan_prepack::create_conv2d_context(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
-        %conv2d_res = vulkan_prepack::conv2d_clamp_run(%input, %packed_weight_bias)
+        %conv2d_res = vulkan_prepack::run_conv2d_context(%input, %packed_weight_bias)
         %r = aten::relu_(%conv2d_res)
         return (%r) )";
 
@@ -188,6 +218,7 @@ void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
   insertPrePackedGruOp(graph);
+  insertPrePackedLstmOp(graph);
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {
@@ -210,12 +241,15 @@ void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack")) ||
+         Symbol::fromQualString("vulkan_prepack::create_conv2d_context")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
+         Symbol::fromQualString("vulkan_prepack::create_tconv2d_context")) ||
         (n->kind() ==
-         Symbol::fromQualString(
-             "vulkan_prepack::conv2d_transpose_clamp_prepack")));
+         Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_lstm_context")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }

@@ -63,7 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+  file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -72,7 +72,7 @@ if(INTERN_BUILD_ATEN_OPS)
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
-  ${all_python}
+  ${torchgen_python}
   ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
@@ -401,6 +401,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -424,6 +425,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
   endif()
 
+  file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
+  file(GLOB_RECURSE autograd_yaml "${TOOLS_PATH}/autograd/*.yaml")
+  file(GLOB_RECURSE autograd_templates "${TOOLS_PATH}/autograd/templates/*")
   add_custom_command(
     OUTPUT
     ${TORCH_GENERATED_CODE}
@@ -437,47 +441,20 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --gen_lazy_ts_backend
       ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
-    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
-    "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
-    "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
-    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
-    "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
-    "${TOOLS_PATH}/autograd/templates/VariableType.h"
-    "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
-    "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
-    "${TOOLS_PATH}/autograd/templates/Functions.h"
-    "${TOOLS_PATH}/autograd/templates/Functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_functions.h"
-    "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
-    "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
-    "${TOOLS_PATH}/autograd/deprecated.yaml"
-    "${TOOLS_PATH}/autograd/derivatives.yaml"
-    "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
-    "${TOOLS_PATH}/autograd/gen_autograd.py"
-    "${TOOLS_PATH}/autograd/gen_python_functions.py"
-    "${TOOLS_PATH}/autograd/gen_variable_factories.py"
-    "${TOOLS_PATH}/autograd/gen_variable_type.py"
-    "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
-    "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TORCH_ROOT}/torchgen/gen_backend_stubs.py"
-    "${TORCH_ROOT}/torchgen/gen_lazy_tensor.py"
-    "${TORCH_ROOT}/torchgen/api/lazy.py"
-    "${TORCH_ROOT}/torchgen/dest/lazy_ir.py"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
+      "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+      "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+      "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
+      "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
+      "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
+      ${autograd_python}
+      ${autograd_yaml}
+      ${autograd_templates}
+      ${torchgen_python}
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -549,8 +526,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
-        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.mm
       )
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+      include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
       list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
     endif()
   endif()
@@ -565,7 +545,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
     # See https://github.com/pytorch/pytorch/issues/38856
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
   endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -600,6 +580,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+    )
+  endif()
+
+  if(${USE_ITT})
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
     )
   endif()
 
@@ -966,6 +953,13 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+  if(USE_UCC AND BUILD_SPLIT_CUDA)
+    target_link_libraries(torch_cuda_cpp PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_cuda_cpp PRIVATE USE_UCC)
+  elseif(USE_UCC)
+    target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_cuda PRIVATE USE_UCC)
+  endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
     target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
@@ -983,8 +977,17 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
-        ${CUDA_cusolver_LIBRARY}
     )
+    if($ENV{ATEN_STATIC_CUDA})
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+      )
+    else()
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_cusolver_LIBRARY}
+      )
+    endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
@@ -1036,23 +1039,36 @@ endif()
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
+  file(GLOB lite_interpreter_python "${TOOLS_PATH}/lite_interpreter/*.py")
   if(${TRACING_BASED})
+    file(GLOB code_analyzer_python "${TOOLS_PATH}/code_analyzer/*.py")
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-      "${PYTHON_EXECUTABLE}"
-      -m tools.code_analyzer.gen_oplist
-      --model_file_list_path "${SELECTED_OP_LIST}"
-      --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+        "${PYTHON_EXECUTABLE}"
+        -m tools.code_analyzer.gen_oplist
+        --model_file_list_path "${SELECTED_OP_LIST}"
+        --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      DEPENDS
+        ${torchgen_python}
+        ${lite_interpreter_python}
+        ${code_analyzer_python}
+        "${SELECTED_OP_LIST}"
+        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       WORKING_DIRECTORY "${TORCH_ROOT}")
   else()
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-      "${PYTHON_EXECUTABLE}"
-      -m tools.lite_interpreter.gen_selected_mobile_ops_header
-      --yaml_file_path "${SELECTED_OP_LIST}"
-      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+        "${PYTHON_EXECUTABLE}"
+        -m tools.lite_interpreter.gen_selected_mobile_ops_header
+        --yaml_file_path "${SELECTED_OP_LIST}"
+        --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+      DEPENDS
+        ${torchgen_python}
+        ${lite_interpreter_python}
+        "${SELECTED_OP_LIST}"
+        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
       WORKING_DIRECTORY "${TORCH_ROOT}")
   endif()
 
@@ -1120,11 +1136,13 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
+
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
-      ${TORCH_ROOT}/third_party/kineto/libkineto/include
       ${TORCH_ROOT}/third_party/kineto/libkineto/src)
   endif()
 
@@ -1331,6 +1349,16 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PUBLIC USE_DISTRIBUTED)
   if(USE_GLOO AND USE_C10D_GLOO)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
+  endif()
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_UCC)
+    if(USE_CUDA)
+      if(BUILD_SPLIT_CUDA)
+        target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_UCC)
+      else()
+        target_compile_definitions(torch_cuda PUBLIC USE_C10D_UCC)
+      endif()
+    endif()
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
     if(USE_ROCM)
@@ -1782,7 +1810,7 @@ if(BUILD_TEST)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
         # Build vec with minimal dependencies on all platforms but Windows
         if(NOT MSVC)
-          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
           target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
           if(USE_FBGEMM)
@@ -2008,6 +2036,9 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
+  if(USE_MKLDNN)
+      target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
+  endif()
   if(WIN32)
     target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)

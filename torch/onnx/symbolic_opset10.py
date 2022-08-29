@@ -1,15 +1,20 @@
 import sys
 import warnings
+from typing import Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
-from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
+from torch.onnx import (  # noqa: F401
+    _patch_torch,
+    _type_utils,
+    errors,
+    symbolic_helper,
+    symbolic_opset9 as opset9,
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -18,6 +23,39 @@ from torch.onnx._globals import GLOBALS
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
 # release on 04/24/19
+
+
+__all__ = [
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "dequantize",
+    "div",
+    "embedding_bag",
+    "fake_quantize_per_tensor_affine",
+    "flip",
+    "fmod",
+    "isfinite",
+    "isinf",
+    "max_pool1d_with_indices",
+    "max_pool1d",
+    "max_pool2d_with_indices",
+    "max_pool2d",
+    "max_pool3d_with_indices",
+    "max_pool3d",
+    "nan_to_num",
+    "quantize_per_tensor",
+    "Quantized",
+    "slice",
+    "sort",
+    "topk",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
 def div(g, self, other, *args):
@@ -141,15 +179,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Sequence[int],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -187,6 +226,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -194,7 +234,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         if scales is None:
             scales = symbolic_helper._interpolate_size_to_scales(
                 g, input, output_size, dim
@@ -257,12 +297,12 @@ def slice(g, self, *args):
         start, end, step = args
         dim = 0
     else:
-        raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = (
-        start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+        raise errors.SymbolicValueError("Unknown aten::slice signature", self)
+    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+        start.type(), _C.NoneType
     )
-    is_end_none = (
-        end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+        end.type(), _C.NoneType
     )
     is_start_onnx_const = start.node().kind() == "onnx::Constant"
     is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -324,7 +364,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
@@ -408,11 +448,13 @@ def fake_quantize_per_tensor_affine(
             10,
             13,
             "Quantize range (0, 127) not supported, requires opset 13 Clip",
+            inputs,
         )
     if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             f"For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
-            f"Got ({quant_min}, {quant_max})"
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     scale = symbolic_helper._maybe_get_scalar(scale)
     if scale is None:
@@ -421,6 +463,7 @@ def fake_quantize_per_tensor_affine(
             10,
             13,
             "Non-constant scale not supported",
+            inputs,
         )
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
@@ -449,8 +492,9 @@ def isfinite(g, input):
 
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    # TODO(justinchuby): Extract all the cast ops into a helper function.
     zero_point = g.op(
-        "Cast", zero_point, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+        "Cast", zero_point, to_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
@@ -466,7 +510,7 @@ def nan_to_num(g, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = symbolic_helper.pytorch_name_to_type[input.type().scalarType()]
+    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)
@@ -544,6 +588,16 @@ class Quantized:
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
     @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
@@ -557,6 +611,57 @@ class Quantized:
         x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
         output = opset9.hardswish(g, x)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def sigmoid(g, x, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.sigmoid(g, x)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.leaky_relu(g, x, negative_slope, inplace)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def layer_norm(g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.layer_norm(g, x, normalized_shape, weight, bias, eps, False)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+
+        output = opset9.group_norm(g, x, num_groups, weight, bias, eps, False)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
+    def instance_norm(
+        g,
+        q_input,
+        weight,
+        bias,
+        eps,
+        op_scale,
+        op_zero_point,
+    ):
+        input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+
+        output = opset9.instance_norm(
+            g, input, weight, bias, None, None, False, 0, eps, False
+        )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
@@ -612,3 +717,19 @@ class Quantized:
         )
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    @symbolic_helper.parse_args("v", "i", "v", "v")
+    def cat(
+        g,
+        q_inputs: _C.Value,
+        dim: int,
+        op_scale: _C.Value,
+        op_zero_point: _C.Value,
+    ) -> _C.Value:
+        unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
+        dequantized = [
+            symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
+        ]
+        concatenated = g.op("Concat", *dequantized, axis_i=dim)
+        return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)

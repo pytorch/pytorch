@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -101,6 +102,10 @@ static void _launch_kernel(int total_n_elems, func_t f) {
 }
 
 void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
+  if (iter.numel() == 0) {
+    return;
+  }
+
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       unpack_pivots_cuda_kernel(sub_iter, dim_size);

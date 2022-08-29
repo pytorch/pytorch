@@ -7,7 +7,9 @@
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
@@ -39,7 +41,148 @@
 
 namespace at { namespace cuda { namespace jit {
 
+// hiprtc already includes some traits, so this removes duplicate definitions of
+// integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
+// Copied from aten/src/ATen/cuda/llvm_basic.cpp, then modified as above.
+// If not compiling for ROCm, return the original get_traits_string().
+std::string get_traits_string_but_hiprtc_safe() {
+#ifdef USE_ROCM
+    return R"ESCAPE(
+namespace std {
+
+template <class _Tp>
+_Tp&& __declval(int);
+template <class _Tp>
+_Tp __declval(long);
+template <class _Tp>
+decltype(__declval<_Tp>(0)) declval() noexcept;
+
+template <class _Tp> struct remove_const            {typedef _Tp type;};
+template <class _Tp> struct remove_const<const _Tp> {typedef _Tp type;};
+template <class _Tp> using remove_const_t = typename remove_const<_Tp>::type;
+
+template <class _Tp> struct remove_volatile               {typedef _Tp type;};
+template <class _Tp> struct remove_volatile<volatile _Tp> {typedef _Tp type;};
+template <class _Tp> using remove_volatile_t = typename remove_volatile<_Tp>::type;
+
+template <class _Tp> struct remove_cv
+{typedef typename remove_volatile<typename remove_const<_Tp>::type>::type type;};
+template <class _Tp> using remove_cv_t = typename remove_cv<_Tp>::type;
+
+template <class _Tp> struct __libcpp_is_floating_point              : public false_type {};
+template <>          struct __libcpp_is_floating_point<float>       : public true_type {};
+template <>          struct __libcpp_is_floating_point<double>      : public true_type {};
+template <>          struct __libcpp_is_floating_point<long double> : public true_type {};
+
+template <class _Tp>
+inline constexpr bool is_arithmetic_v = is_arithmetic<_Tp>::value;
+
+template <class _Tp>
+struct __numeric_type
+{
+   static void __test(...);
+   static float __test(float);
+   static double __test(char);
+   static double __test(int);
+   static double __test(unsigned);
+   static double __test(long);
+   static double __test(unsigned long);
+   static double __test(long long);
+   static double __test(unsigned long long);
+   static double __test(double);
+   static long double __test(long double);
+
+   typedef decltype(__test(declval<_Tp>())) type;
+   static const bool value = !is_same<type, void>::value;
+};
+
+template <>
+struct __numeric_type<void>
+{
+   static const bool value = true;
+};
+
+// __promote
+
+template <class _A1, class _A2 = void, class _A3 = void,
+          bool = __numeric_type<_A1>::value &&
+                 __numeric_type<_A2>::value &&
+                 __numeric_type<_A3>::value>
+class __promote_imp
+{
+public:
+    static const bool value = false;
+};
+
+template <class _A1, class _A2, class _A3>
+class __promote_imp<_A1, _A2, _A3, true>
+{
+private:
+    typedef typename __promote_imp<_A1>::type __type1;
+    typedef typename __promote_imp<_A2>::type __type2;
+    typedef typename __promote_imp<_A3>::type __type3;
+public:
+    typedef decltype(__type1() + __type2() + __type3()) type;
+    static const bool value = true;
+};
+
+template <class _A1, class _A2>
+class __promote_imp<_A1, _A2, void, true>
+{
+private:
+    typedef typename __promote_imp<_A1>::type __type1;
+    typedef typename __promote_imp<_A2>::type __type2;
+public:
+    typedef decltype(__type1() + __type2()) type;
+    static const bool value = true;
+};
+
+template <class _A1>
+class __promote_imp<_A1, void, void, true>
+{
+public:
+    typedef typename __numeric_type<_A1>::type type;
+    static const bool value = true;
+};
+
+template <class _A1, class _A2 = void, class _A3 = void>
+class __promote : public __promote_imp<_A1, _A2, _A3> {};
+
+} // namespace std
+)ESCAPE";
+#else
+    return get_traits_string();
+#endif
+}
+
+#ifdef USE_ROCM
+const std::string jit_preamble = R"ESCAPE(
+#pragma clang force_cuda_host_device begin
+)ESCAPE";
+const std::string jit_epilogue = R"ESCAPE(
+#pragma clang force_cuda_host_device end
+)ESCAPE";
+#else
+const std::string jit_preamble;
+const std::string jit_epilogue;
+#endif
+
 const std::string jit_common_types = R"ESCAPE(
+  #ifdef __HIPCC__
+  #define ERROR_UNSUPPORTED_CAST ;
+  // corresponds to aten/src/ATen/native/cuda/thread_constants.h
+  #define CUDA_OR_ROCM_NUM_THREADS 256
+  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+  #define MAX_DIMS 16
+  #ifndef __forceinline__
+  #define __forceinline__ inline __attribute__((always_inline))
+  #endif
+  #else
+  //TODO use _assert_fail, because assert is disabled in non-debug builds
+  #define ERROR_UNSUPPORTED_CAST assert(false);
+  #define CUDA_OR_ROCM_NUM_THREADS 128
+  #define MAX_DIMS 25
+  #endif
   #define POS_INFINITY __int_as_float(0x7f800000)
   #define INFINITY POS_INFINITY
   #define NEG_INFINITY __int_as_float(0xff800000)
@@ -53,11 +196,9 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  constexpr int num_threads = 128;
+  constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
-  //TODO use _assert_fail, because assert is disabled in non-debug builds
-  #define ERROR_UNSUPPORTED_CAST assert(false);
 
   ${traits_string}
   ${cmath_string}
@@ -145,15 +286,22 @@ struct alignas(2) Half {
 
   Half() = default;
   inline __host__ __device__ Half(float value){
+#ifdef __HIPCC__
+    x = __half_as_short(__float2half(value));
+#else
     asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+#endif
   }
   inline __host__ __device__ operator float() const{
+#ifdef __HIPCC__
+      return __half2float(*reinterpret_cast<const __half*>(&x));
+#else
       float val;
       asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
       //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
       return val;
+#endif
   }
-
 };
 }
 )ESCAPE";
@@ -200,16 +348,57 @@ struct alignas(2) BFloat16 {
   }
 
   inline __host__ __device__ operator float() const{
+#ifdef __HIPCC__
+    union
+    {
+        uint32_t int32;
+        float    fp32;
+    } u = {uint32_t(x) << 16};
+    return u.fp32;
+#else
     float val;
     asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x)); //do we need const cast here?
     return val;
+#endif
   }
 
 };
 }
 )ESCAPE";
 
-// copy-pasted from c10/util/TypeCast.h
+// From c10/util/Load.h
+const std::string load_support_literal = R"ESCAPE(
+
+  namespace c10 {
+    template <typename T>
+    struct LoadImpl {
+      __device__ static T apply(const void *src) {
+        return *reinterpret_cast<const T*>(src);
+      }
+    };
+
+    template <>
+    struct LoadImpl<bool> {
+      __device__ static bool apply(const void *src) {
+        static_assert(sizeof(bool) == sizeof(char), "");
+        return LoadImpl<char>::apply(src);
+      }
+    };
+
+    template <typename T>
+    __device__ T load(const void *src) {
+      return LoadImpl<T>::apply(src);
+    }
+
+    template <typename scalar_t>
+    __device__ scalar_t load(const scalar_t *src) {
+      return LoadImpl<scalar_t>::apply(src);
+    }
+  }  // namespace c10
+
+)ESCAPE";
+
+// copy-pasted from c10/util/TypeCast.h and c10/core/DynamicCast.h
 const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <typename T>
@@ -283,7 +472,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
-      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+      return static_cast_with_inter_type<dest_t, type>::apply(c10::load<type>(ptr));
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
@@ -344,7 +533,7 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
   struct LoadWithoutCast {
   template <typename scalar_t>
   __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+    return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
   };
 
@@ -417,7 +606,7 @@ const std::string offset_calc_template = R"ESCAPE(
       }
 
       #pragma unroll
-      for (int dim = 0; dim < 25; ++dim) {
+      for (int dim = 0; dim < MAX_DIMS; ++dim) {
       if (dim == dims) {
           break;
       }
@@ -436,9 +625,9 @@ const std::string offset_calc_template = R"ESCAPE(
   }
 
     int dims;
-    IntDivider sizes_[25];
+    IntDivider sizes_[MAX_DIMS];
     // NOTE: this approach will not support nInputs == 0
-    ${index_type} strides_[25][NARGS];
+    ${index_type} strides_[MAX_DIMS][NARGS];
   };
 
 
@@ -446,6 +635,7 @@ const std::string offset_calc_template = R"ESCAPE(
 
 const std::string jit_code_template = R"ESCAPE(
 
+  ${load_support}
   ${dynamic_casting_string}
 
 
@@ -467,7 +657,7 @@ const std::string jit_code_template = R"ESCAPE(
     int idx = blockIdx.x;
 
     int remaining = numel - block_work_size * idx;
-    auto thread_idx = threadIdx.x;
+    int thread_idx = threadIdx.x;
 
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++){
@@ -509,9 +699,11 @@ const std::string jit_code_template = R"ESCAPE(
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
 
+  ${load_support}
+
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+      return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
 
   template<typename scalar_t>
@@ -525,6 +717,24 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
     scalar_t val[vec_size];
   };
 
+  template <int vec_size, typename scalar_t>
+  __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+    return from[offset];
+  }
+
+  template <int vec_size>
+  __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint32_t offset) {
+    // See NOTE [Loading boolean values]
+    auto tmp = load_vector<vec_size>(reinterpret_cast<const uint8_t*>(base_ptr), offset);
+    aligned_vector<bool, vec_size> ret;
+    for (int i = 0; i < vec_size; ++i) {
+      ret.val[i] = bool(tmp.val[i]);
+    }
+    return ret;
+  }
+
   ${functor}
 
   // TODO: setup grid-stride loop
@@ -536,8 +746,9 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
       ${compute_type} scalar_val${extra_params}) //[${nInputs}+${nOutputs}],
       {
       constexpr int vec_size = ${vec_size};
+      using scalar_t = ${scalar_type};
       int remaining = N - block_work_size * blockIdx.x;
-      auto thread_idx = threadIdx.x;
+      int thread_idx = threadIdx.x;
       int idx = blockIdx.x;
       ${declare_load_arrays}
       ${declare_store_arrays}
@@ -571,11 +782,9 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
       } else {
         static constexpr int loop_size = thread_work_size / vec_size;
   //actual loading
-        using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
         ${vector_inputs}
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
-          vec_t_input v;
           ${load_vectorized_inputs}
           thread_idx += num_threads;
         }
@@ -598,6 +807,49 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   }
 )ESCAPE";
 
+static void replace_all(std::string& s, const std::string& to_replace, const std::string& replace_with) {
+  std::ostringstream oss;
+  std::size_t pos = 0;
+  std::size_t prev_pos = pos;
+
+  while (true) {
+    prev_pos = pos;
+    pos = s.find(to_replace, pos);
+    if (pos == std::string::npos)
+      break;
+    oss << s.substr(prev_pos, pos - prev_pos);
+    oss << replace_with;
+    pos += to_replace.size();
+  }
+
+  oss << s.substr(prev_pos);
+  s = oss.str();
+}
+
+// hipify replaces certain device math functions, e.g., std::max -> ::max
+// See torch/utils/hipify/cuda_to_hip_mappings.py.
+// Replace them back. Search for " ::<name>" to avoid duplicate replacements.
+static std::string unhipify_math_functions(const std::string &original) {
+  static std::vector<std::pair<std::string,std::string>> mappings = {
+    {" std::max", " ::max"},
+    {" std::min", " ::min"},
+    {" std::ceil", " ::ceil"},
+    {" std::floor", " ::floor"},
+    {" std::exp", " ::exp"},
+    {" std::log", " ::log"},
+    {" std::pow", " ::pow"},
+    {" std::fabs", " ::fabs"},
+    {" std::fmod", " ::fmod"},
+    {" std::remainder", " ::remainder"},
+    {" std::frexp", " ::frexp"}
+  };
+  std::string ret = original;
+  for (const auto& mapping : mappings) {
+    replace_all(ret, mapping.second, mapping.first);
+  }
+  return ret;
+}
+
 // The following is copied from fused_kernel.cpp
 // TODO: refactor codegenOutputQuery into its own file
 //   that can be included by both files
@@ -615,7 +867,12 @@ void codegenOutputQuery(
     int& nvrtc_major,
     int& nvrtc_minor,
     bool& compile_to_sass) {
-
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  cuda_major = prop->major;
+  cuda_minor = prop->minor;
+  compile_to_sass = false;
+#else
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
   TORCH_CHECK(
       nvrtc_major >= 6, "NVRTC versions less than 6 are not supported. Is: ", nvrtc_major);
@@ -658,6 +915,7 @@ void codegenOutputQuery(
     // compile to sass is not allowed prior to CUDA 11.1
     compile_to_sass = false;
   #endif
+#endif
 }
 
 // TODO: another copy paste from jit, refactor so it's usable from both
@@ -674,6 +932,36 @@ void __inline__ initializeCudaContext() {
   }
 }
 
+std::string generate_code(
+    const KernelDescriptor &desc,
+    bool contiguous,
+    bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
+    bool vectorized,
+    int vec_size,
+    bool return_by_ref) {
+  c10::SmallVector<std::string> extra_args_typenames(desc.extra_args_types.size());
+  for (auto i : c10::irange(extra_args_typenames.size())) {
+    extra_args_typenames[i] = typeName(desc.extra_args_types[i]);
+  }
+
+  return generate_code(
+      desc.nInputs,
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      dynamic_casting,
+      scalar_pos,
+      extra_args_typenames,
+      vectorized,
+      vec_size,
+      return_by_ref);
+}
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -681,7 +969,7 @@ constexpr int thread_work_size = THREAD_WORK_SIZE;
 std::string generate_code(
     int nInputs,
     int nOutputs,
-    const std::string& func,
+    const std::string& func_,
     const std::string& name,
     const std::string& f_inputs_type,
     const std::string& compute_type,
@@ -693,6 +981,7 @@ std::string generate_code(
     bool vectorized,
     int vec_size,
     bool return_by_ref) {
+  std::string func = func_;
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
@@ -804,11 +1093,16 @@ std::string generate_code(
       f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
       f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
     // complex<Half> depends on complex<T> and Half dtypes.
-    env.s("traits_string", get_traits_string());
+    env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
+#ifdef USE_ROCM
+    // unhipify math functions, but only if std::complex is used.
+    func = unhipify_math_functions(func);
+    env.s("functor", func);
+#endif
   } else if (dynamic_casting) {
-    env.s("traits_string", get_traits_string());
+    env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", "");
   } else {
@@ -825,6 +1119,8 @@ std::string generate_code(
   } else {
     env.s("complex_half_body_string", "");
   }
+
+  env.s("load_support", load_support_literal);
 
   if (!vectorized) {
     if (!dynamic_casting) {
@@ -863,7 +1159,8 @@ std::string generate_code(
     }
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(
+      jit_preamble + jit_common_types + offset_calc_template + jit_code_template + jit_epilogue);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -875,9 +1172,9 @@ std::string generate_code(
   std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    vector_inputs << "vec_t_input * vec" << i_string <<
-    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+" << nOutputs << "])" <<
-    " + block_work_size / vec_size * idx;\n";
+    vector_inputs << "auto * input" << i_string <<
+        " = reinterpret_cast<const scalar_t*>(data[" << i_string << "+" << nOutputs << "])" <<
+        " + block_work_size * idx;\n";
   }
   env.s("vector_inputs", vector_inputs.str());
 
@@ -893,10 +1190,11 @@ std::string generate_code(
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
-    load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
+    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector<vec_size>("
+                           << "input" << i_string << ", thread_idx);\n";
     load_vectorized_inputs << "#pragma unroll\n";
     load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
-    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
+    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = vec" << i_string << ".val[j];\n";
     load_vectorized_inputs << "}\n";
   }
   env.s("load_vectorized_inputs", load_vectorized_inputs.str());
@@ -928,7 +1226,8 @@ std::string generate_code(
   }
   env.s("store_unrolled_outputs", store_unrolled_outputs.str());
 
-  static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
+  static auto cuda_template = at::jit::CodeTemplate(
+    jit_preamble + jit_common_types + jit_vectorized_code_template + jit_epilogue);
   const auto code = cuda_template.format(env);
   return code;
 }
@@ -1002,8 +1301,33 @@ std::string load_code_template(const std::string& path) {
 }
 
 std::string generate_reduction_code(
+    const KernelDescriptor &desc,
+    int vt0,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen) {
+  TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
+  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
+
+  return generate_reduction_code(
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      vt0,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      vectorized,
+      vec_size,
+      max_threads_codegen
+    );
+}
+
+std::string generate_reduction_code(
     int nOutputs,
-    const std::string& func,
+    const std::string& func_,
     const std::string& name,
     const int vt0,
     const std::string& f_inputs_type,
@@ -1013,6 +1337,7 @@ std::string generate_reduction_code(
     bool vectorized,
     int vec_size,
     int max_threads_codegen) {
+      std::string func = func_;
       at::jit::TemplateEnv env;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
@@ -1038,10 +1363,14 @@ std::string generate_reduction_code(
           f_inputs_type == "std::complex<double>" ||
           f_inputs_type == "std::complex<at::Half>" ) {
         // complex<Half> depends on complex<T> and Half dtypes.
-        env.s("traits_string", get_traits_string());
+        env.s("traits_string", get_traits_string_but_hiprtc_safe());
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
         env.s("complex", std::to_string(1));
+#ifdef USE_ROCM
+        // unhipify math functions, but only if std::complex is used.
+        func = unhipify_math_functions(func);
+#endif
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");
@@ -1057,7 +1386,7 @@ std::string generate_reduction_code(
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
       static auto cuda_template = at::jit::CodeTemplate(
-        jit_common_types + offset_calc_template + get_reduction_template());
+        jit_preamble + jit_common_types + offset_calc_template + get_reduction_template() + jit_epilogue);
       const auto code = cuda_template.format(env);
       return code;
 }
@@ -1201,6 +1530,9 @@ NvrtcFunction jit_pwise_function(
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
+#ifdef USE_ROCM
+  std::vector<const char*> args = {"--std=c++14"};
+#else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
@@ -1215,6 +1547,7 @@ NvrtcFunction jit_pwise_function(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
 
   #ifndef NDEBUG
     // Add line info to generated kernels

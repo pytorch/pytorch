@@ -231,12 +231,15 @@ void transformShapeFunction(
   if (schema_string->returns().size() > 1) {
     TORCH_INTERNAL_ASSERT(
         graph->outputs().size() == 1 &&
-        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+        graph->outputs().at(0)->type()->cast<TupleType>());
     auto tuple_node = graph->outputs().at(0)->node();
+    WithInsertPoint guard(graph->return_node());
+    auto tuple_unpack_values = createTupleUnpack(tuple_node->output());
     graph->eraseOutput(0);
-    for (Value* v : tuple_node->inputs()) {
+    for (Value* v : tuple_unpack_values) {
       graph->registerOutput(v);
     }
+    GRAPH_DUMP("After Output Tuple Unpacking", graph);
   }
 }
 
@@ -246,7 +249,13 @@ std::shared_ptr<Graph> genShapeComputeFn(
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
   std::shared_ptr<Graph> graph;
+  GRAPH_DEBUG(
+      "Registering schema: ",
+      *schema_string,
+      " with shape compute func: ",
+      shape_compute_function_name);
   if (reused_functions.count(shape_compute_function_name)) {
+    GRAPH_DEBUG("Registering reused schema");
     graph = reused_functions[shape_compute_function_name];
   } else {
     Function& shape_compute_function =
@@ -344,20 +353,28 @@ void loadModule(const CompilationUnit& module) {
 }
 
 void loadFunctions() {
-  auto shape_compute_functions =
-      GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
+  try {
+    auto shape_compute_functions =
+        GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
-  auto src = std::make_shared<Source>(shape_compute_functions);
-  std::stringstream ss;
-  std::vector<at::IValue> constantTable;
-  auto resolver = std::make_shared<SourceImporterImpl>(
-      compilation_unit,
-      &constantTable,
-      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
-      1);
-  compilation_unit->define(
-      c10::nullopt, shape_compute_functions, resolver, nullptr);
-  loadModule(*compilation_unit);
+    auto src = std::make_shared<Source>(shape_compute_functions);
+    std::stringstream ss;
+    std::vector<at::IValue> constantTable;
+    auto resolver = std::make_shared<SourceImporterImpl>(
+        compilation_unit,
+        &constantTable,
+        [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+        1);
+    compilation_unit->define(
+        c10::nullopt, shape_compute_functions, resolver, nullptr);
+    loadModule(*compilation_unit);
+  } catch (...) {
+    // Reset the cache and compilation unit so that we don't get weird errors
+    // in later tests when one of the shape functions is invalid.
+    compilation_unit = std::make_shared<CompilationUnit>();
+    cached_schema_to_graph.clear();
+    throw;
+  }
 }
 } // anonymous namespace
 

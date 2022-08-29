@@ -1,17 +1,13 @@
 import itertools
-from typing import List, Sequence, Union, Dict
+from typing import Dict, List, Sequence, Union
+
+from torchgen.api import cpp
 
 from torchgen.api.types import DispatcherSignature
-from torchgen.api import cpp
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
+from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
-from torchgen.model import (
-    Argument,
-    NativeFunction,
-    SchemaKind,
-    TensorOptionsArguments,
-)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -462,11 +458,20 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 )
 
 
-def type_wrapper_name(f: NativeFunction) -> str:
+def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
     if f.func.name.overload_name:
-        return f"{cpp.name(f.func)}_{f.func.name.overload_name}"
+        name = f"{cpp.name(f.func)}_{f.func.name.overload_name}"
     else:
-        return cpp.name(f.func)
+        name = cpp.name(f.func)
+
+    # The key argument is only used in gen_variable_type where we need fns per autograd dispatch key.
+    # In gen_trace_type and gen_inplace_view_type where only one fn per native_fn must be generated,
+    # the key argument should not be passed.
+    # We do not append key if it is Default so that generated functions from
+    # before per-dispatch-key derivatives were added retain the same names.
+    if key != "Default":
+        name = name + f"_{key}"
+    return name
 
 
 @with_native_function

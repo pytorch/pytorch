@@ -1,5 +1,8 @@
 from typing import Iterator, List, Sequence, Union
 
+
+from torch.utils.data.datapipes._decorator import functional_datapipe
+
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
@@ -7,6 +10,7 @@ from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 __all__ = ["FileListerIterDataPipe", ]
 
 
+@functional_datapipe("list_files")
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""
     Given path(s) to the root directory, yields file pathname(s) (path + filename) of files within the root directory.
@@ -22,6 +26,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         length: Nominal length of the datapipe
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import FileLister
         >>> dp = FileLister(root=".", recursive=True)
         >>> list(dp)

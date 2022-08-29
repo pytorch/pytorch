@@ -28,7 +28,9 @@
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
+#include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
@@ -98,7 +100,9 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
+  ss << nvfuser_resources::memory_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -580,11 +584,13 @@ void validateAlignedVectorizedFusionInputOutput(
   bool still_rightmost = true;
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
-    // If this domain is contiguous, then not necessary to check the
-    // stride. Otherwise, stride must be 1 if it's rightmost or
-    // divisible by word_size.
+    const auto size = aten_tensor.sizes().at(i);
+    // If this domain is contiguous or size == 1, then not necessary to check
+    // the stride. Otherwise, stride must be 1 if it's rightmost or
+    // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || (still_rightmost && stride == 1) ||
+        stride == cur_contig_stride || size == 1 ||
+            (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
         tv->toString(),
@@ -597,9 +603,12 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    const auto size = aten_tensor.sizes().at(i);
     still_rightmost = still_rightmost && size == 1;
-    cur_contig_stride = stride * size;
+    // We do not update cur_contig_stride for size==1 dimensions,
+    // since we have specialized vectorization stride check for them
+    if (size != 1) {
+      cur_contig_stride = stride * size;
+    }
   }
 }
 
@@ -769,7 +778,33 @@ kir::ExpressionEvaluator bindKernelInputs(
 
       for (const auto dim : c10::irange(root_domain.size())) {
         const auto extent = root_domain[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
+        }
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
@@ -785,7 +820,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }
@@ -816,7 +851,7 @@ ExpressionEvaluator bindFusionInputs(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs do not match.");
 
-  ExpressionEvaluator evaluator(fusion);
+  ExpressionEvaluator expr_eval(fusion);
   auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
@@ -830,20 +865,46 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom =
+      auto root_domain =
           TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == (int64_t)root_dom.size(),
+          aten_tensor.ndimension() == (int64_t)root_domain.size(),
           "Something went wrong configuring launch. Inputs do not match.");
-      for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
+      for (const auto dim : c10::irange(root_domain.size())) {
+        const auto extent = root_domain[dim]->extent();
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
+        }
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
         TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
-        const auto prev_value = evaluator.evaluate(extent);
+        const auto prev_value = expr_eval.evaluate(extent);
         if (prev_value.has_value()) {
           TORCH_CHECK(
               *prev_value == value,
@@ -851,10 +912,10 @@ ExpressionEvaluator bindFusionInputs(
               extent,
               " to ",
               value,
-              "but it's already set to ",
+              " but it's already set to ",
               *prev_value);
         } else {
-          evaluator.bind(extent, value);
+          expr_eval.bind(extent, value);
         }
       }
     } else if (
@@ -864,10 +925,10 @@ ExpressionEvaluator bindFusionInputs(
           aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
           "fusion expected Scalar Int inputs, but found",
           aten_inputs[i].type()->str());
-      evaluator.bind(inputs[i], aten_inputs[i].toInt());
+      expr_eval.bind(inputs[i], aten_inputs[i].toInt());
     }
   }
-  return evaluator;
+  return expr_eval;
 }
 
 void initializeCudaContext() {
@@ -888,6 +949,11 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
+  if (isOptionDisabled(DisableOption::ArchCheck)) {
+    TORCH_WARN(
+        "NVFuser Compile: arch check disabled, should not compile any kernel");
+  }
+
   initializeCudaContext();
 
   std::stringstream ptxas_log;
@@ -901,9 +967,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
+    std::stringstream ss;
+    ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
@@ -937,7 +1006,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const bool disable_fma = isDisabled(DisableOption::Fma);
+  const bool disable_fma = isOptionDisabled(DisableOption::Fma);
 #ifdef __HIP_PLATFORM_HCC__
   if (disable_fma) {
     TORCH_WARN_ONCE(
@@ -950,14 +1019,20 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     args.push_back("--fmad=true");
   }
 #endif
-
-#ifndef NDEBUG
   // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
+  if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
+    args.push_back("-lineinfo");
+    args.push_back("-G");
+    args.push_back("--dopt=on");
+  }
+#ifdef NDEBUG
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
+
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
+    args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
+  }
 
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
@@ -991,6 +1066,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");
@@ -1212,6 +1293,10 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
       lowered_kernel_name));
+
+  TORCH_CHECK(
+      !isOptionDisabled(DisableOption::ArchCheck),
+      "NVFuser Compile: arch check disabled, should not return any compiled kernel");
 
   return {compiled_kernel_, ptxas_log.str()};
 }

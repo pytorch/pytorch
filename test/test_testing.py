@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import re
+import subprocess
 import sys
 import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
@@ -24,7 +25,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
-import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
 
@@ -435,8 +436,8 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
-            dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
+            dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
             else:  # device_type ='cuda'
@@ -480,7 +481,7 @@ if __name__ == '__main__':
         test_bases_count = len(get_device_type_test_bases())
         # Test without setting env var should run everything.
         env = dict(os.environ)
-        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+        for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
             if k in env.keys():
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
@@ -1133,7 +1134,7 @@ class TestAssertCloseSparseCSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1191,7 +1192,7 @@ class TestAssertCloseSparseCSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 
@@ -1249,7 +1250,7 @@ class TestAssertCloseSparseBSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1307,7 +1308,7 @@ class TestAssertCloseSparseBSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 
@@ -1773,8 +1774,9 @@ class TestImports(TestCase):
                            "torch.distributed.elastic.rendezvous",  # depps on etcd
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
-                           "torch.testing._internal.common_fx2trt",  # needs fx
                            "torch.testing._internal.distributed.",  # just fails
+                           "torch.ao.sparsity._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
@@ -1801,6 +1803,16 @@ class TestImports(TestCase):
                 except Exception as e:
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
+
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    def test_no_warning_on_import(self) -> None:
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
 
 if __name__ == '__main__':

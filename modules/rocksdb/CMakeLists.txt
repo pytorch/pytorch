@@ -56,6 +56,10 @@ endif()
 # which is the main lib of Caffe2. If your library explicitly depends on cuda,
 # then you will need to depend on the caffe2_gpu_library as well.
 add_library(caffe2_rocksdb ${CMAKE_CURRENT_SOURCE_DIR}/rocksdb.cc)
+# RocksDB 7 uses C++17 STL in header.
+if(RocksDB_VERSION_MAJOR VERSION_GREATER_EQUAL 7)
+  set_target_properties(caffe2_rocksdb PROPERTIES CXX_STANDARD 17)
+endif()
 target_link_libraries(caffe2_rocksdb PUBLIC torch_library)
 target_link_libraries(caffe2_rocksdb PRIVATE ${RocksDB_LIBRARIES})
 target_include_directories(caffe2_rocksdb PRIVATE ${RocksDB_INCLUDE_DIR})

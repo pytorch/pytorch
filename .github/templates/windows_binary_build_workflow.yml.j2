@@ -47,11 +47,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  PYTORCH_RETRY_TEST_CASES: 1
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 !{{ common.concurrency(build_environment) }}
@@ -76,7 +72,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: !{{ common.upload_artifact_s3_action }}
+      - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
           name: !{{ config["build_name"] }}
@@ -97,7 +93,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      - uses: !{{ common.download_artifact_s3_action }}
+      - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}

@@ -22,6 +22,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -92,23 +94,50 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
-static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
 #ifndef CUDART_VERSION
-  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+  TORCH_CHECK(false, "linalg.lu_factor: cuBLAS backend for linalg.lu_factor is not available.")
 #else
-  TORCH_INTERNAL_ASSERT(batchCount(b) == batchCount(lu), "batch_size of b and lu must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(lu) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
+  // This function just works with square matrices
+  TORCH_INTERNAL_ASSERT(A.size(-2) == A.size(-1));
+
+  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");;
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto lda = cuda_int_cast(std::max<int>(1, n), "lda");
+
+  auto pivots_data = get_pivots ? pivots.data_ptr<int>() : nullptr;
+  auto infos_data = infos.data_ptr<int>();
+  Tensor a_ptr_array = get_device_pointers<scalar_t>(A);
+  auto a_ptr_array_data = reinterpret_cast<scalar_t**>(a_ptr_array.data_ptr());
+
+  at::cuda::blas::getrfBatched(n, a_ptr_array_data, lda, pivots_data, infos_data, batch_size);
+#endif
+}
+
+void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "lu_factor_cublas", [&]{
+    apply_lu_factor_batched_cublas<scalar_t>(A, pivots, infos, get_pivots);
+  });
+}
+
+template <typename scalar_t>
+static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "linalg.lu_solve: cuBLAS backend for linalg.lu_solve is not available.")
+#else
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(B), "batch_size of LU and B must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
-  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
-  auto m = cuda_int_cast(lu.size(-2), "m");
-  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
+  auto m = cuda_int_cast(LU.size(-2), "m");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
   int info = 0;
 
-  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
-  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(LU);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(B);
   auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
@@ -119,9 +148,9 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #endif
 }
 
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
-    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
+void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(LU, pivots, B, trans);
   });
 }
 
@@ -440,101 +469,6 @@ inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
   auto size = self.sizes();
   auto size_slice = IntArrayRef(size.data(), size.size()-1);
   return at::ones(size_slice, self.options()).diag_embed().mT();
-}
-
-template <typename scalar_t>
-inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_getrf_ptr, int* info_getrs_ptr, int n, int lda) {
-  // self_inv_ptr should already be an identity matrix
-
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, info_getrf_ptr);
-  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, self_inv_ptr, lda, info_getrs_ptr, CUBLAS_OP_N);
-}
-
-template <typename scalar_t>
-static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& infos_getrf, Tensor& infos_getrs) {
-  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
-  const int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-  const int lda = std::max<int>(1, n);
-
-  auto self_data = self.data_ptr<scalar_t>();
-  auto self_mat_stride = matrixStride(self);
-  auto self_inv_data = self_inv.data_ptr<scalar_t>();
-  auto self_inv_mat_stride = matrixStride(self_inv);
-
-  auto infos_getrf_data = infos_getrf.data_ptr<int>();
-  auto infos_getrs_data = infos_getrs.data_ptr<int>();
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-
-  // Heuristic: For small batch size or large matrix size, we use for-loop to iterate over the batches instead of
-  //            calling the batched cublas routine.
-  if (batch_size <= 8 || /* batch_size > 8 && */ n >= 512) {
-    for (int64_t i = 0; i < batch_size; i++) {
-      auto dataPtr = allocator.allocate(sizeof(int) * lda);
-      int* pivot = reinterpret_cast<int*>(dataPtr.get());
-
-      int* infos_getrf_working_ptr = &infos_getrf_data[i];
-      int* infos_getrs_working_ptr = &infos_getrs_data[i];
-
-      _apply_single_inverse_helper<scalar_t>(
-        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, infos_getrf_working_ptr, infos_getrs_working_ptr, n, lda);
-    }
-  } else {
-    // cublas batched kernels require input be "device array of device pointers"
-    Tensor self_array = at::arange(
-      reinterpret_cast<int64_t>(self_data),
-      reinterpret_cast<int64_t>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
-      static_cast<int64_t>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
-    Tensor self_inv_array = at::arange(
-      reinterpret_cast<int64_t>(self_inv_data),
-      reinterpret_cast<int64_t>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
-      static_cast<int64_t>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
-
-    auto dataPtr = allocator.allocate(sizeof(int)*batch_size*lda);
-    int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
-
-    at::cuda::blas::getrfBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), lda,
-      ipiv_array, infos_getrf_data, batch_size);
-
-    at::cuda::blas::getriBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), lda,
-      ipiv_array, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()), lda, infos_getrs_data, batch_size);
-  }
-}
-
-template <typename scalar_t>
-static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tensor& infos_getrf, Tensor& infos_getrs) {
-  int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-  int lda = std::max<int>(1, n);
-
-  Tensor ipiv = at::empty({lda}, self.options().dtype(at::kInt));
-
-  _apply_single_inverse_helper<scalar_t>(
-    self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), infos_getrf.data_ptr<int>(), infos_getrs.data_ptr<int>(), n, lda);
-}
-
-// This is a type dispatching helper function for 'apply_batched_inverse_lib' and 'apply_single_inverse_lib'
-Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs) {
-  // assuming result is in column major order and contains the matrices to invert
-  Tensor input_working_copy = cloneBatchedColumnMajor(result);
-
-  // for getrf + getrs (cusolver path)
-  // result should be filled with identity matrices
-  result.zero_();
-  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-
-  if (result.dim() > 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cuda", [&]{
-      apply_batched_inverse_lib<scalar_t>(
-        input_working_copy, result, infos_getrf, infos_getrs);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cuda", [&]{
-      apply_single_inverse_lib<scalar_t>(input_working_copy, result, infos_getrf, infos_getrs);
-    });
-  }
-
-  return result;
 }
 
 // call cusolver gesvd function to calculate svd
@@ -1685,14 +1619,14 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_) {
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
     "lu_factor_cusolver",
     [&self,
      &pivots,
      &infos,
-     &get_pivots]() {
+     get_pivots]() {
     const auto m = cuda_int_cast(self.size(-2), "m");
     const auto n = cuda_int_cast(self.size(-1), "n");
     const auto lda = std::max<int>(1, m);
@@ -1717,35 +1651,41 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
-  // See https://github.com/pytorch/pytorch/issues/53879 for more details.
-  if (!get_pivots && use_magma_) {
-    at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
-      -std::numeric_limits<double>::infinity());
+  // https://github.com/pytorch/pytorch/issues/53879#issuecomment-830633572
+  if (!get_pivots) {
+    // nan_to_num does not work for complex inputs
+    // https://github.com/pytorch/pytorch/issues/59247
+    if (self.is_complex()) {
+      self.copy_(at::where(self.eq(self), self,  at::scalar_tensor(0., self.options())));
+    } else {
+      at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity());
+    }
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cusolver", [&] {
     const auto trans = to_cublas(transpose);
-    int n = cuda_int_cast(lu.size(-2), "n");
-    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    auto batch_size = batchCount(b);
-    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    int n = cuda_int_cast(LU.size(-2), "n");
+    int nrhs = cuda_int_cast(B.size(-1), "nrhs");
+    auto batch_size = batchCount(B);
+    auto info = at::zeros({1}, LU.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
-    auto b_data = b.data_ptr<scalar_t>();
-    auto lu_data = lu.data_ptr<scalar_t>();
+    auto b_data = B.data_ptr<scalar_t>();
+    auto lu_data = LU.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
     auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
-    auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
-    auto b_stride = matrixStride(b);
+    auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
+    auto b_stride = matrixStride(B);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
     // lu and pivots tensors can be broadcast to b
     // here we construct a helper indexing tensor to linearly index into lu and pivots
-    IntArrayRef lu_batch_shape(lu.sizes().data(), lu.dim() - 2);
-    IntArrayRef b_batch_shape(b.sizes().data(), b.dim() - 2);
+    IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+    IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
     BroadcastLinearIndices lu_index(
-        batchCount(lu), lu_batch_shape, b_batch_shape);
+        batchCount(LU), lu_batch_shape, b_batch_shape);
 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {

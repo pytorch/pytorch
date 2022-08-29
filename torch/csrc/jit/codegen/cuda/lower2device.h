@@ -164,6 +164,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return sync_map_;
   }
 
+  kir::KernelPerformanceProfile& profile() {
+    return profile_;
+  }
+
   // This is an interface to propagate information after expression
   //  replacement on the kernel IR. E.g.:
   //    for ...
@@ -209,6 +213,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   CommonIndexMap common_index_map_;
   FusedReductionInfo fused_reduction_info_;
   SyncMap sync_map_;
+  kir::KernelPerformanceProfile profile_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size

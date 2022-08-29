@@ -2,29 +2,33 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 
 #include <torch/csrc/python_headers.h>
-#include <memory>
 #include <cstdio>
+#include <memory>
 #include <typeindex>
 #include <unordered_map>
 
-#include <torch/csrc/autograd/python_function.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/python_hook.h>
-#include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 
 using namespace torch::autograd;
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 namespace {
 
-PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
-{
+PyObject* THPCppFunction_call(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   if (kwargs && PyDict_Size(kwargs) != 0) {
     return PyErr_Format(PyExc_TypeError, "keyword arguments are not supported");
   }
@@ -32,8 +36,11 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   int num_inputs = PyTuple_GET_SIZE(args);
   int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
   if (num_inputs != num_inputs_required) {
-    return PyErr_Format(PyExc_TypeError, "expected %d arguments, got %d instead",
-                        num_inputs_required, num_inputs);
+    return PyErr_Format(
+        PyExc_TypeError,
+        "expected %d arguments, got %d instead",
+        num_inputs_required,
+        num_inputs);
   }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
@@ -68,11 +75,10 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   return tuple.release();
 }
 
-int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
-{
+int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   for (const auto& hook : fn.pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+    if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
@@ -84,8 +90,7 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
   return 0;
 }
 
-int THPCppFunction_clear(PyObject* self)
-{
+int THPCppFunction_clear(PyObject* self) {
   auto f = (THPCppFunction*)self;
   // Remove the weak ref of the c++ object if it exist
   if (f->cdata) {
@@ -95,8 +100,7 @@ int THPCppFunction_clear(PyObject* self)
   return 0;
 }
 
-void THPCppFunction_dealloc(PyObject* self)
-{
+void THPCppFunction_dealloc(PyObject* self) {
   THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
@@ -104,83 +108,91 @@ void THPCppFunction_dealloc(PyObject* self)
 
 } // namespace
 
-PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
-{
+PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook) {
   const auto num_next = self->cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
-  if (!py_functions) return nullptr;
+  if (!py_functions)
+    return nullptr;
   for (const auto i : c10::irange(num_next)) {
     auto& c_tuple = self->cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
-    if (!tuple) return nullptr;
-    PyObject *py_fn = functionToPyObject(c_tuple.function);
-    if (!py_fn) return nullptr;
+    if (!tuple)
+      return nullptr;
+    PyObject* py_fn = functionToPyObject(c_tuple.function);
+    if (!py_fn)
+      return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
-    PyObject *py_idx = THPUtils_packUInt32(c_tuple.input_nr);
-    if (!py_idx) return nullptr;
+    PyObject* py_idx = THPUtils_packUInt32(c_tuple.input_nr);
+    if (!py_idx)
+      return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
   }
   return py_functions.release();
 }
 
-PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused)
-{
-  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
+PyObject* THPCppFunction_metadata(THPCppFunction* self, void* _unused) {
+  auto metadata =
+      static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
 
   Py_INCREF(metadata);
   return metadata;
 }
 
-PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void *unused) {
+PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void* unused) {
   Py_RETURN_TRUE;
 }
 
-PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
-{
+PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   if (!THPVariable_Check(_var)) {
-    return PyErr_Format(PyExc_TypeError, "_register_hook_dict expected a variable");
+    return PyErr_Format(
+        PyExc_TypeError, "_register_hook_dict expected a variable");
   }
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
-  std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, THPVariable_Unpack(var).output_nr()));
+  std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
+      var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
-PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
-{
+PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return registerFunctionHook(fn, hook);
 }
 
-PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
+PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook) {
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  return registerFunctionPreHook(fn, hook);
+}
+
+PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packString(fn.name());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
-  THP_FUNCTION_DEFAULT_METHODS,
-  {nullptr}
-};
+    THP_FUNCTION_DEFAULT_METHODS,
+    {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef default_properties[] = {
-  THP_FUNCTION_DEFAULT_PROPERTIES,
-  {nullptr}
-};
+    THP_FUNCTION_DEFAULT_PROPERTIES,
+    {nullptr}};
 
-PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
-  PyGetSetDef* function_properties, PyMethodDef* function_methods)
-{
+PyTypeObject* _initFunctionPyTypeObject(
+    PyTypeObject& type,
+    const char* name,
+    PyGetSetDef* function_properties,
+    PyMethodDef* function_methods) {
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
   type.tp_basicsize = sizeof(THPCppFunction);
   type.tp_call = THPCppFunction_call;
   type.tp_methods = function_methods ? function_methods : default_methods;
-  type.tp_getset = function_properties ? function_properties : default_properties;
+  type.tp_getset =
+      function_properties ? function_properties : default_properties;
   type.tp_dealloc = THPCppFunction_dealloc;
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;
@@ -202,8 +214,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
-{
+PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
   static DefaultFunctionType default_type;
 
   if (!cdata) {
@@ -230,7 +241,8 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
     }
 
     THPObjectPtr obj(type->tp_alloc(type, 0));
-    if (!obj) return nullptr;
+    if (!obj)
+      return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();
     new (&f->cdata) std::shared_ptr<Node>(cdata);
 
@@ -241,14 +253,12 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
   return cdata->pyobj();
 }
 
-void registerCppFunction(const std::type_info& type, PyTypeObject* pytype)
-{
+void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
   Py_INCREF((PyObject*)pytype);
   cpp_function_types[std::type_index(type)] = THPObjectPtr((PyObject*)pytype);
 }
 
-PyObject* registerFunctionHook(Node& fn, PyObject* hook)
-{
+PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   PyObject* dict = Py_None;
   for (const auto& hook : fn.post_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
@@ -257,10 +267,14 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook)
     }
   }
 
-  THPObjectPtr register_fn(PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
-  if (!register_fn) return nullptr;
-  THPObjectPtr res(PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
-  if (!res) return nullptr;
+  THPObjectPtr register_fn(
+      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
+  if (!register_fn)
+    return nullptr;
+  THPObjectPtr res(
+      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
+  if (!res)
+    return nullptr;
 
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
@@ -273,4 +287,35 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook)
   return handle;
 }
 
-}} // namespace torch::autograd
+// This is almost a copy of the function above except post -> pre
+PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
+  PyObject* dict = Py_None;
+  for (const auto& hook : fn.pre_hooks()) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      dict = pyhook->dict;
+      break;
+    }
+  }
+
+  THPObjectPtr register_fn(
+      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
+  if (!register_fn)
+    return nullptr;
+  THPObjectPtr res(
+      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
+  if (!res)
+    return nullptr;
+
+  if (dict == Py_None) {
+    dict = PyTuple_GET_ITEM(res.get(), 0);
+    std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(dict));
+    fn.add_pre_hook(std::move(hook));
+  }
+
+  PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
+  Py_INCREF(handle);
+  return handle;
+}
+
+} // namespace autograd
+} // namespace torch

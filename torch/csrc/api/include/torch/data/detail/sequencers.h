@@ -11,7 +11,7 @@ namespace data {
 namespace detail {
 namespace sequencers {
 namespace detail {
-template<typename Result>
+template <typename Result>
 bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
   return std::any_of(
       buffer.begin(), buffer.end(), [](const optional<Result>& result) {

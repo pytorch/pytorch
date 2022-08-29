@@ -7,15 +7,10 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::SparseCPU)) {
-      return kCPU;
-    } else if (key_set.has(DispatchKey::SparseXPU)) {
-      return kXPU;
-    } else if (key_set.has(DispatchKey::SparseCUDA)) {
-      return kCUDA;
-    } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
-    }
+    auto k = c10::highestPriorityBackendTypeId(key_set);
+    TORCH_CHECK(c10::toFunctionalityKey(k) == DispatchKey::Sparse,
+      "cannot create sparse tensor with non sparse dispatch key ", k);
+    return c10::dispatchKeyToDeviceType(k);
   }
 }
 
@@ -54,6 +49,8 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
 }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
 void SparseTensorImpl::release_resources() {
   TensorImpl::release_resources();
   values_.reset();

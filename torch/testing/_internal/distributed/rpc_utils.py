@@ -43,9 +43,11 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
+    FaultyAgentRpcTest,
+)
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
-    FaultyAgentRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,
@@ -176,7 +178,7 @@ def generate_tests(
             continue
 
         name = f"{prefix}{test_class.__name__}"
-        class_ = type(name, (test_class, mixin, SpawnHelper), dict())
+        class_ = type(name, (test_class, mixin, SpawnHelper), {})
         class_.__module__ = module_name
         ret[name] = class_
     return ret

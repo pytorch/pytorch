@@ -1,3 +1,5 @@
+# Only used for PyTorch open source BUCK build
+
 """Provides utility macros for working with globs."""
 
 load("@bazel_skylib//lib:paths.bzl", "paths")

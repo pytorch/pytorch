@@ -58,7 +58,6 @@ __device__ void broadcast(
     __threadfence();
   }
 
-  bool null = false;
   grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, true>(
       sync_flags[grid_seg_idx], grid_seg_size);
 

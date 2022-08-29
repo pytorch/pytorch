@@ -8,6 +8,8 @@
 namespace at {
 namespace mps {
 
+C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+
 namespace HeapAllocator {
 
 HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& p)
@@ -56,7 +58,7 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& p)
   TORCH_INTERNAL_ASSERT(buffer);
   // insert heap after a buffer was created on it to update the order of heap's set
   p.pool->heaps.insert(heap);
-  p.buffer_block = new BufferBlock(p.size(), buffer, heap, m_allocated_buffers.size() + 1);
+  p.buffer_block = new BufferBlock(p.size(), p.requested_size, buffer, heap, m_allocated_buffers.size() + 1);
   m_allocated_buffers[p.buffer_block->buffer] = p.buffer_block;
   m_total_allocated_memory += p.size();
 
@@ -64,7 +66,8 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& p)
     std::cerr << "Allocated "
               << (p.pool->is_shared ? "shared" : "private")
               << " buffer #" << p.buffer_block->buf_id
-              << " with aligned size " << format_size(p.size())
+              << " of size " << format_size(p.size())
+              << " at " << p.buffer_block->buffer
               << " (requested size: " << format_size(p.requested_size)
               << ", heap size: " << format_size(heap->size.available)
               << ", total allocated: " << format_size(m_total_allocated_memory) << ")\n";
@@ -90,7 +93,8 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& p)
     std::cerr << "Reusing "
               << (p.pool->is_shared ? "shared" : "private")
               << " buffer #" << p.buffer_block->buf_id
-              << " with aligned size " << format_size(p.buffer_block->size)
+              << " of size " << format_size(p.buffer_block->size)
+              << " at " << p.buffer_block->buffer
               << " (requested size: " << format_size(p.requested_size) << ")\n";
   }
   return true;
@@ -125,7 +129,9 @@ id<MTLBuffer> MPSHeapAllocatorImpl::Malloc(size_t size, bool sharedStorage)
 void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block)
 {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
+  trigger_memory_callbacks(buffer_block, IMpsAllocatorCallback::EventType::FREED);
   buffer_block->in_use = false;
+  buffer_block->shape.clear(); // reset shape
   BufferPool *pool = buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
   TORCH_INTERNAL_ASSERT(pool->buffers.insert(buffer_block).second);
@@ -133,12 +139,17 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block)
 
 BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr)
 {
-  id<MTLBuffer> buf = __builtin_bit_cast(id<MTLBuffer>, ptr);
-  auto it = m_allocated_buffers.find(buf);
+  auto it = m_allocated_buffers.find(ptr);
   if (it == m_allocated_buffers.end())
     return nullptr;
 
   return it->second;
+}
+
+void MPSHeapAllocatorImpl::trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) {
+  for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
+    MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+  }
 }
 
 bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr)
@@ -148,6 +159,40 @@ bool MPSHeapAllocatorImpl::isSharedBuffer(void* ptr)
   BufferBlock *buffer_block = get_allocated_buffer_block(ptr);
   // it's OK for the buffer_block to not exist yet
   return buffer_block && buffer_block->heap->pool->is_shared;
+}
+
+ssize_t MPSHeapAllocatorImpl::getRequestedBufferSize(void* ptr)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  BufferBlock *buffer_block = get_allocated_buffer_block(ptr);
+  if (buffer_block)
+    return (ssize_t) buffer_block->requested_size;
+  // this indicates the passed buffer pointer wasn't found
+  return -1;
+}
+
+void MPSHeapAllocatorImpl::setBufferShape(void* ptr, const IntArrayRef& shape)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  BufferBlock *buffer_block = get_allocated_buffer_block(ptr);
+  TORCH_INTERNAL_ASSERT(buffer_block, "failed to find the buffer ", ptr);
+  // note that the IntArrayRef doesn't own the underlying data, and the backing
+  // memory for shape data must persist as long as the buffer is in use.
+  // So we need to copy to vector.
+  buffer_block->shape = shape.vec();
+}
+
+IntArrayRef MPSHeapAllocatorImpl::getBufferShape(void* ptr)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  BufferBlock *buffer_block = get_allocated_buffer_block(ptr);
+  if (buffer_block && buffer_block->shape.size() > 0)
+    return IntArrayRef{buffer_block->shape};
+
+  return IntArrayRef();
 }
 
 void MPSHeapAllocatorImpl::Free(void* ptr)
@@ -167,6 +212,8 @@ void MPSHeapAllocatorImpl::EmptyCache()
 
 void MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove_empty_heap)
 {
+  trigger_memory_callbacks(buffer_block, IMpsAllocatorCallback::EventType::RELEASED);
+
   HeapBlock *heap = buffer_block->heap;
   BufferPool *pool = heap->pool;
   m_total_allocated_memory -= buffer_block->size;
@@ -289,7 +336,7 @@ public:
 
   DeleterFnPtr raw_deleter() const override { return &Delete; }
   bool is_shared(void* ptr) const { return _getAllocImpl().isSharedBuffer(ptr); }
-  bool is_shared_storge_supported() const { return m_has_unified_memory; }
+  bool is_shared_storage_supported() const { return m_has_unified_memory; }
 
 private:
   bool m_has_unified_memory;
@@ -318,6 +365,7 @@ MPSAllocator& _getSharedAllocator() {
   static MPSAllocator s_mps_shared_alloc(true);
   return s_mps_shared_alloc;
 }
+
 MPSAllocator& _getPrivateAllocator() {
   static mps::MPSAllocator s_mps_private_alloc(false);
   return s_mps_private_alloc;
@@ -327,7 +375,7 @@ MPSAllocator& _getPrivateAllocator() {
 at::Allocator* getMPSSharedAllocator()
 {
   auto& sa = _getSharedAllocator();
-  if (sa.is_shared_storge_supported()) {
+  if (sa.is_shared_storage_supported()) {
     return &sa;
   }
 
@@ -337,6 +385,19 @@ at::Allocator* getMPSSharedAllocator()
 at::Allocator* getMPSStaticAllocator() {
   return &_getPrivateAllocator();
 }
+
+// TODO: create MPSHooks interface and move these there.
+ssize_t get_requested_buffer_size(void* ptr) {
+  return _getAllocImpl().getRequestedBufferSize(ptr);
+}
+
+void set_buffer_shape(void* ptr, const IntArrayRef& shape) {
+  _getAllocImpl().setBufferShape(ptr, shape);
+}
+
+IntArrayRef get_buffer_shape(void* ptr) {
+  return _getAllocImpl().getBufferShape(ptr);
+};
 
 } // namespace mps
 
@@ -368,5 +429,4 @@ Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device)
 }
 
 } // namespace native
-
 } // namespace at

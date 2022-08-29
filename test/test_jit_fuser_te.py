@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
     enable_profiling_mode_for_profiling_tests, slowTest
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
-    clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions
+    clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions, NoTracerWarnContextManager
 
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests, \
@@ -1387,6 +1387,7 @@ class TestTEFuser(JitTestCase):
                 F.hardsigmoid,
                 F.hardswish,
                 F.softplus,
+                F.silu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
@@ -2395,6 +2396,42 @@ class TestTEFuser(JitTestCase):
         f = FileCheck().check("Found multiple fusions")
         f.run(str(error_out.exception))
 
+    def test_constant_chunk_shapes(self):
+        # We had an issue where buildShapeExpressions would fail as show below:
+        #
+        # %1 : Tensor = Constant[..]  # not supported, we don't build this shape
+        # %2 : Tensor = Constant[..]  # not supported
+        # %3 : Tensor = aten::add(%1, %2)  # inputs not supported, we don't build shape
+        # ... = prim::ConstantChunk[..](%3)  # it forgets to check whether input shapes exist, and fails
+        if self.dynamic_shapes:
+            self.skipTest("TODO: chunk dynamic shapes")
+
+        for device in self.devices:
+            def f(x, y):
+                r = torch.tensor(4)
+                z1, z2 = (x + y + r).chunk(2, dim=1)
+                return z1 * z2
+
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
+
+            ge = self.checkTrace(f, (x, y))
+            graph = ge.graph_for(x, y)
+
+            # make sure that we are actually testing the right scenario
+            FileCheck().check("with " + FUSION_GROUP + "_").check_count(
+                "ConstantChunk", 1, exactly=True
+            ).run(str(graph))
+
+            f_traced = torch.jit.trace(f, (x, y))
+
+            for i in range(4):
+                # make sure this doesn't error out
+                res = f_traced(x, y)
+
+            self.assertEqual(res, f(x, y))
+
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
@@ -2624,23 +2661,26 @@ def f({', '.join(param_names)}):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nnc_correctness(self, device, dtype, op):
-        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+        if not op.supports_tracing:
+            self.skipTest("Requires tracing support")
 
-        for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant, cache_traced_fn=True)
-            ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+        with NoTracerWarnContextManager() as no_warn:
+            variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
-            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+            for variant, sample in variant_sample_pairs:
+                trace = create_traced_fn(self, variant, cache_traced_fn=True)
+                ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+                trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+                val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            self.assertEqual(ref, val)
+                self.assertEqual(ref, val)
 
-        # https://github.com/pytorch/pytorch/issues/35600
-        # each torch.jit.trace adds state to the _python_cu compilation unit
-        # since this test traces a lot of functions, out-of-memory can occur
-        # if the CU is not cleared.
-        torch.jit._state._python_cu.drop_all_functions()
+            # https://github.com/pytorch/pytorch/issues/35600
+            # each torch.jit.trace adds state to the _python_cu compilation unit
+            # since this test traces a lot of functions, out-of-memory can occur
+            # if the CU is not cleared.
+            torch.jit._state._python_cu.drop_all_functions()
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
