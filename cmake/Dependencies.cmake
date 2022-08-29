@@ -823,11 +823,8 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
-      target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
-      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.1.0)
-        # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
-        target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
-      endif()
+      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
+      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     endif()
   endif()
 
@@ -1374,6 +1371,16 @@ if(USE_NCCL)
   endif()
 endif()
 
+# ---[ UCC
+if(USE_UCC)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(WARNING "UCC is currently only supported under Linux.")
+    caffe2_update_option(USE_UCC OFF)
+  else()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/ucc.cmake)
+  endif()
+endif()
+
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
@@ -1431,6 +1438,11 @@ if(USE_GLOO)
       if(USE_DISTRIBUED AND USE_TENSORPIPE)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
+      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+        # Tell Gloo build system to use bundled NCCL, see
+        # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
+        set(NCCL_EXTERNAL ON)
       endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
@@ -1640,17 +1652,13 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(NOT MSVC)
-    if(CMAKE_VERSION VERSION_LESS "3.1")
-      set(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-    else()
-      set(CMAKE_C_STANDARD 11)
-    endif()
+    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14)
+    set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
   endif()
 
   # use cub in a safe manner, see:
@@ -1764,7 +1772,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
-  set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1780,11 +1787,11 @@ if(NOT INTERN_BUILD_MOBILE)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       if(BUILD_CAFFE2_OPS)
-        set(CAFFE2_USE_MKLDNN ON)
         list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
+      caffe2_update_option(USE_MKLDNN OFF)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")

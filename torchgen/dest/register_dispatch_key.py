@@ -1,42 +1,44 @@
-from typing import List, Optional, Tuple, Union
 import itertools
-from typing_extensions import Literal
-from dataclasses import dataclass
 import textwrap
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
-from torchgen.context import method_with_native_function, native_function_manager
-from torchgen.utils import Target, mapMaybe, assert_never
-from torchgen.model import (
-    DispatchKey,
-    NativeFunction,
-    NativeFunctionsGroup,
-    SchemaKind,
-    TensorOptionsArguments,
-    DeviceCheckType,
-    Argument,
-    is_cuda_dispatch_key,
-    BackendIndex,
-    gets_generated_out_inplace_wrapper,
-)
+from typing_extensions import Literal
+
+import torchgen.api.cpp as cpp
+import torchgen.api.meta as meta
+import torchgen.api.structured as structured
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
     ConstRefCType,
     CppSignature,
     CppSignatureGroup,
+    DispatcherSignature,
     Expr,
-    MutRefCType,
     kernel_signature,
+    MutRefCType,
+    NamedCType,
     NativeSignature,
     tensorT,
-    NamedCType,
-    DispatcherSignature,
 )
-import torchgen.api.meta as meta
-import torchgen.api.cpp as cpp
-import torchgen.api.structured as structured
-from torchgen.api.translate import translate
+
+from torchgen.context import method_with_native_function, native_function_manager
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    DeviceCheckType,
+    DispatchKey,
+    gets_generated_out_inplace_wrapper,
+    is_cuda_dispatch_key,
+    NativeFunction,
+    NativeFunctionsGroup,
+    SchemaKind,
+    TensorOptionsArguments,
+)
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import assert_never, mapMaybe, Target
 
 
 def gen_registration_headers(
@@ -285,8 +287,8 @@ class RegisterDispatchKey:
         self, f: NativeFunction
     ) -> Union[NativeSignature, DispatcherSignature]:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
-        return kernel_signature(
-            f, self.backend_index, prefix=f"wrapper_{f.func.name.overload_name}_"
+        return DispatcherSignature.from_schema(
+            f.func, prefix=f"wrapper_{f.func.name.overload_name}_"
         )
 
     def gen_out_inplace_wrapper(
@@ -405,10 +407,11 @@ class RegisterDispatchKey:
                 f, method=False, fallback_binding=False
             )
 
+            # TODO: dedupe this with the structured codegen
             if self.target is Target.NAMESPACED_DECLARATION:
-                result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
-                if cpp_sig_group.faithful_signature is not None:
-                    result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+                result = ""
+                for cpp_sig in cpp_sig_group.signatures():
+                    result += f"TORCH_API {cpp_sig.decl()};\n"
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
 
@@ -419,10 +422,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-                result = generate_defn(cpp_sig_group.signature)
-                if cpp_sig_group.faithful_signature is not None:
-                    result += generate_defn(cpp_sig_group.faithful_signature)
+                result = ""
+                for cpp_sig in cpp_sig_group.signatures():
+                    result += generate_defn(cpp_sig)
                 return result
+
             elif self.target is Target.ANONYMOUS_DEFINITION:
                 # short circuit for inplace_meta
                 if inplace_meta:
@@ -449,7 +453,14 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 else:
                     impl_name = f"{metadata.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
-                args_exprs_str = ", ".join(a.name for a in args)
+                kernel_sig = kernel_signature(f, self.backend_index)
+
+                args_exprs_str = ", ".join(
+                    e.expr
+                    for e in translate(
+                        sig.arguments(), kernel_sig.arguments(), method=False
+                    )
+                )
 
                 device_check = "  // No device check\n"
                 # Backends that require device guards presumably also require device checks.
@@ -739,12 +750,14 @@ resize_out(out, sizes, strides, options);
         )
 
         # Signature of the wrapper function we'll register to the dispatcher
-        sig = NativeSignature(f.func, prefix="wrapper_")
+        sig = NativeSignature(
+            f.func, prefix="wrapper_", symint=self.backend_index.symint
+        )
 
         if self.target is Target.NAMESPACED_DECLARATION:
-            result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
-            if cpp_sig_group.faithful_signature is not None:
-                result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+            result = ""
+            for cpp_sig in cpp_sig_group.signatures():
+                result += f"TORCH_API {cpp_sig.decl()};\n"
             return result
 
         elif self.target is Target.NAMESPACED_DEFINITION:
@@ -756,9 +769,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 }}
 """
 
-            result = generate_defn(cpp_sig_group.signature)
-            if cpp_sig_group.faithful_signature is not None:
-                result += generate_defn(cpp_sig_group.faithful_signature)
+            result = ""
+            for cpp_sig in cpp_sig_group.signatures():
+                result += generate_defn(cpp_sig)
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:

@@ -2,6 +2,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
@@ -15,9 +16,9 @@
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
@@ -487,7 +488,12 @@ static void setInputTensorTypes(
   auto s_iter = stack.begin();
   size_t list_idx = 0;
   if (!param_count_list.empty()) {
-    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+    TORCH_INTERNAL_ASSERT(
+        input_values.size() == param_count_list.size(),
+        " input_values:",
+        input_values.size(),
+        " vs param_count_list:",
+        param_count_list.size());
   }
   for (auto v : input_values) {
     // Leave packed param types alone. This is needed for downstream passes
@@ -1770,8 +1776,6 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
-  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
-
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
@@ -1950,6 +1954,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
+  m.def(
+      "_quantize_ondevice_ptq_dynamic",
+      [](mobile::Module& m, const std::string& method_name) {
+        mobile::quantization::PTQQuanizationHelper ptq_helper;
+        ptq_helper.quantize_dynamic(m, method_name);
+      });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);

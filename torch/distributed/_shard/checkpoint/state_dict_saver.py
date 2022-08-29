@@ -1,98 +1,29 @@
-import io
-from typing import Any, Dict, List, Tuple, Optional, Union
-
-
-import torch
+from typing import Optional
 import torch.distributed as dist
 
-from torch import Tensor
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor,
-)
+from .planner import SavePlanner
+from .default_planner import DefaultSavePlanner
 
-from .metadata import (
-    Metadata,
-    BytesWriteRequest,
-    TensorWriteRequest,
-)
-from .resharding import (
-    _prepare_sharded_tensor_write,
-    _prepare_tensor_write,
-    _prepare_bytes_write
-)
 
 from .storage import (
     StorageWriter,
 )
 
-from .api import CheckpointException
+from .metadata import (
+    Metadata,
+    STATE_DICT_TYPE
+)
+from .utils import _DistWrapper
 
-# -------------- private functions --------------
-
-def _prepare(
-    state_dict: Dict[str, Any],
-    write_replicated_data: bool,
-    process_group: Optional[dist.ProcessGroup] = None,
-) -> Tuple[Metadata, List[BytesWriteRequest], List[TensorWriteRequest]]:
-    """
-    Build the serialization plan for a given state_dict
-
-    Args:
-        state_dict: The instance to plan for.
-
-    Returns:
-        A tuple with the following values:
-
-        metadata: Metadata
-        The storage metadata describing Tensor and ShardedTensors
-        instances found in `state_dict`. See `Metadata` for the schema.
-
-        size_for_storage_keys: Dict[str, int]
-            Key is the storage key name, value is the associated size
-            It can used to pre allocate the storage for parallel and non sequential writes.
-
-        bytes_write_requests: List[BytesWriteRequest]
-            List of ByteIO write requests that should be performed by the writer.
-
-        tensor_write_requests: List[TensorWriteRequest]
-            List of Tensor write requests that should be performed by the writer.
-
-    """
-    metadata = Metadata(state_dict_metadata={})
-    tensor_write_requests: List[TensorWriteRequest] = []
-    bytes_write_requests: List[BytesWriteRequest] = []
-    storage_key_to_fqn: Dict[str, str] = dict()
-
-    for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor):
-            st_write_reqs, st_md = _prepare_sharded_tensor_write(obj, fqn, storage_key_to_fqn)
-            tensor_write_requests += st_write_reqs
-            metadata.state_dict_metadata[fqn] = st_md
-        elif isinstance(obj, Tensor):
-            write_reqs, tensor_md = _prepare_tensor_write(obj, fqn, storage_key_to_fqn)
-            if write_replicated_data:
-                tensor_write_requests += write_reqs
-            metadata.state_dict_metadata[fqn] = tensor_md
-        else:
-            bytes_io = io.BytesIO()
-            # This produces incomplete MD for rank > 0 since we won't populate bytes_io.
-            # This is ok since only rank == 0 uses this data
-            if write_replicated_data:
-                torch.save(obj, bytes_io)
-            byte_write_reqs, bytes_md = _prepare_bytes_write(bytes_io, fqn, storage_key_to_fqn)
-            if write_replicated_data:
-                bytes_write_requests += byte_write_reqs
-            metadata.state_dict_metadata[fqn] = bytes_md
-
-    return (metadata, bytes_write_requests, tensor_write_requests)
 
 def save_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False
-) -> None:
+    no_dist: bool = False,
+    planner: SavePlanner = None
+) -> Metadata:
     """
     Save a distributed model in SPMD style.
 
@@ -122,6 +53,7 @@ def save_state_dict(
         no_dist (bool): Don't attempt to save in SPMD style. Default to False
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
         >>> # We must call this function prior to state_dict()
         >>> my_model._register_state_dict_hook(state_dict_hook)
@@ -141,76 +73,42 @@ def save_state_dict(
         is the user's responsibility to ensure that this is set so that each rank
         has an individual GPU, via ``torch.cuda.set_device()``
     """
-    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
+    distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
+    if planner is None:
+        planner = DefaultSavePlanner()
+    assert planner is not None
 
-    exceptions: List[Optional[BaseException]] = [None]
-    if is_coordinator:
-        try:
-            storage_writer.prepare()
-        except BaseException as e:
-            exceptions = [e]
+    global_metatadata = None
 
-    # Writing can only start once prepare has finished
-    if not no_dist:
-        dist.broadcast_object_list(exceptions, group=process_group, src=coordinator_rank)
+    def local_step():
+        assert planner is not None
+        planner.init(state_dict, distW.is_coordinator)
+        storage_writer.init(distW.is_coordinator)
+        local_plan = planner.create_local_plan()
+        local_plan = storage_writer.prepare_local_plan(local_plan)
+        return local_plan
 
-    if exceptions[0] is not None:
-        raise CheckpointException("failed to prepare storage", {coordinator_rank : exceptions[0]})
+    def global_step(all_local_plans):
+        nonlocal global_metatadata
 
-    rank_write_error: Optional[BaseException]
-    try:
-        (
-            metadata,
-            bytes_write_requests,
-            tensor_write_requests,
-        ) = _prepare(state_dict, is_coordinator, process_group)
+        assert planner is not None
+        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
+        all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
+        return all_local_plans
 
-        combined_writes: List[Union[TensorWriteRequest, BytesWriteRequest]] = []
-        combined_writes.extend(tensor_write_requests)
-        combined_writes.extend(bytes_write_requests)
+    central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
-        storage_writer.prepare_storage(combined_writes)
-        bytes_futures = storage_writer.write_bytes(bytes_write_requests)
-        tensor_futures = storage_writer.write_tensors(tensor_write_requests)
-        torch.futures.wait_all([bytes_futures, tensor_futures])
-        rank_write_error = None
-    except BaseException as e:
-        rank_write_error = e
+    def write_data():
+        assert planner is not None
+        final_local_plan = planner.finish_plan(central_plan)
+        all_writes = storage_writer.write_data(final_local_plan, planner)
 
-    all_errors: List[Optional[BaseException]]
-    # collect all write errors
-    if not no_dist:
-        all_errors = [None] * dist.get_world_size(process_group)
-        dist.gather_object(
-            obj=rank_write_error,
-            object_gather_list=all_errors if is_coordinator else None,
-            dst=coordinator_rank
-        )
-    else:
-        all_errors = [rank_write_error]
+        all_writes.wait()
+        return all_writes.value()
 
-    result: List[Optional[CheckpointException]] = [None]
-    if is_coordinator:
-        message: Optional[str] = None
-        # gather produces an array of arrays, flatten it
-        if any(all_errors):
-            message = "Failed to write data"
-        else:
-            try:
-                storage_writer.finish(metadata=metadata)
-            except BaseException as e:
-                all_errors[coordinator_rank] = e
-                message = "Failed to finish checkpoint"
+    def finish_checkpoint(all_results):
+        assert global_metatadata is not None
+        storage_writer.finish(metadata=global_metatadata, results=all_results)
+        return global_metatadata
 
-        if message is not None:
-            node_failures = {i: err for i, err in enumerate(all_errors) if err is not None}
-            result[0] = CheckpointException(message, node_failures)
-
-    if not no_dist:
-        dist.broadcast_object_list(
-            result,
-            group=process_group,
-            src=coordinator_rank)
-
-    if result[0] is not None:
-        raise result[0]
+    return distW.all_reduce("write", write_data, finish_checkpoint)

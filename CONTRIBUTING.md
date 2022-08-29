@@ -17,6 +17,7 @@
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
@@ -443,12 +444,50 @@ These are the docs that you see over at [our docs website](https://pytorch.org/d
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
 the [PyTorch Developer Wiki](https://pytorch.org/wiki).
-If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
 
-PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
 for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
+
+
+### Docstring type formatting
+
+In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
+
+* The "`Callable`", "`Any`", "`Iterable`", "`Iterator`", "`Generator`" types should have their first letter capitalized.
+
+* The "`list`" and "`tuple`" types should be completely lowercase.
+
+* Types should not be made plural. For example: `tuple of int` should be used instead of `tuple of ints`.
+
+* The only acceptable delimiter words for types are `or` and `of`. No other non-type words should be used other than `optional`.
+
+* The word `optional` should only be used after the types, and it is only used if the user does not have to specify a value for the variable. Default values are listed after the variable description. Example:
+
+    ```
+    my_var (int, optional): Variable description. Default: 1
+    ```
+
+* Basic Python types should match their type name so that the [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
+    * Use `str` instead of `string`.
+    * Use `bool` instead of `boolean`.
+    * Use `dict` instead of `dictionary`.
+
+* Square brackets should be used for the dictionary type. For example:
+
+    ```
+    my_var (dict[str, int]): Variable description.
+    ```
+
+* If a variable has two different possible types, then the word `or` should be used without a comma. Otherwise variables with 3 or more types should use commas to separate the types. Example:
+
+    ```
+    x (type1 or type2): Variable description.
+    y (type1, type2, or type3): Variable description.
+    ```
+
 
 ### Building documentation
 
@@ -467,12 +506,20 @@ pip install -r requirements.txt
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
+> Note: if you installed `nodejs` with a different package manager (e.g.,
+`conda`) then `npm` will probably install a version of `katex` that is not
+compatible with your version of `nodejs` and doc builds will fail.
+A combination of versions that is known to work is `node@6.13.1` and
+`katex@0.13.18`. To install the latter with `npm` you can run
+```npm install -g katex@0.13.18```
+
 
 > Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
 
 ```bash
 yarn global add katex
 ```
+> If a specific version is required you can use for example `yarn global add katex@0.13.18`.
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
 

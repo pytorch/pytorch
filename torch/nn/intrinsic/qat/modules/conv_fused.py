@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.utils import fuse_conv_bn_weights
@@ -10,6 +10,8 @@ from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.parameter import Parameter
 from typing import TypeVar
 
+__all__ = ['ConvBn1d', 'ConvBnReLU1d', 'ConvReLU1d', 'ConvBn2d', 'ConvBnReLU2d', 'ConvReLU2d', 'ConvBn3d',
+           'ConvBnReLU3d', 'ConvReLU3d', 'update_bn_stats', 'freeze_bn_stats']
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,
     2: nn.BatchNorm2d,
@@ -103,9 +105,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         # using zero bias here since the bias for original conv
         # will be added later
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:

@@ -1,6 +1,6 @@
-from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
-
 from typing import Dict, Union
+
+from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
 
 
 def func_name_base_str(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:
@@ -55,7 +55,7 @@ is_hand_written_ops_ = frozenset(
 )
 
 
-def is_hand_written(g: NativeFunctionsGroup) -> bool:
+def is_hand_written(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
     name_base = func_name_base_str(g)
     return name_base in is_hand_written_ops_
 

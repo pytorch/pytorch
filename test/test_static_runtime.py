@@ -23,6 +23,9 @@ class StaticModule:
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
         self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
 
+    def runAsync(self, args, kwargs):
+        return self.static_module.runAsync(args, kwargs)
+
     def benchmark_individual_ops(self, args, kwargs, warmup_runs, main_runs):
         return self.static_module.benchmark_individual_ops(
             args, kwargs, warmup_runs, main_runs
@@ -223,6 +226,20 @@ class TestStaticModule(TestCase):
         torch.testing.assert_close(output_test, output_ref)
 
     """
+    Test Case: To test simple fork/wait operation with
+    StaticRuntime runAsync API returning future
+    """
+    def test_fork_wait_1_async(self):
+        inp1 = torch.ones(5, 5)
+        inp2 = torch.randn(5, 5)
+        torch_graph = torch.jit.script(fork_wait_graph1)
+        output_ref = torch_graph(inp1, inp2)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module.runAsync((inp1, inp2), {})
+        output_test.wait()
+        torch.testing.assert_close(output_test.value(), output_ref)
+
+    """
     Test Case: To test fork/wait operation in a graph on
     a loop subgraph performing mix of operations
     """
@@ -236,6 +253,20 @@ class TestStaticModule(TestCase):
         torch.testing.assert_close(output_test, output_ref)
 
     """
+    Test Case: To test fork/wait operation on a loop
+    subgraph with StaticRuntime runAsync API returning future
+    """
+    def test_fork_wait_2_async(self):
+        inp1 = torch.randn(5, 5)
+        inp2 = torch.randn(5, 5)
+        torch_graph = torch.jit.script(fork_wait_graph2)
+        output_ref = torch_graph(inp1, inp2)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module.runAsync((inp1, inp2), {})
+        output_test.wait()
+        torch.testing.assert_close(output_test.value(), output_ref)
+
+    """
     Test Case: To test fork/wait operation in a graph on
     having multiple fork/wait operations
     """
@@ -247,6 +278,21 @@ class TestStaticModule(TestCase):
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module(input, num_forks)
         torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test fork/wait operation in a graph with
+    multiple fork/wait operations on runAsync API returning future
+    """
+    def test_fork_wait_3_async(self):
+        input = torch.ones(3, 3)
+        num_forks = 10
+        torch_graph = torch.jit.script(fork_wait_graph3)
+        output_ref = torch_graph(input, num_forks)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module.runAsync((input, num_forks), {})
+        output_test.wait()
+        torch.testing.assert_close(output_test.value(), output_ref)
+
     """
     Test Case: To test fork/wait operation in a graph on
     multiple nested fork/wait operations
@@ -260,6 +306,22 @@ class TestStaticModule(TestCase):
         output_ref = torch_graph(input, num_forks, num_child_forks)
         output_test = static_runtime_module(input, num_forks, num_child_forks)
         torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test fork/wait operation in a graph with multiple
+    nested fork/wait operations on runAsync API returning future
+    """
+    def test_fork_wait_4_async(self):
+        input = torch.ones(3, 3)
+        num_forks = 10
+        num_child_forks = 10
+        torch_graph = torch.jit.script(fork_wait_graph4)
+        static_runtime_module = StaticModule(torch_graph)
+        output_ref = torch_graph(input, num_forks, num_child_forks)
+        output_test = static_runtime_module.runAsync(
+            (input, num_forks, num_child_forks), {})
+        output_test.wait()
+        torch.testing.assert_close(output_test.value(), output_ref)
 
     """
     Test Case: To test exception handling in fork/wait
@@ -277,6 +339,36 @@ class TestStaticModule(TestCase):
         try:
             static_runtime_module = StaticModule(torch_graph)
             output_test = static_runtime_module(input1, input2)
+        except Exception as error:
+            expected_error_msg = (
+                "The size of tensor a (7) must match the size "
+                "of tensor b (5) at non-singleton dimension 1"
+            )
+            # test fails if error does not contain expected substr
+            if str(error).find(expected_error_msg) == -1:
+                raise RuntimeError(
+                    "Tried execution of add.Tensors with incompatible shape. "
+                    "Exception raised by forked runtime execution does "
+                    f"not contain expected substring: \"{expected_error_msg}\""
+                ) from error
+
+    """
+    Test Case: To test exception handling in fork/wait
+    operation with runAsync API. Add.Tensor op is called for
+    tensors with non-matching dims on the forked subgraph
+    and the exception raised by subgraph is set on future returned
+    by prim::fork to parent graph. Returned exception is
+    checked for substring expected_error_msg as declared below
+    """
+    def test_fork_wait_exception_async(self):
+        # incompatible tensors for add due to shape mismatch
+        input1 = torch.randn(4, 7)
+        input2 = torch.randn(4, 5)
+        torch_graph = torch.jit.script(fork_wait_graph_exception)
+        try:
+            static_runtime_module = StaticModule(torch_graph)
+            output_test = static_runtime_module.runAsync(
+                (input1, input2), {})
         except Exception as error:
             expected_error_msg = (
                 "The size of tensor a (7) must match the size "

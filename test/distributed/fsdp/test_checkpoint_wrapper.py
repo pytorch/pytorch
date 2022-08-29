@@ -27,7 +27,13 @@ class CheckpointWrapperTest(TestCase):
 
     def test_load_activation_checkpointed_module(self):
         lin = nn.Linear(10, 10, bias=False)
-        lin = checkpoint_wrapper(lin)
+        lin = checkpoint_wrapper(
+            lin,
+            checkpoint_fn=checkpoint,
+            # checkpoint kwargs
+            use_reentrant=True,
+            preserve_rng_state=False,
+        )
         state_dict = deepcopy(lin.state_dict())
         # Load into non-checkpoint wrapped linear module
         lin_new = nn.Linear(10, 10, bias=False)
@@ -176,6 +182,12 @@ class CheckpointWrapperTest(TestCase):
                     self.assertTrue(param.requires_grad)
                     self.assertFalse(param.grad is None)
 
+    def test_fqn(self):
+        lin = nn.Linear(10, 10, bias=False)
+        lin = checkpoint_wrapper(lin)
+        state_dict = lin.state_dict()
+        for fqn, _ in lin.named_parameters():
+            self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
 if __name__ == "__main__":
     run_tests()

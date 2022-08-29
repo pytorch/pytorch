@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_scalars.h>
@@ -336,9 +337,11 @@ Tensor internal_new_from_data(
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
     c10::impl::ExcludeDispatchKeyGuard functorch_back_guard(
         c10::DispatchKey::FuncTorchDynamicLayerBackMode);
-    // We disable DeferredInit handler for similar reasons as functorch.
-    c10::impl::ExcludeDispatchKeyGuard deferred_init_guard(
-        c10::DispatchKey::DeferredInit);
+    // We disable Fake and DeferredInit handlers for similar reasons as
+    // functorch.
+    c10::impl::ExcludeDispatchKeyGuard fake_and_deferred_init_guard(
+        c10::DispatchKeySet{
+            c10::DispatchKey::Fake, c10::DispatchKey::DeferredInit});
     // Note [Functionalization <> torch.Tensor constructor]
     // Functionalization "lifts" the newly constructed tensor into a wrapper
     // using aten::lift().
@@ -359,7 +362,7 @@ Tensor internal_new_from_data(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
             scalar_type,
-            " or an _UntypedStorage, but got ",
+            " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
             sizes,
@@ -412,8 +415,9 @@ Tensor internal_new_from_data(
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   // lift has no autograd implementation, so we need to make sure we don't try
   // to dispatch to it.
+  // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
-  return tensor.lift();
+  return at::lift_fresh(tensor);
 }
 
 Tensor new_from_data_copy(
@@ -639,7 +643,7 @@ Tensor legacy_tensor_generic_ctor_new(
           storage_scalar_type == scalar_type,
           "Expected a Storage of type ",
           scalar_type,
-          " or an _UntypedStorage, but got type ",
+          " or an UntypedStorage, but got type ",
           storage_scalar_type,
           " for argument 1 'storage'");
     }

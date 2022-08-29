@@ -6,6 +6,7 @@ UNKNOWN=()
 
 # defaults
 PARALLEL=1
+export TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK=ERRORS
 
 while [[ $# -gt 0 ]]
 do
@@ -66,11 +67,11 @@ if [[ "${SHARD_NUMBER}" == "1" ]]; then
     --ignore "$top_dir/test/onnx/test_custom_ops.py" \
     --ignore "$top_dir/test/onnx/test_utility_funs.py" \
     --ignore "$top_dir/test/onnx/test_models.py" \
+    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "${test_paths[@]}"
 
   # Heavy memory usage tests that cannot run in parallel.
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
@@ -81,6 +82,7 @@ if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # TODO(#79802): Parameterize test_models.py
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
 
   pytest "${args[@]}" "${args_parallel[@]}" \
