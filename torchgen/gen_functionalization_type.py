@@ -78,21 +78,18 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     if g.view_copy is None:
         return None
 
-    # For view_copy.SymInt overloads,
-    # See gen_symint_view_copy_kernel.
-    if g.view_copy.func.name.overload_name == "SymInt":
-        return None
-
     # We can make view_copy work in more cases by using reshape()
     # when a normal view call would ordinarily fail.
     # This also makes LTC more efficient, because they don't need to include
     # clone() calls in their graph (which is normally needed by reshape).
     if str(g.view_copy.func.name) == "view_copy":
         return """\
-at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
-  DimVector shape = infer_size_dv(size, self.numel());
+at::Tensor view_copy(const at::Tensor & self, at::SymIntArrayRef size) {
+  // TODO: don't cast to int array ref
+  auto int_size = c10::asIntArrayRefSlow(size);
+  DimVector shape = infer_size_dv(int_size, self.numel());
   if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
-    return self.reshape(size);
+    return self.reshape(int_size);
   } else {
     auto output = at::_ops::view::call(self, size);
     return output.clone();
@@ -100,7 +97,8 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 }
 """
     # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(g.view_copy.func)
+    # Functionalization always operates on symints though
+    view_copy_sig = NativeSignature(g.view_copy.func, symint=True)
 
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
@@ -134,34 +132,6 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 {view_copy_sig.defn()} {{
   auto output = at::_ops::{view_api_name}::call({exprs});
   {return_cloned_output}
-}}
-"""
-
-
-# For symint view copy kernels, we want to generate them to call into
-# their concrete view_copy counterparts.
-@with_native_function_and
-def gen_symint_view_copy_kernel(
-    view_copy: NativeFunction, view_copy_symint: NativeFunction
-) -> str:
-    # view_copy.symint is a native signature, since we're generating an at::native:: kernel
-    view_copy_symint_sig = NativeSignature(view_copy_symint.func)
-
-    # view_copy is a dispatcher signature, since we're calling into the at::_ops API
-    view_copy_sig = DispatcherSignature(view_copy.func)
-
-    exprs = ", ".join(
-        [
-            e.expr
-            for e in translate(
-                view_copy_symint_sig.arguments(), view_copy_sig.arguments()
-            )
-        ]
-    )
-
-    return f"""
-{view_copy_symint_sig.defn()} {{
-  return at::_ops::{view_copy.func.name.unambiguous_name()}::call({exprs});
 }}
 """
 

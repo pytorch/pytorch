@@ -1503,8 +1503,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
-    def test_onnx_intermediate_renaming(self):
-        class RenamedIntermediateModule(torch.nn.Module):
+    def test_onnx_node_naming(self):
+        class MainModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self._module_1 = torch.nn.Linear(10, 10)
@@ -1519,15 +1519,28 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 z = self._module_4(y * z)
                 return z
 
-        module = RenamedIntermediateModule()
+        module = MainModule()
+        ref_node_names = [
+            "/_module_1/Gemm",
+            "/_module_2/Gemm",
+            "/_module_3/Gemm",
+            "/_module_4/Gemm",
+            "/Mul",
+            "/Mul_1",
+        ]
+        f = io.BytesIO()
 
-        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=["y"])
-        renamed_intermediate = 0
-        for n in g.nodes():
-            for v in n.inputs():
-                if v.debugName().startswith("onnx::Mul_"):
-                    renamed_intermediate += 1
-        self.assertEqual(renamed_intermediate, 2)
+        torch.onnx.export(module, torch.ones(1, 10), f, output_names=["y"])
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
+
+        torch.onnx.export(
+            torch.jit.script(module), torch.ones(1, 10), f, output_names=["y"]
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):
