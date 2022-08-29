@@ -428,7 +428,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
         sym_stride,
         aliasAnalysisFromSchema()),
