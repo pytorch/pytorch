@@ -56,6 +56,12 @@ _skip_nvfuser_constant_conversion = [
     torch.ops.nvprims.collapse_view.default,
 ]
 
+_get_shape_ops = [
+    torch.ops.nvprims.collapse_view.default,
+    torch.ops.nvprims.reshape.default,
+    torch.ops.nvprims.split_dim.default,
+]
+
 
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
@@ -84,6 +90,15 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         class FusionInterpreter(torch.fx.Interpreter):
+            def run_node(self, node):
+                # View ops require original shape of args[0]
+                if node.target in _get_shape_ops:
+                    original_shape = list(node.args[0].meta["tensor_meta"].shape)
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    args = [args[0], original_shape, *args[1:]]
+                    return self.call_function(node.target, args, node.kwargs)
+                return super().run_node(node)
+
             def call_function(self, target, args, kwargs):
                 if target in _skip_nvfuser_constant_conversion:
                     return target.impl_nvfuser(fd, *args, **kwargs)
