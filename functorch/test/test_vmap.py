@@ -4460,16 +4460,16 @@ class TestRandomness(TestCase):
 
 
     def test_jacfwd_with_random(self):
-      # checks on behavior are above, this just checks that jacfwd respects
-      # the randomness param
+        # checks on behavior are above, this just checks that jacfwd respects
+        # the randomness param
 
-      x = torch.rand(3, 4)
-      with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
-        jacfwd(torch.bernoulli)(x)
+        x = torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+          jacfwd(torch.bernoulli)(x)
 
-      # x isn't batched so use bernoulli since it doesn't do inplace randomness
-      jacfwd(torch.bernoulli, randomness="same")(x)
-      jacfwd(torch.bernoulli, randomness="different")(x)
+        # x isn't batched so use bernoulli since it doesn't do inplace randomness
+        jacfwd(torch.bernoulli, randomness="same")(x)
+        jacfwd(torch.bernoulli, randomness="different")(x)
 
 
 class TestTransformFailure(TestCase):
