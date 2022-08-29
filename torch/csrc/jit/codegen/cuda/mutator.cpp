@@ -129,7 +129,7 @@ void OptOutMutator::mutate(UnaryOp* uop) {
   auto container = uop->container();
   auto uop_type = uop->getUnaryOpType();
   container->removeExpr(uop);
-  IrBuilder::create<UnaryOp>(container, uop_type, out, in, uop->getRNGOffset());
+  IrBuilder::create<UnaryOp>(container, uop_type, out, in);
 }
 
 void OptOutMutator::mutate(BinaryOp* bop) {

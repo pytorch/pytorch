@@ -566,8 +566,7 @@ class ReplaceExprInput : private kir::ExprMutator {
       auto replacement = IrBuilder::create<UnaryOp>(
           node->getUnaryOpType(),
           node->out(),
-          replaced_inputs.value().at(node->in()),
-          node->getRNGOffset());
+          replaced_inputs.value().at(node->in()));
       registerReplaceWithPredicate(node, replacement);
     }
   }

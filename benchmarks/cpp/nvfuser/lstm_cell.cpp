@@ -170,11 +170,11 @@ static void LstmCell_RunFusion(
   FusionExecutor executor;
   executor.compileFusion(&fusion);
 
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
 
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
-    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    cudaDeviceSynchronize();
   }
 }
 

@@ -165,11 +165,7 @@ struct SchemaParser {
       N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
-      if (alias_info) {
-        if (!container) {
-          container = c10::optional<at::AliasInfo>(at::AliasInfo());
-          container->setIsWrite(alias_info->isWrite());
-        }
+      if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);

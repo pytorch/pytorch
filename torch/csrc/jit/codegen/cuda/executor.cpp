@@ -646,7 +646,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
       global_buffers.zero_init.push_back(false);
     }
     // Remember the tensor buffer used for storing kernel profile
-    if (isOptionEnabled(EnableOption::KernelProfile) &&
+    if (isEnabled(EnableOption::KernelProfile) &&
         tv == kernel->profile().getBuffer()) {
       global_buffers.profile_buffer = global_buffers.buffers.back();
     }
@@ -916,14 +916,18 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel()->summary().max_rng_offsets >= 0) {
+    if (kernel()->summary().is_stochastic) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
       // binded but is not generally how we handle that in scheduler.
       // Refer to `Philox` in generated kernel to understand how the mapping
       // works.
-      rand_offset = (kernel()->summary().max_rng_offsets + 1) * 4;
+      rand_offset = 4 *
+          (std::ceil(
+               allocated_outputs[0].numel() /
+               (4.0 * 128 * launch_params_.gdimx())) + // NOLINT
+           1);
     }
 
     // This is the entry when we have provided `opt_code` but the entry has not
@@ -957,7 +961,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.push(inputs);
     kernel_arguments.push(allocated_outputs);
     kernel_arguments.push(global_buffers.buffers);
-    if (lowered_->kernel()->summary().max_rng_offsets >= 0) {
+    if (lowered_->kernel()->summary().is_stochastic) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
   }
@@ -1088,7 +1092,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  if (isOptionEnabled(EnableOption::KernelProfile)) {
+  if (isEnabled(EnableOption::KernelProfile)) {
     std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 

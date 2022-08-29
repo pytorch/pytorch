@@ -136,7 +136,7 @@ static void Baseline_LayerNorm_BWD(
   std::array<bool, 3> output_mask = {true, true, true};
 
   clearL2Cache();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     at::native_layer_norm_backward(
@@ -144,9 +144,9 @@ static void Baseline_LayerNorm_BWD(
 
     auto output = at::layer_norm(input, norm_shape, weight, bias);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    cudaDeviceSynchronize();
     clearL2Cache();
-    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    cudaDeviceSynchronize();
   }
 
   benchmark_state.SetBytesProcessed(
