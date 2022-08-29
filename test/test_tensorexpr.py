@@ -11,13 +11,14 @@ from torch.testing._internal.common_utils import suppress_warnings, num_profiled
 
 from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
+LLVM_ENABLED = torch._C._llvm_enabled()
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
         super(BaseTestClass, self).setUp()
         self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        self.dtypes = [torch.float32, torch.bfloat16]
+        self.dtypes = [torch.float32, torch.bfloat16] if LLVM_ENABLED else [torch.float32]
 
     def tearDown(self):
         self.tensorexpr_options.restore()
@@ -708,6 +709,8 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, rand_a, rand_b)
             self.assertLastGraphAllFused()
 
+            _atol = 2e-3
+            _rtol = 1e-5
             if data_type is torch.bfloat16:
                 # Compared to aten logic, NNC coudl save addtional BF16/Fp32 conversion.
                 # Take d = a + b - c as an example, the aten logic is as follows at
@@ -723,9 +726,10 @@ class TestTensorExprFuser(BaseTestClass):
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 if torch_fn not in cmp_fns:
                     y = y.bfloat16()
+                _atol = 2e-2
             else:
                 y = torch_fn(rand_a, rand_b)
-            self.assertEqual(x.cpu(), y.cpu(), atol=2e-3, rtol=1e-5)
+            self.assertEqual(x.cpu(), y.cpu(), atol=_atol, rtol=_rtol)
 
     def test_unary_ops(self):
         def test_cast_float(x, y):
@@ -902,7 +906,9 @@ class TestTensorExprFuser(BaseTestClass):
         }
         fn_dev_dtype = itertools.product(gpu_only_fns.union(fns), self.devices, self.dtypes)
         for torch_fn, dev, data_type in fn_dev_dtype:
-            # print(torch_fn, dev)
+            if torch_fn == test_lgamma and dev=="cuda":
+                # lgamma_cuda does not support BF16
+                continue
             torch.manual_seed(0)
             torch.set_printoptions(10)
             rand_a = torch.rand(1024, dtype=data_type, device=dev)
@@ -915,13 +921,17 @@ class TestTensorExprFuser(BaseTestClass):
             traced = torch.jit.trace(torch_fn, (ins, ins))
             x = warmup_and_run_forward(traced, rand_a, rand_b)
             self.assertLastGraphAllFused()
+
+            _atol=2e-3
+            _rtol=1e-5
             if data_type is torch.bfloat16 and torch_fn not in gpu_only_fns:
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 y = y.bfloat16()
+                _atol = 4e-3
             else:
                 y = torch_fn(rand_a, rand_b)
 
-            self.assertEqual(x.cpu(), y.cpu(), atol=2e-3, rtol=1e-5)
+            self.assertEqual(x.cpu(), y.cpu(), atol=_atol, rtol=_rtol)
             # nans
             # TODO: reenable. Currently all of the tests fail
             # traced = torch.jit.trace(torch_fn, (ins, ins))
@@ -1438,12 +1448,16 @@ class TestTensorExprFuser(BaseTestClass):
                 y = torch.rand_like(x)
                 return (x + y) - (y - x)
 
+            _atol = 2e-3
+            _rtol = 1e-5
             for data_type in self.dtypes:
+                if data_type is torch.bfloat16:
+                    _atol = 2e-2
                 a = torch.rand(4, dtype=data_type, device=device)
                 scripted = torch.jit.script(test)
                 out = warmup_and_run_forward(scripted, a)
                 self.assertLastGraphAllFused()
-                assert torch.allclose(out, 2 * a)
+                assert torch.allclose(out, 2 * a, atol=_atol, rtol=_rtol)
 
     def test_mask(self):
         def test(x):
