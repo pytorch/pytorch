@@ -4,6 +4,24 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
+ExperimentalConfig::ExperimentalConfig(
+    std::vector<std::string> profiler_metrics,
+    bool profiler_measure_per_kernel)
+    : profiler_metrics{profiler_metrics},
+      profiler_measure_per_kernel{profiler_measure_per_kernel} {}
+
+/*explicit*/ ExperimentalConfig::operator bool() const {
+  return !profiler_metrics.empty();
+}
+
+bool ProfilerConfig::disabled() const {
+  return state == torch::profiler::impl::ProfilerState::Disabled;
+}
+
+bool ProfilerConfig::global() const {
+  return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
+}
+
 namespace {
 enum ProfilerIValueIdx {
   STATE = 0,
@@ -42,9 +60,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
 
 bool profilerEnabled() {
   auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
-  return state_ptr &&
-      state_ptr->config().state !=
-      torch::profiler::impl::ProfilerState::Disabled;
+  return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {
