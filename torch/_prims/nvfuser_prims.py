@@ -217,7 +217,10 @@ def _split_dim_nvfuser(
     outer_length: int,
 ):
     inner_length = a_shape[dim] // outer_length
-    new_shape = a_shape[0:dim] + [outer_length, inner_length] + a_shape[dim + 1 :]
+    if isinstance(a_shape, list):
+        new_shape = a_shape[0:dim] + [outer_length, inner_length] + a_shape[dim + 1 :]
+    else:
+        new_shape = a_shape[0:dim] + (outer_length, inner_length) + a_shape[dim + 1 :]  # type: ignore[assignment]
     return fd.ops.view(a, a_shape, new_shape)
 
 
@@ -231,13 +234,10 @@ def _collapse_view_nvfuser(
     dim_length = 1
     for idx in range(start, end):
         dim_length = dim_length * a_shape[idx]
-    new_shape = (
-        a_shape[0:start]
-        + [
-            dim_length,
-        ]
-        + a_shape[end:]
-    )
+    if isinstance(a_shape, list):
+        new_shape = a_shape[0:start] + [dim_length] + a_shape[end:]
+    else:
+        new_shape = a_shape[0:start] + (dim_length,) + a_shape[end:]  # type: ignore[assignment]
     return fd.ops.view(a, a_shape, new_shape)
 
 
