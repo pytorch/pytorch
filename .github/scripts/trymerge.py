@@ -965,7 +965,7 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
-def get_new_issue_link(
+def gen_new_issue_link(
     org: str,
     project: str,
     labels: List[str],
