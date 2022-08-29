@@ -75,13 +75,22 @@ DECLARE_DISPATCH(unary_fn, special_bessel_j0_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_j1_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_y0_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_y1_stub);
+DECLARE_DISPATCH(unary_fn, special_cos_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_cosh_pi_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_i0_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_i1_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_k0_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_k1_stub);
 DECLARE_DISPATCH(unary_fn, special_scaled_modified_bessel_k0_stub);
 DECLARE_DISPATCH(unary_fn, special_scaled_modified_bessel_k1_stub);
+DECLARE_DISPATCH(unary_fn, special_sin_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_sinc_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_sinh_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_sinhc_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_sinhc_stub);
 DECLARE_DISPATCH(unary_fn, special_spherical_bessel_j0_stub);
+DECLARE_DISPATCH(unary_fn, special_tan_pi_stub);
+DECLARE_DISPATCH(unary_fn, special_tanh_pi_stub);
 
 // NB: these are actually defined in Distribution
 DECLARE_DISPATCH(void(*)(const TensorBase&, const TensorBase&, c10::optional<Generator>), bernoulli_tensor_stub);

@@ -13800,19 +13800,6 @@
   structured: True
   variants: function
 
-- func: special_sinhc(Tensor z) -> Tensor
-  python_module: special
-  structured_delegate: special_sinhc.out
-  variants: function
-
-- func: special_sinhc.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: special_sinhc_out
-  python_module: special
-  structured_inherits: TensorIteratorBase
-  structured: True
-  variants: function
-
 - func: special_sinhc_pi(Tensor z) -> Tensor
   python_module: special
   structured_delegate: special_sinhc_pi.out
@@ -13821,6 +13808,19 @@
 - func: special_sinhc_pi.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_sinhc_pi_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_sinhc(Tensor z) -> Tensor
+  python_module: special
+  structured_delegate: special_sinhc.out
+  variants: function
+
+- func: special_sinhc.out(Tensor z, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_sinhc_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

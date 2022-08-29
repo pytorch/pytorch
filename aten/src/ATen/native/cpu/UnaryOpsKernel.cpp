@@ -24,6 +24,16 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/irange.h>
 
+#include <ATen/native/special_functions/cos_pi.h>
+#include <ATen/native/special_functions/cosh_pi.h>
+#include <ATen/native/special_functions/sin_pi.h>
+#include <ATen/native/special_functions/sinc_pi.h>
+#include <ATen/native/special_functions/sinhc.h>
+#include <ATen/native/special_functions/sinhc_pi.h>
+#include <ATen/native/special_functions/sinh_pi.h>
+#include <ATen/native/special_functions/tan_pi.h>
+#include <ATen/native/special_functions/tanh_pi.h>
+
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
@@ -654,6 +664,78 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     });
 } // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
 
+static void cos_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "cos_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::cos_pi(z);
+    });
+  });
+} // void cos_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void cosh_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "cosh_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::cosh_pi(z);
+    });
+  });
+} // void cosh_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void sin_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sin_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::sin_pi(z);
+    });
+  });
+} // void sin_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void sinc_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinc_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::sinc_pi(z);
+    });
+  });
+} // void sinc_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void sinhc_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::sinhc_pi(z);
+    });
+  });
+} // void sinhc_cpu_kernel(TensorIteratorBase &iterator)
+
+static void sinhc_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::sinhc_pi(z);
+    });
+  });
+} // void sinhc_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void sinh_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinh_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::sinh_pi(z);
+    });
+  });
+} // void sinh_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void tan_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tan_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::tan_pi(z);
+    });
+  });
+} // void tan_pi_cpu_kernel(TensorIteratorBase &iterator)
+
+static void tanh_pi_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tanh_pi_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t z) {
+      return at::native::special_functions::tanh_pi(z);
+    });
+  });
+} // void tanh_pi_cpu_kernel(TensorIteratorBase &iterator)
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -752,6 +834,15 @@ REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+REGISTER_DISPATCH(special_cos_pi_stub, &CPU_CAPABILITY::cos_pi_cpu_kernel);
+REGISTER_DISPATCH(special_cosh_pi_stub, &CPU_CAPABILITY::cosh_pi_cpu_kernel);
+REGISTER_DISPATCH(special_sin_pi_stub, &CPU_CAPABILITY::sin_pi_cpu_kernel);
+REGISTER_DISPATCH(special_sinc_pi_stub, &CPU_CAPABILITY::sinc_pi_cpu_kernel);
+REGISTER_DISPATCH(special_sinh_pi_stub, &CPU_CAPABILITY::sinh_pi_cpu_kernel);
+REGISTER_DISPATCH(special_sinhc_pi_stub, &CPU_CAPABILITY::sinhc_pi_cpu_kernel);
+REGISTER_DISPATCH(special_sinhc_stub, &CPU_CAPABILITY::sinhc_cpu_kernel);
+REGISTER_DISPATCH(special_tan_pi_stub, &CPU_CAPABILITY::tan_pi_cpu_kernel);
+REGISTER_DISPATCH(special_tanh_pi_stub, &CPU_CAPABILITY::tanh_pi_cpu_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

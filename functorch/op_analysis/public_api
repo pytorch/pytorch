@@ -124,6 +124,7 @@ sin
 sinc
 sinh
 special.cos_pi
+special.cosh_pi
 special.entr
 special.erfcx
 special.i0e
@@ -134,6 +135,12 @@ special.ndtr
 special.ndtri
 special.polygamma
 special.sin_pi
+special.sinc_pi
+special.sinh_pi
+special.sinhc
+special.sinhc_pi
+special.tan_pi
+special.tanh_pi
 sqrt
 square
 tan

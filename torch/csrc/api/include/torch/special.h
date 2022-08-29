@@ -1422,6 +1422,26 @@ inline Tensor& cos_pi(Tensor& out, const Tensor& z) {
   return torch::special_cos_pi_out(out, z);
 }
 
+/// Hyperbolic cosine of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.cosh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::cosh_pi(z);
+/// ```
+inline Tensor cosh_pi(const Tensor& z) {
+  return torch::special_cosh_pi(z);
+}
+
+inline Tensor& cosh_pi(Tensor& out, const Tensor& z) {
+  return torch::special_cosh_pi_out(out, z);
+}
+
 /// Sine of :math:`\pi z`.
 ///
 /// See
@@ -1440,6 +1460,126 @@ inline Tensor sin_pi(const Tensor& z) {
 
 inline Tensor& sin_pi(Tensor& out, const Tensor& z) {
   return torch::special_sin_pi_out(out, z);
+}
+
+/// Sinc of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sinc_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sinc_pi(z);
+/// ```
+inline Tensor sinc_pi(const Tensor& z) {
+  return torch::special_sinc_pi(z);
+}
+
+inline Tensor& sinc_pi(Tensor& out, const Tensor& z) {
+  return torch::special_sinc_pi_out(out, z);
+}
+
+/// Hyperbolic sine of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sinh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sinh_pi(z);
+/// ```
+inline Tensor sinh_pi(const Tensor& z) {
+  return torch::special_sinh_pi(z);
+}
+
+inline Tensor& sinh_pi(Tensor& out, const Tensor& z) {
+  return torch::special_sinh_pi_out(out, z);
+}
+
+/// Hyperbolic sinc of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sinhc_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sinhc_pi(z);
+/// ```
+inline Tensor sinhc_pi(const Tensor& z) {
+  return torch::special_sinhc_pi(z);
+}
+
+inline Tensor& sinhc_pi(Tensor& out, const Tensor& z) {
+  return torch::special_sinhc_pi_out(out, z);
+}
+
+/// Hyperbolic sinc of :math:`z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.sinhc.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::sinhc(z);
+/// ```
+inline Tensor sinhc(const Tensor& z) {
+  return torch::special_sinhc(z);
+}
+
+inline Tensor& sinhc(Tensor& out, const Tensor& z) {
+  return torch::special_sinhc_out(out, z);
+}
+
+/// Tangent of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.tan_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::tan_pi(z);
+/// ```
+inline Tensor tan_pi(const Tensor& z) {
+  return torch::special_tan_pi(z);
+}
+
+inline Tensor& tan_pi(Tensor& out, const Tensor& z) {
+  return torch::special_tan_pi_out(out, z);
+}
+
+/// Hyperbolic tangent of :math:`\pi z`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.tanh_pi.
+///
+/// Example:
+///
+/// ```
+/// auto z = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::tanh_pi(z);
+/// ```
+inline Tensor tanh_pi(const Tensor& z) {
+  return torch::special_tanh_pi(z);
+}
+
+inline Tensor& tanh_pi(Tensor& out, const Tensor& z) {
+  return torch::special_tanh_pi_out(out, z);
 }
 } // namespace special
 } // namespace torch

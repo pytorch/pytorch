@@ -5,6 +5,7 @@ namespace native {
 namespace special_functions {
 namespace detail {
 template<typename T1>
+C10_HOST_DEVICE
 promote_t<T1>
 sinhc(T1 z) {
   if (std::isnan(z)) {

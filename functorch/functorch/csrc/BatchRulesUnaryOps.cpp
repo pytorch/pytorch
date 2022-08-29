@@ -163,7 +163,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(exp2);
 
   // torch.special.* functions
-  UNARY_POINTWISE(special_cos_pi);
+  UNARY_POINTWISE(cos_pi);
+  UNARY_POINTWISE(cosh_pi);
+  UNARY_POINTWISE(sin_pi);
+  UNARY_POINTWISE(sinc_pi);
+  UNARY_POINTWISE(sinh_pi);
+  UNARY_POINTWISE(sinhc);
+  UNARY_POINTWISE(sinhc_pi);
   UNARY_POINTWISE(special_digamma);
   UNARY_POINTWISE(special_entr);
   UNARY_POINTWISE(special_erf);
@@ -183,8 +189,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE(special_ndtri);
   UNARY_POINTWISE(special_psi);
   UNARY_POINTWISE(special_round);
-  UNARY_POINTWISE(special_sin_pi);
   UNARY_POINTWISE(special_sinc);
+  UNARY_POINTWISE(tan_pi);
+  UNARY_POINTWISE(tanh_pi);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
   UNARY_POINTWISE_ALL(elu);

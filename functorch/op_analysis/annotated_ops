@@ -489,6 +489,7 @@ isinf, composite pointwise
 isposinf, composite pointwise
 isneginf, composite pointwise
 special_cos_pi, primitive pointwise
+special_cosh_pi, primitive pointwise
 special_entr, primitive pointwise
 special_erf, alias
 special_erfc, alias
@@ -504,6 +505,12 @@ special_i1e, composite pointwise
 special_logit, composite pointwise
 special_ndtr, primitive pointwise
 special_sin_pi, primitive pointwise
+special_sinc_pi, primitive pointwise
+special_sinh_pi, primitive pointwise
+special_sinhc, primitive pointwise
+special_sinhc_pi, primitive pointwise
+special_tan_pi, primitive pointwise
+special_tanh_pi, primitive pointwise
 special_xlog1py, composite pointwise
 fft_fft, fft
 fft_ifft, fft

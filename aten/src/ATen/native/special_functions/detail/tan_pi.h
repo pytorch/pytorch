@@ -8,6 +8,7 @@ namespace native {
 namespace special_functions {
 namespace detail {
 template<typename T1>
+C10_HOST_DEVICE
 T1
 tan_pi(T1 z) {
   using T2 = T1;
@@ -17,6 +18,7 @@ tan_pi(T1 z) {
 }
 
 template<typename T1>
+C10_HOST_DEVICE
 c10::complex<T1>
 tan_pi(c10::complex<T1> z) {
   using T2 = T1;

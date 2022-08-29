@@ -12,7 +12,11 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_dtype import all_types_and, floating_types, all_types_and_complex_and
+from torch.testing._internal.common_dtype import (
+    all_types_and,
+    all_types_and_complex_and,
+    floating_types,
+)
 from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -648,15 +652,57 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.cos_pi',
+        "special.cos_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.cos(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.cosh_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.cosh(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.sin_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.sin(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.sinc_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.sinc(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.sinh_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.sinh(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.sinhc_pi",
         dtypes=all_types_and_complex_and(torch.bool),
         ref=None,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
-        'special.sin_pi',
+        "special.sinhc",
         dtypes=all_types_and_complex_and(torch.bool),
         ref=None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.tan_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.tan(np.pi * x),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.tanh_pi",
+        dtypes=all_types_and_complex_and(torch.bool),
+        ref=lambda x: np.tanh(np.pi * x),
         supports_autograd=False,
     ),
 ]
