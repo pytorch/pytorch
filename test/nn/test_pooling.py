@@ -1421,6 +1421,18 @@ torch.cuda.synchronize()
                 t, output_size = inp
                 m(output_size)(t)
 
+    @slowTest
+    def test_adaptive_pool_odd_size(self, device):
+        # See https://github.com/pytorch/pytorch/issues/81409
+        Ih, Iw, Oh, Ow = 5873, 3693, 3527, 2219
+        imgs = torch.randint(low=0, high=256, size=(11, Ih, Iw), dtype=torch.float)
+        imgs_ = F.adaptive_avg_pool2d(imgs, (Oh, Ow))
+        imgs_ = F.adaptive_max_pool2d(imgs, (Oh, Ow))
+
+        Id, Ih, Iw, Od, Oh, Ow = 3, 5873, 3693, 3, 3527, 2219
+        imgs = torch.randint(low=0, high=256, size=(3, Id, Ih, Iw), dtype=torch.float)
+        imgs_ = F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
+        imgs_ = F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals())
 instantiate_parametrized_tests(TestPoolingNN)
