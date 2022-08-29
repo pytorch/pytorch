@@ -1330,13 +1330,32 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f"\nReason: {e}"
+    def handle_exception(e: Exception, title: str = "Merge failed") -> None:
+        exception = f"**Reason**: {e}"
+
+        troubleshooting = ""
+        if args.land_checks:
+            troubleshooting += get_land_check_troubleshooting_message()
+
+        internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
-            msg += f"\nRaised by [workflow job]({run_url})"
-        if args.land_checks:
-            msg += get_land_check_troubleshooting_message()
+            # Hide this behind a collapsed bullet since it's not helpful to most devs
+            internal_debugging = "\n".join((
+                "<details><summary>Details for Dev Infra team</summary>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                "</details>"
+            ))
+
+        msg = "\n".join((
+            f"## {title}",
+            f"{exception}",
+            "",
+            f"{troubleshooting}",
+            "",
+            f"{internal_debugging}"
+        ))
+
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
