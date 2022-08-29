@@ -5,7 +5,6 @@ from typing import (
     Any,
     cast,
     Dict,
-    Iterable,
     Iterator,
     List,
     NamedTuple,
@@ -16,6 +15,7 @@ from typing import (
 )
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 # Import the entire FSDP file to avoid circular imports
@@ -309,7 +309,7 @@ def _flatten_optim_state_dict(
             flat_osd_state[key] = copy.copy(unflat_osd_state[unflat_param_name])
 
     # Construct the "param_groups" part -- copy as is since it will be
-    # rekeyed later according to the target rank's `optim_input`
+    # rekeyed later according to the target rank's optimizer
     flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
     return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
 
@@ -858,31 +858,26 @@ def _broadcast_unsharded_pos_dim_tensor_state(
 def _rekey_sharded_optim_state_dict(
     sharded_osd: Dict[str, Any],
     model: torch.nn.Module,
-    optim_input: Optional[
-        Union[
-            List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter],
-        ]
-    ] = None,
+    optim: torch.optim.Optimizer,
 ) -> Dict[str, Any]:
     """
     Rekeys the optimizer state dict from unflattened parameter names to
-    flattened parameter IDs according to the calling rank's ``optim_input``,
-    which may be different across ranks. In particular, the unflattened
-    parameter names are represented as :class:`_OptimStateKey` s.
+    flattened parameter IDs according to the calling rank's ``optim``, which
+    may be different across ranks. In particular, the unflattener parameter
+    names are represented as :class:`_OptimStateKey` s.
     """
-    param_to_flat_param_id = _get_param_to_param_id(model, optim_input)
+    param_to_flat_param_id = _get_param_to_param_id(optim)
     param_to_unflat_param_names = FSDP._get_param_to_unflat_param_names(model)
     # All parameter keys in `param_to_flat_param_id` should be in
     # `param_to_unflat_param_names` -- strict inequality follows when not all
-    # parameters are passed to the optimizer via `optim_input`
+    # parameters are passed to the optimizer
     assert len(param_to_flat_param_id) <= len(param_to_unflat_param_names)
 
     unflat_param_names_to_flat_param_id: Dict[Tuple[str, ...], int] = {}  # for "state"
     unflat_param_name_to_flat_param_id: Dict[str, int] = {}  # for "param_groups"
     for param, unflat_param_names in param_to_unflat_param_names.items():
         if param not in param_to_flat_param_id:
-            # This parameter was not passed to the optimizer via `optim_input`
+            # This parameter was not passed to the optimizer
             continue
         flat_param_id = param_to_flat_param_id[param]
         unflat_param_names_to_flat_param_id[tuple(unflat_param_names)] = flat_param_id
@@ -933,88 +928,24 @@ def _get_flat_param_to_fsdp_module(model: torch.nn.Module):
 
 
 def _get_param_id_to_param(
-    model: torch.nn.Module,
-    optim_input: Optional[
-        Union[
-            List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter],
-        ]
-    ] = None,
-) -> List[torch.nn.Parameter]:
+    optim: torch.optim.Optimizer,
+):
     """
     Constructs a mapping from parameter IDs to parameters. This may be used
     both for models with ``FlatParameter`` s and without.
-
-    NOTE: We critically assume that, whether the optimizer input is a list of
-    parameters or a list of parameter groups, :class:`torch.optim.Optimizer`
-    enumerates the parameter IDs in order. In other words, for a parameter list
-    input, the parameter IDs should be in that list order, and for a parameter
-    groups input, the parameter IDs should be in order within each parameter
-    group and in order across parameter groups.
-
-    Args:
-        model (torch.nn.Module): Model whose parameters are passed into the
-            optimizer.
-        optim_input (Optional[Union[List[Dict[str, Any]],
-        Iterable[torch.nn.Parameter]]]): Input passed into the optimizer
-            representing either a :class:`list` of parameter groups or an
-            iterable of parameters; if ``None``, then this method assumes the
-            input was ``model.parameters()``. (Default: ``None``)
-
-    Returns:
-        List[torch.nn.Parameter]: Mapping from parameter IDs to parameters,
-        where the parameter ID is implicitly the index in the :class:`list`.
     """
-    # Assume the standard case of passing `model.parameters()` to the optimizer
-    # if `optim_input` is not specified
-    if optim_input is None:
-        return list(model.parameters())
-    try:
-        params = list(optim_input)
-    except TypeError:
-        raise TypeError(
-            "Optimizer input should be an iterable of Tensors or dicts, "
-            f"but got {optim_input}"
-        )
-    if len(params) == 0:
-        raise ValueError("Optimizer input should not be empty")
-
-    # Check if the optimizer input represents tensors or parameter groups
-    all_tensors = True
-    all_dicts = True
-    for param in params:
-        all_tensors &= isinstance(param, torch.Tensor)
-        all_dicts &= isinstance(param, dict)
-    if not all_tensors and not all_dicts:
-        raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
-    if all_tensors:
-        return params  # type: ignore[return-value]
-    assert all_dicts
-    param_id_to_param = []
-    for param_group in params:
-        has_params_key = "params" in param_group  # type: ignore[operator]
-        assert has_params_key, (
-            'A parameter group should map "params" to a list of the '
-            "parameters in the group"
-        )
-        for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list) to
-            # `param`
+    param_id_to_param: List[nn.Parameter] = []
+    for param_group in optim.param_groups:
+        for param in param_group["params"]:
             param_id_to_param.append(param)
-    return param_id_to_param  # type: ignore[return-value]
+    return param_id_to_param
 
 
 def _get_param_to_param_id(
-    model: torch.nn.Module,
-    optim_input: Optional[
-        Union[
-            List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter],
-        ]
-    ] = None,
+    optim: torch.optim.Optimizer,
 ) -> Dict[torch.nn.Parameter, int]:
     """Constructs the inverse mapping of :func:`_get_param_id_to_param`."""
-    param_id_to_param = _get_param_id_to_param(model, optim_input)
+    param_id_to_param = _get_param_id_to_param(optim)
     return {param: param_id for param_id, param in enumerate(param_id_to_param)}
 
 
@@ -1068,12 +999,6 @@ def _is_zero_dim_tensor(x: Any) -> bool:
 def _optim_state_dict(
     model: torch.nn.Module,
     optim: torch.optim.Optimizer,
-    optim_input: Optional[
-        Union[
-            List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter],
-        ]
-    ] = None,
     rank0_only: bool = True,
     shard_state: bool = False,
     group: Optional[dist.ProcessGroup] = None,
@@ -1091,11 +1016,6 @@ def _optim_state_dict(
             were passed into the optimizer ``optim``.
         optim (torch.optim.Optimizer): Optimizer for ``model`` 's
             parameters.
-        optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
-            Input passed into the optimizer ``optim`` representing either a
-            :class:`list` of parameter groups or an iterable of parameters;
-            if ``None``, then this method assumes the input was
-            ``model.parameters()``. (Default: ``None``)
         rank0_only (bool): If ``True``, saves the populated :class:`dict`
             only on rank 0; if ``False``, saves it on all ranks. (Default:
             ``True``)
@@ -1121,9 +1041,7 @@ def _optim_state_dict(
     param_to_unflat_param_names: Dict[
         torch.nn.Parameter, List[str]
     ] = FSDP._get_param_to_unflat_param_names(model)
-    flat_param_id_to_param: List[torch.nn.Parameter] = _get_param_id_to_param(
-        model, optim_input
-    )
+    flat_param_id_to_param: List[torch.nn.Parameter] = _get_param_id_to_param(optim)
     optim_state_key_to_flat_param_id: Dict[_OptimStateKey, int] = {}  # local
     r0_flat_param_id_to_optim_state_key: Dict[
         int, _OptimStateKey
