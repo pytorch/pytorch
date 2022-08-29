@@ -33,12 +33,13 @@ class ConcreteProp(torch.fx.Interpreter):
 
 # inplace modifies node/inps
 def _convert_node_to_placeholder(node, inps):
-    if node.op == 'output':
+    if node.op == 'output' or node.op == "placeholder":
         return
     node.op = 'placeholder'
     node.args = ()
+    node.kwargs = {}
     node.target = node.name
-    concrete_val = node.meta['concrete_value']
+    concrete_val = node.meta.get('concrete_value', None)
     if isinstance(concrete_val, torch.Tensor):
         inps.append(concrete_val)
     else:
@@ -78,8 +79,13 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     num_queries = 0
 
+    def deepcopy_fx_graph(fx_graph):
+        return fx.GraphModule(fail_f, copy.deepcopy(fx_graph)).graph
+
+
     def graph_fails(graph, inps):
         nonlocal num_queries
+        graph = copy.deepcopy(graph)
         num_queries += 1
         mod = fx.GraphModule(fail_f, graph)
         mod.graph.lint()
@@ -95,7 +101,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         def new_func(old_state: ReproState, granularity=1):
             print()
             print(f"Strategy: {name} (G: {granularity}) ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
-            new_state = strategy(copy.deepcopy(old_state.graph), list(old_state.inps), granularity)
+            new_state = strategy(deepcopy_fx_graph(old_state.graph), list(old_state.inps), granularity)
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
                 old_nodes = len(old_state.graph.nodes)
@@ -138,7 +144,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         for idx, node in enumerate(cur_graph.nodes):
             new_node = new_graph.node_copy(node, lambda x: env[x])
             if node.op not in ['placeholder', 'output']:
-                if idx % granularity == 0 and idx not in tested:
+                # If idx is divisible by (granularity * 2), it would have been checked already.
+                if idx % granularity == 0 and (idx % (granularity * 2) != 0) and idx not in tested:
                     output_node = new_graph.output((new_node,))
                     if len(new_graph.nodes) < len(cur_graph.nodes) and graph_fails(new_graph, cur_inps):
                         return ReproState(new_graph, cur_inps)
@@ -150,16 +157,19 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     @register_strategy("Remove outputs")
     def remove_outputs(cur_graph, cur_inps, granularity):
+        granularity = max(1, granularity // 2)
         for idx, node in enumerate(cur_graph.nodes):
             node.idx = idx
             if node.op == 'output':
                 output = node
                 break
+
         output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         if len(output_args) == 1:
             return None
-        for idx in range(1, len(output_args)):
-            output.args = (output_args[:idx],)
+
+        for idx in range(0, len(output_args), granularity):
+            output.args = (output_args[:idx] + output_args[idx + granularity:],)
             if graph_fails(cur_graph, cur_inps):
                 return ReproState(cur_graph, cur_inps)
         return None
@@ -218,7 +228,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         num_nodes = len(cur_graph.nodes)
         for start_range in range(0, num_nodes, granularity):
             is_removing = False
-            new_graph = copy.deepcopy(cur_graph)
+            new_graph = deepcopy_fx_graph(cur_graph)
             new_inps = cur_inps[:]
             end_range = min(num_nodes, start_range + granularity)
             for idx in range(start_range, end_range):
@@ -239,32 +249,52 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
     failing_state = ReproState(failing_graph, inps)
 
-    def try_granularity(failing_state, granularity):
+    def try_granularity(failing_state, granularity, use_non_granular):
         print(f"Trying granularity {granularity}")
-        for strategy in [eliminate_dead_code, remove_unused_inputs, remove_suffix, delta_debugging]:
+
+        strategies = []
+        num_nodes = len(failing_state.graph.nodes)
+        num_outputs = len(get_outputs(failing_state.graph))
+        if num_outputs > num_nodes // 2:
+            strategies += [remove_outputs]
+
+        if use_non_granular:
+            strategies += [eliminate_dead_code, remove_unused_inputs]
+
+        strategies += [remove_suffix, delta_debugging]
+
+        for strategy in strategies:
             new_state = strategy(failing_state, granularity)
             if new_state is not None:
                 return new_state
         return None
 
     while True:
+        dump_state(fx.GraphModule(fail_f, failing_state.graph), failing_state.inps)
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
+        new_state = try_granularity(failing_state, granularity, use_non_granular=True)
+        if new_state is not None:
+            failing_state = new_state
+            continue
+
+        granularity //= 2
         has_progress = False
         while granularity >= 1:
-            new_state = try_granularity(failing_state, granularity)
+            new_state = try_granularity(failing_state, granularity, use_non_granular=False)
             if new_state is not None:
-                dump_state(fx.GraphModule(fail_f, new_state.graph), new_state.inps)
                 failing_state = new_state
                 has_progress = True
                 break
             granularity //= 2
-        if not has_progress:
-            new_state = remove_outputs(failing_state, 1)
-            if new_state is not None:
-                has_progress = True
-                failing_state = new_state
-        if not has_progress:
-            break
+        if has_progress:
+            continue
+
+        new_state = remove_outputs(failing_state, 1)
+        if new_state is not None:
+            failing_state = new_state
+            continue
+
+        break
 
     if not graph_fails(failing_state.graph, failing_state.inps):
         raise RuntimeError("Uh oh, something went wrong :( Final graph is not failing")
@@ -272,4 +302,5 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     print(f"Made {num_queries} queries")
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
     dump_state(failing_fx, failing_state.inps)
+    print("Wrote minimal repro out to repro.py")
     return failing_fx, failing_state.inps
