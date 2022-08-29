@@ -42,7 +42,8 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   return convert(v_output);
 }
 
-inline Tensor view(const Tensor& self_arg, const IntArrayRef shape) {
+inline Tensor view(const Tensor& self_arg, const SymIntArrayRef sym_shape) {
+  auto shape = c10::asIntArrayRefSlow(sym_shape);
   return view_internal(self_arg, shape);
 }
 
