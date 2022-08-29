@@ -9,7 +9,12 @@ import pickle
 import collections
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    TEST_WITH_CROSSREF,
+    DeterministicGuard
+)
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch.overrides import (
     handle_torch_function,
@@ -1629,6 +1634,7 @@ class TestTorchFunctionRedispatch(TestCase):
   (RedispatchTensor([3]), RedispatchTensor([3])),
   None)]""")
 
+
 class TestTorchFunctionRedispatchOps(TestCase):
     @ops(op_db)
     def test_redispatch(self, device, dtype, op):
@@ -1651,13 +1657,6 @@ class TestTorchFunctionRedispatchOps(TestCase):
 
             expect = op(sample.input, *sample.args, **sample.kwargs)
             actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
-
-            # Allow non-deterministic ops more wiggle-room
-            if op.gradcheck_nondet_tol > 0:
-                with torch._C.DisableTorchFunction():
-                    diff = (expect - actual).abs()
-                    if (diff < op.gradcheck_nondet_tol).all():
-                        continue
 
             with torch._C.DisableTorchFunction():
                 self.assertEqual(expect, actual)

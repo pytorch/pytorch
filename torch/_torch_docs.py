@@ -13569,6 +13569,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,
