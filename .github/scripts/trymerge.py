@@ -1017,8 +1017,8 @@ def find_matching_merge_rule(pr: GitHubPR,
 
     rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
-        reject_reason = ("No matching merge rules found in merge_rules.yaml. " +
-                         "Please verify the file content to ensure there are a valid merge rule defined.")
+        reject_reason = ("No matching merge rule found in merge_rules.yaml. " +
+                         "Please verify the file content to ensure there are valid merge rules defined.")
         raise RuntimeError(reject_reason)
 
     #  Used to determine best rejection reason
