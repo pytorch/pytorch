@@ -303,7 +303,7 @@ class TestReductions(TestCase):
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.amax().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor([[0.0, 0, 0], [0, 1, 0]]), m))
 
     def test_amin(self):
         d = torch.tensor([[0, 1, 3, -3], [3, -4, 1.0, 3]])
@@ -323,7 +323,7 @@ class TestReductions(TestCase):
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.amin().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor([[1.0, 0, 0], [0, 0, 0]]), m))
 
     def test_prod(self):
         d = torch.tensor([[0, 1, 3, 0.0], [float("nan"), 4, 1.0, 5.0]])
@@ -339,11 +339,11 @@ class TestReductions(TestCase):
         )
 
     def test_prod_grad(self):
-        d = torch.tensor([[0, float("nan"), 2], [3, 4, 5.0]])
+        d = torch.tensor([[2, float("nan"), 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.prod().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor([[4.0, 0, 0], [0, 2, 0]]), m))
 
     def test_all(self):
         d = torch.tensor([[True, True, False, False], [False, True, True, True]])

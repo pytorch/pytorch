@@ -43,11 +43,12 @@ def masked_tensor(data, mask, requires_grad=False):
 
         @staticmethod
         def backward(ctx, grad_output):
-            result = torch._masked._where(grad_output.get_mask(), grad_output.get_data(), 0)
-            return result, None
-            # return grad_output, None
+            return grad_output, None
 
-    return Constructor.apply(data, mask)
+    result = Constructor.apply(data, mask)
+    if requires_grad:
+        result.requires_grad_(requires_grad)
+    return result
 
 
 # New function as_masked_tensor with autograd support to
