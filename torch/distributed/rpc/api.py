@@ -148,6 +148,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
 _thread_local_var = threading.local()
 
+
 @contextlib.contextmanager
 def _wait_all():
     r"""
@@ -157,10 +158,10 @@ def _wait_all():
 
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
-        >>> # xdoctest: +SKIP
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> with rpc._wait_all():
         >>>    fut_1 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
@@ -175,6 +176,7 @@ def _wait_all():
             torch.futures.wait_all(_thread_local_var.future_list)
         finally:
             del _thread_local_var.future_list
+
 
 @_require_initialized
 def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
@@ -237,7 +239,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
     # Leader's signal is the first to be unblocked, after receiving all
     # followers' data objects.
     if is_leader:
-        worker_name_to_response_future_dict = dict()
+        worker_name_to_response_future_dict = {}
         for follower_name in worker_names - {leader_name}:
             fut = rpc_async(
                 follower_name,
@@ -284,6 +286,7 @@ def _barrier(worker_names):
         logger.error(
             f"Failed to complete barrier, got error {ex}"
         )
+
 
 @_require_initialized
 def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
@@ -376,6 +379,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     else:
         _finalize_shutdown()
 
+
 def _finalize_shutdown():
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -395,6 +399,7 @@ def _finalize_shutdown():
         # resolved.
         _cleanup_python_rpc_handler()
         _reset_current_rpc_agent()
+
 
 @_require_initialized
 def get_worker_info(worker_name=None):
@@ -451,7 +456,6 @@ def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT, blocking=True):
         return fut.wait()
     else:
         return fut
-
 
 
 T = TypeVar("T")
@@ -668,6 +672,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             rref._set_profiling_future(fut)
 
     return rref
+
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
     if not callable(func):
@@ -900,14 +905,16 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         _thread_local_var.future_list.append(fut)
     return fut
 
+
 def _get_should_profile():
     # Legacy profiler should be enabled. RPC profiling is not supported with
     # Kineto profiler.
-    ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+    ActiveProfilerType = torch._C._profiler.ActiveProfilerType
     return (
         torch.autograd._profiler_enabled() and
         torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
     )
+
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
     ctx_manager = contextlib.suppress()
