@@ -781,7 +781,7 @@ TEST_F(VulkanAPITest, batch_norm_large) {
   c10::InferenceMode mode;
 
 
-  const auto input_cpu = at::rand({79, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::rand({11, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
   const auto weight_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
@@ -1897,7 +1897,7 @@ TEST_F(VulkanAPITest, hardswish_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardswish_(cpu);
+  at::hardswish_(cpu);
   at::hardswish_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
