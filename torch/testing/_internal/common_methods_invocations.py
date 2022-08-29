@@ -6002,79 +6002,115 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     cases = (
-        ((S, S, S), (S * S, S)),
-        ((S * S, S), (S, S, S)),
-        ((S * S, S), (S, -1, S)),
-        ((S * S * 2, S), (S, -1)),
-        ((S,), (S,)),
-        ((), ()),
-        ((), (1,)),
+        # a, b, is_tensor_supported
+        ((S, S, S), (S * S, S), True),
+        ((S * S, S), (S, S, S), True),
+        ((S * S, S), (S, -1, S), False),  # neg index
+        ((S * S * 2, S), (S, -1), False),  # neg index
+        ((S,), (S,), True),
+        ((), (), False),  # empty
+        ((), (1,), True),
     )
 
-    for shape, args in cases:
-        yield SampleInput(make_arg(shape), args=(args,))
+    for a, b, is_tensor_supported in cases:
+       # skip unsupported cases
+        if kwargs.get("tensor_arg") and not is_tensor_supported:
+            continue
 
-        if kwargs.get("transpose_samples", False) and len(shape) >= 2:
-            transposed = make_arg(shape).transpose(0, 1).detach().requires_grad_(requires_grad)
-            yield SampleInput(transposed, args=(args,))
+        # convert to tensor
+        if kwargs.get("tensor_arg"):
+            b = make_arg(b, requires_grad=False)
+
+        yield SampleInput(make_arg(a), args=(b,))
+
+        if kwargs.get("transpose_samples", False) and len(a) >= 2:
+            transposed = make_arg(a).transpose(0, 1).detach().requires_grad_(requires_grad)
+            yield SampleInput(transposed, args=(b,))
 
 def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs)
 
     cases = (
-        ((125,), (25, 5)),
-        ((25, 25), (1, 5, 5, 1, 5, 1, 5, 1)),
-        ((16, 32), (2, 4, 1, 4, 4, 1, 4)),
-        ((16, 12), (12, 16)),
-        ((1, 16, 12), (12, 16)),
-        ((1, 5, 1, 5), (25, 1)),
-        ((2, 4, 2), (4, 4)),
-        ((1, 4), (1, 1, 2, 1, 2)),
-        ((3, 5, 7), (7, 5, 3)),
-        ((1,), ()),
-        ((5, 0, 2, 3), (5, 0, 2, 3)),
-        ((2, 1, 0, 3, 1), (5, 0)),
-        ((1,), ()),
-        ((4, 5, 6), (4, 5, 6, 1, 1, 1)),
-        ((), (1, 1, 1, 1)),
+        # a, b, is_tensor_supported
+        ((125,), (25, 5), True),
+        ((25, 25), (1, 5, 5, 1, 5, 1, 5, 1), True),
+        ((16, 32), (2, 4, 1, 4, 4, 1, 4), True),
+        ((16, 12), (12, 16), True),
+        ((1, 16, 12), (12, 16), True),
+        ((1, 5, 1, 5), (25, 1), True),
+        ((2, 4, 2), (4, 4), True),
+        ((1, 4), (1, 1, 2, 1, 2), True),
+        ((3, 5, 7), (7, 5, 3), True),
+        ((1,), (), False),  # empty
+        ((5, 0, 2, 3), (5, 0, 2, 3), True),
+        ((2, 1, 0, 3, 1), (5, 0), True),
+        ((1,), (), False),  # empty
+        ((4, 5, 6), (4, 5, 6, 1, 1, 1), True),
+        ((), (1, 1, 1, 1), False),  # empty
     )
 
     irreversible_cases = (
-        ((), (-1,)),
-        ((4, 7, 9, 1, 1), (1, 4, 3, -1, 1)),
+        ((), (-1,), False),  # neg index, empty
+        ((4, 7, 9, 1, 1), (1, 4, 3, -1, 1), False),  # neg index
     )
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-    for a, b in cases:
-        yield SampleInput(make_arg(a), args=(b,))
-        yield SampleInput(make_arg(b), args=(a,))
+    for a, b, is_tensor_supported in cases:
+        # skip unsupported cases
+        if kwargs.get("tensor_arg") and not is_tensor_supported:
+            continue
+
+        if kwargs.get("tensor_arg"):
+            # convert to tensor
+            yield SampleInput(make_arg(a), args=(make_arg(b, requires_grad=False),))
+            yield SampleInput(make_arg(b), args=(make_arg(a, requires_grad=False),))
+        else:
+            yield SampleInput(make_arg(a), args=(b,))
+            yield SampleInput(make_arg(b), args=(a,))
+
+        # convert to tensor
+        if kwargs.get("tensor_arg"):
+            b = make_arg(b, requires_grad=False)
 
         if kwargs.get("transpose_samples", False):
             yield SampleInput(make_arg(a, noncontiguous=True).transpose(0, -1), args=(b,))
         else:
             yield SampleInput(make_arg(a, noncontiguous=True), args=(b,))
 
-    for a, b in irreversible_cases:
+    for a, b, is_tensor_supported in irreversible_cases:
+        # skip unsupported cases
+        if kwargs.get("tensor_arg") and not is_tensor_supported:
+            continue
+
+        # convert to tensor
+        if kwargs.get("tensor_arg"):
+            b = make_arg(b, requires_grad=False)
+
         yield SampleInput(make_arg(a), args=(b,))
 
 def error_inputs_view_reshape(op, device, **kwargs):
 
     cases = (
+        # a, b, is_tensor_supported
         # Reshape to different numel
-        ((2,), ()),
-        ((1, 3, 0), ()),
-        ((4, 3), (4, 2)),
-        ((1, 3, 5), (5, 2, 2)),
+        ((2,), (), False),  # empty
+        ((1, 3, 0), (), False),  # empty
+        ((4, 3), (4, 2), True),
+        ((1, 3, 5), (5, 2, 2), True),
         # No valid inference
-        ((1, 3, 5), (5, -1, 2)),
+        ((1, 3, 5), (5, -1, 2), False),  # neg index
         # Two inferred shapes
-        ((1, 3, 5), (5, -1, -1)),
-        ((1), (0, -1)),
-        ((0, 5), (0, -1)),
+        ((1, 3, 5), (5, -1, -1), False),  # neg index
+        ((1), (0, -1), False),  # neg index
+        ((0, 5), (0, -1), False),  # neg index
     )
 
     make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
-    for a, b in cases:
+    for a, b, is_tensor_supported in cases:
+        # skip unsupported cases
+        if kwargs.get("tensor_arg") and not is_tensor_supported:
+            continue
+
         if b == (5, -1, -1):
             error_regex = "only one dimension can be inferred"
         elif a == (0, 5):
@@ -6083,30 +6119,17 @@ def error_inputs_view_reshape(op, device, **kwargs):
                            "-1 can be any value and is ambiguous")
         else:
             # to avoid having issues with a regex
-            shape = str(list(b))[1:-1]
+            shape = ', '.join(map(str, b))
             size = a if type(a) is int else math.prod(a)
             error_regex = rf"shape '\[{shape}\]' is invalid for input of size {size}"
+
+        # convert to tensor
+        if kwargs.get("tensor_arg"):
+            b = make_arg(b, requires_grad=False)
+
         yield ErrorInput(SampleInput(make_arg(a), args=(b,)), error_type=Exception,
                          error_regex=error_regex)
 
-
-def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device)
-
-    cases = (((S, S, S), (S * S, S)),
-             ((), ()),
-             ((), (1, 1)),
-             )
-
-    for case in cases:
-        shape, shape_other = case
-        inp = make_arg(shape, requires_grad=requires_grad)
-        yield(SampleInput(inp, args=(make_arg(shape_other, requires_grad=False),)))
-
-        if op_info.name != "view_as" and len(shape) >= 2:
-            yield(SampleInput(
-                inp.clone().transpose(0, 1).requires_grad_(requires_grad),
-                args=(make_arg(shape_other, requires_grad=False),)))
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
     input_list = []
@@ -13134,7 +13157,9 @@ op_db: List[OpInfo] = [
     OpInfo('reshape_as',
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           sample_inputs_func=sample_inputs_view_as_reshape_as,
+           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=True, tensor_arg=True),
+           reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=True, tensor_arg=True),
+           error_inputs_func=partial(error_inputs_view_reshape, tensor_arg=True),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13160,7 +13185,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_view_as_reshape_as,
+           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=False, tensor_arg=True),
+           reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=False, tensor_arg=True),
+           error_inputs_func=partial(error_inputs_view_reshape, tensor_arg=True),
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
