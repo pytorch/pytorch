@@ -278,7 +278,7 @@ defined as ``prod(x[:i])``.""",
         cumprod="cumulative_prod",
     )
 
-    operation_names = dict()
+    operation_names = {}
     operation_names.update(reduction_names)
     operation_names.update(normalization_names)
 

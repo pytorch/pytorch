@@ -2199,7 +2199,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
     TORCH_CHECK(length >= 0,
              "split_with_sizes expects split_sizes have only non-negative ",
              "entries, but got split_sizes=", split_sizes);
-    splits.push_back(self.narrow(dim, start_idx, length));
+    splits.push_back(at::native::slice(self, dim, start_idx, start_idx + length, 1));
     start_idx += length;
   }
   TORCH_CHECK(start_idx == dim_size,
@@ -3250,7 +3250,7 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
-              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+              src, " dims) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());

@@ -21,6 +21,8 @@ def is_masked_tensor(a):
 
     Examples:
 
+        >>> # xdoctest: +SKIP
+        >>> from torch.masked.maskedtensor.creation import masked_tensor
         >>> data = torch.arange(6).reshape(2,3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = masked_tensor(data, mask)
