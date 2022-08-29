@@ -3689,15 +3689,15 @@ class FullyShardedDataParallel(nn.Module):
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
-        The API is similar to :meth:``full_optim_state_dict`` but this API
-        chunks all non-zero-dimension states to ShardedTensor to save memory.
-        This API should only be used when the model state_dict is derived with
-        the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
+        The API is similar to :meth:`full_optim_state_dict` but this API chunks
+        all non-zero-dimension states to :class:`ShardedTensor` to save memory.
+        This API should only be used when the model ``state_dict`` is derived
+        with the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
 
-        For the detail usages, refer to the :meth:``full_optim_state_dict`` doc.
+        For the detailed usage, refer to :meth:`full_optim_state_dict`.
 
-        .. warning:: The returned state dict contains ShardedTensor and cannot be
-            directly used by the regular ``optim.load_state_dict``.
+        .. warning:: The returned state dict contains ``ShardedTensor`` and
+            cannot be directly used by the regular ``optim.load_state_dict``.
         """
 
         # TODO: The ultimate goal of the optimizer state APIs should be the same
@@ -3795,10 +3795,10 @@ class FullyShardedDataParallel(nn.Module):
         ] = None,
     ) -> Dict[str, Any]:
         """
-        The API is similar to :meth:``shard_full_optim_state_dict``. The only
+        The API is similar to :meth:`shard_full_optim_state_dict`. The only
         difference is that the input ``sharded_optim_state_dict`` should be
-        returned from :meth:`sharded_optim_state_dict`. Therefore, there will be
-        allgather calls on each rank to gather ShardedTensor.
+        returned from :meth:`sharded_optim_state_dict`. Therefore, there will
+        be all-gather calls on each rank to gather ``ShardedTensor`` s.
 
         Args:
             sharded_optim_state_dict (Dict[str, Any]): Optimizer state dict
@@ -3810,7 +3810,7 @@ class FullyShardedDataParallel(nn.Module):
                 Refer to :meth:``shard_full_optim_state_dict``.
 
         Returns:
-            Refer to :meth:``shard_full_optim_state_dict``.
+            Refer to :meth:`shard_full_optim_state_dict`.
         """
 
         # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
