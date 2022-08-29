@@ -636,8 +636,8 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
 
   // forward pointers to batch[blockIdx.x]
   // each block handles a sample in the mini-batch
-  input += blockIdx.x * classes;
-  output += blockIdx.x * classes;
+  input += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
 
   const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
   const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
@@ -672,9 +672,9 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
 
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
-  gradInput += blockIdx.x * classes;
-  output += blockIdx.x * classes;
-  gradOutput += blockIdx.x * classes;
+  gradInput += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
+  gradOutput += static_cast<int64_t>(blockIdx.x) * classes;
 
   const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
   const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
