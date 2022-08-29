@@ -3,7 +3,7 @@ from collections import defaultdict
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
-from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
+from typing import Any, Callable, DefaultDict, Dict, Iterator, List, Optional, Sized, TypeVar
 
 __all__ = [
     "BatcherIterDataPipe",
@@ -27,15 +27,32 @@ class ShardingFilterIterDataPipe(IterDataPipe):
     """
     def __init__(self, source_datapipe: IterDataPipe):
         self.source_datapipe = source_datapipe
+        self.sharding_groups: Dict[int, Any] = {}
         self.num_of_instances = 1
         self.instance_id = 0
 
     def is_shardable(self):
         return True
 
-    def apply_sharding(self, num_of_instances, instance_id):
-        self.num_of_instances = num_of_instances
-        self.instance_id = instance_id
+    def apply_sharding(self, num_of_instances, instance_id, sharding_group=None):
+        if sharding_group is not None:
+            if None in self.sharding_groups:
+                raise Exception("Already defined default sharding and now trying to use the sharding group. "
+                                "This will lead to unexpected behavior.")
+        else:
+            if len(self.sharding_groups) and not None in self.sharding_groups:
+                raise Exception("Already defined non default sharding groups and now trying to use default one. "
+                                "This will lead to unexpected behavior.")
+
+        self.sharding_groups[sharding_group] = (num_of_instances, instance_id)
+
+        keys = sorted(self.sharding_groups.keys())
+        self.num_of_instances = 1
+        self.instance_id = 0
+
+        for k in keys:
+            self.instance_id += self.sharding_groups[k][1] * self.num_of_instances
+            self.num_of_instances *= self.sharding_groups[k][0]
 
     def __iter__(self):
         for i, item in enumerate(self.source_datapipe):

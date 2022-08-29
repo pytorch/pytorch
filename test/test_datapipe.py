@@ -2752,6 +2752,17 @@ class TestSharding(TestCase):
         self.assertEqual(1, len(sharded_dp0))
         self.assertEqual(0, len(sharded_dp1))
 
+    def test_sharding_groups(self):
+        numbers_dp = dp.iter.IterableWrapper(range(100))
+        sharded_dp = numbers_dp.sharding_filter()
+        sharded_dp.apply_sharding(5, 2, 0)
+        # [2, 7, 12,  17, 22, 27,  32, 37, 42,  47, 52, ...]
+        sharded_dp.apply_sharding(3, 1, 1)
+        # [7, 22, 37, 52, ...]
+        sharded_dp.apply_sharding(2, 1, 2)
+        # [22, 52, 82]
+        self.assertEquals([22, 52, 82], list(sharded_dp))
+
     def test_old_dataloader(self):
         dp0 = self._get_pipeline()
         expected = list(dp0)

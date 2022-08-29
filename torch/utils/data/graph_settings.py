@@ -29,7 +29,7 @@ def _get_all_graph_pipes_helper(graph: DataPipeGraph, id_cache: Set[int]) -> Lis
     return results
 
 
-def apply_sharding(datapipe: DataPipe, num_of_instances: int, instance_id: int) -> DataPipe:
+def apply_sharding(datapipe: DataPipe, num_of_instances: int, instance_id: int, sharding_group: Optional[int] = None) -> DataPipe:
     graph = traverse(datapipe, only_datapipe=True)
     all_pipes = get_all_graph_pipes(graph)
     already_applied_to = None
@@ -40,7 +40,7 @@ def apply_sharding(datapipe: DataPipe, num_of_instances: int, instance_id: int) 
                     if already_applied_to is not None:
                         raise RuntimeError('This implementation of sharding can be only applied once per instance of DataPipeline.',
                                            'Already applied to', already_applied_to, 'while trying to apply to', pipe)
-                    pipe.apply_sharding(num_of_instances, instance_id)
+                    pipe.apply_sharding(num_of_instances, instance_id, sharding_group)
                     already_applied_to = pipe
     return datapipe
 
