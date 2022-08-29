@@ -332,6 +332,7 @@ def discover_functorch_tests():
     assert len(result) >= 8
     return result
 
+
 FUNCTORCH_TESTS = discover_functorch_tests()
 
 TESTS_REQUIRING_LAPACK = [

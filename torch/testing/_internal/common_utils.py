@@ -736,7 +736,7 @@ def run_tests(argv=UNITTEST_ARGS):
                               'test_torch', 'test_tensor_creation_ops', 'test_sparse_csr', 'test_dispatch']
                 or test_filename in ["lazy.test_ts_opinfo", "test_foreach", "lazy.test_reuse_ir", "test_fx_backends",
                                      "test_linalg", "distributions.test_distributions", 'nn.test_pooling',
-                                     'test_ao_sparsity', 'test_native_mha']):
+                                     'test_ao_sparsity', 'test_native_mha', 'test_nestedtensor']):
             exit(0)
         # exclude linux cuda tests because we run into memory issues when running in parallel
         import pytest
