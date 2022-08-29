@@ -57,9 +57,7 @@ TEST(CustomClassTest, ScalarTypeClass) {
   std::istringstream iss(oss.str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   auto loaded_module = torch::jit::load(iss, torch::kCPU);
-
 }
-
 
 class TorchBindTestClass : public torch::jit::CustomClassHolder {
  public:
