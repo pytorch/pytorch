@@ -3,6 +3,7 @@ import torch.fx
 from torch.fx import (
     Node,
     GraphModule,
+    Graph,
 )
 
 from torch.ao.ns.fx.utils import (
@@ -14,8 +15,9 @@ from torch.ao.ns.fx.ns_types import (
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import MatchResult
 
+import builtins
 import copy
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 import operator
 
 SHADOW_NODE_NAME_PREFIX = 'shadow'
@@ -313,7 +315,8 @@ def create_submodule_from_subgraph(
             # to the first node, need to handle this
             cur_args_copy = []
             cur_kwargs_copy = {}
-            seen_names = set()
+            seen_names: Set[str] = set()
+            old_name_to_new_node: Dict[str, Node] = {}
             # args up to num_passthrough_args are passed in from module
             # input, other args are copied
             if cur_node_orig.target in BINARY_FUNCTIONS:
@@ -323,36 +326,76 @@ def create_submodule_from_subgraph(
 
             arg_kwarg_idx = 0
 
+            def _add_placeholder(
+                g: Graph, node: Node, seen_names, old_name_to_new_node
+            ):
+                counter = 0
+                while node.name + '_' + str(counter) in seen_names:
+                    counter += 1
+                cur_name = node.name + '_' + str(counter)
+                seen_names.add(cur_name)
+                placeholder = g.placeholder(cur_name)
+                old_name_to_new_node[node.name] = placeholder
+                return placeholder
+
+            # TODO(before land): unify common code for the arg and kwarg
+            # handling below
+
             for arg in cur_node_orig.args:
                 # note: for graphs starting with patterns such as `y = x + x`, we
                 # need to ensure we do not add multiple placeholders with the
                 # same name
                 if isinstance(arg, Node) and arg_kwarg_idx < num_passthrough:
-                    counter = 0
-                    while arg.name + '_' + str(counter) in seen_names:
-                        counter += 1
-                    cur_name = arg.name + '_' + str(counter)
-                    seen_names.add(cur_name)
-                    cur_args_copy.append(g.placeholder(cur_name))
+                    p = _add_placeholder(
+                        g, arg, seen_names, old_name_to_new_node)
+                    cur_args_copy.append(p)
                 elif isinstance(arg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
-                    cur_names = []
+                    new_arg = []
                     for inner_arg in arg:
-                        counter = 0
-                        while inner_arg.name + '_' + str(counter) in seen_names:
-                            counter += 1
-                        cur_name = inner_arg.name + '_' + str(counter)
-                        seen_names.add(cur_name)
-                        cur_names.append(cur_name)
-                    cur_args_copy.append([g.placeholder(x) for x in cur_names])
+                        new_arg.append(_add_placeholder(
+                            g, inner_arg, seen_names, old_name_to_new_node))
+                    cur_args_copy.append(new_arg)
+                    # TODO(before land): populate old_name_to_new_node
                 elif isinstance(arg, Node):
                     # arg_kwarg_idx >= num_passthrough args, we need to copy
-                    assert arg.op == 'get_attr', f'{arg.op} not handled yet'
-                    new_attr_name = arg.name
-                    obj = getattr_from_fqn(model, arg.target)
-                    # wrap in Parameter to silence a warning in torch/fx/graph.py
-                    obj_copy = torch.nn.Parameter(obj.clone().detach())
-                    setattr(gm, new_attr_name, obj_copy)
-                    cur_args_copy.append(g.get_attr(new_attr_name))
+                    if arg.op == 'get_attr':
+                        new_attr_name = arg.name
+                        obj = getattr_from_fqn(model, arg.target)
+                        # wrap in Parameter to silence a warning in torch/fx/graph.py
+                        obj_copy = torch.nn.Parameter(obj.clone().detach())
+                        setattr(gm, new_attr_name, obj_copy)
+                        cur_args_copy.append(g.get_attr(new_attr_name))
+                    elif arg.op == 'call_function' and \
+                            arg.target == builtins.getattr:
+                        source, target = arg.args[0], arg.args[1]
+                        assert source.name in old_name_to_new_node
+                        new_source = old_name_to_new_node[source.name]
+                        cur_args_copy.append(g.call_function(
+                            arg.target, (new_source, target)))
+                    elif arg.op == 'call_function' and \
+                            arg.target == operator.getitem:
+                        source, target = arg.args[0], arg.args[1]
+                        # for now, this is copy-pasta'ed
+                        # TODO(future PR): better reuse code with get_attr
+                        # handling above
+                        assert source.op == 'get_attr', \
+                            f'{source.op} not handled yet for ' + \
+                            f'{source.format_node()}'
+                        new_attr_name = source.name
+                        obj = getattr_from_fqn(model, source.target)
+                        # wrap in Parameter to silence a warning in torch/fx/graph.py
+                        obj_copy = torch.nn.Parameter(obj.clone().detach())
+                        setattr(gm, new_attr_name, obj_copy)
+                        get_attr_copy = g.get_attr(new_attr_name)
+                        cur_args_copy.append(g.call_function(
+                            operator.getitem, (get_attr_copy, target)))
+
+                    else:
+                        raise AssertionError(
+                            f'{arg.op} not handled yet for arg ' + \
+                            f'{arg.format_node()} of node ' + \
+                            f'{cur_node_orig.format_node()}'
+                        )
                 else:
                     cur_args_copy.append(arg)
 
@@ -364,23 +407,15 @@ def create_submodule_from_subgraph(
                 # need to ensure we do not add multiple placeholders with the
                 # same name
                 if isinstance(kwarg, Node) and arg_kwarg_idx < num_passthrough:
-                    counter = 0
-                    while kwarg.name + '_' + str(counter) in seen_names:
-                        counter += 1
-                    cur_name = kwarg.name + '_' + str(counter)
-                    seen_names.add(cur_name)
-                    cur_kwargs_copy[kwarg_name] = g.placeholder(cur_name)
+                    cur_kwargs_copy[kwarg_name] = _add_placeholder(
+                        g, kwarg, seen_names, old_name_to_new_node)
                 elif isinstance(kwarg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
-                    cur_names = []
+                    new_kwarg = []
                     for inner_kwarg in kwarg:
-                        counter = 0
-                        while inner_kwarg.name + '_' + str(counter) in seen_names:
-                            counter += 1
-                        cur_name = inner_kwarg.name + '_' + str(counter)
-                        seen_names.add(cur_name)
-                        cur_names.append(cur_name)
-                    cur_kwargs_copy[kwarg_name] = \
-                        [g.placeholder(cur_name) for cur_name in cur_names]
+                        p = _add_placeholder(
+                            g, inner_kwarg, seen_names, old_name_to_new_node)
+                        new_kwarg.append(p)
+                    cur_kwargs_copy[kwarg_name] = new_kwarg
 
                 elif isinstance(kwarg, Node):
                     # arg_kwarg_idx >= num_passthrough args, we need to copy
@@ -416,7 +451,7 @@ def create_submodule_from_subgraph(
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
                     if isinstance(arg, torch.nn.Parameter):
-                        new_arg = arg.clone().detach()
+                        new_arg = arg.clone().detach()  # type: ignore[assignment]
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)

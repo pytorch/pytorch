@@ -2078,6 +2078,9 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     def _test_impl(self, m, example_input, qconfig_mappings):
         backend_config = get_native_backend_config()
 
+        # test that input is valid
+        _ = m(*example_input)
+
         msp = prepare_n_shadows_model(
             m, example_input, qconfig_mappings, backend_config)
         # print('msp', msp)
@@ -2146,18 +2149,22 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.w1 = nn.Parameter(torch.randn(2, 2))
-                self.b1 = nn.Parameter(torch.randn(2))
+                self.b1 = nn.Parameter(torch.zeros(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 # self.w2 = nn.Parameter(torch.randn(2, 2))
                 # self.b2 = nn.Parameter(torch.randn(2))
+                self.i = [0]
 
             def forward(self, x):
                 x = F.sigmoid(x)
                 x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w1[:], self.b1)
                 x = F.relu(x)
                 x = x + x
                 x = torch.cat([x,])
                 x = torch.cat((x,))
                 x = torch.cat(tensors=[x,])
+                x = F.layer_norm(x, x.shape)
                 # TODO: enable below after FX graph mode quantization handles
                 # it, currently this is not supported
                 # x = F.linear(input=x, weight=self.w1, bias=self.b1)
@@ -2168,7 +2175,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         qconfig_mappings = [
             QConfigMapping().set_global(torch.quantization.default_qconfig),
-            QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
+            # QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
         ]
         self._test_impl(m, example_input, qconfig_mappings)
 
