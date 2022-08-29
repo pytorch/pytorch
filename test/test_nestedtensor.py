@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
+from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
 from torch import nested_tensor
 
@@ -91,12 +92,6 @@ class TestNestedTensor(TestCase):
         self._test_unbind_case(
             torch.tensor([1]), torch.tensor([7]),
         )
-
-    # @torch.inference_mode()
-    # def test_unbind_2(self):
-    #     self._test_unbind_case(
-    #         torch.tensor(1), torch.tensor(7),
-    #     )
 
     @torch.inference_mode()
     def test_unbind_3(self):
@@ -301,6 +296,36 @@ class TestNestedTensorDeviceType(TestCase):
             ts2.append(t2)
         return (torch.nested_tensor(ts1, device=device, dtype=dtype),
                 torch.nested_tensor(ts2, device=device, dtype=dtype))
+
+    @dtypes(*floating_types_and_half())
+    @dtypesIfCUDA(torch.float64)
+    def test_detach(self, device, dtype):
+        a = torch.randn(2, 4, device=device, dtype=dtype, requires_grad=False)
+        b = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=False)
+        x = torch.nested_tensor([a, b]).requires_grad_()
+
+        x_detach = x.detach()
+
+        z = x_detach * 4
+        self.assertFalse(x_detach.requires_grad)
+        self.assertFalse(z.requires_grad)
+
+        a = torch.randn(2, 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=True)
+        x = torch.nested_tensor([a, b])
+
+        y = x * 2
+        y = y.detach()
+        self.assertFalse(y.requires_grad)
+        self.assertIsNone(y.grad_fn)
+
+        z = x + y
+        z.to_padded_tensor(0).sum().backward()
+        # This is an incorrect gradient, but we assume that's what the user
+        # wanted. detach() is an advanced option.
+        self.assertEqual(a.grad, torch.ones(2, 4, device=device, dtype=dtype))
+        self.assertEqual(b.grad, torch.ones(5, 4, device=device, dtype=dtype))
+
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_unbind_noncontiguous(self, device, dtype):

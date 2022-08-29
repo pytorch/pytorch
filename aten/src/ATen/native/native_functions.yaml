@@ -4667,6 +4667,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: detach
+    NestedTensorCPU, NestedTensorCUDA: detach
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
