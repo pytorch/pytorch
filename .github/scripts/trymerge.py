@@ -1341,16 +1341,17 @@ def main() -> None:
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = \
-              "<details><summary>Details for Dev Infra team</summary>" + \
-              f"\nRaised by <a href=\"{run_url}\">workflow job</a>\n" + \
-              "</details>"
+            internal_debugging = (
+                "<details><summary>Details for Dev Infra team</summary>" +
+                f"\nRaised by <a href=\"{run_url}\">workflow job</a>\n" +
+                "</details>"
+            )
 
         msg = (
-          f"## {title}\n" + \
-          f"{exception}\n\n" + \
-          f"{troubleshooting}\n\n" + \
-          f"{internal_debugging}\n"
+            f"## {title}\n" +
+            f"{exception}\n\n" +
+            f"{troubleshooting}\n\n" +
+            f"{internal_debugging}\n"
         )
 
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
