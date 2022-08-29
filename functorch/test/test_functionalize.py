@@ -41,8 +41,6 @@ def make_functionalize_test(cls):
 FunctionalizeTestCompileCache = make_functionalize_test(test_compile_cache.TestCompileCache)
 FunctionalizeTestCompileCacheStaticArgs = make_functionalize_test(test_compile_cache.TestCompileCacheStaticArgs)
 FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_pythonkey.TestAOTAutograd)
-FunctionalizeTestPythonKeyContiguous = make_functionalize_test(test_pythonkey.TestContiguous)
-FunctionalizeTestPythonKeyRandom = make_functionalize_test(test_pythonkey.TestRandom)
 FunctionalizeTestPythonKeyPartitioning = make_functionalize_test(test_pythonkey.TestPartitioning)
 
 if __name__ == "__main__":
