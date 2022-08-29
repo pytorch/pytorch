@@ -1043,6 +1043,10 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   }
 
   auto outputs = block->outputs();
+  // Create owned refs for inputs. Otherwise, the input cleanup process
+  // will destroy our outputs before we return.
+  FastSet<Value*> inputs = {block->inputs().begin(), block->inputs().end()};
+
   for (const auto i : c10::irange(outputs.size())) {
     auto* output = outputs[i];
 
@@ -1052,7 +1056,7 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
       continue;
     }
 
-    if (toIValue(output).has_value() ||
+    if ((inputs.find(output) != inputs.end()) || toIValue(output).has_value() ||
         // If the output's owning block is not this one, it's from an outer
         // scope
         output->node()->owningBlock() != block) {

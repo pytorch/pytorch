@@ -20,6 +20,7 @@ from torch._prims_common import (
     DimsType,
     Number,
     NumberType,
+    RETURN_TYPE,
     ShapeType,
     StrideType,
     TensorLike,
@@ -280,20 +281,6 @@ def TensorMeta(
 #
 # Common datastructures and helpers
 #
-
-# Describes the return type of the primitive:
-#
-#   - NEW, a new tensor is created
-#   - VIEW, a view of an input tensor is returned
-#   - INPLACE, one or more input tensors is modified
-#
-# these descriptors are mututally exclusive and exhaustive.
-class RETURN_TYPE(Enum):
-    NEW = (0,)
-    VIEW = (1,)
-    INPLACE = (2,)
-
-
 def _wrap_tensor_meta(f):
     def wrap(t):
         if (
