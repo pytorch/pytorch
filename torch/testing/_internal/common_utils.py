@@ -927,7 +927,7 @@ if TEST_WITH_TORCHDYNAMO:
     # torchdynamo.config.debug = True
     torchdynamo.config.print_internal_exceptions = False
     # TODO - Collect errors with fake tensors
-    torchdynamo.config.fake_tensor_propagation = False
+    torchdynamo.config.fake_tensor_propagation = True
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
 
