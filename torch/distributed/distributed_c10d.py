@@ -1,5 +1,6 @@
 import itertools
 import collections.abc
+import hashlib
 import contextlib
 import io
 import logging
@@ -297,18 +298,18 @@ def _get_pg_device(group: ProcessGroup):
     return torch.device("cpu")
 
 
-def _store_based_barrier(rank, store, timeout):
+def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout):
     """
     Barrier based on store which is used for synchronizing processes after
     ``init_process_group`` or ``new_group``. Intended to be used only with
     those two methods and is not a generic alternative to ``barrier()``.
     """
-    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
+    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, group_name)
     store.add(store_key, 1)
     logger.info("Added key: {} to store for rank: {}".format(store_key, rank))
 
     # Now wait for all workers to check in with the store.
-    world_size = get_world_size()
+    world_size = rendezvous_count
     # Use 'add' instead of 'get' since for some store implementations 'add'
     # doesn't work well with 'get'. Ideally the store implementations should
     # be fixed, but for backward compatiblity reasons it is risky to change
@@ -722,6 +723,12 @@ def init_process_group(
 
     backend = Backend(backend)
 
+    """
+    Group name is not visible to users unless they access
+    internals of c10d. This means we can ignore the value
+    they provide as it won't provide meaningful.
+    """
+    group_name = _process_group_name([], use_hashed_name=False)
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
@@ -730,7 +737,7 @@ def init_process_group(
                 "MPI runtime.".format(world_size, rank)
             )
 
-        default_pg = _new_process_group_helper(
+        default_pg, _ = _new_process_group_helper(
             -1, -1, [], Backend.MPI, None, group_name=group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
@@ -747,14 +754,14 @@ def init_process_group(
             # different systems (e.g. RPC) in case the store is multi-tenant.
             store = PrefixStore("default_pg", store)
 
-        default_pg = _new_process_group_helper(
+        default_pg, _ = _new_process_group_helper(
             world_size,
             rank,
             [],
             backend,
             store,
-            pg_options=pg_options,
             group_name=group_name,
+            pg_options=pg_options,
             timeout=timeout,
         )
         _update_default_pg(default_pg)
@@ -772,7 +779,7 @@ def init_process_group(
     else:
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
-        _store_based_barrier(rank, store, timeout)
+        _store_based_barrier(rank, store, group_name, world_size, timeout)
         # Set sequence numbers for gloo and nccl process groups.
         if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
             default_pg._set_sequence_number_for_group()
@@ -784,10 +791,10 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
+    group_name,
     pg_options=None,
-    group_name=None,
     timeout=default_pg_timeout,
-):
+) -> Tuple:
     """
     Create a new distributed process group.
 
@@ -800,10 +807,6 @@ def _new_process_group_helper(
     global _pg_map
     global _group_count
     global _pg_names
-
-    if not group_name:
-        group_name = str(_group_count)
-        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError(
@@ -830,7 +833,7 @@ def _new_process_group_helper(
             )
         pg = ProcessGroupMPI.create(global_ranks_in_group)
         if not pg:
-            return GroupMember.NON_GROUP_MEMBER
+            return GroupMember.NON_GROUP_MEMBER, None
         _pg_map[pg] = (Backend.MPI, None)
         _pg_names[pg] = group_name
     else:
@@ -839,7 +842,7 @@ def _new_process_group_helper(
         if not is_default_group:
             global_rank = _get_default_group().rank()
             if global_rank not in global_ranks_in_group:
-                return GroupMember.NON_GROUP_MEMBER
+                return GroupMember.NON_GROUP_MEMBER, None
 
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -956,7 +959,7 @@ def _new_process_group_helper(
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
 
-    return pg
+    return pg, prefix_store
 
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
@@ -3223,7 +3226,26 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
+def _process_group_name(ranks, use_hashed_name):
+    if use_hashed_name:
+        global _pg_names
+        pg_name = hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+        while pg_name in _pg_names:
+            pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
+    else:
+        global _group_count
+        pg_name = str(_group_count)
+        _group_count += 1
+    return pg_name
+
+def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
+    # Default to the same backend as the global process group
+    #  if backend is not specified.
+    if not backend:
+        backend = get_backend(_get_default_group())
+    return Backend(backend)
+
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
 
@@ -3277,22 +3299,42 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        use_local_synchronization (bool, optional): perform a group-local
+            barrier at the end of the process group creation. This is different
+            in that non-member ranks don't need to call into API and don't
+            join the barrier.
 
     Returns:
-        A handle of distributed group that can be given to collective calls.
+        A handle of distributed group that can be given to collective calls or None if the rank is not part of it.
+
+    N.B. use_local_synchronization doesn't work with MPI.
+
+    N.B. While use_local_synchronization=True can be significantly faster with larger
+    clusters and small process groups, care must be taken since it changes cluster behavior
+    as non-member ranks don't join the group barrier().
+
+    N.B. use_local_synchronization=True can lead to deadlocks when each rank creates
+    multiple overlaping process groups. To avoid that, make sure all ranks follow the
+    same global creation order.
     """
 
     global _pg_group_ranks
 
     default_pg = _get_default_group()
-    default_backend, default_store = _pg_map[default_pg]
+    _, default_store = _pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
     # Default to the same backend as the global process group
     # if the backend is not specified.
-    if not backend:
-        backend = default_backend
+    backend = _get_backend_from_str(backend)
+
+    if use_local_synchronization:
+        # MPI backend doesn't have have a way for us to perform a partial sync
+        if backend == Backend.MPI:
+            raise RuntimeError("MPI backend doesn't support use_local_synchronization=True")
+        if ranks is not None and get_rank() not in ranks:
+            return None
 
     # checks the input ranks
     if ranks is not None:
@@ -3320,13 +3362,14 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         group_world_size = global_world_size
         group_rank = global_rank
 
-    backend = Backend(backend)
-    pg = _new_process_group_helper(
+    group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
+    pg, pg_store = _new_process_group_helper(
         group_world_size,
-        group_rank,
+        group_rank,f
         ranks,
         backend,
         default_store,
+        group_name=group_name,
         pg_options=pg_options,
         timeout=timeout,
     )
@@ -3343,9 +3386,11 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # MPI doesn't have store.
         barrier()
     else:
+        barrier_store = pg_store if use_local_synchronization else default_store
+        world_size = len(ranks) if use_local_synchronization else get_world_size()
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
-        _store_based_barrier(global_rank, default_store, timeout)
+        _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
         # Set sequence numbers for gloo and nccl process groups.
         if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
             Backend.GLOO,

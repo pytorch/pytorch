@@ -1224,6 +1224,75 @@ class AbstractCommTest(object):
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
 
+
+# Variant of AbstractCommTest that expects world size of 4
+class AbstractLargeCommTest(object):
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 4
+
+    @property
+    def device(self):
+        raise RuntimeError("Implement me")
+
+    def _test_new_group_local_sync(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+        ranks_in = [rank, (rank + 2) % self.world_size]
+        ranks_out = [i for i in range(self.world_size) if i not in ranks_in]
+        self.assertIn(rank, ranks_in)
+        self.assertNotIn(rank, ranks_out)
+
+        self.assertIsNone(dist.new_group(ranks=ranks_out, use_local_synchronization=True))
+
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+        self.assertIsInstance(new_pg, dist.ProcessGroup)
+
+        # PTD sorts ranks before creating the PG, so [3, 1] actually gets assigned ranks [1, 0]
+        ranks_in.sort()
+        self.assertEqual(dist.get_group_rank(new_pg, rank), ranks_in.index(rank))
+        self.assertEqual(
+            ranks_in,
+            dist.get_process_group_ranks(new_pg),
+            f"expecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}"
+        )
+
+    def _test_new_group_local_sync_sanity_check(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # split the world in 2 PGs
+        rank = dist.get_rank()
+        pg_idx = rank // 2
+        ranks_in = [pg_idx * 2, pg_idx * 2 + 1]
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+
+        input_tensor = torch.tensor([pg_idx, rank], device=self.device)
+        output_tensor_list = [torch.tensor([-1, -1], device=self.device,) for _ in range(new_pg.size())]
+        dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+        expected = [
+            torch.tensor([pg_idx, ranks_in[0]], device=self.device),
+            torch.tensor([pg_idx, ranks_in[1]], device=self.device)
+        ]
+        self.assertEqual(output_tensor_list, expected)
+
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()

@@ -2358,10 +2358,37 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="gloo")
 
+
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
     def test_collectives(self):
         self._test_collectives(backend="gloo")
+
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return torch.device("cpu")
+
+    @requires_gloo()
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="gloo")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
