@@ -368,7 +368,8 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
+#if (                                                                       \
+    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
     defined(TORCH_ENABLE_GPU_ASSERTS))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
