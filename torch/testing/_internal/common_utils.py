@@ -128,9 +128,6 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
-if os.getenv("USING_PYTEST", ""):
-    torch.cuda.set_per_process_memory_fraction(0.13)
-
 class _TestParametrizer(object):
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
@@ -885,6 +882,9 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # correction, before throwing out the extra compute and proceeding
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
+
+if os.getenv("USING_PYTEST", "") and TEST_CUDA:
+    torch.cuda.set_per_process_memory_fraction(0.13)
 
 def skipIfCrossRef(fn):
     @wraps(fn)
