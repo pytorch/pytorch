@@ -12,6 +12,7 @@ PR_BRANCH_LIST = [
 
 RC_PATTERN = r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
 
+
 def gen_filter_dict(
         branches_list=NON_PR_BRANCH_LIST,
         tags_list=None
