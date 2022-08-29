@@ -163,7 +163,9 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+
   assert_git_not_dirty
 }
 
@@ -197,6 +199,8 @@ test_dynamo_shard() {
       test_overrides \
       test_python_dispatch \
       test_fx \
+      test_package \
+      test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -595,7 +599,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
