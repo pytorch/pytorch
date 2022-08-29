@@ -92,6 +92,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::RNGOp ||
+       expr->getExprType().value() == ExprType::FullOp ||
        expr->getExprType().value() == ExprType::ARangeOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||

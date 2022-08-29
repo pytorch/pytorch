@@ -182,14 +182,48 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
+FullOp::FullOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* fill_value,
+    DataType dtype)
+    : Expr(passkey, ExprType::FullOp), dtype_(dtype), fill_value_(fill_value) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+  }
+  addInput(fill_value);
+  addOutput(out);
+}
+
+FullOp::FullOp(const FullOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
+      fill_value_(ir_cloner->clone(src->fill_value_)) {}
+
+bool FullOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<FullOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<FullOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,
     Val* start,
     Val* end,
     Val* step,
+    DataType dtype,
     Val* linear_index)
     : Expr(passkey, ExprType::ARangeOp),
+      dtype_(dtype),
       start_(start),
       end_(end),
       step_(step),
@@ -202,6 +236,7 @@ ARangeOp::ARangeOp(
 
 ARangeOp::ARangeOp(const ARangeOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
       start_(ir_cloner->clone(src->start_)),
       end_(ir_cloner->clone(src->end_)),
       step_(ir_cloner->clone(src->step_)),
@@ -215,6 +250,9 @@ bool ARangeOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<ARangeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
   if (!start_->sameAs(other_op->start_)) {
     return false;
   }
@@ -347,10 +385,12 @@ RNGOp::RNGOp(
     IrBuilderPasskey passkey,
     RNGOpType type,
     Val* out,
+    DataType dtype,
     int rng_offset,
     Val* philox_index)
     : Expr(passkey, ExprType::RNGOp),
       rng_op_type_(type),
+      dtype_(dtype),
       rng_offset_(rng_offset),
       philox_index_(philox_index) {
   if (out->isA<TensorView>()) {
@@ -364,6 +404,7 @@ RNGOp::RNGOp(
 RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       rng_op_type_(src->rng_op_type_),
+      dtype_(src->dtype()),
       rng_offset_(src->rng_offset_),
       philox_index_(ir_cloner->clone(src->philox_index_)) {}
 
@@ -376,6 +417,9 @@ bool RNGOp::sameAs(const Statement* other) const {
   }
   const auto other_op = other->as<RNGOp>();
   if (getRNGOpType() != other_op->getRNGOpType()) {
+    return false;
+  }
+  if (dtype_ != other_op->dtype_) {
     return false;
   }
   if (getRNGOffset() != other_op->getRNGOffset()) {

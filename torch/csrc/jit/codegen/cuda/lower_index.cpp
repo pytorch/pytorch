@@ -102,14 +102,31 @@ void IndexLowering::handle(const RNGOp* rop) {
   auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
       out_tv, Index::getLinearIndex(out_tv, for_loops_));
 
-  // TensorIndex for writing randlike output.
+  // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
 
   auto lowered = IrBuilder::create<RNGOp>(
-      rop->getRNGOpType(), out, rop->getRNGOffset(), philox_index);
+      rop->getRNGOpType(),
+      out,
+      rop->dtype(),
+      rop->getRNGOffset(),
+      philox_index);
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(rop, back());
+}
+
+void IndexLowering::handle(const FullOp* fop) {
+  auto out_tv = dynamic_cast<TensorView*>(fop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // TensorIndex for writing output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered =
+      IrBuilder::create<FullOp>(out, fop->getFillValue(), fop->dtype());
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(fop, back());
 }
 
 void IndexLowering::handle(const ARangeOp* aop) {
@@ -122,10 +139,10 @@ void IndexLowering::handle(const ARangeOp* aop) {
   auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
       out_tv, Index::getLinearIndex(out_tv, for_loops_));
 
-  // TensorIndex for writing randlike output.
+  // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
   auto lowered = IrBuilder::create<ARangeOp>(
-      out, aop->start(), aop->end(), aop->step(), linear_index);
+      out, aop->start(), aop->end(), aop->step(), aop->dtype(), linear_index);
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(aop, back());

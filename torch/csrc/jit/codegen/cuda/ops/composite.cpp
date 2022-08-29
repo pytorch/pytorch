@@ -27,7 +27,7 @@ ForwardDropoutResult dropout(TensorView* x, Val* prob, Val* scale) {
           scale->getDataType().value() == DataType::Double,
       "Scale is not a valid Double.");
 
-  auto rand_vals = randlike(x);
+  auto rand_vals = rand_like(x);
   auto mask = lt(rand_vals, prob);
   auto apply_mask = mul(x, mask);
   auto y = mul(apply_mask, scale);

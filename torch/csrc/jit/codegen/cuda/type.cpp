@@ -292,6 +292,8 @@ static const char* expr_type2string(ExprType t) {
   switch (t) {
     case ExprType::ARangeOp:
       return "ARangeOp";
+    case ExprType::FullOp:
+      return "FullOp";
     case ExprType::UnaryOp:
       return "UnaryOp";
     case ExprType::BinaryOp:

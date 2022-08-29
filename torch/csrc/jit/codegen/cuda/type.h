@@ -105,6 +105,7 @@ DataType getTypeFromComplexType(DataType dtype);
 enum class ExprType {
   Invalid,
   ARangeOp,
+  FullOp,
   UnaryOp,
   BinaryOp,
   TernaryOp,

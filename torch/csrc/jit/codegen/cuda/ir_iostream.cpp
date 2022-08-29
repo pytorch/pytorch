@@ -248,6 +248,35 @@ void IrPrinter::handle(const NamedScalar* ns) {
   os_ << ns->name();
 }
 
+void IrPrinter::handle(const FullOp* fop) {
+  if (!print_inline_) {
+    indent();
+    os_ << fop->output(0) << "\n";
+    indent_size_++;
+    indent();
+    os_ << " = ";
+  } else {
+    checkInlineable(fop);
+  }
+
+  os_ << "full({";
+  for (auto i : c10::irange(fop->inputs().size())) {
+    if (i == fop->inputs().size() - 1) {
+      os_ << "}";
+    }
+    if (i >= 0) {
+      os_ << ", ";
+    }
+    handle(fop->input(i));
+  }
+  os_ << ", " << fop->dtype() << ")";
+
+  indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
+}
+
 void IrPrinter::handle(const ARangeOp* aop) {
   if (!print_inline_) {
     indent() << aop->output(0);
@@ -265,7 +294,7 @@ void IrPrinter::handle(const ARangeOp* aop) {
   handle(aop->end());
   os_ << ", ";
   handle(aop->step());
-  os_ << ")";
+  os_ << ", " << aop->dtype() << ")";
 
   indent_size_--;
 
@@ -429,7 +458,7 @@ void IrPrinter::handle(const RNGOp* rop) {
     checkInlineable(rop);
   }
 
-  os_ << rop->getRNGOpType() << "(";
+  os_ << rop->getRNGOpType() << "({";
   bool first = true;
   for (auto i : rop->inputs()) {
     if (!first) {
@@ -438,12 +467,13 @@ void IrPrinter::handle(const RNGOp* rop) {
     handle(i);
     first = false;
   }
-  os_ << ")";
+  os_ << "}, " << rop->dtype() << ")";
 
   indent_size_--;
 
-  if (!print_inline_)
+  if (!print_inline_) {
     os_ << ";\n";
+  }
 }
 
 void IrPrinter::handle(const ReductionOp* rop) {

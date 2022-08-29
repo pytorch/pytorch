@@ -125,7 +125,24 @@ TORCH_CUDA_CU_API WelfordResult Welford(
 TORCH_CUDA_CU_API TensorView* rand(
     const std::vector<Val*>& shape,
     DataType dtype);
-
+TORCH_CUDA_CU_API Val* rand_like(Val*);
+TORCH_CUDA_CU_API TensorView* rand_like(TensorView*);
+TORCH_CUDA_CU_API TensorView* full(
+    const std::vector<Val*>& shape,
+    Val* fill_value,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* full_like(TensorView* tv, Val* fill_value);
+TORCH_CUDA_CU_API Val* full_like(Val* tv, Val* fill_value);
+TORCH_CUDA_CU_API TensorView* zeros(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* zeros_like(TensorView*);
+TORCH_CUDA_CU_API Val* zeros_like(Val*);
+TORCH_CUDA_CU_API TensorView* ones(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* ones_like(TensorView*);
+TORCH_CUDA_CU_API Val* ones_like(Val*);
 //! WARNING: giving invalid combinations of the start, end and step
 //! arguments can result in undefined behavior. Specifically, the
 //! signs of `end - start` and step must be the same.
@@ -204,9 +221,6 @@ TORCH_CUDA_CU_API TensorView* log2(TensorView*);
 // neg
 TORCH_CUDA_CU_API Val* neg(Val*);
 TORCH_CUDA_CU_API TensorView* neg(TensorView*);
-// randlike
-TORCH_CUDA_CU_API Val* randlike(Val*);
-TORCH_CUDA_CU_API TensorView* randlike(TensorView*);
 // real
 TORCH_CUDA_CU_API Val* real(Val*);
 TORCH_CUDA_CU_API TensorView* real(TensorView*);

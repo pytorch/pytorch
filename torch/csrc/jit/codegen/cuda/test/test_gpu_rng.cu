@@ -141,7 +141,7 @@ TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(1, aten_to_data_type(dtype));
   fusion->addInput(tv0);
-  auto tv1 = randlike(tv0);
+  auto tv1 = rand_like(tv0);
   auto tv2 = set(tv1);
   fusion->addOutput(tv2);
 
@@ -176,7 +176,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNG_CUDA) {
     TensorView* tv1 = makeConcreteTensor({5, 5}, aten_to_data_type(dtype));
     fusion->addInput(tv0);
     fusion->addInput(tv1);
-    auto tv2 = randlike(tv0);
+    auto tv2 = rand_like(tv0);
     auto tv3 = add(tv1, tv2);
     auto tv4 = add(tv0, tv3);
     fusion->addOutput(tv4);
@@ -207,7 +207,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNG2_CUDA) {
       TensorView* tv1 = makeSymbolicTensor(1, aten_to_data_type(dtype));
       fusion->addInput(tv0);
       fusion->addInput(tv1);
-      auto tv2 = randlike(tv0);
+      auto tv2 = rand_like(tv0);
       auto tv3 = add(tv1, tv2);
       fusion->addOutput(tv3);
 
@@ -239,7 +239,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNGSmem_CUDA) {
     TensorView* tv1 = makeConcreteTensor({5, 5}, aten_to_data_type(dtype));
     fusion->addInput(tv0);
     fusion->addInput(tv1);
-    auto tv2 = randlike(tv0);
+    auto tv2 = rand_like(tv0);
     auto tv3 = add(tv1, tv2);
     auto tv4 = add(tv0, tv3);
     fusion->addOutput(tv4);
@@ -272,7 +272,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNGSmemNonSquareTile_CUDA) {
   TensorView* tv1 = makeConcreteTensor({5, 5});
   fusion->addInput(tv0);
   fusion->addInput(tv1);
-  auto tv2 = randlike(tv0);
+  auto tv2 = rand_like(tv0);
   auto tv3 = add(tv1, tv2);
   auto tv4 = add(tv0, tv3);
   fusion->addOutput(tv4);

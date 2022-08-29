@@ -18,6 +18,165 @@ namespace jit {
 
 using namespace torch::jit::fuser::cuda;
 
+TEST_F(NVFuserTest, FusionStandaloneFull_CUDA) {
+  auto sizes = {0, 1, 10, 17, 1024};
+  auto dtypes = {
+      kBool,
+      kFloat,
+      kLong,
+      kDouble,
+      kHalf,
+      kBFloat16,
+      kInt,
+      kComplexFloat,
+      kComplexDouble};
+
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  Val* size = IrBuilder::create<Int>();
+  Val* fill_val1 = IrBuilder::create<Int>();
+  Val* fill_val2 = IrBuilder::create<Int>();
+  Val* fill_val3 = IrBuilder::create<Int>();
+  fusion->addInput(size);
+  fusion->addInput(fill_val1);
+  fusion->addInput(fill_val2);
+  fusion->addInput(fill_val3);
+  for (auto dtype : dtypes) {
+    auto out_tv = full({size}, fill_val1, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = full({size, size}, fill_val2, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = full_like(out_tv, fill_val3);
+    fusion->addOutput(out_tv);
+  }
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  for (auto size : sizes) {
+    std::vector<at::Tensor> expect;
+    expect.reserve(dtypes.size());
+    for (auto dtype : dtypes) {
+      const auto options =
+          at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+      expect.emplace_back(at::full({size}, 11, options));
+      expect.emplace_back(at::full({size, size}, 12, options));
+      expect.emplace_back(at::full({size, size}, 13, options));
+    }
+    auto cg_outputs = executor_cache.runFusionWithInputs({size, 11, 12, 13});
+
+    testValidate(
+        executor_cache.fusion(),
+        cg_outputs,
+        {size, 11, 12, 13},
+        expect,
+        __LINE__,
+        __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionStandaloneZeros_CUDA) {
+  auto sizes = {0, 1, 10, 17, 1024};
+  auto dtypes = {
+      kBool,
+      kFloat,
+      kLong,
+      kDouble,
+      kHalf,
+      kBFloat16,
+      kInt,
+      kComplexFloat,
+      kComplexDouble};
+
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  Val* size = IrBuilder::create<Int>();
+  fusion->addInput(size);
+  for (auto dtype : dtypes) {
+    auto out_tv = zeros({size}, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = zeros({size, size}, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = zeros_like(out_tv);
+    fusion->addOutput(out_tv);
+  }
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  for (auto size : sizes) {
+    std::vector<at::Tensor> expect;
+    expect.reserve(dtypes.size());
+    for (auto dtype : dtypes) {
+      const auto options =
+          at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+      expect.emplace_back(at::zeros({size}, options));
+      expect.emplace_back(at::zeros({size, size}, options));
+      expect.emplace_back(at::zeros({size, size}, options));
+    }
+    auto cg_outputs = executor_cache.runFusionWithInputs({size});
+
+    testValidate(
+        executor_cache.fusion(),
+        cg_outputs,
+        {size},
+        expect,
+        __LINE__,
+        __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionStandaloneOnes_CUDA) {
+  auto sizes = {0, 1, 10, 17, 1024};
+  auto dtypes = {
+      kBool,
+      kFloat,
+      kLong,
+      kDouble,
+      kHalf,
+      kBFloat16,
+      kInt,
+      kComplexFloat,
+      kComplexDouble};
+
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  Val* size = IrBuilder::create<Int>();
+  fusion->addInput(size);
+  for (auto dtype : dtypes) {
+    auto out_tv = ones({size}, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = ones({size, size}, aten_to_data_type(dtype));
+    fusion->addOutput(out_tv);
+    out_tv = ones_like(out_tv);
+    fusion->addOutput(out_tv);
+  }
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  for (auto size : sizes) {
+    std::vector<at::Tensor> expect;
+    expect.reserve(dtypes.size());
+    for (auto dtype : dtypes) {
+      const auto options =
+          at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+      expect.emplace_back(at::ones({size}, options));
+      expect.emplace_back(at::ones({size, size}, options));
+      expect.emplace_back(at::ones({size, size}, options));
+    }
+    auto cg_outputs = executor_cache.runFusionWithInputs({size});
+
+    testValidate(
+        executor_cache.fusion(),
+        cg_outputs,
+        {size},
+        expect,
+        __LINE__,
+        __FILE__);
+  }
+}
+
 TEST_F(NVFuserTest, FusionStandaloneARange_CUDA) {
   auto starts_ends = {-1., 0., 10.3, 1024. * 256};
   auto steps = {-1.5, 1., 2.};

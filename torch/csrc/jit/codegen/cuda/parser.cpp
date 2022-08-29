@@ -1321,7 +1321,7 @@ class IrParser {
               }
             }
 
-            auto out = randlike(operand);
+            auto out = rand_like(operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },

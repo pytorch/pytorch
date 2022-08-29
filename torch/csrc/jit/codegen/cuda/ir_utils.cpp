@@ -180,6 +180,16 @@ struct SubstituteInExpr : public OptInDispatch {
     OptInDispatch::handle(expr);
   }
 
+  void handle(FullOp* full_expr) final {
+    auto out = reference_->sameAs(full_expr->output(0)) ? substitute_
+                                                        : full_expr->output(0);
+    expr_ = IrBuilder::create<FullOp>(
+        full_expr->container(),
+        out,
+        full_expr->getFillValue(),
+        full_expr->dtype());
+  }
+
   void handle(ARangeOp* arange_expr) final {
     auto start = reference_->sameAs(arange_expr->start())
         ? substitute_
@@ -197,6 +207,7 @@ struct SubstituteInExpr : public OptInDispatch {
         start,
         end,
         step,
+        arange_expr->dtype(),
         arange_expr->getLinearIndex());
   }
 
@@ -250,6 +261,7 @@ struct SubstituteInExpr : public OptInDispatch {
         rng_expr->container(),
         rng_expr->getRNGOpType(),
         out,
+        rng_expr->dtype(),
         rng_expr->getRNGOffset(),
         rng_expr->getPhiloxIndex());
   }
@@ -748,7 +760,7 @@ class ValReplacementMutator : private OptOutMutator {
     // grab all leaves towards outputs and grab stmts from there.
     auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
 
-    // Some fusions, such as standalone randlike, can have disconnected DAG, so
+    // Some fusions, such as standalone rand_like, can have disconnected DAG, so
     // we need some mechanism to make sure our replacement set is as complete as
     // possible
     // TODO: I think we need a more general mechanism to support disconnected

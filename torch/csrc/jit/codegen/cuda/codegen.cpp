@@ -560,10 +560,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           << "&" << gen(ldst->in()) << ");\n";
   }
 
+  void handle(const FullOp* fop) final {
+    indent() << gen(fop->output(0)) << " = (" << fop->dtype() << ")"
+             << gen(fop->getFillValue()) << ";\n";
+  }
+
   void handle(const ARangeOp* aop) final {
     auto index = genTensorIndex(aop->getLinearIndex()->as<kir::TensorIndex>());
-    indent() << gen(aop->output(0)) << " = arange<" << aop->output(0)->dtype()
-             << ">";
+    indent() << gen(aop->output(0)) << " = arange<" << aop->dtype() << ">";
     code_ << "(" << index << ", " << gen(aop->start()) << ", "
           << gen(aop->step()) << ");\n";
   }
@@ -759,9 +763,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   void handle(const RNGOp* rop) final {
     // TODO: TORCH_INTERNAL_ASSERT that the scheduler correctly creates an
     // innermost ID of size 4 (float) or size 2 (double)?
-    auto out_tv = rop->output(0)->as<kir::TensorIndex>()->view();
     auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
-    int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
+    int multiple = rop->dtype() == DataType::Double ? 2 : 4;
     indent() << "nvfuser_index_t linear_index" << rop->name() << " = " << index
              << ";\n";
     indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = linear_index"
@@ -780,8 +783,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << "}\n";
     auto op_type = rop->getRNGOpType();
     indent() << gen(rop->output(0)) << " = " << op_type;
-    if (needFloatSuffix(op_type) &&
-        rop->output(0)->dtype() == DataType::Float) {
+    if (needFloatSuffix(op_type) && rop->dtype() == DataType::Float) {
       code_ << "f";
     }
     code_ << "(rng_result, rng_component" << rop->name() << ");\n";

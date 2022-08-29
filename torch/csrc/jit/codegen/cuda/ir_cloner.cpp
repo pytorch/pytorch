@@ -88,6 +88,10 @@ void IrCloner::handle(const TensorView* tv) {
   clone_ = IrBuilder::clone(tv, this);
 }
 
+void IrCloner::handle(const FullOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const ARangeOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
