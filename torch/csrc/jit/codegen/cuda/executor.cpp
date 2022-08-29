@@ -93,7 +93,9 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
               << " =======\n\n"
               << code << "\n======================================\n\n";
-  } else if (isDebugDumpEnabled(DebugDumpOption::CudaToFile)) {
+  }
+  if (isDebugDumpEnabled(DebugDumpOption::CudaToFile) ||
+      isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
     std::stringstream file_name;
     file_name << "__tmp_kernel" << fusion_id_ << ".cu";
     std::cout << "PRINTING: " << file_name.str() << std::endl;
@@ -644,7 +646,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
       global_buffers.zero_init.push_back(false);
     }
     // Remember the tensor buffer used for storing kernel profile
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         tv == kernel->profile().getBuffer()) {
       global_buffers.profile_buffer = global_buffers.buffers.back();
     }
@@ -762,8 +764,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       if (outputs.empty()) {
         FUSER_PERF_SCOPE("ExecutorRunFusion::OutputAlloc");
         for (const auto i : c10::irange(executor_entry->output_sizes.size())) {
-          allocated_outputs.push_back(at::native::empty_cuda(
+          allocated_outputs.push_back(at::native::empty_strided_cuda(
               executor_entry->output_sizes[i],
+              executor_entry->output_strides[i],
               executor_entry->output_types[i],
               c10::nullopt,
               options_.device,
@@ -789,6 +792,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 at::TensorOptions()
                     .dtype(executor_entry->buffer_types[i])
                     .device(options_.device)));
+            global_buffers.zero_init.push_back(true);
           } else {
             global_buffers.buffers.push_back(at::native::empty_cuda(
                 executor_entry->buffer_sizes[i],
@@ -796,6 +800,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 c10::nullopt,
                 options_.device,
                 c10::nullopt));
+            global_buffers.zero_init.push_back(false);
           }
         }
       }
@@ -911,18 +916,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel()->summary().is_stochastic) {
+    if (kernel()->summary().max_rng_offsets >= 0) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
       // binded but is not generally how we handle that in scheduler.
       // Refer to `Philox` in generated kernel to understand how the mapping
       // works.
-      rand_offset = 4 *
-          (std::ceil(
-               allocated_outputs[0].numel() /
-               (4.0 * 128 * launch_params_.gdimx())) + // NOLINT
-           1);
+      rand_offset = (kernel()->summary().max_rng_offsets + 1) * 4;
     }
 
     // This is the entry when we have provided `opt_code` but the entry has not
@@ -934,6 +935,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       executor_entry->io_alias_indices = alias_indices;
       for (const auto& output : allocated_outputs) {
         executor_entry->output_sizes.push_back(output.sizes().vec());
+        executor_entry->output_strides.push_back(output.strides().vec());
         executor_entry->output_types.push_back(output.scalar_type());
       }
 
@@ -955,7 +957,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.push(inputs);
     kernel_arguments.push(allocated_outputs);
     kernel_arguments.push(global_buffers.buffers);
-    if (lowered_->kernel()->summary().is_stochastic) {
+    if (lowered_->kernel()->summary().max_rng_offsets >= 0) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
   }
@@ -982,9 +984,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
-    for (const auto& buffer : global_buffers.buffers) {
+    TORCH_INTERNAL_ASSERT(
+        global_buffers.buffers.size() == global_buffers.zero_init.size(),
+        "global_buffer buffer & zero_init container should have identical sizes");
+    for (const auto i : c10::irange(global_buffers.buffers.size())) {
+      const auto& buffer = global_buffers.buffers[i];
+      const auto& zero_init = global_buffers.zero_init[i];
       std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
-                << std::endl;
+                << " is_zero_initialized: " << zero_init << std::endl;
     }
   }
 
@@ -1081,7 +1088,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  if (isEnabled(EnableOption::KernelProfile)) {
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
     std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 

@@ -1,10 +1,16 @@
 {% import 'common.yml.j2' as common %}
 
 {%- macro binary_env(config, is_windows=False) -%}
-    env:
+    env:!{{ binary_env_as_input(config, is_windows, True) }}
+{%- endmacro %}
+
+{%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
+{%- else %}
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -14,23 +20,25 @@
       GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
 {%- endif %}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
+{%- if include_skip_tests %}
+      SKIP_ALL_TESTS: 1
+{%- endif %}
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
-      SKIP_ALL_TESTS: 1
 {%- if config["package_type"] == "libtorch" %}
-{%- if config["libtorch_config"] %}
+  {%- if config["libtorch_config"] %}
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
-{%- endif %}
+  {%- endif %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-{%- if config["devtoolset"] %}
+  {%- if config["devtoolset"] %}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
-{%- endif %}
-{%- if is_windows %}
+  {%- endif %}
+  {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
-{%- endif %}
+  {%- endif %}
 {%- else %}
       DESIRED_PYTHON: "!{{ config["python_version"] }}"
 {%- endif %}
@@ -39,60 +47,21 @@
 
 {%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
 !{{ config["build_name"] }}-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
 {%- if has_test %}
     needs: !{{ config["build_name"] }}-test
 {%- else %}
     needs: !{{ config["build_name"] }}-build
 {%- endif %}
-    !{{ binary_env(config, is_windows) }}
-    steps:
-      !{{ common.setup_ec2_linux() }}
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-{%- if use_s3 %}
-      - uses: !{{ common.download_artifact_s3_action }}
-{%- else %}
-      - uses: actions/download-artifact@v2
-{%- endif %}
-        name: Download Build Artifacts
-        with:
-          name: !{{ config["build_name"] }}
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
-        run: |
-          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
-      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
-        run: |
-          # reference ends with an RC suffix
-          if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
-            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
-          fi
-      - name: Upload binaries
-        env:
-          PKG_DIR: "${{ runner.temp }}/artifacts"
-          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
-          # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-          ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-        run: |
-          docker run --rm -i \
-            -e ANACONDA_API_TOKEN \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e DRY_RUN \
-            -e PACKAGE_TYPE \
-            -e PKG_DIR=/artifacts \
-            -e UPLOAD_CHANNEL \
-            -e UPLOAD_SUBFOLDER \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -v "${GITHUB_WORKSPACE}:/v" \
-            -w /v \
-            308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
-            bash -c '.circleci/scripts/binary_upload.sh'
-      !{{ common.teardown_ec2_linux() }}
-{%- endmacro -%}
+    with:!{{ binary_env_as_input(config, is_windows) }}
+      build_name: !{{ config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+{%- endmacro %}

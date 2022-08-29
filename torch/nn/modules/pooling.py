@@ -291,6 +291,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("do other tests modify the global state?")
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
@@ -524,7 +525,7 @@ class AvgPool1d(_AvgPoolNd):
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.,  4.,  6.]]])
+        tensor([[[2., 4., 6.]]])
     """
 
     kernel_size: _size_1_t

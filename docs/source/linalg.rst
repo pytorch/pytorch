@@ -84,6 +84,7 @@ Matrix Products
 
     cross
     matmul
+    vecdot
     multi_dot
     householder_product
 
@@ -114,6 +115,7 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    solve_ex
     lu_factor_ex
     ldl_factor
     ldl_factor_ex

@@ -262,6 +262,8 @@ def _get_device_infos():
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
     device_count = torch.cuda.device_count()
+    if torch.cuda.is_available() and opts.devices:
+        torch.cuda.init()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent):
@@ -312,16 +314,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
-    if torch.cuda.is_available():
-        # It's necessary to initialize PyTorch CUDA states here (e.g.,
-        # CUDACachingAllocator). If this is missing, we could hit errors like
-        # "allocator not initialized", because other processes might send
-        # CUDA-related RPC request to this process before user code in this
-        # process initializes its PyTorch CUDA states.
-        torch.cuda.init()
-        device_count = torch.cuda.device_count()
-    else:
-        device_count = 0
+    device_count = torch.cuda.device_count()
 
     is_static_group = True if world_size else False
     # world_size is specified so this is a static group (ranks cannot join and leave)
@@ -338,6 +331,14 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             rpc_backend_options.devices,
             group,
         )
+
+        if torch.cuda.is_available() and devices:
+            # It's necessary to initialize PyTorch CUDA states here (e.g.,
+            # CUDACachingAllocator). If this is missing, we could hit errors like
+            # "allocator not initialized", because other processes might send
+            # CUDA-related RPC request to this process before user code in this
+            # process initializes its PyTorch CUDA states.
+            torch.cuda.init()
 
         # TODO: add try-except and destroy _agent in all processes if any fails.
         agent = TensorPipeAgent(

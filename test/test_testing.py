@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
-import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
 
@@ -436,8 +436,8 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
-            dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
+            dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
             else:  # device_type ='cuda'
@@ -1775,6 +1775,8 @@ class TestImports(TestCase):
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
+                           "torch.ao.sparsity._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
