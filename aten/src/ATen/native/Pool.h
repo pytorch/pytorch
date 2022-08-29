@@ -58,6 +58,11 @@ template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
     TORCH_CHECK(stride != 0, "stride should not be zero");
+    TORCH_CHECK(pad >= 0,
+                "pad must be non-negative, but got pad: ", pad);
+    TORCH_CHECK(pad <= kernelSize / 2,
+                "pad should be at most half of kernel size, but got pad=",
+                pad, " and kernel_size=", kernelSize)
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }

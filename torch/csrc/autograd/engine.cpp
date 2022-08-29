@@ -381,6 +381,10 @@ get_current_graph_task_exec_info() {
   return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
 }
 
+bool get_current_graph_task_keep_graph() {
+  return current_graph_task ? current_graph_task->keep_graph_ : true;
+}
+
 void add_node_to_current_graph_task_exec_info(Node* fn) {
   current_graph_task->exec_info_[fn].needed_ = true;
 }
@@ -904,7 +908,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled()) {
+  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
