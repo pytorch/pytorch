@@ -968,7 +968,7 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
-def get_new_issue_link(
+def gen_new_issue_link(
     org: str,
     project: str,
     labels: List[str],
@@ -1009,7 +1009,7 @@ def find_matching_merge_rule(pr: GitHubPR,
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-    issue_link = get_new_issue_link(
+    issue_link = gen_new_issue_link(
         org=pr.org,
         project=pr.project,
         labels=["module: ci"],
@@ -1018,7 +1018,7 @@ def find_matching_merge_rule(pr: GitHubPR,
 
     rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
-        reject_reason = "Rejecting the merge as no rule is defined for the repository."
+        reject_reason = f"Rejecting the merge as no rule is defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
 
     #  Used to determine best rejection reason
