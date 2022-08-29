@@ -585,7 +585,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
-@torch.library.impl(meta_lib, "_embedding_bag")
+# @torch.library.impl(meta_lib, "_embedding_bag")
 def meta_embedding_bag(
     weight,
     indices,

@@ -752,6 +752,162 @@ def embedding_dense_backward(
     )
 
 
+@register_decomposition(aten._embedding_bag)
+def _embedding_bag(
+        weight: Tensor,
+        indices: Tensor,
+        offsets: Tensor = None,
+        scale_grad_by_freq: bool = False,
+        mode: int = 0,
+        sparse: bool =False,
+        per_sample_weights: Tensor = None,
+        include_last_offset: bool = False,
+        padding_idx: int =-1) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+
+    assert weight.dim() == 2, "'weight' must be 2-D"
+
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+
+    result, offset2bag, bag_size, max_indices = None, None, None, None
+
+    def is_fast_path_index_select_scale(src, scale, output, padding_idx):
+        return (
+            is_fast_path_index_select(src, output, padding_idx) and scale.stride(0) == 1
+        )
+
+    def is_fast_path_index_select(src, output, padding_idx):
+        return (
+            (src.dtype == torch.float or src.dtype == torch.half)
+            and src.stride(1) == 1
+            and output.stride(1) == 1
+            and padding_idx < 0
+        )
+
+    def is_fast_path(src, scale, output, padding_idx):
+        if scale is not None:
+            return is_fast_path_index_select_scale(src, scale, output, padding_idx)
+        else:
+            return is_fast_path_index_select(src, output, padding_idx)
+
+    if indices.dim() == 2:
+        print("if indices.dim() == 2:")
+
+        assert offsets is None, "If 'indices' is 2-D, then 'offsets' must be None"
+
+        embeddings = weight.index_select(0, indices.reshape(-1))
+
+        if per_sample_weights is not None:
+            assert mode == 0, "If 'per_sample_weights' is not None, then 'mode' must be 'sum'"
+            embeddings = embeddings * per_sample_weights.reshape(-1, 1)
+
+        shape = list(indices.shape)
+        shape.append(weight.shape[1])
+
+        if mode == 0:
+            result = torch.sum(embeddings.view(shape), dim=1)
+        elif mode == 1:
+            result = torch.mean(embeddings.view(shape), dim=1)
+        elif mode == 2:
+            result, max_indices = torch.max(embeddings.view(shape), dim=1)
+
+    if indices.dim() == 1:
+        assert offsets is not None, "If 'indices' is 1-D, then 'offsets' must not be None"
+        assert offsets.dim() == 1, "'offsets' must be 1-D"
+
+        embeddings = weight.index_select(0, indices)
+
+        if per_sample_weights is not None:
+            assert mode == 0, "If 'per_sample_weights' is not None, then 'mode' must be 'sum'"
+            embeddings = embeddings * per_sample_weights.reshape(-1, 1)
+
+        if include_last_offset:
+            bag_offsets = offsets[:-1]
+        else:
+            bag_offsets = offsets
+
+        num_bags = len(bag_offsets)
+
+
+        if bag_offsets.device.type != "cpu":
+            bag_size = torch.zeros_like(offsets)
+            bag_size[:-1] = offsets[1:] - offsets[:-1]
+            if include_last_offset:
+                print(f"{include_last_offset}, setting to 0 ")
+                bag_size[-1] = 0
+            else:
+                print(f"{include_last_offset}, setting to {indices.size(0) - bag_offsets[-1]} ")
+                bag_size[-1] = indices.size(0) - bag_offsets[-1]
+        else:
+            if mode == MODE_MEAN or mode == MODE_MAX:
+                bag_size = torch.zeros(num_bags, dtype=bag_offsets.dtype, device=bag_offsets.device)
+                bag_size[:-1] = bag_offsets[1:] - bag_offsets[:-1]
+                bag_size[-1] = indices.size(0) - bag_offsets[-1]
+
+            else:
+                bag_size = torch.zeros_like(bag_offsets)
+
+        output = weight.new_empty(num_bags, weight.size(1))
+        fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
+
+        def get_offset2bag():
+            offset2bag = torch.zeros_like(indices)
+            offset2bag.index_add_(0, bag_offsets, torch.ones_like(bag_offsets))
+            offset2bag[0] -= 1
+            offset2bag = offset2bag.cumsum(0)
+            return offset2bag
+
+        if bag_offsets.device.type != "cpu":
+            offset2bag = get_offset2bag()
+        else:
+            if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+                offset2bag = get_offset2bag()
+            else:
+                offset2bag = bag_offsets.new_empty(0)
+
+        bags = []
+        max_indices_bag = []
+        for i in range(num_bags):
+            if i < num_bags - 1:
+                selected = embeddings[bag_offsets[i] : bag_offsets[i + 1]]
+            else:
+                selected = embeddings[bag_offsets[i] : ]
+
+            if selected.size(0) == 0:
+                reduced = torch.zeros(1, weight.size(1), dtype=weight.dtype, device=weight.device)
+                if mode == MODE_MAX:
+                    max_indices_bag.append(torch.zeros(1, weight.size(1), dtype=indices.dtype, device=indices.device))
+
+            else:
+                if mode == 0:
+                    reduced = torch.sum(selected, dim=0, keepdim=True)
+                elif mode == 1:
+                    reduced = torch.mean(selected, dim=0, keepdim=True)
+                elif mode == 2:
+                    reduced, max_indices = torch.max(selected, dim=0, keepdim=True)
+                    max_indices_bag.append(indices[max_indices + bag_offsets[i]])
+
+            bags.append(reduced)
+
+        result = torch.cat(bags, dim=0)
+
+
+        if offsets.device.type != "cpu":
+            if mode == MODE_MAX:
+                max_indices = torch.cat(max_indices_bag, dim=0)
+            else:
+                max_indices = indices.new_empty(0)
+        else:
+            if max_indices_bag:
+                max_indices = torch.cat(max_indices_bag, dim=0)
+            else:
+                if mode == MODE_MEAN:
+                    max_indices = bag_size.clone()
+                else:
+                    max_indices = torch.zeros_like(bag_offsets)
+
+    return result, offset2bag, bag_size, max_indices
+
+
 def prod(x: List[int]):
     r = 1
     for i in x:

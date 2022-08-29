@@ -6525,12 +6525,12 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
                               kwargs={'padding_idx': 2, 'mode': mode,
                                       'per_sample_weights': per_sample_weights},)
 
-            idx = make_long_input((6, ), low=0, high=S)
-            weights = make_input((S, S))
-            offsets_ = torch.tensor([0, 3, 6], device=device, dtype=torch.long)
-            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-            yield SampleInput(weights, args=(idx,),
-                              kwargs={'mode': mode, 'offsets': offsets_, 'include_last_offset': True},)
+            # idx = make_long_input((6, ), low=0, high=S)
+            # weights = make_input((S, S))
+            # offsets_ = torch.tensor([0, 3, 6], device=device, dtype=torch.long)
+            # per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            # yield SampleInput(weights, args=(idx,),
+            #                   kwargs={'mode': mode, 'offsets': offsets_, 'include_last_offset': True},)
 
             if not requires_grad:
                 # Following inputs return different gradient from the numerical gradient.
