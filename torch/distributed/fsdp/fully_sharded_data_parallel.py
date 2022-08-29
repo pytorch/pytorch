@@ -376,10 +376,6 @@ class _ExecOrderData:
     (which thus assumes static graph) and the post-forward order on *every*
     iteration for backward prefetching (which thus does not assume static
     graph but may be provide an incorrect order).
-
-    Additionally, if the distributed debug level is set to at least INFO, then
-    this tracks additional data structures for checking the execution order
-    across ranks on the first iteration and per rank across iterations.
     """
 
     def __init__(self, debug_level: dist.DebugLevel) -> None:
@@ -392,11 +388,11 @@ class _ExecOrderData:
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[HandlesKey, int] = {}
         self.is_first_iter: Optional[bool] = None
+
+        # Data structures for execution order validation
         self._checking_order: bool = (
             debug_level in [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]
         )
-
-        # The following are only used if distributed debug level >= INFO
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
@@ -418,12 +414,9 @@ class _ExecOrderData:
     ) -> None:
         """
         Initializes the data structures needed for checking the forward order.
-        This is a no-op if the distributed debug level is less than INFO.
-        Otherwise, this should be called after a root FSDP instance has been
-        set during lazy initialization.
+        This should be called after a root FSDP instance has been set during
+        lazy initialization.
         """
-        if not self._checking_order:
-            return
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -498,19 +491,13 @@ class _ExecOrderData:
         be a group of handles used in the same module's forward. If ``handles``
         is empty, then it is omitted.
 
-        If the distributed debug level is at least INFO, then this additionally
-        checks the execution order across ranks. See :meth:`_check_order` for
-        details.
+        On the first iteration, this checks the execution order across ranks.
+        See :meth:`_check_order` for details.
         """
         if not handles:
             return
         handles_key = tuple(handles)
-        if self._checking_order:
-            self._check_order(handles_key)
-            # Fix the debug pre-forward order after the first iteration since
-            # we check against the first iteration order thereafter
-            if self.is_first_iter:
-                self.handles_debug_pre_forward_order.append(handles_key)
+        self._check_order(handles_key)
         # Only record the first usage of a handles key
         if handles_key in self.handles_to_post_forward_order_index:
             return
@@ -520,16 +507,16 @@ class _ExecOrderData:
 
     def _check_order(self, handles_key: HandlesKey) -> None:
         """
-        Checks the forward execution order. This should only be called if the
-        distributed debug level is at least INFO.
+        Checks the forward execution order.
 
-        On the first iteration, this uses all-gathers to check that all ranks
+        - On the first iteration, this uses all-gathers to check that all ranks
         are all-gathering the same handles and hence ``FlatParameter`` s,
         raising an error if not.
-        On subsequent iterations, this checks that each rank is locally
-        consistent with its own forward order from the first iteration, issuing
-        a warning if not. This issues a warning on the first deviating
-        iteration and stops warning thereafter.
+        - On subsequent iterations, if the distributed debug level is at least
+        INFO, then this checks that each rank is locally consistent with its
+        own forward order from the first iteration, issuing a warning if not.
+        This issues a warning on the first deviating iteration and stops
+        warning thereafter.
         """
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
@@ -590,7 +577,11 @@ class _ExecOrderData:
                         f"for {r1_param_names} while rank {r2} is all-gathering "
                         f"parameters for {r2_param_names}"
                     )
-        else:
+            # Fix the debug pre-forward order after the first iteration since
+            # we check against the first iteration order thereafter
+            if self._checking_order:
+                self.handles_debug_pre_forward_order.append(handles_key)
+        elif self._checking_order:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
             if self.warn_status == _ExecOrderWarnStatus.WARNED:
