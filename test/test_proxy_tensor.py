@@ -771,7 +771,9 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
-    return empty""")
+    detach_default = torch.ops.aten.detach.default(empty);  empty = None
+    sym_size_2 = torch.ops.aten.sym_size(detach_default, 0)
+    return detach_default""")
 
     def test_cat(self):
         def f(a, b):
