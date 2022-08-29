@@ -363,7 +363,11 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     transpose_result = true;
     result_ = resolve_conj_if_indicated(result, true);
   } else {
+    if (!result.is_contiguous()){
     result_ = c10::MaybeOwned<Tensor>::owned(result.transpose(1, 2).clone(at::MemoryFormat::Contiguous).transpose(1, 2));
+    } else {
+      result_ = c10::MaybeOwned<Tensor>::borrowed(result);
+    }
   }
 
   int leading_dim = transpose_result ? 1 : 2;
