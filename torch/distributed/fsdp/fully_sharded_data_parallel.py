@@ -51,6 +51,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.nn.parameter import Parameter
+
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -1025,7 +1026,9 @@ class FullyShardedDataParallel(nn.Module):
         self._hook_registered = False
 
         # Used to prevent running the pre-backward hook multiple times
-        self._pre_backward_hook_has_run: Dict[HandlesKey, bool] = {}
+        self._ran_pre_backward_hook: Dict[HandlesKey, bool] = {}
+        # Used to know whether to sync the pre-all-gather stream
+        self._ran_pre_unshard: bool = False
         self._is_root: Optional[bool] = None  # `None` indicates not yet set
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
@@ -1177,8 +1180,8 @@ class FullyShardedDataParallel(nn.Module):
         ``fsdp_kwargs``.
 
         Precondition: ``auto_wrap_policy`` contains the arguments expected by
-            ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
-            ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
+        ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
+        ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
         """
         auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
         root_module = auto_wrap_kwargs["module"]
@@ -1464,9 +1467,13 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
         """
-        with torch.cuda.stream(self._streams["all_gather"]):
-            for handle in handles:
-                handle.pre_unshard()
+        for handle in handles:
+            if handle.needs_pre_unshard():
+                with torch.cuda.stream(self._streams["pre_all_gather"]):
+                    handle.pre_unshard()
+                self._ran_pre_unshard = True
+                self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
+            with torch.cuda.stream(self._streams["all_gather"]):
                 handle.unshard()
                 handle.post_unshard()
 
@@ -1873,11 +1880,13 @@ class FullyShardedDataParallel(nn.Module):
         """Initializes CUDA streams for overlapping data transfer and
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
-        if torch.cuda.is_available():
-            # Stream for all-gathering parameters.
-            self._streams["all_gather"] = torch.cuda.Stream()
-            # Stream for overlapping grad reduction with the backward pass.
-            self._streams["post_backward"] = torch.cuda.Stream()
+        assert torch.cuda.is_available()
+        # Stream for all-gathering parameters.
+        self._streams["all_gather"] = torch.cuda.Stream()
+        # Stream for overlapping grad reduction with the backward pass.
+        self._streams["post_backward"] = torch.cuda.Stream()
+        # Stream for pre-all-gather copies (e.g. H2D or precision cast).
+        self._streams["pre_all_gather"] = torch.cuda.Stream()
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1885,9 +1894,13 @@ class FullyShardedDataParallel(nn.Module):
         synchronize with the default stream to ensure that the previous
         optimizer step is done.
         """
-        if not torch.cuda.is_available() or not self._is_root:
+        if not self._is_root:
             return
-        self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
+        current_stream = torch.cuda.current_stream()
+        self._streams["all_gather"].wait_stream(current_stream)
+        if self._ran_pre_unshard:
+            self._streams["pre_all_gather"].wait_stream(current_stream)
+            self._ran_pre_unshard = False
 
     def _prefetch_handles(
         self,
@@ -2967,7 +2980,7 @@ class FullyShardedDataParallel(nn.Module):
         # Since these handles' `FlatParameter`s participated in a forward,
         # we conservatively assume that they will be used in the backward
         self._needs_pre_backward_unshard[handles_key] = False
-        self._pre_backward_hook_has_run[handles_key] = False
+        self._ran_pre_backward_hook[handles_key] = False
 
         def _pre_backward_hook(_handles: List[FlatParamHandle], *unused: Any) -> None:
             """Prepares ``_handles`` 's ``FlatParameter`` s for gradient
@@ -2975,7 +2988,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if self._pre_backward_hook_has_run[_handles_key]:
+            if self._ran_pre_backward_hook[_handles_key]:
                 return
 
             with torch.autograd.profiler.record_function(
@@ -3003,7 +3016,7 @@ class FullyShardedDataParallel(nn.Module):
                 self._prefetch_handles(_handles_key)
                 for handle in _handles:
                     handle.prepare_gradient()
-                self._pre_backward_hook_has_run[_handles_key] = True
+                self._ran_pre_backward_hook[_handles_key] = True
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
@@ -3334,7 +3347,7 @@ class FullyShardedDataParallel(nn.Module):
         # Update root and nested FSDP's hooks and flags.
         for m in self.fsdp_modules(self):  # includes self
             _finalize_params(m)
-            m._pre_backward_hook_has_run.clear()
+            m._ran_pre_backward_hook.clear()
             m.training_state = TrainingState_.IDLE
             for handle in m._handles:
                 handle._training_state = HandleTrainingState.IDLE
