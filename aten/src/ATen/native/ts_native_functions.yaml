@@ -141,7 +141,6 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero
-  - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
   - diagonal_copy
@@ -175,9 +174,7 @@ supported:
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
-  - empty.SymInt
   - empty_strided
-  - empty_strided.SymInt
   - fill_.Scalar
   - normal_
   - max_pool3d_with_indices
@@ -200,7 +197,6 @@ supported:
   - pixel_unshuffle
   - select_backward
   - _trilinear
-  - linalg_inv_ex
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
 autograd:
