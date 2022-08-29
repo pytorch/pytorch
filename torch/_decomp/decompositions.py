@@ -143,7 +143,7 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
     return torch.where(
         (self > -3.0) & (self < 3.0),
         grad_output * (1.0 / 6.0),
-        grad_output.new_zeros(()),
+        0.0,
     )
 
 
@@ -152,17 +152,13 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
-    return torch.where(
-        (self <= min_val) | (self >= max_val), grad_output.new_zeros(()), grad_output
-    )
+    return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
 @register_decomposition(aten.hardshrink_backward)
 @pw_cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
-    return torch.where(
-        (self >= -lambd) & (self <= lambd), grad_out.new_zeros(()), grad_out
-    )
+    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
 
 
 @register_decomposition(aten.hardswish)
@@ -176,7 +172,7 @@ def hardswish(self: Tensor) -> Tensor:
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
         self < -3,
-        grad_output.new_zeros(()),
+        0.0,
         torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
@@ -184,7 +180,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @register_decomposition(aten.threshold_backward)
 @pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
-    return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
+    return torch.where(self <= threshold, 0.0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -251,9 +247,7 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 @register_decomposition(aten.softshrink_backward)
 def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    return torch.where(
-        (self >= -lambd) & (self <= lambd), grad_output.new_zeros(()), grad_output
-    )
+    return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
 
 
 @register_decomposition(aten.prelu_backward)
@@ -269,9 +263,7 @@ def prelu_backward(
     for _ in range(2, grad_output.dim()):
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
-    weight_grad_collector = torch.where(
-        self > 0, grad_output.new_zeros(()), self * grad_output
-    )
+    weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
     out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
@@ -408,8 +400,7 @@ def _nll_loss_backward(
 
     has_ignore_index = ignore_index >= 0
     if has_ignore_index:
-        ignore_index_mask = target != ignore_index
-        grad_output = grad_output * ignore_index_mask
+        grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
 
@@ -621,7 +612,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.col2im_backward)
@@ -632,17 +623,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
-
-
-@register_decomposition(aten.masked_fill.Scalar)
-def masked_fill_Scalar(self: Tensor, mask: Tensor, value: float) -> Tensor:
-    return torch.where(mask, utils.dtype_to_type(self.dtype)(value), self)
-
-
-@register_decomposition(aten.masked_fill.Tensor)
-def masked_fill_Tensor(self: Tensor, mask: Tensor, value: Tensor) -> Tensor:
-    return torch.where(mask, value, self)
+    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -662,7 +643,7 @@ def logit_backward(
         return torch.where(
             torch.logical_and(self >= lo, self <= hi),
             grad_output / (self * (1.0 - self)),
-            self.new_zeros(()),
+            0.0,
         )
     else:
         return torch.where(
@@ -699,12 +680,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     return shifted - shifted_logsumexp
-
-
-@register_decomposition(aten.addcdiv)
-@pw_cast_for_opmath
-def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    return self + value * (tensor1 / tensor2)
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
@@ -872,6 +847,94 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+@register_decomposition(aten.native_group_norm_backward)
+@pw_cast_for_opmath
+def native_group_norm_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    utils.check_same_device(
+        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    )
+    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
+    utils.check(
+        input.numel() == N * C * HxW,
+        lambda: f"Expect input to have { N * C * HxW} elements",
+    )
+    utils.check(
+        mean.shape == (N, group),
+        lambda: f"Expect mean to have shape ({N}, {group}, but got {mean.shape}",
+    )
+    utils.check(
+        gamma is None or gamma.numel() == C,
+        lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
+    )
+
+    cpg, _rem = divmod(C, group)
+    utils.check(
+        _rem == 0,
+        lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
+    )
+
+    # Compute Internal gradients
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2])
+
+    d_input: Optional[Tensor] = None
+    d_gamma: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
+    if output_mask[0]:
+        s = 1.0 / (HxW * cpg)
+        if gamma is not None:
+            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                gamma.reshape(1, group, cpg),
+            )
+        else:
+            ds_val = ds.reshape(N, group, cpg).sum(2)
+            db_val = db.reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                torch.ones((1, group, cpg), device=rstd.device),
+            )
+        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - db_val * rstd * s
+
+        c1 = c1.unsqueeze(-1)
+        c2 = _unsqueeze_to_dim(c2, 4)
+        c3 = _unsqueeze_to_dim(c3, 4)
+        d_input = (
+            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
+            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
+            + c3
+        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
+    if output_mask[1]:
+        d_gamma = (
+            (
+                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+                * rstd.unsqueeze(-1)
+            )
+            .sum(dim=[0])
+            .reshape(C)
+        )
+    if output_mask[2]:
+        d_bias = db.sum(dim=[0])
+
+    return (d_input, d_gamma, d_bias)
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
@@ -1025,6 +1088,36 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+@register_decomposition(aten._to_copy)
+def _to_copy(
+    x: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout=None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    non_blocking: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    assert not layout or layout == torch.strided, "TODO"
+    assert not pin_memory, "TODO"
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype_converted = False
+    if device is not None and device != x.get_device():
+        # avoid conversions on cpu
+        if dtype is not None and device.type == "cpu":
+            x = torch._prims.convert_element_type(x, dtype)
+            dtype_converted = True
+        x = torch._prims.device_put(x, device)
+    if dtype is not None and not dtype_converted:
+        x = torch._prims.convert_element_type(x, dtype)
+    if memory_format is not None:  # no ref/prim for memory format
+        out = torch.empty_like(x, memory_format=memory_format)
+        out.copy_(x)
+        return out  # type: ignore[call-overload]
+    return x
+
+
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1124,8 +1217,8 @@ def cudnn_batch_norm(
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
     return (
         a,
-        input.new_zeros((0,)),
-        input.new_zeros((0,)),
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
         input.new_zeros((0,), dtype=torch.uint8),
     )
 
@@ -1250,20 +1343,6 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten.transpose.int, disable_meta=True)
-def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
-    dim0, dim1 = utils.canonicalize_dims(self.dim(), (dim0, dim1))  # type: ignore[misc]
-
-    if self.dim() <= 1:
-        return self
-
-    if dim0 == dim1:
-        return self
-    perm = list(range(self.dim()))
-    perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
-    return torch.permute(self, perm)
-
-
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
@@ -1386,3 +1465,84 @@ def upsample_bilinear2d_vec(
     q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
     return result
+
+
+# We should be applying decompositions after all transformations
+@register_decomposition(aten.is_same_size.default)
+def is_same_size(a: Tensor, b: Tensor) -> bool:
+    return a.shape == b.shape
+
+
+@register_decomposition(aten._reshape_alias)
+def _reshape_alias(x, shape, strides):
+    return aten.view(x, shape)
+
+
+@register_decomposition(aten.nll_loss_forward)
+def nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    assert self.dim() > 0 and self.dim() <= 2, "input tensor should be 1D or 2D"
+    assert (
+        target.dim() <= 1
+    ), "0D or 1D target tensor expected, multi-target not supported"
+
+    no_batch_dim = self.dim() == 1 and target.dim() == 0
+    assert no_batch_dim or (
+        self.shape[0] == target.shape[0]
+    ), f"size mismatch (got input: {self.shape}, target: {target.shape})"
+
+    n_classes = self.shape[-1]
+
+    assert weight is None or (
+        weight.dim() == 1 and weight.numel() == n_classes
+    ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
+
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        w = weight.unsqueeze(0) if n_dims > 1 else weight
+        self = self * w
+
+    target_ = target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+
+    if ignore_index >= 0:
+        result = torch.where(target != ignore_index, result, 0)
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = self.new_full((), 0.0)
+        return result, total_weight
+
+    if weight is not None:
+        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
+        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
+        if ignore_index >= 0:
+            wsum = torch.where(target != ignore_index, wsum, 0)
+        total_weight = wsum.sum()
+    elif ignore_index >= 0:
+        total_weight = (target != ignore_index).sum().to(self)
+    else:
+        total_weight = self.new_full((), 1.0 * result.numel())
+
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        if weight is None:
+            result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
+        else:
+            result = result.sum() / total_weight
+
+    return result, total_weight

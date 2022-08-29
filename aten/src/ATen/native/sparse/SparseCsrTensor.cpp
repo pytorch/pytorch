@@ -757,9 +757,8 @@ Tensor empty_like_sparse_csr(
 }
 
 Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
-  TORCH_CHECK(
-      self.layout() == kSparseCsr || self.layout() == kSparseBsr,
-      "select(): currently only supports the SparseCsr and SparseBsr layout.");
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(), "select()", []() { return; });
   TORCH_CHECK_INDEX(
       self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -784,41 +783,55 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   new_sizes.erase(new_sizes.begin() + dim);
   auto options = self.options();
 
-  // Selecting batch dimension
-  if (dim < self.dim() - 2) {
-    if (self.layout() == kSparseBsr) {
-      return at::native::_sparse_bsr_tensor_unsafe(
-          self.crow_indices().select(dim, index),
-          self.col_indices().select(dim, index),
-          self.values().select(dim, index),
-          new_sizes,
-          optTypeMetaToScalarType(options.dtype_opt()),
-          options.layout_opt(),
-          options.device_opt(),
-          options.pinned_memory_opt());
-    }
-    return at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().select(dim, index),
-        self.col_indices().select(dim, index),
+  Tensor plain_indices;
+  Tensor compressed_indices;
+  std::tie(compressed_indices, plain_indices) =
+      AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+          self.layout(),
+          "select",
+          [&]() {
+            return std::make_pair(self.crow_indices(), self.col_indices());
+          },
+          [&]() {
+            return std::make_pair(self.ccol_indices(), self.row_indices());
+          });
+  auto n_batch = compressed_indices.dim() - 1;
+
+  if (dim < n_batch) {
+    // Selecting batch dimension
+    return at::native::_sparse_compressed_tensor_unsafe(
+        compressed_indices.select(dim, index),
+        plain_indices.select(dim, index),
         self.values().select(dim, index),
         new_sizes,
         optTypeMetaToScalarType(options.dtype_opt()),
         options.layout_opt(),
         options.device_opt(),
         options.pinned_memory_opt());
-  } else {
+  } else if (dim < n_batch + 2) {
+    // Selecting sparse dimension
     TORCH_CHECK(
-        self.is_sparse_csr(),
-        "select(): selecting non-batch dimensions is currently only supported for CSR tensors.");
+        self.layout() == kSparseCsr || self.layout() == kSparseCsc,
+        "select(): selecting non-batch dimensions is currently only supported for non-blocked sparse compressed layouts tensors.");
     TORCH_CHECK(
-        self.dim() == 2,
-        "select(): selecting rows or columns is not implemented for batched sparse CSR tensors.")
-    // Converting to COO and calling select is slighly slower than operating on
-    // the CSR indices directly for constructing a COO vector, however current
-    // version is more readable and easier to understand.
+        n_batch == 0,
+        "select(): selecting rows or columns is not implemented for batched sparse compressed tensors.")
+    // Converting to COO and calling select is slightly slower than operating
+    // on the CSR indices directly for constructing a COO vector, however
+    // current version is more readable and easier to understand.
     return self.to_sparse().select(dim, index);
+  } else {
+    // Selecting dense dimension
+    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        self.layout(),
+        "select",
+        // Non blocked layout (2 sparse dims become 1 nnz dim in values, so dim
+        // is found one position to the left)
+        [&]() { return self.values().select(dim - 1, index); },
+        // Block layout (2 sparse dims become 1 nnz dim + 2 block-shape dims in
+        // values, so dim is found 1 position to the right)
+        [&]() { return self.values().select(dim + 1, index); });
   }
 }
-
 } // namespace native
 } // namespace at

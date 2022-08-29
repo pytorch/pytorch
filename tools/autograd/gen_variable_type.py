@@ -25,7 +25,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -55,7 +55,11 @@ from torchgen.api.types import (
     VectorCType,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.context import native_function_manager, with_native_function
+from torchgen.context import (
+    native_function_manager,
+    with_native_function,
+    with_native_function_and,
+)
 from torchgen.model import (
     Argument,
     BaseType,
@@ -67,7 +71,7 @@ from torchgen.model import (
 )
 from torchgen.utils import FileManager, mapMaybe
 
-from .context import with_native_function_with_differentiability_info
+from .context import with_native_function_with_differentiability_info_and_key
 from .gen_inplace_or_view_type import (
     ALL_VIEW_FUNCTIONS,
     ASSIGN_RETURN_VALUE,
@@ -717,6 +721,7 @@ def gen_variable_type(
     tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
+    used_keys: Set[str],
 ) -> None:
 
     """VariableType.h and VariableType.cpp body
@@ -733,9 +738,52 @@ def gen_variable_type(
         },
     )
 
+    # helper that generates a TORCH_LIBRARY_IMPL macro for each
+    # dispatch key that appears in derivatives.yaml
+    def wrapper_registrations(used_keys: Set[str]) -> str:
+        library_impl_macro_list: List[str] = []
+        for key in used_keys:
+            dispatch_key = key
+            if key == "Default":
+                dispatch_key = "Autograd"
+            library_impl_macro = (
+                f"TORCH_LIBRARY_IMPL(aten, {dispatch_key}, m) "
+                + "{\n"
+                + "${"
+                + f"wrapper_registrations_{key}"
+                + "}\n}"
+            )
+            library_impl_macro_list += [library_impl_macro]
+        return "\n\n".join(library_impl_macro_list)
+
+    # Generate a new template from VariableType.cpp which replaces ${wrapper_registrations}
+    # with per key TORCH_LIBRARY_IMPL macros for each key that appears in derivatives.yaml
+    fm1 = FileManager(
+        install_dir=out + "/templates", template_dir=template_path, dry_run=False
+    )
+    fm1.write(
+        "VariableType.cpp",
+        lambda: {
+            "type_derived_method_definitions": "\n\n".join(
+                [
+                    "${" + f"type_derived_method_definitions_{key}" + "}"
+                    for key in used_keys
+                ]
+            ),
+            "wrapper_registrations": wrapper_registrations(used_keys),
+        },
+    )
+
+    # Generate final VariableType_*.cpp files from the generated template
+    fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
+
+    sharded_keys = set(
+        [f"type_derived_method_definitions_{key}" for key in used_keys]
+        + [f"wrapper_registrations_{key}" for key in used_keys]
+    )
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    fm.write_sharded(
+    fm2.write_sharded(
         "VariableType.cpp",
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
@@ -744,15 +792,15 @@ def gen_variable_type(
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
-        sharded_keys={"type_derived_method_definitions", "wrapper_registrations"},
+        sharded_keys=sharded_keys,
     )
 
 
-@with_native_function
-def gen_wrapper_registration(f: NativeFunction) -> str:
+@with_native_function_and
+def gen_wrapper_registration(f: NativeFunction, key: str = "Default") -> str:
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
-        type_wrapper_name=type_wrapper_name(f),
+        type_wrapper_name=type_wrapper_name(f, key),
         class_type="VariableType",
     )
 
@@ -761,6 +809,7 @@ def gen_variable_type_func(
     fn: NativeFunctionWithDifferentiabilityInfo,
 ) -> Dict[str, List[str]]:
     f = fn.func
+    result = {}
     with native_function_manager(f):
         name = cpp.name(f.func)
         formals = gen_formals(f)
@@ -794,20 +843,38 @@ def gen_variable_type_func(
             wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
                 unqual_operator_name_with_overload=f.func.name
             )
+            result["type_derived_method_definitions_Default"] = [type_definition]
+            result["wrapper_registrations_Default"] = [wrapper_registration]
         else:
-            type_definition = METHOD_DEFINITION.substitute(
-                return_type=cpp.returns_type(f.func.returns).cpp_type(),
-                type_wrapper_name=type_wrapper_name(f),
-                type_definition_body=emit_body(fn),
-                formals=formals,
-            )
-            wrapper_registration = gen_wrapper_registration(f)
-
+            if not fn.info:
+                key = "Default"
+                type_definition = METHOD_DEFINITION.substitute(
+                    return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                    type_wrapper_name=type_wrapper_name(f, key),
+                    type_definition_body=emit_body(fn, key),
+                    formals=formals,
+                )
+                wrapper_registration = gen_wrapper_registration(f, key)
+                result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                result[f"wrapper_registrations_{key}"] = [wrapper_registration]
+            else:
+                for key, _ in fn.info.items():
+                    type_definition = METHOD_DEFINITION.substitute(
+                        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                        type_wrapper_name=type_wrapper_name(f, key),
+                        type_definition_body=emit_body(fn, key),
+                        formals=formals,
+                    )
+                    wrapper_registration = gen_wrapper_registration(f, key)
+                    result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                    result[f"wrapper_registrations_{key}"] = [wrapper_registration]
     # See Note [Manual Backend kernels]
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
     # If you want to register a kernel to Autograd, you must make the op abstract.
     # In other words, this op must have dispatch section in native_functions.yaml.
-    if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
+    if name in MANUAL_AUTOGRAD_AND_TRACER or (
+        fn.info and any(info.has_derivatives for info in fn.info.values())
+    ):
         msg = (
             f"There's a formula for {name}(or its functional variant) in derivatives.yaml. "
             f"It's required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA "
@@ -817,18 +884,17 @@ def gen_variable_type_func(
         )
         assert f.is_abstract, msg
 
-    return {
-        "type_derived_method_definitions": [type_definition],
-        "wrapper_registrations": [wrapper_registration],
-    }
+    return result
 
 
-@with_native_function_with_differentiability_info
-def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
+@with_native_function_with_differentiability_info_and_key
+def emit_body(
+    fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
+) -> List[str]:
     assert dispatch_strategy(fn) == "use_derived"
     f = fn.func
-    info = fn.info
-    fw_derivatives = fn.fw_derivatives
+    info = fn.info[key] if fn.info else None
+    fw_derivatives = fn.fw_derivatives.get(key, []) if fn.fw_derivatives else []
 
     name = cpp.name(f.func)
     inplace = f.func.kind() == SchemaKind.inplace
@@ -878,7 +944,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     differentiable_inputs = gen_differentiable_inputs(f)
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    differentiable_outputs = gen_differentiable_outputs(fn)
+    differentiable_outputs = gen_differentiable_outputs(fn, key)
 
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (
         name in DONT_REQUIRE_DERIVATIVE
@@ -1316,9 +1382,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     def emit_any_requires_grad() -> List[str]:
         extra_condition = ""
-        if fn.info and fn.info.output_differentiability_conditions:
-            assert len(fn.info.output_differentiability_conditions) == 1
-            extra_condition = f"_any_requires_grad &= ({fn.info.output_differentiability_conditions[0]});"
+        if info and info.output_differentiability_conditions:
+            assert len(info.output_differentiability_conditions) == 1
+            extra_condition = f"_any_requires_grad &= ({info.output_differentiability_conditions[0]});"
         return [
             SETUP_ANY_REQUIRES_GRAD.substitute(
                 args_with_derivatives=[arg.name for arg in args_with_derivatives],
@@ -1358,9 +1424,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     )
                 requires_fw_grad = "true"
 
-            if fn.info and fn.info.output_differentiability_conditions:
-                assert len(fn.info.output_differentiability_conditions) == 1
-                requires_fw_grad = f"({fn.info.output_differentiability_conditions[0]}) && ({requires_fw_grad})"
+            if info and info.output_differentiability_conditions:
+                assert len(info.output_differentiability_conditions) == 1
+                requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && ({requires_fw_grad})"
 
             content.append(
                 f"auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};\n"

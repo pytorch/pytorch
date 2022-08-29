@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ops/composite.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
@@ -179,11 +180,12 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self,
-             c10::complex<double> val) -> nvfuser::Scalar* {
+             std::complex<double> val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<
                               torch::jit::fuser::cuda::ComplexDouble,
-                              c10::complex<double>>({out->index}, val));
+                              c10::complex<double>>(
+                {out->index}, static_cast<c10::complex<double>>(val)));
             return out;
           },
           py::return_value_policy::reference)
@@ -292,6 +294,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("round", round)
   NVFUSER_PYTHON_BINDING_UNARY_OP("rsqrt", rsqrt)
   NVFUSER_PYTHON_BINDING_UNARY_OP("set", set)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("sign", sign)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sigmoid", sigmoid)
   NVFUSER_PYTHON_BINDING_UNARY_OP("silu", silu)
   NVFUSER_PYTHON_BINDING_UNARY_OP("sin", sin)

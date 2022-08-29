@@ -1,8 +1,10 @@
 import functools
-from typing import Any, Callable, Dict, Sequence
+from contextlib import nullcontext
+from typing import Any, Callable, Dict, Sequence, Union
 
 import torch
 
+import torch._decomp
 import torch._prims
 
 import torch._refs
@@ -35,12 +37,19 @@ def torch_to_refs_map():
         torch.Tensor.__and__: torch._refs.bitwise_and,
         torch.Tensor.__or__: torch._refs.bitwise_or,
         torch.Tensor.__eq__: torch._refs.eq,
+        torch.Tensor.__rsub__: torch._refs.rsub,
+        torch.Tensor.__rtruediv__: torch._refs.rtruediv,
+        torch.Tensor.__floordiv__: torch._refs.floor_divide,
+        torch.Tensor.__rfloordiv__: torch._refs.rfloordiv,
+        torch.Tensor.__pow__: torch._refs.pow,
+        torch.Tensor.__rpow__: torch._refs.rpow,
         torch.Tensor.new_empty: torch._refs.new_empty,
         torch.Tensor.new_full: torch._refs.new_full,
         torch.Tensor.new_zeros: torch._refs.new_zeros,
         torch.Tensor.new_ones: torch._refs.new_ones,
         torch.Tensor.fill_: torch._refs.fill_,
         torch.Tensor.zero_: torch._refs.zero_,
+        torch.Tensor.to: torch._refs.to,
         # TODO: Should these methods be mapped some other way?
         torch.Tensor.copy_: torch._prims.copy_to,
         torch.Tensor.resize: torch._prims.resize,
@@ -57,6 +66,25 @@ def torch_to_refs_map():
 
 
 @functools.lru_cache(None)
+def nvfuser_decomp_table():
+    """
+    decomposition table needed for nvfuser
+    """
+    aten = torch.ops.aten
+    nvfuser_decompositions: Sequence[
+        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+    ] = {  # type: ignore[assignment]
+        # AMP calls `to` in C++, which is not handled by torch mapping
+        aten._to_copy,
+    }
+
+    from torch._decomp import get_decompositions
+
+    decomp_table = get_decompositions(nvfuser_decompositions)
+    return decomp_table
+
+
+@functools.lru_cache(None)
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
@@ -64,11 +92,46 @@ def all_prims():
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
 
 
+class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.ops.prims.* functions to
+    use nvFuser's prims in torch.ops.nvprims.*
+
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode():
+    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
+
+    By default, this context manager will fall back on the torch.ops.prims* if the
+    nvprim does not exist.
+    """
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
+            orig_func, torch._ops.OpOverloadPacket
+        ):
+            namespace = str(orig_func).split(".")[0]
+            name = str(orig_func).split(".")[1]
+            if namespace == "prims":
+                nvfunc = getattr(torch.ops.nvprims, name, None)
+                if nvfunc is not None:
+                    return nvfunc(*args, **kwargs)
+        return orig_func(*args, **kwargs)
+
+
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
     """
     Switches the interpretation of torch.* functions and Tensor methods to
     use PrimTorch refs in torch._refs.  (Direct calls to _refs are unaffected.)
 
+    >>> # xdoctest: +SKIP
     >>> with TorchRefsMode():
     ...     torch.add(x, y)  # calls torch._refs.add(x, y)
 
@@ -78,9 +141,15 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     this behavior can be customized by passing a function to should_fallback_fn.
     """
 
-    def __init__(self, strict=False, should_fallback_fn=lambda *_: False):
+    def __init__(
+        self,
+        strict=False,
+        should_fallback_fn=lambda *_: False,
+        prims_mode_cls=nullcontext,
+    ):
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
+        self.prims_mode_cls = prims_mode_cls
 
     def __torch_function__(
         self,
@@ -92,10 +161,22 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         # For primitive operations, run them as is without interception
+        # Unless we are in prims_mode, in which case we want to use nvprims
         if orig_func in torch_function_passthrough or orig_func in all_prims():
-            return orig_func(*args, **kwargs)
+            with self.prims_mode_cls():
+                return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
+
+        # For torch.ops.aten.*, use registered decompositions from torch._decomp
+        # torch._decomp.decomposition_table provides a mapping from
+        # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
+        # implementations.
+        # There're other ways to implement this functionality,
+        # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+            func = torch._decomp.decomposition_table.get(orig_func, None)
+
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, func, args, kwargs):
@@ -131,5 +212,7 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 TorchRefsNvfuserCapabilityMode = functools.partial(
-    TorchRefsMode, should_fallback_fn=_is_func_unsupported_nvfuser
+    TorchRefsMode,
+    should_fallback_fn=_is_func_unsupported_nvfuser,
+    prims_mode_cls=NvfuserPrimsMode,
 )
