@@ -129,7 +129,7 @@ def _new_node(
     Returns:
         The new node.
     """
-    aten = kwargs.pop("aten", False)
+    aten = kwargs.pop("aten", False) or namespace == "aten"
     node = g.create(f"{namespace}::{op}", args, outputs)
     for k, v in sorted(kwargs.items()):
         if k == "inplace":
