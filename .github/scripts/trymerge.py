@@ -1013,7 +1013,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         project=pr.project,
         labels=["module: ci"],
     )
-    reject_reason = (f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team")
+    reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team"
 
     rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
