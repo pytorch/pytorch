@@ -3873,7 +3873,7 @@ class TestRandomness(TestCase):
         if batch_dim == "first":
             non_vmapped_input = input_tensor[0]
         elif batch_dim == "last":
-            non_vmapped_input = input_tensor.move_dim(-1, 0)[0]
+            non_vmapped_input = input_tensor.movedim(-1, 0)[0]
         else:
             assert batch_dim == "none"
             non_vmapped_input = input_tensor
