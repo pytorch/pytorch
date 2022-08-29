@@ -16833,7 +16833,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.reshape",
         torch_opinfo_name="reshape",
-        validate_view_consistency=False,
+        # RuntimeError: Cannot call view on the same TensorView twice
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.roll",
