@@ -1249,12 +1249,12 @@ if(ANDROID)
 endif()
 
 # ---[ Kernel asserts
-set(PYTORCH_ENABLE_KERNEL_ASSERTS OFF CACHE BOOL "Default kernel asserts are disabled on ROCm only")
+set(TORCH_ENABLE_GPU_ASSERTS OFF CACHE BOOL "Default kernel asserts are disabled on ROCm only")
 # Kernel asserts are enabled by default for CUDA and disabled for ROCm.
-# For ROCm, it can be enabled by setting PYTORCH_ENABLE_KERNEL_ASSERTS
-if(USE_CUDA OR (USE_ROCM AND PYTORCH_ENABLE_KERNEL_ASSERTS))
+# For ROCm, it can be enabled by setting TORCH_ENABLE_GPU_ASSERTS
+if(USE_CUDA OR (USE_ROCM AND TORCH_ENABLE_GPU_ASSERTS))
   message(STATUS "Enabling kernel asserts")
-  add_definitions(PYTORCH_ENABLE_KERNEL_ASSERTS)
+  add_definitions(-DTORCH_ENABLE_GPU_ASSERTS)
 else()
   message(STATUS "Disabling kernel asserts")
 endif()
