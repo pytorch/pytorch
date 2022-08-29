@@ -80,8 +80,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         class FusionInterpreter(torch.fx.Interpreter):
             def run_node(self, node):
                 # Squeeze requires original shape of args[0]
-                # This catches torch.ops.nvprims.squeeze and torch.ops.nvprims.squeeze.default
-                if "squeeze" in str(node.target):
+                if node.target in [
+                    torch.ops.nvprims.squeeze,
+                    torch.ops.nvprims.squeeze.default,
+                ]:
                     original_shape = list(node.args[0].meta["tensor_meta"].shape)
                     assert len(node.args) == 2
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
