@@ -31,7 +31,9 @@ allreduce_(
           static_cast<ReduceOp>(reduce_op),
           std::chrono::milliseconds(timeout)});
 
-  //
+  // Return input tensors as output tensors to make inplace allreduce look like
+  // a functional API, so that make_fx can correctly build the dependencies in
+  // the graph later.
   return std::
       tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
           std::move(tensor_vec), work);
