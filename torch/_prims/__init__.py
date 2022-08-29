@@ -242,7 +242,7 @@ def TensorMeta(
     if any(
         isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
     ):
-        return torch.empty(shape, dtype, device=device)
+        return torch.empty(shape, dtype=dtype, device=device)
     else:
         return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
