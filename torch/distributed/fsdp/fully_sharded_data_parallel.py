@@ -51,6 +51,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.nn.parameter import Parameter
+
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -63,10 +64,13 @@ from ._optim_utils import (
 )
 from ._shard_utils import _create_chunk_sharded_tensor
 from ._utils import (
+    _alloc_storage,
     _apply_to_modules,
     _apply_to_tensors,
     _contains_batchnorm,
+    _free_storage,
     _override_batchnorm_mixed_precision,
+    p_assert,
 )
 from .flat_param import FlatParameter, FlatParamHandle
 from .flatten_params_wrapper import (
@@ -4163,35 +4167,6 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda", torch.cuda.current_device())
 
-
-def _free_storage(data: torch.Tensor) -> None:
-    """Free underlying storage of a Tensor."""
-    if data.storage().size() > 0:
-        # Since we're modifying the Tensor's Storage directly, make sure the Tensor
-        # is the sole occupant of the Storage.
-        assert (
-            data.storage_offset() == 0
-        ), "The tensor is not the sole occupant of the storage."
-        data.storage().resize_(0)  # type: ignore[attr-defined]
-
-
-@torch.no_grad()
-def _alloc_storage(data: torch.Tensor, size: torch.Size) -> None:
-    """Allocate storage for a tensor."""
-    if data.storage().size() == size.numel():  # no need to reallocate
-        return
-    assert (
-        data.storage().size() == 0
-    ), "Then tensor storage should have been resized to be 0."
-    data.storage().resize_(size.numel())  # type: ignore[attr-defined]
-
-def p_assert(cond: Any, s: Any) -> None:
-    """This is used as an alternate to ``assert`` when in the backward context
-    to print the error message ``s`` since otherwise, it is swallowed."""
-    if not cond:
-        print(s)
-        traceback.print_stack()
-        raise AssertionError
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
     r"""Calculate gradient norm of an iterable of parameters.
