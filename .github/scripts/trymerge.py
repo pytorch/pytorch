@@ -1347,11 +1347,13 @@ def main() -> None:
                 "</details>"
             )
 
-        msg = (
-            f"## {title}\n" +
-            f"{exception}\n\n" +
-            f"{troubleshooting}\n\n" +
-            f"{internal_debugging}\n"
+        msg = "\n".join(
+            f"## {title}",
+            f"{exception}",
+            f"",
+            f"{troubleshooting}",
+            f""
+            f"{internal_debugging}"
         )
 
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
