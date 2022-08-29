@@ -332,7 +332,7 @@ class TestPrims(TestCase):
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
 
-    @dtypes(torch.float32)  # TODO: enable float16 after https://github.com/pytorch/pytorch/pull/83705
+    @dtypes(torch.float32, torch.float16)
     def test_batch_norm_backward_nvprims(self, device, dtype):
         # This test verifies that the backward pass of batch norm is correctly decomposed into nvprims
         from torch.fx.experimental.proxy_tensor import make_fx
