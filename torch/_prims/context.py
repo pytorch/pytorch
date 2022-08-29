@@ -1,6 +1,6 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict, Sequence, Union
 
 import torch
 
@@ -50,6 +50,7 @@ def torch_to_refs_map():
         torch.Tensor.new_ones: torch._refs.new_ones,
         torch.Tensor.fill_: torch._refs.fill_,
         torch.Tensor.zero_: torch._refs.zero_,
+        torch.Tensor.to: torch._refs.to,
         # TODO: Should these methods be mapped some other way?
         torch.Tensor.copy_: torch._prims.copy_to,
         torch.Tensor.resize: torch._prims.resize,
@@ -63,6 +64,25 @@ def torch_to_refs_map():
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
     return r
+
+
+@functools.lru_cache(None)
+def nvfuser_decomp_table():
+    """
+    decomposition table needed for nvfuser
+    """
+    aten = torch.ops.aten
+    nvfuser_decompositions: Sequence[
+        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+    ] = {  # type: ignore[assignment]
+        # AMP calls `to` in C++, which is not handled by torch mapping
+        aten._to_copy,
+    }
+
+    from torch._decomp import get_decompositions
+
+    decomp_table = get_decompositions(nvfuser_decompositions)
+    return decomp_table
 
 
 @functools.lru_cache(None)
