@@ -3666,8 +3666,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
-  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto self0 = at::randint(1, 1 << 4, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 26, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3677,8 +3677,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
-  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto self1 = at::randint(1, 1 << 4, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 26, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -3698,8 +3698,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
-  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto self0 = at::randint(1 << 21, 1 << 30, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 22, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3709,8 +3709,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
-  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto self1 = at::randint(1 << 21, 1 << 30, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 22, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -6230,8 +6230,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool2d_backward) {
         return (%cloned)
   )IR";
 
-  auto grad_output0 = at::randint(-3, 2, {2, 2, 2});
-  auto self0 = at::randint(-3, 2, {2, 2, 2});
+  auto grad_output0 = at::randint(-3, 2, {2, 2, 2}, at::kFloat);
+  auto self0 = at::randint(-3, 2, {2, 2, 2}, at::kFloat);
   auto indices0 = at::randint(0, 1, {2, 2, 2}, at::kLong);
   std::vector<IValue> args{grad_output0, self0, indices0};
   testStaticRuntime(
@@ -6242,8 +6242,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool2d_backward) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto grad_output1 = at::randint(-3, 3, {3, 3, 3});
-  auto self1 = at::randint(-3, 2, {3, 3, 3});
+  auto grad_output1 = at::randint(-3, 3, {3, 3, 3}, at::kFloat);
+  auto self1 = at::randint(-3, 2, {3, 3, 3}, at::kFloat);
   auto indices1 = at::randint(0, 1, {3, 3, 3}, at::kLong);
   std::vector<IValue> args2{grad_output1, self1, indices1};
   testStaticRuntime(
@@ -6264,8 +6264,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool3d_backward) {
         return (%cloned)
   )IR";
 
-  auto grad_output0 = at::randint(-3, 2, {2, 2, 2, 2});
-  auto self0 = at::randint(-3, 2, {2, 2, 2, 2});
+  auto grad_output0 = at::randint(-3, 2, {2, 2, 2, 2}, at::kFloat);
+  auto self0 = at::randint(-3, 2, {2, 2, 2, 2}, at::kFloat);
   auto indices0 = at::randint(0, 1, {2, 2, 2, 2}, at::kLong);
   std::vector<IValue> args{grad_output0, self0, indices0};
   testStaticRuntime(
@@ -6276,8 +6276,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool3d_backward) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto grad_output1 = at::randint(-3, 3, {3, 3, 3, 3});
-  auto self1 = at::randint(-3, 2, {3, 3, 3, 3});
+  auto grad_output1 = at::randint(-3, 3, {3, 3, 3, 3}, at::kFloat);
+  auto self1 = at::randint(-3, 2, {3, 3, 3, 3}, at::kFloat);
   auto indices1 = at::randint(0, 1, {3, 3, 3, 3}, at::kLong);
   std::vector<IValue> args2{grad_output1, self1, indices1};
   testStaticRuntime(
