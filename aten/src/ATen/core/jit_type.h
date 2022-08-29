@@ -1738,13 +1738,6 @@ struct getTypePtr_ final {
   }
 };
 
-template <typename T, bool fake>
-struct getMaybeFakeTypePtr_ final {
-  static decltype(auto) call() {
-    return getTypePtr_<T>::call();
-  }
-};
-
 template <>
 struct getTypePtr_<at::IValue> final {
   static decltype(auto) call() {
@@ -1790,13 +1783,13 @@ struct getTypePtr_<int64_t> final {
 };
 
 template <>
-struct getMaybeFakeTypePtr_<SymInt, false> final {
+struct getTypePtr_<SymInt> final {
   static decltype(auto) call() {
     return SymIntType::get();
   }
 };
 template <>
-struct getMaybeFakeTypePtr_<SymInt, true> final {
+struct getTypePtr_<c10::ScalarType> final {
   static decltype(auto) call() {
     return IntType::get();
   }
@@ -1805,6 +1798,18 @@ template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
     return DeviceObjType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Layout> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::MemoryFormat> final {
+  static decltype(auto) call() {
+    return IntType::get();
   }
 };
 template <>
@@ -1850,47 +1855,47 @@ struct getTypePtr_<at::Dimname> final {
     return StringType::get();
   }
 };
-template <class T, bool fake>
-struct getMaybeFakeTypePtr_<std::vector<T>, fake> final {
+template <class T>
+struct getTypePtr_<std::vector<T>> final {
   static const auto& call() {
-    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto inner_type = getTypePtr_<T>::call();
     // The "per vector<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("vector", inner_type);
     return type;
   }
 };
-template <class T, bool fake>
-struct getMaybeFakeTypePtr_<c10::ArrayRef<T>, fake> final {
+template <class T>
+struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
-    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto inner_type = getTypePtr_<T>::call();
     // The "per ArrayRef<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("ArrayRef", inner_type);
     return type;
   }
 };
-template <bool fake>
-struct getMaybeFakeTypePtr_<c10::SymIntArrayRef, fake> final {
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
   static const auto& call() {
-    static auto type = ListType::create(getMaybeFakeTypePtr_<c10::SymInt, fake>::call());
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
     return type;
   }
 };
-template <class T, bool fake>
-struct getMaybeFakeTypePtr_<c10::List<T>, fake> final {
+template <class T>
+struct getTypePtr_<c10::List<T>> final {
   static const auto& call() {
-    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto inner_type = getTypePtr_<T>::call();
     // The "per List<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = ListType::get("List", inner_type);
     return type;
   }
 };
-template <class T, size_t N, bool fake>
-struct getMaybeFakeTypePtr_<std::array<T, N>, fake> final {
+template <class T, size_t N>
+struct getTypePtr_<std::array<T, N>> final {
   static const auto& call() {
-    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto inner_type = getTypePtr_<T>::call();
     // The "per array<T, N>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     // (Concatenating the length onto the end of the string because we want a unique
@@ -1899,22 +1904,22 @@ struct getMaybeFakeTypePtr_<std::array<T, N>, fake> final {
     return type;
   }
 };
-template <class K, class V, bool fake>
-struct getMaybeFakeTypePtr_<std::unordered_map<K, V>, fake> final {
+template <class K, class V>
+struct getTypePtr_<std::unordered_map<K, V>> final {
   static const auto& call() {
-    static auto inner_key_type = getMaybeFakeTypePtr_<K, fake>::call();
-    static auto inner_val_type = getMaybeFakeTypePtr_<V, fake>::call();
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
     // The "per unordered_map<K, V>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = DictType::get("unordered_map", inner_key_type, inner_val_type);
     return type;
   }
 };
-template <class K, class V, bool fake>
-struct getMaybeFakeTypePtr_<c10::Dict<K, V>, fake> final {
+template <class K, class V>
+struct getTypePtr_<c10::Dict<K, V>> final {
   static const auto& call() {
-    static auto inner_key_type = getMaybeFakeTypePtr_<K, fake>::call();
-    static auto inner_val_type = getMaybeFakeTypePtr_<V, fake>::call();
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
     // The "per Dict<K, V>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = DictType::get("Dict", inner_key_type, inner_val_type);
@@ -1922,10 +1927,10 @@ struct getMaybeFakeTypePtr_<c10::Dict<K, V>, fake> final {
   }
 };
 
-template <class T, bool fake>
-struct getMaybeFakeTypePtr_<at::optional<T>, fake> final {
+template <class T>
+struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto inner_type = getTypePtr_<T>::call();
     // The "per optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = OptionalType::get(inner_type);
@@ -1937,17 +1942,17 @@ struct getMaybeFakeTypePtr_<at::optional<T>, fake> final {
 template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getMaybeFakeTypePtr_<IntArrayRef, false>::call());
+    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
     return type;
   }
 };
 
-template <class... Contained, bool fake>
-struct getMaybeFakeTypePtr_<std::tuple<Contained...>, fake> final {
+template <class... Contained>
+struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {
     static auto type = ([]() {
       std::vector<TypePtr> contained_types = {
-        (getMaybeFakeTypePtr_<Contained, fake>::call())...
+        (getTypePtr_<Contained>::call())...
       };
       return TupleType::create(std::move(contained_types));
     })();
@@ -1965,7 +1970,7 @@ template <class T>
 inline decltype(auto) getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
-  return detail::getMaybeFakeTypePtr_<T, false>::call();
+  return detail::getTypePtr_<T>::call();
 }
 
 template <class T>
@@ -1973,16 +1978,6 @@ inline TypePtr getTypePtrCopy() {
   // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
   return getTypePtr<T>();
-}
-
-template <class T>
-inline decltype(auto) getFakeTypePtr() {
-  return detail::getMaybeFakeTypePtr_<T, true>::call();
-}
-
-template <class T>
-inline TypePtr getFakeTypePtrCopy() {
-  return getFakeTypePtr<T>();
 }
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
@@ -2137,45 +2132,6 @@ static LayoutTypePtr get();
 private:
 LayoutType() : EnumerationType() {}
 };
-
-namespace detail {
-template <>
-struct getMaybeFakeTypePtr_<c10::ScalarType, false> final {
-  static decltype(auto) call() {
-    return ScalarTypeType::get();
-  }
-};
-template <>
-struct getMaybeFakeTypePtr_<c10::Layout, false> final {
-  static decltype(auto) call() {
-    return LayoutType::get();
-  }
-};
-template <>
-struct getMaybeFakeTypePtr_<c10::MemoryFormat, false> final {
-  static decltype(auto) call() {
-    return MemoryFormatType::get();
-  }
-};
-template <>
-struct getMaybeFakeTypePtr_<c10::ScalarType, true> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getMaybeFakeTypePtr_<c10::Layout, true> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getMaybeFakeTypePtr_<c10::MemoryFormat, true> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-} // namespace detail
 
 // the common supertype of all lists,
 // List[T] <: AnyList for all T

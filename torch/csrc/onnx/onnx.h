@@ -16,7 +16,5 @@ enum class TrainingMode {
   TRAINING, // Training mode
 };
 
-constexpr char kOnnxNodeNameAttribute[] = "onnx_name";
-
 } // namespace onnx
 } // namespace torch
