@@ -66,16 +66,6 @@ Tensor empty_per_channel_affine_quantized(
       quantizer);
 }
 
-Tensor empty_symint_unknown_quantized(
-    c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-      return at::native::empty_unknown_quantized(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
-}
-
 Tensor empty_unknown_quantized(
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -108,16 +98,6 @@ Tensor empty_strided_unknown_quantized(
 
   TORCH_CHECK(false, "empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
 
-}
-
-Tensor empty_strided_symint_unknown_quantized(
-    SymIntArrayRef size,
-    SymIntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
-  return empty_strided_unknown_quantized(c10::asIntArrayRefSlow(size), c10::asIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 // Provide better error message if dtype is wrong

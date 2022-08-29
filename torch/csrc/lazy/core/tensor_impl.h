@@ -46,6 +46,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   virtual c10::SymIntArrayRef sym_sizes_custom() const override;
   virtual c10::SymIntArrayRef sym_sizes() const override;
   virtual c10::SymIntArrayRef sym_strides_custom() const override;
+  virtual c10::SymIntArrayRef sym_strides() const override;
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   const at::Storage& storage() const override {
@@ -58,9 +59,10 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
  private:
   void setup_size_properties();
+  void setup_sym_sizes() const;
 
   LazyTensorPtr tensor_;
-  std::vector<c10::SymInt> sym_sizes_;
+  mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;
   size_t generation_{0};
 };
 

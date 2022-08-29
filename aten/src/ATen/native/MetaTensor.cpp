@@ -13,18 +13,6 @@ namespace at {
 namespace native {
 
 Tensor empty_meta(
-  IntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
-) {
-  return at::detail::empty_meta(
-      size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
-Tensor empty_symint_meta(
   SymIntArrayRef size,
   c10::optional<ScalarType> dtype_opt,
   c10::optional<Layout> layout_opt,
@@ -42,18 +30,6 @@ Tensor empty_symint_meta(
 }
 
 Tensor empty_strided_meta(
-  IntArrayRef size,
-  IntArrayRef stride,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt
-) {
-  return at::detail::empty_strided_meta(
-      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-}
-
-Tensor empty_strided_symint_meta(
   SymIntArrayRef size,
   SymIntArrayRef stride,
   c10::optional<ScalarType> dtype_opt,
@@ -64,10 +40,11 @@ Tensor empty_strided_symint_meta(
   auto opt_size = asIntArrayRefSlowOpt(size);
   auto opt_stride = asIntArrayRefSlowOpt(stride);
   if (opt_size.has_value()) {
-    TORCH_INTERNAL_ASSERT(opt_stride.has_value());
-    return at::detail::empty_strided_meta(*opt_size, *opt_stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+    TORCH_CHECK(opt_stride.has_value(), "empty_strided(): sizes are symbolic but not strides");
+    return at::detail::empty_strided_meta(
+        *opt_size, *opt_stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   }
-  TORCH_INTERNAL_ASSERT(!opt_stride.has_value());
+  TORCH_CHECK(!opt_stride.has_value(), "empty_strided(): strides are symbolic but not sizes");
   return at::detail::empty_strided_symint_meta(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
