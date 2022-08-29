@@ -230,7 +230,7 @@ Tensor computeMaxPool2d(
   BufHandle ResultBuf = Buf::make(
       "max_pool2d",
       outputShape,
-      Dtype(*outputType),
+      dtype,
       c10::nullopt, // initializer
       ExprVectorToExprHandleVector(strides),
       qx_qscale,
