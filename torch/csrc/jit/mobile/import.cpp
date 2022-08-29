@@ -586,11 +586,19 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
-  return _load_mobile_from_bytes(
-      data, size, device, extra_files, module_load_options);
+  auto format = getFileFormat(filename);
+
+  if (format == FileFormat::FlatbufferFileFormat) {
+    std::shared_ptr<char> data;
+    size_t size = 0;
+    std::tie(data, size) = get_file_content(filename.c_str());
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_for_mobile(
+      std::move(rai), device, extra_files, module_load_options);
 }
 
 TORCH_API mobile::Module _load_for_mobile(
