@@ -40,7 +40,7 @@ class ShardingFilterIterDataPipe(IterDataPipe):
                 raise Exception("Already defined default sharding and now trying to use the sharding group. "
                                 "This will lead to unexpected behavior.")
         else:
-            if len(self.sharding_groups) and not None in self.sharding_groups:
+            if len(self.sharding_groups) and None not in self.sharding_groups:
                 raise Exception("Already defined non default sharding groups and now trying to use default one. "
                                 "This will lead to unexpected behavior.")
 
