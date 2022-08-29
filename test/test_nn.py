@@ -3223,7 +3223,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", MinusOne())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3276,7 +3276,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3314,7 +3314,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "bias", Double())
         parametrize.register_parametrization(model, "bias", MinusOne())
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, bias=True, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
@@ -3353,7 +3353,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             3, 3, qconfig=torch.ao.quantization.get_default_qconfig()
         )
 
@@ -15803,7 +15803,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
-    def test_softmax_64bit_indexing(self, device, dtype):
+    def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
@@ -15817,6 +15817,22 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    @largeTensorTest("90GB", "cpu")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            self.assertEqual(y[0], y[-1])
+            self.assertEqual(x.grad[0], x.grad[-1])
+
+        run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -19268,6 +19284,7 @@ class TestModuleGlobalHooks(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
