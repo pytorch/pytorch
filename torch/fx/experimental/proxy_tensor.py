@@ -23,7 +23,7 @@ from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -80,18 +80,6 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def get_proxy_slots(obj):
     return obj.__dict__.get(proxy_slot)
 
-
-# Gets the proxy for a tensor, if it exists.
-def get_proxy(obj):
-    res = get_proxy_slots(obj)
-    if res is None:
-        return None
-    vals = tuple(res.values())
-    assert len(vals) == 1
-    return vals[0]
-
-def has_proxy(obj):
-    return get_proxy(obj) is not None
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
@@ -282,10 +270,6 @@ class PythonKeyTracer(Tracer):
             self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         return forward(*args, **kwargs)
-
-    # We don't want to turn getattr calls into proxies. So we just return the actual value.
-    def getattr(self, attr, attr_val, parameter_proxy_cache):
-        return attr_val
 
     def create_arg(self, a: Any):
         if isinstance(a, torch.nn.Parameter):
@@ -545,15 +529,6 @@ def wrapper_and_args_for_make_fx(func, args, kwargs):
         return func(*fn_args, **fn_kwargs)
     return wrapped, flat_args
 
-@contextmanager
-def disable_autocast_cache():
-    old_value = torch.is_autocast_cache_enabled()
-    torch.set_autocast_cache_enabled(False)
-    try:
-        yield
-    finally:
-        torch.set_autocast_cache_enabled(old_value)
-
 
 def make_fx(f, decomposition_table=None, tracing_mode="real"):
     assert tracing_mode in ["real", "fake", "symbolic"]
@@ -565,7 +540,6 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fx_tracer.record_stack_traces = True
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
@@ -612,10 +586,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             func = f
 
-        # We disable the autocast cache as the autocast cache causes type conversions on parameters to
-        # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
+        with decompose(decomposition_table), fake_tensor_mode, sym_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way

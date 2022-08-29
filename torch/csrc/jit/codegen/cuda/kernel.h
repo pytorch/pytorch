@@ -38,7 +38,7 @@ struct KernelSummary {
   std::vector<const kir::Allocate*> static_smem_allocations;
 
   //! Indicate the need to generate random numbers
-  int max_rng_offsets = -1;
+  bool is_stochastic = false;
 
   //! Do we have any block reductions?
   bool has_block_reductions = false;

@@ -127,7 +127,7 @@ static void Baseline_Softmax_Dropout(
   at::Tensor attention_scores = at::randn(input_shape, options);
   at::Tensor at_y = at::randn(input_shape, options);
 
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
 
   for (auto _ : benchmark_state) {
     clearL2Cache();
@@ -144,7 +144,7 @@ static void Baseline_Softmax_Dropout(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
 
   // 5 dtype: attention_scores + attention_mask + attention_scores_out +
   // attention_probs_out + output

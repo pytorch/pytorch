@@ -186,11 +186,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto out =
         reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
     expr_ = IrBuilder::create<UnaryOp>(
-        unary_expr->container(),
-        unary_expr->getUnaryOpType(),
-        out,
-        in,
-        unary_expr->getRNGOffset());
+        unary_expr->container(), unary_expr->getUnaryOpType(), out, in);
   }
 
   void handle(BinaryOp* binary_expr) final {
@@ -891,8 +887,7 @@ struct ReplaceValInIndexVal : public OptInDispatch {
     auto inp = last_visited_val_;
     TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
     auto out = IrBuilder::create<Int>(c10::nullopt);
-    IrBuilder::create<UnaryOp>(
-        uop->getUnaryOpType(), out, inp, uop->getRNGOffset());
+    IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
     last_visited_val_ = out;
   }
 

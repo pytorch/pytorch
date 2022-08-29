@@ -92,7 +92,7 @@ class Instrumentor : private kir::IrVisitor {
 } // namespace
 
 std::vector<Expr*> instrumentKernel(const std::vector<Expr*>& exprs) {
-  if (!isOptionEnabled(EnableOption::KernelProfile)) {
+  if (!isEnabled(EnableOption::KernelProfile)) {
     return exprs;
   }
 

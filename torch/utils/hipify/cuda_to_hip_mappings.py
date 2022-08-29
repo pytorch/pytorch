@@ -6505,6 +6505,22 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("rocblas_zgetrf_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
+            "cublasSgetriBatched",
+            ("rocblas_sgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
+            "cublasDgetriBatched",
+            ("rocblas_dgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
+            "cublasCgetriBatched",
+            ("rocblas_cgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
+            "cublasZgetriBatched",
+            ("rocblas_zgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+        ),
+        (
             "cublasSgetrsBatched",
             ("rocblas_sgetrs_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
@@ -8270,9 +8286,6 @@ C10_MAPPINGS = collections.OrderedDict(
         ),
         ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
         ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
-        ("C10_CUDA_ERROR_HANDLED", ("C10_HIP_ERROR_HANDLED", API_C10)),
-        ("C10_CUDA_IGNORE_ERROR", ("C10_HIP_IGNORE_ERROR", API_C10)),
-        ("C10_CUDA_CLEAR_ERROR", ("C10_HIP_CLEAR_ERROR", API_C10)),
         ("c10::cuda", ("c10::hip", API_C10)),
         ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
         ("CUDAStream", ("HIPStream", API_C10)),
