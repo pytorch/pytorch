@@ -257,6 +257,7 @@ ALLOW_LIST = [
     ("aten::unsafe_split_with_sizes.out", datetime.date(2022, 9, 1)),
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
+    ("aten::sym_numel", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
