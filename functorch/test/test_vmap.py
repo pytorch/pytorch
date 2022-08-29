@@ -4465,7 +4465,7 @@ class TestRandomness(TestCase):
 
         x = torch.rand(3, 4)
         with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
-          jacfwd(torch.bernoulli)(x)
+            jacfwd(torch.bernoulli)(x)
 
         # x isn't batched so use bernoulli since it doesn't do inplace randomness
         jacfwd(torch.bernoulli, randomness="same")(x)
