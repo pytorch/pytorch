@@ -2165,6 +2165,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 x = torch.cat((x,))
                 x = torch.cat(tensors=[x,])
                 x = F.layer_norm(x, x.shape)
+                x = F.layer_norm(x, x.shape[1:])
                 # TODO: enable below after FX graph mode quantization handles
                 # it, currently this is not supported
                 # x = F.linear(input=x, weight=self.w1, bias=self.b1)

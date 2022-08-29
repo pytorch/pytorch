@@ -375,20 +375,37 @@ def create_submodule_from_subgraph(
                     elif arg.op == 'call_function' and \
                             arg.target == operator.getitem:
                         source, target = arg.args[0], arg.args[1]
-                        # for now, this is copy-pasta'ed
-                        # TODO(future PR): better reuse code with get_attr
-                        # handling above
-                        assert source.op == 'get_attr', \
-                            f'{source.op} not handled yet for ' + \
-                            f'{source.format_node()}'
-                        new_attr_name = source.name
-                        obj = getattr_from_fqn(model, source.target)
-                        # wrap in Parameter to silence a warning in torch/fx/graph.py
-                        obj_copy = torch.nn.Parameter(obj.clone().detach())
-                        setattr(gm, new_attr_name, obj_copy)
-                        get_attr_copy = g.get_attr(new_attr_name)
-                        cur_args_copy.append(g.call_function(
-                            operator.getitem, (get_attr_copy, target)))
+                        if source.op == 'get_attr':
+                            # for now, this is copy-pasta'ed
+                            # TODO(future PR): better reuse code with get_attr
+                            # handling above
+                            new_attr_name = source.name
+                            obj = getattr_from_fqn(model, source.target)
+                            # wrap in Parameter to silence a warning in torch/fx/graph.py
+                            obj_copy = torch.nn.Parameter(obj.clone().detach())
+                            setattr(gm, new_attr_name, obj_copy)
+                            get_attr_copy = g.get_attr(new_attr_name)
+                            cur_args_copy.append(g.call_function(
+                                operator.getitem, (get_attr_copy, target)))
+                        elif source.op == 'call_function' and \
+                                source.target == builtins.getattr:
+                            # for now, this is copy-pasta'ed
+                            # TODO(future PR): better reuse code with
+                            # call_function get_attr handling above
+                            source_first_arg = source.args[0]
+                            new_source_first_arg = old_name_to_new_node[source_first_arg.name]
+                            call_fun_node = g.call_function(
+                                builtins.getattr, (new_source_first_arg, source.args[1]))
+                            new_arg_node = g.call_function(
+                                operator.getitem, (call_fun_node, arg.args[1]))
+                            cur_args_copy.append(new_arg_node)
+                        else:
+                            raise AssertionError(
+                                f'{source.op} not handled yet for ' + \
+                                f'{source.format_node()}, ' + \
+                                f'arg: {arg.format_node()}, ' + \
+                                f'cur_node_orig: {cur_node_orig.format_node()}'
+                            )
 
                     else:
                         raise AssertionError(
