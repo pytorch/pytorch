@@ -142,7 +142,7 @@ class DummyGitRepo(GitRepo):
 
 class TestGitHubPR(TestCase):
     def test_merge_rules_valid(self) -> None:
-        "Test that merge_rules.json can be parsed"
+        "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
         self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
 
