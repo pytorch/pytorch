@@ -1457,7 +1457,6 @@ class CommTensor(torch.Tensor):
                     # execution during tracing is correct.
                     e._work.wait()
 
-
                 return e._tensor
             else:
                 return e
