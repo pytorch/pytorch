@@ -2391,7 +2391,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
     new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim + 1)
     if new_shape is not None:
-        return prims.collapse_view(a, a.shape, start_dim, end_dim + 1)
+        return prims.collapse_view(a, start_dim, end_dim + 1)
 
     # Makes a copy if it can't make a view
     return prims.collapse(a, start_dim, end_dim + 1)
@@ -2583,7 +2583,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             last_dim = a_.ndim - 1
             # NOTE: using split_dim instead of unsqueeze may seem silly here,
             # but it's necessary to get the strides correct
-            a_ = prims.split_dim(a_, a_.shape, last_dim, a_.shape[last_dim])
+            a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
             idx = idx + 1
             continue
 
@@ -2609,7 +2609,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
             if new_shape is None:
                 if allow_copy:
-                    return prims.reshape(a, a.shape, shape)
+                    return prims.reshape(a, shape)
 
                 msg = "Cannot view a tensor with shape {0} and strides {1} as a tensor with shape {2}!".format(
                     a.shape, a.stride(), shape
@@ -2620,7 +2620,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
         # Splits the (possibly flattened) dimension to create the desired dim length
         if accum != length:
-            a_ = prims.split_dim(a_, a_.shape, idx, length)
+            a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
 

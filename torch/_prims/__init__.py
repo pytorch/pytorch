@@ -1300,9 +1300,7 @@ def _collapse_view_helper(
     return new_shape, new_strides
 
 
-def _collapse_view_meta(
-    a: TensorLikeType, origianl_shape: ShapeType, start: int, end: int
-) -> TensorLikeType:
+def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
     new_shape, new_strides = _collapse_view_helper(a, start, end)
 
     if new_shape is None:
@@ -1312,9 +1310,7 @@ def _collapse_view_meta(
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
-def _collapse_view_aten(
-    a: Tensor, original_shape: ShapeType, start: int, end: int
-) -> Tensor:
+def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
     # Special-cases zero-dim tensors
     if a.ndim == 0:
         shape = (1,)
@@ -1348,7 +1344,7 @@ _collapse_view_doc = """
   """
 
 collapse_view = _make_prim(
-    schema="collapse_view(Tensor(a) a, SymInt[] original_shape, int start, int end) -> Tensor(a)",
+    schema="collapse_view(Tensor(a) a, int start, int end) -> Tensor(a)",
     meta=_collapse_view_meta,
     impl_aten=_collapse_view_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1609,9 +1605,7 @@ slice_in_dim = _make_prim(
 )
 
 
-def _split_dim_meta(
-    a: TensorLikeType, original_shape: ShapeType, dim: int, outer_length: int
-) -> TensorLikeType:
+def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     utils.validate_idx(a.ndim, dim)
     utils.validate_dim_length(outer_length)
@@ -1638,9 +1632,7 @@ def _split_dim_meta(
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
-def _split_dim_aten(
-    a: Tensor, original_shape: ShapeType, dim: int, outer_length: int
-) -> Tensor:
+def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
     inner_length = a.shape[dim] // outer_length
     new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
@@ -1656,7 +1648,7 @@ _split_dim_doc = """
 
 # TODO: consider renaming split_dim_view
 split_dim = _make_prim(
-    schema="split_dim(Tensor(a) a, SymInt[] original_shape, int dim, SymInt outer_length) -> Tensor(a)",
+    schema="split_dim(Tensor(a) a, int dim, SymInt outer_length) -> Tensor(a)",
     meta=_split_dim_meta,
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1824,7 +1816,7 @@ cat = _make_prim(
 )
 
 
-def _reshape_meta(a: TensorLikeType, original_shape: ShapeType, shape: ShapeType):
+def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
@@ -1840,7 +1832,7 @@ def _reshape_meta(a: TensorLikeType, original_shape: ShapeType, shape: ShapeType
     return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
-def _reshape_aten(a: Tensor, original_shape: ShapeType, shape: ShapeType) -> Tensor:
+def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
     return a.reshape(shape).contiguous().clone()
 
 
@@ -1849,7 +1841,7 @@ _reshape_doc = """
   containing a copy of the data in a.
   """
 reshape = _make_prim(
-    schema="reshape(Tensor a, SymInt[] original_shape, SymInt[] shape) -> Tensor",
+    schema="reshape(Tensor a, SymInt[] shape) -> Tensor",
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
