@@ -609,7 +609,12 @@ static int THPVariable_clear(THPVariable* self) {
     }
   }
   TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
-  self->cdata = MaybeOwned<Variable>();
+  {
+    // MapAllocator can take significant time to release large tensors;
+    // release the GIL here to avoid impacting main thread perf.
+    pybind11::gil_scoped_release no_gil;
+    self->cdata = MaybeOwned<Variable>();
+  }
   return 0;
 }
 
@@ -2144,7 +2149,8 @@ py::object torchDispatchFromTensorImpl(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
           unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  // NB: this may not be a python tensor if you got here from a mode!
+  // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
