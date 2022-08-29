@@ -41,7 +41,7 @@ here is the basic process.
    requests are small; in that case, no need to let us know about what
    you want to do, just get cracking. But if the change is going to be
    large, it's usually a good idea to get some design comments about it
-   first.
+   first by `submitting an RFC <https://github.com/pytorch/rfcs/blob/master/README.md>`__.
 
    -  If you don't know how big a change is going to be, we can help you
       figure it out! Just post about it on
