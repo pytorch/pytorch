@@ -965,6 +965,18 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
+def get_new_issue_link(
+    org: str,
+    project: str,
+    labels: List[str],
+    template: str = "bug-report.yml"
+) -> str:
+    labels_str = ",". join(labels)
+    return (f"https://github.com/{org}/{project}/issues/new?"
+            f"labels={urllib.parse.quote(labels_str)}&"
+            f"template={urllib.parse.quote(template)}")
+
+
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     from pathlib import Path
 
@@ -980,10 +992,8 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
-            reject_reason = (f"{rules_path} does not exist, no merge rule can be found. "
-                             f"Please run `@pytorchbot rebase -s` to rebase the PR "
-                             f"onto PyTorch stable branch before trying to merge again.")
-            raise FileNotFoundError(reject_reason)
+            reject_reason = (f"{rules_path} does not exist")
+            raise RuntimeError(reject_reason)
         with open(rules_path) as fp:
             rc = yaml.safe_load(fp)
         return [MergeRule(**x) for x in rc]
@@ -998,23 +1008,25 @@ def find_matching_merge_rule(pr: GitHubPR,
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-
-    issue_link = (f"https://github.com/{pr.org}/{pr.project}/issues/new"
-                  f"?labels=module%3A%20ci&template=bug-report.yml")
-    bug_report = (f"Please help file a [bug report]({issue_link}) "
-                  f"to PyTorch DevX Team with the PR number.")
+    issue_link = get_new_issue_link(
+        org=pr.org,
+        project=pr.project,
+        labels=["module: ci"],
+    )
+    reject_reason = (f"No rules find to match PR, "
+                     f"please [report]{issue_link} this issue to DevX team")
 
     try:
-        # Any error here means that the script couldn't load the merge rules for
-        # some reasons, and the error should say so
         rules = read_merge_rules(repo, pr.org, pr.project)
-    except FileNotFoundError as error:
-        raise RuntimeError(str(error))
-    except RuntimeError as error:
-        raise RuntimeError(f"{error}. {bug_report}")
+    except Exception as error:
+        # Any error here means that the script couldn't load the merge rules for
+        # some reasons, and the reject message should say so
+        raise RuntimeError(f"{reject_reason}: {error}")
 
-    reject_reason = (f"PR {pr.pr_num} does not match any merge rules. "
-                     f"This should not happen. {bug_report}")
+    if not rules:
+        reject_reason = "Merges are not allowed into repository without a rules."
+        raise RuntimeError(reject_reason)
+
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
@@ -1086,9 +1098,6 @@ def find_matching_merge_rule(pr: GitHubPR,
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason)
-
-    # Reaching here means the default reject reason will be used. This should not happen
-    # and is most likely a bug
     raise RuntimeError(reject_reason)
 
 
