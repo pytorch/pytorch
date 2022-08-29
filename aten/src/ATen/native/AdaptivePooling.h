@@ -19,7 +19,7 @@ DECLARE_DISPATCH(adaptive_max_pooling_fn, adaptive_max_pool2d_kernel);
 DECLARE_DISPATCH(adaptive_max_pooling_backward_fn, adaptive_max_pool2d_backward_kernel);
 
 static inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  return (a * c) / b;
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
 static inline int64_t end_index(int64_t a, int64_t b, int64_t c) {

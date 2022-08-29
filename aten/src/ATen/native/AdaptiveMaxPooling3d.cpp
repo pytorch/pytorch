@@ -67,7 +67,7 @@ namespace native {
 namespace {
 
 inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  return (a * c) / b;
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
 inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
