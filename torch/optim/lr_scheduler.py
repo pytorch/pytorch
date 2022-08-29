@@ -725,6 +725,7 @@ class PolynomialLR(_LRScheduler):
         >>> # lr = 0.00050   if epoch == 2
         >>> # lr = 0.00025   if epoch == 3
         >>> # lr = 0.0       if epoch >= 4
+        >>> # xdoctest: +SKIP("undefined vars")
         >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
         >>> for epoch in range(100):
         >>>     train(...)

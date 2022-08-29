@@ -5,7 +5,7 @@ import inspect
 import sys
 import typing
 import warnings
-from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -14,8 +14,9 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _patch_torch, _type_utils, errors  # noqa: F401
+from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -212,13 +213,34 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
 
 def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
-    if tuple_node.kind() != "prim::TupleConstruct":
+    if not _is_tuple_construct(tuple_value):
         raise errors.SymbolicValueError(
             f"ONNX symbolic expected node type 'prim::TupleConstruct', "
             f"got '{tuple_node.kind()}'.",
             tuple_value,
         )
     return tuple(tuple_node.inputs())
+
+
+def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+    """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
+    Args:
+        tuple_value: A tuple of tensor, scale, zero_point, and optionally axis.
+    Returns:
+        A tuple of tensor, scale, zero_point, and optionally axis.
+    """
+    tuple_node = tuple_value.node()
+    # A quantized tensor is represented as tuple of the form (tensor, scale, zero_point, <axis>)
+    if not _is_tuple_construct(tuple_value):
+        raise errors.SymbolicValueError(
+            f"ONNX symbolic expected the output of `{tuple_node}` to be a quantized "
+            f"tensor. Is this likely due to missing support for quantized "
+            f"`{tuple_node.kind()}`. Please create an issue on {_constants.PYTORCH_GITHUB_ISSUES_URL}",
+            tuple_value,
+        )
+    unpacked = tuple(tuple_node.inputs())
+    assert len(unpacked) == 3 or len(unpacked) == 4
+    return unpacked
 
 
 # Check if list_value is output from prim::ListConstruct
@@ -349,44 +371,57 @@ def quantized_args(
     """
 
     def decorator(fn):
-        fn._scale = scale
-        fn._zero_point = zero_point
-
         @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
-            _scale = fn._scale
-            if _scale is not None:
-                _scale = g.op("Constant", value_t=torch.tensor(_scale))
-            _zero_point = fn._zero_point
-            if _zero_point is not None:
-                _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
+            nonlocal scale
+            nonlocal zero_point
+            if scale is not None:
+                _scale = g.op("Constant", value_t=torch.tensor(scale))
+            else:
+                _scale = None
+            if zero_point is not None:
+                _zero_point = g.op("Constant", value_t=torch.tensor(zero_point))
+            else:
+                _zero_point = None
 
             # Support variable length arguments by marking unspecified ones as non-quantized
             arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
                 len(args) - len(arg_q_descriptors)
             )
             descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
+
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
-                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                (descriptor and _is_value(arg) and _is_tuple_construct(arg))
                 for descriptor, arg in descriptor_args
             ):
                 return fn(g, *args, **kwargs)
 
-            dequantized_args = []
+            # Dequantize arguments that are quantized
+            non_quantized_args = []
             for descriptor, arg in descriptor_args:
-                if descriptor:
-                    dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
-                    dequantized_args.append(dequantized_arg)
+                if descriptor and _is_value(arg) and _is_tuple_construct(arg):
+                    # Quantized arg is a tuple of (value, scale, zero_point)
+                    dequantized_arg, arg_scale, arg_zero_point, _ = dequantize_helper(
+                        g, arg
+                    )
+                    non_quantized_args.append(dequantized_arg)
+                    # Set scale and zero_point to the first quantized input if not already set
                     if _scale is None:
-                        _scale = scale
+                        _scale = arg_scale
                     if _zero_point is None:
-                        _zero_point = zero_point
+                        _zero_point = arg_zero_point
                 else:
-                    dequantized_args.append(arg)
+                    # Non-quantized arg
+                    non_quantized_args.append(arg)
             # TODO(justinchuby): Only single output is supported for now. We may want to
             # support multiple outputs in the future.
-            output = fn(g, *dequantized_args, **kwargs)
+            output = fn(g, *non_quantized_args, **kwargs)
+
+            assert _scale is not None, "Bug: Scale must be set for quantized operator"
+            assert (
+                _zero_point is not None
+            ), "Bug: Zero point must be set for quantized operator"
 
             return quantize_helper(g, output, _scale, _zero_point)
 
@@ -472,6 +507,10 @@ def _is_scalar_list(x: _C.Value) -> bool:
     )
 
 
+def _is_tuple_construct(x: _C.Value) -> bool:
+    return x.node().kind() == "prim::TupleConstruct"
+
+
 def is_caffe2_aten_fallback() -> bool:
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -479,6 +518,7 @@ def is_caffe2_aten_fallback() -> bool:
     )
 
 
+@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -487,6 +527,7 @@ def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     return x_type.dim()
 
 
+@_beartype.beartype
 def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -501,6 +542,7 @@ def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     return x_type.sizes()
 
 
+@_beartype.beartype
 def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
     sizes = _get_tensor_sizes(x)
     return sizes[dim] if sizes else None
@@ -521,42 +563,68 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
     return dim
 
 
-def _unimplemented(op: str, msg: str):
+def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(
-            "ONNX export failed on " + op + " because " + msg + " not supported"
-        )
+        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
     elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
-        _onnx_unsupported(f"{op}, {msg}")
+        _onnx_unsupported(f"{op}, {msg}", value)
 
 
-def _onnx_unsupported(op_name: str):
-    raise RuntimeError(
+def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of operator {op_name}. "
-        "Please feel free to request support or submit a pull request on PyTorch GitHub."
+        f"Please feel free to request support or submit a pull request "
+        f"on PyTorch GitHub: {_constants.PYTORCH_GITHUB_ISSUES_URL}"
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
-def _onnx_opset_unsupported(op_name: str, current_opset: int, supported_opset: int):
-    raise RuntimeError(
+def _onnx_opset_unsupported(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    value: Optional[_C.Value] = None,
+) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _onnx_opset_unsupported_detailed(
-    op_name: str, current_opset: int, supported_opset: int, reason: str
-):
-    raise RuntimeError(
+    op_name: str,
+    current_opset: int,
+    supported_opset: int,
+    reason: str,
+    value: Optional[_C.Value] = None,
+) -> NoReturn:
+    message = (
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
+    if isinstance(value, _C.Value):
+        raise errors.SymbolicValueError(
+            message,
+            value,
+        )
+    raise errors.OnnxExporterError(message)
 
 
 def _block_list_in_opset(name: str):
     def symbolic_fn(*args, **kwargs):
-        raise RuntimeError(
+        raise errors.OnnxExporterError(
             f"ONNX export failed on {name}, which is not implemented for opset "
             f"{GLOBALS.export_onnx_opset_version}. "
             "Try exporting with other opset versions."
@@ -1214,8 +1282,8 @@ def _reshape_helper(g, input, shape, allowzero=0):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if GLOBALS.export_onnx_opset_version <= 13:
         if allowzero == 1:
-            raise _onnx_opset_unsupported(
-                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14
+            _onnx_opset_unsupported(
+                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
             )
         return g.op("Reshape", input, shape)
     else:
@@ -1376,13 +1444,15 @@ def dequantize_helper(
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
-        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point) for per tensor quantization,
-          or (quantized_tensor, scale, zero_point, axis) for per channel quantization.
-          Representing the quantized tensor.
-        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the data type of quantized tensor.
-          It must be either torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
+        qtensor: torch._C.Value, either a tuple of (quantized_tensor, scale, zero_point)
+            for per tensor quantization, or
+            (quantized_tensor, scale, zero_point, axis) for per channel quantization,
+            representing the quantized tensor.
+        qdtype: torch.onnx.TensorProtoDataType default None, if not None, represents the
+            data type of quantized tensor. It must be either
+            torch.onnx.TensorProtoDataType.UINT8 or torch.onnx.TensorProtoDataType.INT8.
     """
-    unpacked_qtensors = _unpack_tuple(qtensor)
+    unpacked_qtensors = _unpack_quantized_tensor(qtensor)
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
@@ -1404,6 +1474,7 @@ def dequantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            qtensor,
         )
 
     return (
@@ -1430,6 +1501,9 @@ def quantize_helper(
         zero_point: torch._C.Value, quantized zero point.
         axis: Optional[torch._C.Value] default None, if None, represents per tensor quantization.
             Otherwise, represents per channel quantization, along given axis.
+
+    Returns:
+        A TupleConstruct storing information of the quantized tensor.
     """
     if (
         axis is not None
@@ -1441,16 +1515,15 @@ def quantize_helper(
             GLOBALS.export_onnx_opset_version,
             13,
             "Attribute axis is not supported.",
+            tensor,
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):  # type: ignore[attr-defined]
-        # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
