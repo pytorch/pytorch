@@ -2641,6 +2641,10 @@ def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=True)
 
 
+def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.reshape(other.size())
+
+
 @register_decomposition(torch.ops.aten.roll)
 def roll(
     a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
@@ -3142,6 +3146,10 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
+
+
+def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.view(other.size())
 
 
 # CompositeImplicitAutograd - don't register decomp

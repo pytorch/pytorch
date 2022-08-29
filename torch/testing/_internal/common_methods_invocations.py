@@ -16931,6 +16931,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.reshape_as",
+        torch_opinfo_name="reshape_as",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
@@ -16992,6 +16997,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view",
         torch_opinfo_name="view",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.view_as",
+        torch_opinfo_name="view_as",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
