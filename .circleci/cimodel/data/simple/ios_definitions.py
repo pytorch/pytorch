@@ -1,5 +1,5 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
-from cimodel.data.simple.util.branch_filters import gen_filter_dict, PR_BRANCH_LIST
+from cimodel.data.simple.util.branch_filters import gen_filter_dict_exclude
 import cimodel.lib.miniutils as miniutils
 
 XCODE_VERSION = MultiPartVersion([12, 5, 1])
@@ -53,7 +53,7 @@ class IOSJob:
         if self.extra_props:
             props_dict.update(self.extra_props)
 
-        props_dict["filters"] = gen_filter_dict(branches_list=PR_BRANCH_LIST)
+        props_dict["filters"] = gen_filter_dict_exclude()
 
         return [{"pytorch_ios_build": props_dict}]
 

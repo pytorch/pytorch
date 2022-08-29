@@ -1438,9 +1438,10 @@ workflows:
           xcode-version: "13.3.1"
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-1-2-default
           build-environment: macos-12-py3-x86-64
@@ -1451,9 +1452,10 @@ workflows:
             - macos-12-py3-x86-64-build
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-2-2-default
           build-environment: macos-12-py3-x86-64
@@ -1464,9 +1466,10 @@ workflows:
             - macos-12-py3-x86-64-build
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-1-1-functorch
           build-environment: macos-12-py3-x86-64
@@ -1478,9 +1481,10 @@ workflows:
             - macos-12-py3-x86-64-build
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - mac_build:
           name: macos-12-py3-x86-64-lite-interpreter-build-test
           build-environment: macos-12-py3-lite-interpreter-x86-64
@@ -1488,9 +1492,10 @@ workflows:
           build-generates-artifacts: false
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - mac_build:
           name: macos-12-py3-arm64-build
           build-environment: macos-12-py3-arm64
@@ -1498,9 +1503,10 @@ workflows:
           python-version: "3.9.12"
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - upload_test_stats:
           name: upload test status
           requires:
@@ -1509,16 +1515,18 @@ workflows:
             - macos-12-py3-x86-64-test-1-1-functorch
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
       - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
@@ -1528,9 +1536,10 @@ workflows:
           context: org-member
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
@@ -1540,9 +1549,10 @@ workflows:
           context: org-member
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
@@ -1553,9 +1563,10 @@ workflows:
           context: org-member
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
@@ -1565,9 +1576,10 @@ workflows:
           build_environment: ios-12-5-1-x86-64-coreml
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
@@ -1578,9 +1590,10 @@ workflows:
           context: org-member
           filters:
             branches:
-              only:
-                - /gh\/.*\/head/
-                - /pull\/.*/
+              ignore:
+                - master
+                - nightly
+                - postnightly
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "1"
