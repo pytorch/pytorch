@@ -83,6 +83,10 @@ class SubgraphMatcher:
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
                 return True
+
+            if pn.op == "call_module":
+                return pn.target in gn.target
+
             return pn.target == gn.target
         return False
 
