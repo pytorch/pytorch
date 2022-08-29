@@ -132,7 +132,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
-    raise FileNotFoundError("testing")
+    raise RuntimeError("testing")
 
 
 class DummyGitRepo(GitRepo):

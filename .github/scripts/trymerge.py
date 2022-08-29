@@ -992,8 +992,8 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
     else:
         rules_path = Path(repo.repo_dir) / repo_relative_rules_path
         if not rules_path.exists():
-            reject_reason = (f"{rules_path} does not exist")
-            raise RuntimeError(reject_reason)
+            print(f"{rules_path} does not exist, returning empty rules")
+            return []
         with open(rules_path) as fp:
             rc = yaml.safe_load(fp)
         return [MergeRule(**x) for x in rc]
@@ -1013,18 +1013,12 @@ def find_matching_merge_rule(pr: GitHubPR,
         project=pr.project,
         labels=["module: ci"],
     )
-    reject_reason = (f"No rules find to match PR, "
-                     f"please [report]{issue_link} this issue to DevX team")
+    reject_reason = (f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team")
 
-    try:
-        rules = read_merge_rules(repo, pr.org, pr.project)
-    except Exception as error:
-        # Any error here means that the script couldn't load the merge rules for
-        # some reasons, and the reject message should say so
-        raise RuntimeError(f"{reject_reason}: {error}")
-
+    rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
-        reject_reason = "Merges are not allowed into repository without a rules."
+        reject_reason = ("No matching merge rules found in merge_rules.yaml. " +
+                         "Please verify the file content to ensure there are a valid merge rule defined.")
         raise RuntimeError(reject_reason)
 
     #  Used to determine best rejection reason
