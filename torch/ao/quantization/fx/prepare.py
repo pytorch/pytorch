@@ -74,6 +74,8 @@ from .utils import (
     assert_and_get_unique_device,
     get_non_observable_arg_indexes_and_types,
     get_new_attr_name_with_prefix,
+    node_arg_is_weight,
+    node_arg_is_bias,
     NON_QUANTIZABLE_WEIGHT_OPS,
 )
 
@@ -135,8 +137,6 @@ __all__ = [
     "maybe_insert_output_observer_for_node",
     "maybe_make_input_output_share_observers",
     "maybe_propagate_dtype_for_node",
-    "node_arg_is_bias",
-    "node_arg_is_weight",
     "prepare",
     "propagate_dtypes_for_known_nodes",
     "qat_swap_modules",
@@ -153,22 +153,6 @@ DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
-
-def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
-        if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
-            return True
-        return node.kwargs.get("weight") is arg
-    return False
-
-def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
-        if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
-            return True
-        return node.kwargs.get("bias") is arg
-    return False
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,

@@ -55,7 +55,7 @@ from .utils import (
     create_getattr_from_value,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
-    WEIGHT_INDEX_DICT,
+    node_arg_is_weight,
 )
 
 from torch.ao.quantization.quantize import (
@@ -107,27 +107,26 @@ def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool
     """
     return isinstance(node, Node) and node.name in qconfig_map and qconfig_map[node.name] is None
 
-def run_weight_observers(observed: GraphModule) -> None:
+def run_weight_observers(observed: GraphModule, backend_config: BackendConfig) -> None:
     """ Extract the subgraph that produces the weight for dynamic quant
     or weight only quant node and run the subgraph to observe the weight.
     Note that the observers of dynamic quant or weight only quant ops are
     run during the convert step.
     """
     for node in observed.graph.nodes:
-        if node.op != 'call_function' or node.target not in WEIGHT_INDEX_DICT:
+        if node.op != "call_function":
             continue
-        for i, node_arg in enumerate(node.args):
-            if i not in WEIGHT_INDEX_DICT[node.target]:
-                continue
+        for node_arg in node.args:
             # node_arg is weight
-            weight_observer_nodes = collect_producer_nodes(node_arg)
-            if weight_observer_nodes is None:
-                continue
-            weight_observer_module = \
-                graph_module_from_producer_nodes(
-                    observed, weight_observer_nodes)
-            # run the weight observer
-            weight_observer_module()
+            if node_arg and node_arg_is_weight(node, node_arg, backend_config):
+                weight_observer_nodes = collect_producer_nodes(node_arg)
+                if weight_observer_nodes is None:
+                    continue
+                weight_observer_module = \
+                    graph_module_from_producer_nodes(
+                        observed, weight_observer_nodes)
+                # run the weight observer
+                weight_observer_module()
 
 # this method is temporary will be removed soon
 def duplicate_quantize_dynamic_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -590,6 +589,9 @@ def convert(
             "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
+    if backend_config is None:
+        backend_config = get_native_backend_config()
+
     node_name_to_scope, prepare_custom_config, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
@@ -638,7 +640,7 @@ def convert(
 
     # always run weight observers in the top level forward method
     # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
+    run_weight_observers(model, backend_config)
 
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
@@ -717,8 +719,6 @@ def convert(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
 
-    if backend_config is None:
-        backend_config = get_native_backend_config()
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
