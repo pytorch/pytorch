@@ -15,6 +15,7 @@ def dispatch(*types, **kwargs):
     defined suggesting the additional method to break the ambiguity.
     Examples
     --------
+    >>> # xdoctest: +SKIP
     >>> @dispatch(int)
     ... def f(x):
     ...     return x + 1
