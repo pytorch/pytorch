@@ -654,7 +654,7 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
         if kwarg_type == "float":
             return 1.0
         assert kwarg_type == "tensor"
-        return torch.ones(inp.shape[:-2])
+        return torch.ones(inp.shape[:-2], device=device, dtype=dtype)
 
     for tol_type in ["float", "tensor"]:
         for atol_type, rtol_type in product(["none", tol_type], repeat=2):

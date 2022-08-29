@@ -199,6 +199,8 @@ test_dynamo_shard() {
       test_overrides \
       test_python_dispatch \
       test_fx \
+      test_package \
+      test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -597,7 +599,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
