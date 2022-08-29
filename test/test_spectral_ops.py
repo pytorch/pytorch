@@ -1539,7 +1539,7 @@ class FFTDocTestFinder:
         doctests = []
 
         modname = name if name is not None else obj.__name__
-        globs = dict() if globs is None else globs
+        globs = {} if globs is None else globs
 
         for fname in obj.__all__:
             func = getattr(obj, fname)

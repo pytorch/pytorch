@@ -80,17 +80,18 @@ def create_contiguous(shape):
 class FakeSymbolicTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device):
-        # sym_strides doesn't work yet
-        # TODO: this is wrong in general
         offset = 0
+        # TODO: this is wrong in general
+        sym_stride = create_contiguous(sym_shape)
         r = torch.Tensor._make_wrapper_subclass(
             cls, sym_shape,
-            create_contiguous(sym_shape), offset,
+            sym_stride, offset,
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
 
         r.sym_shape = sym_shape
+        r.sym_stride = sym_stride
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -106,6 +107,10 @@ class FakeSymbolicTensor(torch.Tensor):
         if func_overload == torch.ops.aten.sym_size.default:
             self = args[0]
             return self.sym_shape
+
+        if func_overload == torch.ops.aten.sym_stride.default:
+            self = args[0]
+            return self.sym_stride
 
         # some calls can be redirected to `sym_size` rather than
         # `sym_sizes`. `sym_size` uses `dim` to canonicalize an index
@@ -260,6 +265,12 @@ class TestPySymInt(TestCase):
 
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
+
+    @skipIfNoSympy
+    def test_stride(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
+        self.assertIsInstance(x.stride()[0], CPP_SYMINT_CLASS)
 
     @skipIfNoSympy
     def test_size_expressions(self):

@@ -197,7 +197,7 @@ class TestPrims(TestCase):
             return torch.digamma(a)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a)
+            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
 
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
@@ -217,7 +217,7 @@ class TestPrims(TestCase):
             return torch.sigmoid(torch.digamma(a))
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a)
+            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_sigmoid = any(
@@ -235,6 +235,28 @@ class TestPrims(TestCase):
         self.assertFalse(includes_aten_sigmoid)
         self.assertFalse(includes_prims_digamma)
         self.assertTrue(includes_nvprims_exp)
+
+
+    def test_aten_overload_to_prims(self, device):
+        # This test is to ensure that the torch.ops.aten calls are replaced with refs
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.ops.aten.sigmoid.default(torch.ops.aten.digamma.default(a))
+
+        with TorchRefsMode():
+            gm = make_fx(func)(a)
+
+        # Check that all call_function nodes are prims
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        all_prims_namespace = all(
+            node.target.name.startswith("prims") for node in call_function_nodes
+        )
+        self.assertTrue(all_prims_namespace)
+
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -330,6 +352,31 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, ())
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    @parametrize("correction", [0, 1])
+    @parametrize("keepdim", [True, False])
+    def test_var_mean(self, device, dtype, correction, keepdim):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+
+        def _wrapper(a):
+            return torch.var_mean(a, [0, 1], correction=correction, keepdim=keepdim)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(_wrapper)(make_arg((5, 5)))
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_nvprims_var_mean = any(
+            torch.ops.nvprims.var_mean.main == node.target
+            for node in call_function_nodes
+        )
+        self.assertTrue(includes_nvprims_var_mean)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -485,6 +532,43 @@ class TestRefs(TestCase):
 
 
 instantiate_device_type_tests(TestRefs, globals())
+
+
+class TestDecomp(TestCase):
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_decomposition_type_promotion_nvprim_amp(self, device, dtype):
+        x = torch.rand(5, device=device).to(dtype)
+        y = torch.rand(5, device=device).to(dtype)
+
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
+        from torch.fx.experimental.proxy_tensor import make_fx
+        op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
+
+        def fn0(*arg):
+            return _is_func_unsupported_nvfuser(mode, op, arg, {})
+
+        def fn1(x):
+            x = x * 2
+            x = x @ x
+            x = x * 2
+            return x
+
+        with TorchRefsNvfuserCapabilityMode() as mode:
+            self.assertFalse(fn0(x, y, 0.3, False))
+
+            with torch.autocast("cuda"):
+                gm = make_fx(fn1, decomposition_table=torch._prims.context.nvfuser_decomp_table())(x)
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_aten_to_copy = any(
+                torch.ops.aten._to_copy.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_aten_to_copy)
+
+
+instantiate_device_type_tests(TestDecomp, globals())
 
 
 if __name__ == "__main__":
