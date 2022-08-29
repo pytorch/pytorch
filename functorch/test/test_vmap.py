@@ -3300,8 +3300,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.lstsq'),
-        xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_rank'),
         xfail('linalg.matrix_rank', 'hermitian'),
         xfail('linalg.pinv'),
@@ -3524,6 +3522,24 @@ class TestVmapOperatorsOpInfo(TestCase):
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
+
+    def test_fill__Tensor(self, device):
+        # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
+        def test():
+            B = 2
+            args = (torch.randn(B, 3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (0, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (-1, 0))
+
+            args = (torch.randn(3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (None, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn([]))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
+
+        check_vmap_fallback(self, test, Tensor.fill_)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
