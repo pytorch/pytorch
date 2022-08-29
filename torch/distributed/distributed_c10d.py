@@ -6,7 +6,7 @@ import pickle
 import time
 import warnings
 from datetime import timedelta
-from typing import Callable, Dict, Optional, Tuple, Union, Sequence
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
@@ -350,7 +350,7 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
             return rank
     raise RuntimeError(f"Group rank {group_rank} is not part of group {group}")
 
-def get_process_group_ranks(group: ProcessGroup) -> Sequence[int]:
+def get_process_group_ranks(group: ProcessGroup):
     """
     Get all ranks associated with ``group``.
 
