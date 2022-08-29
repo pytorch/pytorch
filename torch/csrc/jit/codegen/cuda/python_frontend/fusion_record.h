@@ -112,18 +112,6 @@ struct SqueezeOpRecord : RecordFunctor {
   int64_t dim_;
 };
 
-struct SetOpRecord : RecordFunctor {
-  SetOpRecord(std::vector<size_t> _args, std::vector<size_t> _outputs)
-      : RecordFunctor(std::move(_args), std::move(_outputs)) {}
-  virtual ~SetOpRecord() = default;
-
-  void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
-    auto output = torch::jit::fuser::cuda::set(arg);
-    fd.setFusionState(outputs.at(0), output);
-  }
-};
-
 //! Specialized Record Functor for the FusionDefinition's broadcast_in_dim op.
 
 struct BroadcastOpRecord : RecordFunctor {
