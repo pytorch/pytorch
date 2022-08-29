@@ -277,6 +277,7 @@ def create_submodule_from_subgraph(
 
     """
     # TODO: handle kwargs
+    # TODO: handle non-normalized kwargs
 
     #
     # create a blank GraphModule with an empty graph
@@ -369,6 +370,18 @@ def create_submodule_from_subgraph(
                     cur_name = kwarg.name + '_' + str(counter)
                     seen_names.add(cur_name)
                     cur_kwargs_copy[kwarg_name] = g.placeholder(cur_name)
+                elif isinstance(kwarg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
+                    cur_names = []
+                    for inner_kwarg in kwarg:
+                        counter = 0
+                        while inner_kwarg.name + '_' + str(counter) in seen_names:
+                            counter += 1
+                        cur_name = inner_kwarg.name + '_' + str(counter)
+                        seen_names.add(cur_name)
+                        cur_names.append(cur_name)
+                    cur_kwargs_copy[kwarg_name] = \
+                        [g.placeholder(cur_name) for cur_name in cur_names]
+
                 elif isinstance(kwarg, Node):
                     # arg_kwarg_idx >= num_passthrough args, we need to copy
                     assert kwarg.op == 'get_attr', f'{kwarg.op} not handled yet'
