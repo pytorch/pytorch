@@ -333,25 +333,6 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
         np.testing.assert_allclose(a.numpy() + b.numpy(), x.numpy())
 
-    def test_bf16(self):
-        TENSOR_LEN = 8
-
-        def easy(x, y):
-            aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y)
-            return bbb
-
-        traced = torch.jit.trace(
-            easy,
-            (torch.rand(TENSOR_LEN, dtype=torch.bfloat16), torch.full((TENSOR_LEN,), 0.5, dtype=torch.bfloat16)),
-        )
-
-        a = torch.rand(TENSOR_LEN, dtype=torch.double)
-        b = torch.full((TENSOR_LEN,), 0.5, dtype=torch.double)
-        x = warmup_and_run_forward(traced, a, b)
-        self.assertLastGraphAllFused()
-        self.assertEqual((a + b) * b, x)
-
     def test_double(self):
         TENSOR_LEN = 8
 
