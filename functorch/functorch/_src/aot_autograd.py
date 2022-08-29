@@ -19,7 +19,6 @@ from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
-from .decompositions import register_decomposition
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 
@@ -177,11 +176,6 @@ def normalize_as_list(x):
 
 
 aot_autograd_decompositions = {}
-
-# TODO: Remove these stupid decompositions
-@register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
-def _reshape_alias(x, shape, strides):
-    return aten.view(x, shape)
 
 
 # This is a list since looking forward, we can have this arbitrarily nested.
