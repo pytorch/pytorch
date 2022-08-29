@@ -1018,7 +1018,7 @@ def find_matching_merge_rule(pr: GitHubPR,
 
     rules = read_merge_rules(repo, pr.org, pr.project)
     if not rules:
-        reject_reason = f"Rejecting the merge as no rule is defined for the repository in {MERGE_RULE_PATH}"
+        reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
 
     #  Used to determine best rejection reason
