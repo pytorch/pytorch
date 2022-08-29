@@ -23,6 +23,7 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::CudaToFile, false},
+      {DebugDumpOption::DebugInfo, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
       {DebugDumpOption::FusionSegmenterLog, false},
@@ -35,7 +36,9 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
-      {DebugDumpOption::PerfDebugVerbose, false}};
+      {DebugDumpOption::PerfDebugVerbose, false},
+      {DebugDumpOption::TransformPropagator, false},
+      {DebugDumpOption::InlinePropagator, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -56,6 +59,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::CudaFull] = true;
       } else if (token == "cuda_to_file") {
         options_map[DebugDumpOption::CudaToFile] = true;
+      } else if (token == "debug_info") {
+        options_map[DebugDumpOption::DebugInfo] = true;
       } else if (token == "launch_param") {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
@@ -82,6 +87,10 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
+      } else if (token == "transform_propagator") {
+        options_map[DebugDumpOption::TransformPropagator] = true;
+      } else if (token == "inline_propagator") {
+        options_map[DebugDumpOption::InlinePropagator] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -89,10 +98,11 @@ auto parseDebugDumpOptions() {
             token,
             "'\nAvailable options:\n",
             "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
+            "\tcuda_to_file, debug_info, launch_param, segmented_fusion, fusion_args,\n",
             "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
             "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n");
+            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n",
+            "\ttransform_propagator, inline_propagator\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -123,6 +133,8 @@ auto parseDisableOptions() {
       } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
+        TORCH_WARN(
+            "fmad is disabled for nvrtc, which could negatively affect performance. Try removing `fma` from env variable PYTORCH_NVFUSER_DISABLE for optimal performance.");
         options_map[DisableOption::Fma] = true;
       } else if (token == "index_hoist") {
         options_map[DisableOption::IndexHoist] = true;
@@ -152,7 +164,10 @@ auto parseDisableOptions() {
 
 auto parseEnableOptions() {
   std::unordered_map<EnableOption, bool> options_map = {
-      {EnableOption::Complex, false}, {EnableOption::KernelProfile, false}};
+      {EnableOption::Complex, false},
+      {EnableOption::KernelProfile, false},
+      {EnableOption::LinearDecomposition, false},
+      {EnableOption::ConvDecomposition, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
@@ -163,6 +178,10 @@ auto parseEnableOptions() {
         options_map[EnableOption::Complex] = true;
       } else if (token == "kernel_profile") {
         options_map[EnableOption::KernelProfile] = true;
+      } else if (token == "linear_decomposition") {
+        options_map[EnableOption::LinearDecomposition] = true;
+      } else if (token == "conv_decomposition") {
+        options_map[EnableOption::ConvDecomposition] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -268,12 +287,12 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
   return dump_options.at(option);
 }
 
-bool isDisabled(DisableOption option) {
+bool isOptionDisabled(DisableOption option) {
   const static auto options = parseDisableOptions();
   return options.at(option);
 }
 
-bool isEnabled(EnableOption option) {
+bool isOptionEnabled(EnableOption option) {
   const static auto options = parseEnableOptions();
   return options.at(option);
 }
@@ -282,7 +301,8 @@ bool useFallback() {
   // Keep this env var for compatibility
   const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
   bool fallback_disabled = disable_fb_env ? atoi(disable_fb_env) : false;
-  fallback_disabled = fallback_disabled || isDisabled(DisableOption::Fallback);
+  fallback_disabled =
+      fallback_disabled || isOptionDisabled(DisableOption::Fallback);
 
   return !fallback_disabled;
 }

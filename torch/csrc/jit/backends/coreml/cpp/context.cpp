@@ -12,10 +12,6 @@ BackendRegistrar::BackendRegistrar(ContextInterface* ctx) {
   g_coreml_ctx_registry.store(ctx);
 }
 
-bool isCoreMLAvailable() {
-  auto p = g_coreml_ctx_registry.load();
-  return p ? p->isCoreMLAvailable() : false;
-}
 void setModelCacheDirectory(std::string path) {
   auto p = g_coreml_ctx_registry.load();
   if (p) {
