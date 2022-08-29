@@ -1248,6 +1248,17 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
+# ---[ Kernel asserts
+set(PYTORCH_ENABLE_KERNEL_ASSERTS OFF CACHE BOOL "Default kernel asserts are disabled on ROCm only")
+# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
+# For ROCm, it can be enabled by setting PYTORCH_ENABLE_KERNEL_ASSERTS
+if(USE_CUDA OR (USE_ROCM AND PYTORCH_ENABLE_KERNEL_ASSERTS))
+  message(STATUS "Enabling kernel asserts")
+  add_definitions(PYTORCH_ENABLE_KERNEL_ASSERTS)
+else()
+  message(STATUS "Disabling kernel asserts")
+endif()
+
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")

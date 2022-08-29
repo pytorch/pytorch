@@ -328,7 +328,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // code that would otherwise be suppressed when building Release.
 #if defined(__ANDROID__) || defined(__APPLE__) ||  \
     (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
-    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
+    (!defined(PYTORCH_ENABLE_KERNEL_ASSERTS))
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
@@ -368,7 +368,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && defined(PYTORCH_ENABLE_KERNEL_ASSERTS))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -386,7 +386,7 @@ __host__ __device__
         const char* function) throw() __attribute__((__noreturn__));
 
 #if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(ROCM_DISABLE_GPU_ASSERTS)
+    && defined(PYTORCH_ENABLE_KERNEL_ASSERTS)
 // ROCm supports __assert_fail only as a device side function.
 __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion,
