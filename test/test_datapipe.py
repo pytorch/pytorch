@@ -1294,6 +1294,10 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (*data, data[0] + data[2]), fn_n1, [0, 2], -1)
         _helper(lambda data: (*data, (-data[1], -data[2], data[1] + data[2])), fn_nn, [1, 2], -1)
 
+        # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
+        _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
+        _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
+
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
