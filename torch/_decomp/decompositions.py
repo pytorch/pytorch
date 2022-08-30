@@ -541,6 +541,32 @@ def binary_cross_entropy_backward(
     return result
 
 
+@register_decomposition(aten.soft_margin_loss)
+@out_wrapper()
+@pw_cast_for_opmath
+def soft_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    loss = torch.log1p(torch.exp(-input * target))
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.soft_margin_loss_backward)
+@pw_cast_for_opmath
+def soft_margin_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    grad_input = target * grad_output * (torch.sigmoid(target * self) - 1)
+    if reduction == Reduction.MEAN.value:
+        grad_input = grad_input / self.numel()
+    return grad_input
+
+
 @register_decomposition(aten._euclidean_dist)
 def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
     x1_norm = x1.pow(2).sum(-1, True)
