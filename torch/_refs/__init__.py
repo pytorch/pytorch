@@ -2609,9 +2609,9 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        if input.device.type == "cuda":
+        squeeze_rstd = prims.squeeze(rstd, reduction_dims)
+        if input.device.type != "cpu":
             save_mean = prims.convert_element_type(running_mean, compute_dtype)
-            squeeze_rstd = prims.squeeze(rstd, reduction_dims)
             save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
         else:
             save_mean = torch.empty([0], device=running_mean.device)

@@ -1587,9 +1587,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.instance_norm',
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
+        '_refs.native_group_norm',
         '_refs.instance_norm',
-        '_refs.transpose',
-        '_refs.expand_as',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
