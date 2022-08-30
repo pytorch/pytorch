@@ -275,6 +275,10 @@ class MaskedTensor(torch.Tensor):
         kwargs["requires_grad"] = requires_grad
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
+        if data.requires_grad:
+            print ("UserWarning")
+            warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
+                          "To avoid this, you can use data.clone().detach()", UserWarning)
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 
     def _preprocess_data(self, data, mask):
@@ -331,6 +335,24 @@ class MaskedTensor(torch.Tensor):
     def __init__(self, data, mask, requires_grad=False):
         self._preprocess_data(data, mask)
         self._validate_members()
+
+    @staticmethod
+    def from_values(data, mask):
+        """ Differentiable constructor for MaskedTensor """
+        class Constructor(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, data, mask):
+                return MaskedTensor(data.clone(), mask.clone())
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, None
+
+        result = Constructor.apply(data, mask)
+        if data.requires_grad:
+            result.requires_grad_(True)
+            # result.retain_grad()
+        return result
 
     def _set_data_mask(self, data, mask):
         self._masked_data = data
@@ -469,7 +491,6 @@ class MaskedTensor(torch.Tensor):
                 raise ValueError(f"__torch_dispatch__, {func.name}: args[2] expected to be the same as data.stride()")
             return MaskedTensor(func(data, args[1], args[2], **kwargs), mask)
         if func in [torch.ops.aten.detach, torch.ops.aten.clone]:
-            _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
             return MaskedTensor(func(data), mask)
         if func is torch.ops.aten._softmax:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
@@ -589,7 +610,16 @@ class MaskedTensor(torch.Tensor):
         return self.get_data().masked_fill(~self.get_mask(), value)
 
     def get_data(self):
-        return self._masked_data
+        class GetData(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, self):
+                return self._masked_data
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, None
+
+        return GetData.apply(self)
 
     def get_mask(self):
         return self._masked_mask
