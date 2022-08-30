@@ -1356,10 +1356,9 @@ int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
   return total_numel;
 }
 
-bool check_same_numel(const std::vector<at::Tensor>& input_tensors) {
-  int64_t numel = input_tensors[0].numel();
+bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
   for (const auto& input_tensor : input_tensors) {
-    if (numel != input_tensor.numel()) {
+    if (!input_tensors[0].is_same_size(input_tensor)) {
       return false;
     }
   }
@@ -2016,9 +2015,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     const AllgatherOptions& opts) {
   check_gpu_tensors_different_devices(inputTensors);
   // @lint-ignore CLANGTIDY
-  bool same_numel = check_same_numel(outputTensors.back());
+  bool same_size = check_same_size(outputTensors.back());
 
-  if (same_numel) {
+  if (same_size) {
     auto outputFlattened =
         flatten_for_scatter_gather(outputTensors, inputTensors, size_);
     check_gpu_tensors_different_devices(outputFlattened);
@@ -2110,9 +2109,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     const ReduceScatterOptions& opts) {
   check_gpu_tensors_different_devices(outputTensors);
   // @lint-ignore CLANGTIDY
-  bool same_numel = check_same_numel(inputTensors.back());
+  bool same_size = check_same_size(inputTensors.back());
 
-  if (same_numel) {
+  if (same_size) {
     // @lint-ignore CLANGTIDY
     auto tensor = outputTensors.back();
     RECORD_PARAM_COMMS(

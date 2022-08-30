@@ -1,3 +1,6 @@
+from typing import Optional
+
+
 class MultiPartVersion:
     def __init__(self, parts, prefix=""):
         self.parts = parts
@@ -13,14 +16,11 @@ class MultiPartVersion:
         else:
             return [self.prefix]
 
-    def render_dots(self):
-        return ".".join(self.prefixed_parts())
-
-    def render_dots_or_parts(self, with_dots):
-        if with_dots:
-            return [self.render_dots()]
-        else:
+    def render_dots_or_parts(self, sep: Optional[str] = None):
+        if sep is None:
             return self.prefixed_parts()
+        else:
+            return [sep.join(self.prefixed_parts())]
 
 
 class CudaVersion(MultiPartVersion):
