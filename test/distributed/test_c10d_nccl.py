@@ -2747,6 +2747,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nncl_rank_membership(self):
+        self._test_rank_membership(backend="nccl")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
