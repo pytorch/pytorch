@@ -3300,8 +3300,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.lstsq'),
-        xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_rank'),
         xfail('linalg.matrix_rank', 'hermitian'),
         xfail('linalg.pinv'),
@@ -4434,7 +4432,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:
