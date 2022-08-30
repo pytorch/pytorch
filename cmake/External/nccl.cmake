@@ -26,7 +26,7 @@ if(NOT __NCCL_INCLUDED)
         ProcessorCount(NUM_HARDWARE_THREADS)
         # Assume 2 hardware threads per cpu core
         math(EXPR MAX_JOBS "${NUM_HARDWARE_THREADS} / 2")
-        # ProcessorCount might return 0, set to a possitive number
+        # ProcessorCount might return 0, set to a positive number
         if(MAX_JOBS LESS 2)
             set(MAX_JOBS 2)
         endif()
@@ -42,7 +42,6 @@ if(NOT __NCCL_INCLUDED)
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
-        env
         ${MAKE_COMMAND}
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
