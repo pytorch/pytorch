@@ -1,8 +1,8 @@
 import contextlib
 import functools
 import itertools
-import weakref
 import warnings
+import weakref
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Union
@@ -154,9 +154,7 @@ class FakeTensorConverter(object):
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", "The .grad attribute of a Tensor"
-            )
+            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
             out.grad = self.from_real_tensor(fake_mode, t.grad)
