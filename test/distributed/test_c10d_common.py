@@ -1457,7 +1457,6 @@ class CommTensor(torch.Tensor):
                     # execution during tracing is correct.
                     e._work.wait()
 
-
                 return e._tensor
             else:
                 return e
@@ -1560,9 +1559,6 @@ class CompilerTest(MultiProcessTestCase):
         traced_fn = make_fx(fn)(xx)
         traced_fn.graph.lint()
         traced_fn.graph.eliminate_dead_code()
-
-        if self.rank == 0:
-            traced_fn.graph.print_tabular()
 
         # make sure the mul op indeed waits for comm
         for node in traced_fn.graph.nodes:
