@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -1806,8 +1806,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
