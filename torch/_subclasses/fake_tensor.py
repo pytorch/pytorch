@@ -15,7 +15,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_any, tree_flatten, tree_map
 
 
 aten = torch.ops.aten
@@ -563,28 +563,14 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_tensors = [
             i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
         ]
-        flat_symints = [
-            i
-            for i in tree_flatten((args, kwargs))[0]
-            if isinstance(i, torch._C.SymIntNode)
-        ]
-        has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        has_symbolic_sizes = any(i.has_sym_ints for i in flat_arg_tensors) or tree_any(
+            lambda a: isinstance(a, torch._C.SymIntNode), (args, kwargs)
         )
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
-
-            with no_dispatch():
-                if symbolic_shapes.is_symbolic_op(func):
-                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-                if func == aten.size.default:
-                    raise RuntimeError(
-                        "Trying to call aten.size on a tensor with symbolic shapes. "
-                        "It's likely that this is from calling tensor.shape in C++"
-                    )
 
             with self.restore():
                 if func in meta_table:
@@ -593,7 +579,26 @@ class FakeTensorMode(TorchDispatchMode):
                 if func in decomposition_table:
                     return decomposition_table[func](*args, **kwargs)
 
-                # Decomposes CompositeImplicitAutograd ops
+            with no_dispatch():
+                # TODO: the naming of this function is awful, this doesn't
+                # mean that an op is SymInt, it is more narrow
+                if symbolic_shapes.is_symbolic_op(func):
+                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
+                if func == aten.size.default:
+                    raise RuntimeError(
+                        "Trying to call aten.size on a tensor with symbolic shapes. "
+                        "It's likely that this is from calling tensor.shape in C++"
+                    )
+
+        # TODO: this list is duped with proxy tensor
+        if func not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.dim.default,
+            torch.ops.aten.sym_numel.default,
+        ]:
+            with self.restore():
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
