@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/ivalue.h>
