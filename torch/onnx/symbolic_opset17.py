@@ -20,6 +20,14 @@ from torch.onnx import symbolic_helper
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    return g.op("LayerNormalization", input, weight, bias, epsilon_f=eps, axis_i=len(normalized_shape))
+    return g.op(
+        "LayerNormalization",
+        input,
+        weight,
+        bias,
+        epsilon_f=eps,
+        axis_i=len(normalized_shape),
+    )
