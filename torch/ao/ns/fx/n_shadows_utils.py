@@ -317,14 +317,6 @@ def create_submodule_from_subgraph(
             cur_kwargs_copy = {}
             seen_names: Set[str] = set()
             old_name_to_new_node: Dict[str, Node] = {}
-            # args up to num_passthrough_args are passed in from module
-            # input, other args are copied
-            if cur_node_orig.target in BINARY_FUNCTIONS:
-                num_passthrough = 2
-            else:
-                num_passthrough = 1
-
-            arg_kwarg_idx = 0
 
             def _add_placeholder(
                 g: Graph, node: Node, seen_names, old_name_to_new_node
@@ -345,113 +337,40 @@ def create_submodule_from_subgraph(
                 # note: for graphs starting with patterns such as `y = x + x`, we
                 # need to ensure we do not add multiple placeholders with the
                 # same name
-                if isinstance(arg, Node) and arg_kwarg_idx < num_passthrough:
+                if isinstance(arg, Node):
                     p = _add_placeholder(
                         g, arg, seen_names, old_name_to_new_node)
                     cur_args_copy.append(p)
-                elif isinstance(arg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
+                elif isinstance(arg, (list, tuple)):
                     new_arg = []
                     for inner_arg in arg:
-                        new_arg.append(_add_placeholder(
-                            g, inner_arg, seen_names, old_name_to_new_node))
+                        if isinstance(inner_arg, Node):
+                            new_arg.append(_add_placeholder(
+                                g, inner_arg, seen_names, old_name_to_new_node))
+                        else:
+                            new_arg.append(inner_arg)
                     cur_args_copy.append(new_arg)
                     # TODO(before land): populate old_name_to_new_node
-                elif isinstance(arg, Node):
-                    # arg_kwarg_idx >= num_passthrough args, we need to copy
-                    if arg.op == 'get_attr':
-                        new_attr_name = arg.name
-                        obj = getattr_from_fqn(model, arg.target)
-                        # wrap in Parameter to silence a warning in torch/fx/graph.py
-                        obj_copy = torch.nn.Parameter(obj.clone().detach())
-                        setattr(gm, new_attr_name, obj_copy)
-                        cur_args_copy.append(g.get_attr(new_attr_name))
-                    elif arg.op == 'call_function' and \
-                            arg.target == builtins.getattr:
-                        source, target = arg.args[0], arg.args[1]
-                        assert source.name in old_name_to_new_node
-                        new_source = old_name_to_new_node[source.name]
-                        cur_args_copy.append(g.call_function(
-                            arg.target, (new_source, target)))
-                    elif arg.op == 'call_function' and \
-                            arg.target == operator.getitem:
-                        source, target = arg.args[0], arg.args[1]
-                        if source.op == 'get_attr':
-                            # for now, this is copy-pasta'ed
-                            # TODO(future PR): better reuse code with get_attr
-                            # handling above
-                            new_attr_name = source.name
-                            obj = getattr_from_fqn(model, source.target)
-                            # wrap in Parameter to silence a warning in torch/fx/graph.py
-                            obj_copy = torch.nn.Parameter(obj.clone().detach())
-                            setattr(gm, new_attr_name, obj_copy)
-                            get_attr_copy = g.get_attr(new_attr_name)
-                            cur_args_copy.append(g.call_function(
-                                operator.getitem, (get_attr_copy, target)))
-                        elif source.op == 'call_function' and \
-                                source.target == builtins.getattr:
-                            # for now, this is copy-pasta'ed
-                            # TODO(future PR): better reuse code with
-                            # call_function get_attr handling above
-                            source_first_arg = source.args[0]
-                            new_source_first_arg = old_name_to_new_node[source_first_arg.name]
-                            call_fun_node = g.call_function(
-                                builtins.getattr, (new_source_first_arg, source.args[1]))
-                            new_arg_node = g.call_function(
-                                operator.getitem, (call_fun_node, arg.args[1]))
-                            cur_args_copy.append(new_arg_node)
-                        else:
-                            raise AssertionError(
-                                f'{source.op} not handled yet for ' + \
-                                f'{source.format_node()}, ' + \
-                                f'arg: {arg.format_node()}, ' + \
-                                f'cur_node_orig: {cur_node_orig.format_node()}'
-                            )
-                    elif arg.op == 'call_method':
-                        old_target = arg.args[0]
-                        new_target = old_name_to_new_node[old_target.name]
-                        new_arg_args = (new_target, *arg.args[1:])
-                        new_arg_node = g.call_method(arg.target, new_arg_args)
-                        cur_args_copy.append(new_arg_node)
-                    else:
-                        raise AssertionError(
-                            f'{arg.op} not handled yet for arg ' + \
-                            f'{arg.format_node()} of node ' + \
-                            f'{cur_node_orig.format_node()}'
-                        )
                 else:
                     cur_args_copy.append(arg)
-
-                arg_kwarg_idx += 1
 
             for kwarg_name, kwarg in cur_node_orig.kwargs.items():
                 # TODO: dedup code with above
                 # note: for graphs starting with patterns such as `y = x + x`, we
                 # need to ensure we do not add multiple placeholders with the
                 # same name
-                if isinstance(kwarg, Node) and arg_kwarg_idx < num_passthrough:
+                if isinstance(kwarg, Node):
                     cur_kwargs_copy[kwarg_name] = _add_placeholder(
                         g, kwarg, seen_names, old_name_to_new_node)
-                elif isinstance(kwarg, (list, tuple)) and arg_kwarg_idx < num_passthrough:
+                elif isinstance(kwarg, (list, tuple)):
                     new_kwarg = []
                     for inner_kwarg in kwarg:
                         p = _add_placeholder(
                             g, inner_kwarg, seen_names, old_name_to_new_node)
                         new_kwarg.append(p)
                     cur_kwargs_copy[kwarg_name] = new_kwarg
-
-                elif isinstance(kwarg, Node):
-                    # arg_kwarg_idx >= num_passthrough args, we need to copy
-                    assert kwarg.op == 'get_attr', f'{kwarg.op} not handled yet'
-                    new_attr_name = kwarg.name
-                    obj = getattr_from_fqn(model, kwarg.target)
-                    # wrap in Parameter to silence a warning in torch/fx/graph.py
-                    obj_copy = torch.nn.Parameter(obj.clone().detach())
-                    setattr(gm, new_attr_name, obj_copy)
-                    cur_kwargs_copy[kwarg_name] = g.get_attr(new_attr_name)
                 else:
                     cur_kwargs_copy[kwarg_name] = kwarg
-
-                arg_kwarg_idx += 1
 
             cur_args_copy = tuple(cur_args_copy)  # type: ignore[assignment]
         else:

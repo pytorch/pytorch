@@ -863,27 +863,36 @@ def prepare_n_shadows_model(
                     # inside the module
                     # TODO(future PR): adjust this for ops where it does not work
 
-                    if first_node.target in BINARY_FUNCTIONS:
-                        prev_node_0 = get_normalized_nth_input(first_node, mt, 0)
-                        prev_node_1 = get_normalized_nth_input(first_node, mt, 1)
-                        new_args = []
-                        if isinstance(prev_node_0, Node):
-                            new_args.append(prev_node_0)
-                        if isinstance(prev_node_1, Node):
-                            new_args.append(prev_node_1)
-                        new_args = tuple(new_args)  # type: ignore[assignment]
-                    else:
-                        prev_node = get_normalized_nth_input(first_node, mt, 0)
-                        if isinstance(prev_node, (list, tuple)):
-                            new_args = (*prev_node,)  # type: ignore[assignment]
-                        else:
-                            new_args = (prev_node,)  # type: ignore[assignment]
-                    new_kwargs: Dict[str, Any] = {}
+                    # TODO(future PR): handle fusion patterns where non-first nodes
+                    # need inputs
+
+                    # pass in all node args and kwargs
+                    new_args = []
+                    for arg in first_node.args:
+                        if isinstance(arg, Node):
+                            new_args.append(arg)
+                        elif isinstance(arg, (list, tuple)) and len(arg) and isinstance(arg[0], Node):
+                            for inner_arg in arg:
+                                if isinstance(inner_arg, Node):
+                                    new_args.append(inner_arg)
+
+                    new_kwargs = {}
+                    for name, old_kwarg in first_node.kwargs.items():
+                        if isinstance(old_kwarg, Node):
+                            new_kwargs[name] = old_kwarg
+                        elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
+                            for inner_old_kwarg in old_kwarg:
+                                new_args.append(inner_old_kwarg)
+
+                    new_args = tuple(new_args)
 
                     new_node = mt.graph.call_module(
                         attr_name, args=new_args, kwargs=new_kwargs)
 
     mt.recompile()
+    # print(mt)
+    # print(getattr(mt, 'shadow_wrapper_4_1'))
+    # print(getattr(mt, 'shadow_wrapper_7_1'))
     return mt
 
 def convert_n_shadows_model(model: GraphModule) -> GraphModule:

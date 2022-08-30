@@ -2156,21 +2156,25 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 self.i = [0]
 
             def forward(self, x):
-                x = F.sigmoid(x)
-                x = F.linear(x, self.w1, self.b1)
-                x = F.linear(x, self.w1[:], self.b1)
-                x = F.relu(x)
-                x = x + x
-                x = torch.cat([x,])
-                x = torch.cat((x,))
-                x = torch.cat(tensors=[x,])
-                x = F.layer_norm(x, x.shape)
-                x = F.layer_norm(x, x.shape[1:])
-                # x = x.reshape(1, -1) * 2
-                # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
-                x = torch.matmul(x, x.reshape(2, 2))
+                if True:
+                    x = F.sigmoid(x)
+                    x = F.linear(x, self.w1, self.b1)
+                    x = F.linear(x, self.w1[:], self.b1)
+                    x = F.relu(x)
+                    x = x + x
+                    x = torch.cat([x,])
+                    x = torch.cat((x,))
+                    x = torch.cat(tensors=[x,])
+                    # TODO(future PR): enable layernorm
+                    # blocked on FX graph mode quant not inserting observer for
+                    # second arg, if the second arg is a module input
+                    # x = F.layer_norm(x, x.shape)
+                    # x = F.layer_norm(x, x.shape[1:])
+                    # x = x.reshape(1, -1) * 2
+                    # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
+                    x = torch.matmul(x, x.reshape(2, 2))
                 # TODO: enable below
-                # x = torch.matmul(x.reshape(2, 2), x.reshape(2, 2))
+                x = torch.matmul(x.reshape(2, 2), x.reshape(2, 2))
                 # TODO: enable below after FX graph mode quantization handles
                 # it, currently this is not supported
                 # x = F.linear(input=x, weight=self.w1, bias=self.b1)
