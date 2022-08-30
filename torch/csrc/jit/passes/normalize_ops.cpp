@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 
 namespace torch {
