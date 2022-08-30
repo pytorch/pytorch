@@ -97,14 +97,21 @@ install_ubuntu() {
 install_centos() {
   # Need EPEL for many packages we depend on.
   # See http://fedoraproject.org/wiki/EPEL
-  yum --enablerepo=extras install -y epel-release
+  # extras repo is not there for CentOS 9 and epel-release is already part of repo list
+  if [[ $OS_VERSION == 9 ]]; then
+      yum install -y epel-release
+      ALLOW_ERASE="--allowerasing"
+  else
+      yum --enablerepo=extras install -y epel-release
+      ALLOW_ERASE=""
+  fi
 
   ccache_deps="asciidoc docbook-dtds docbook-style-xsl libxslt"
   numpy_deps="gcc-gfortran"
   # Note: protobuf-c-{compiler,devel} on CentOS are too old to be used
   # for Caffe2. That said, we still install them to make sure the build
   # system opts to build/use protoc and libprotobuf from third-party.
-  yum install -y \
+  yum install -y $ALLOW_ERASE \
     $ccache_deps \
     $numpy_deps \
     autoconf \
@@ -122,13 +129,20 @@ install_centos() {
     glog-devel \
     hiredis-devel \
     libstdc++-devel \
-    libsndfile-devel \
     make \
-    opencv-devel \
     sudo \
     wget \
     unzip \
     vim
+
+  if [[ $OS_VERSION == 9 ]]
+  then
+	  dnf --enablerepo=crb -y install libsndfile-devel
+  else
+	  yum install -y \
+            opencv-devel \
+	    libsndfile-devel
+  fi
 
   # Cleanup
   yum clean all
@@ -137,8 +151,10 @@ install_centos() {
   rm -rf /var/lib/yum/history
 }
 
-# Install base packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+
+# Install base packages depending on the base OS
 case "$ID" in
   ubuntu)
     install_ubuntu
@@ -153,7 +169,6 @@ case "$ID" in
 esac
 
 # Install Valgrind separately since the apt-get version is too old.
-OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
 if [[ $ID == centos && $OS_VERSION == 7 ]]; then WGET_FLAG="--no-check-certificate" ; else WGET_FLAG=""; fi
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
