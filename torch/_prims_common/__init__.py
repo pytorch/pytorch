@@ -1033,6 +1033,19 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     ALWAYS_BOOL = (3,)
 
 
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1346,6 +1359,23 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
     validate_no_repeating_dims(dims)
     return dims
+
+
+def set_correction(
+    unbiased: Optional[bool] = None,
+    correction: Optional[int] = None,
+):
+    if correction is not None and unbiased is not None:
+        raise RuntimeError("cannot specify both correction and unbiased arguments")
+    elif correction is None and unbiased is None:
+        correction = 1
+    elif correction is None and unbiased is not None:
+        correction = 0 if unbiased is False else 1
+    if not isinstance(correction, int):
+        raise ValueError("correction argument should be integer")
+    if correction < 0:
+        raise ValueError("correction argument should be non-negative")
+    return correction
 
 
 def check_in_bounds_for_storage(
