@@ -4,8 +4,8 @@ on:
 
 env:
   PYTHON_VERSION: "3.8"
-  CUDA_VERSION: "11.3"
-  MAGMA_VERSION: "magma-cuda113"
+  CUDA_VERSION: "11.6"
+  MAGMA_VERSION: "magma-cuda116"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
   NUMPY_VERSION: "1.21.2"
   PR_NUM: ${{ github.event.number }}
