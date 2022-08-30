@@ -7007,6 +7007,26 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, ), kwargs=kwargs)
 
+    # test INT_TO_FLOAT promotion
+    if dtype.is_complex:
+        for d in (torch.bool, torch.int64):
+            yield SampleInput(_make_tensor(dtype=dtype), args=(_make_tensor(dtype=d),))
+            yield SampleInput(_make_tensor(dtype=d), args=(_make_tensor(dtype=dtype),))
+
+def error_inputs_poisson_nll_loss(op_info, device, **kwargs):
+    make = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # invalid reduction value
+    yield ErrorInput(SampleInput(make(5, 4), args=(make(5, 4),),
+                     kwargs={'reduction': 'abc'}),
+                     error_type=ValueError,
+                     error_regex='abc is not valid')
+    # invalid input shapes
+    yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
+                     error_regex=(r'The size of tensor a \(5\) must match the '
+                                  r'size of tensor b \(4\) at non-singleton '
+                                  r'dimension 1'))
+
 def error_inputs_soft_margin_loss(op_info, device, **kwargs):
     make = partial(make_tensor, device=device, dtype=torch.float32)
 
@@ -15550,6 +15570,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_poisson_nll_loss,
+        error_inputs_func=error_inputs_poisson_nll_loss,
     ),
     OpInfo(
         "argsort",
@@ -16246,6 +16267,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.poisson_nll_loss",
+        torch_opinfo_name="nn.functional.poisson_nll_loss",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
