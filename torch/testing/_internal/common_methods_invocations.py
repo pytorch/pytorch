@@ -7125,28 +7125,26 @@ def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
-    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # kl_div works with inputs in [0, 1] (aka the pdf of a probability measure)
+    # Then log [0, 1] = (-inf, 0], so this is the log space
+    make_arg = partial(make_tensor, low=0., device=device, dtype=dtype, requires_grad=requires_grad)
 
-    shapes_and_reduction = [
-        ((2,), "mean"),
-        ((2, 3), "mean"),
-        ((2, 3, 4), "mean"),
-        ((2,), "none"),
-        ((2,), "batchmean"),
-        ((2,), "sum"),
-    ]
+    def make_log(shape):
+        out = torch.nn.functional.log_softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
 
-    sample_inputs = []
-    for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
-        # input should be log-probability, i.e. lie in (-inf, 0]
-        input = make(shape, low=None, high=0)
-        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
-        # i.e. lie in (-inf, 0]
-        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
-        sample_inputs.append(
-            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-        )
-    return sample_inputs
+    def make_prob(shape):
+        out = torch.nn.functional.softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
+
+    shapes = ((2,), (2, 3))
+    reductions = ("none", "mean", "batchmean", "sum")
+    for shape, reduction, log_target in product(shapes, reductions, (True, False)):
+        input = make_log(shape)
+        target = make_log(shape) if log_target else make_prob(shape)
+        yield SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -15634,10 +15632,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
-        dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        dtypesIfCUDA=floating_types_and(
-            torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
-        ),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
