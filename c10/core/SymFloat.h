@@ -13,8 +13,9 @@ namespace c10 {
 // NB: this is actually double precision; we're using the Python naming here
 class C10_API SymFloat {
  public:
-  /*implicit*/ SymFloat(double d) : data_(d) {};
-  SymFloat(SymFloatNode ptr) : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)) {};
+  /*implicit*/ SymFloat(double d) : data_(d){};
+  SymFloat(SymFloatNode ptr)
+      : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)){};
   SymFloat() : data_(0.0) {}
 
   SymFloatNodeImpl* toSymFloatNodeImplUnowned() const {

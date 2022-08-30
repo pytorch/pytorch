@@ -99,10 +99,10 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
+#include <c10/core/SymFloat.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
-#include <c10/core/SymFloat.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <pybind11/cast.h>
@@ -245,9 +245,7 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
     return getPyObj().attr("__str__")().cast<std::string>();
   }
 
-  SymFloatNode dispatch_common_(
-      const char* fname,
-      const SymFloatNode& other) {
+  SymFloatNode dispatch_common_(const char* fname, const SymFloatNode& other) {
     auto pother = dynamic_cast<PythonSymFloatNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
@@ -263,7 +261,9 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
 
 SymFloat PythonSymIntNodeImpl::sym_float() {
   py::gil_scoped_acquire acquire;
-  return c10::make_intrusive<PythonSymFloatNodeImpl>(getPyObj().attr("__sym_float__")())->toSymFloat();
+  return c10::make_intrusive<PythonSymFloatNodeImpl>(
+             getPyObj().attr("__sym_float__")())
+      ->toSymFloat();
 }
 
 namespace {
@@ -1275,119 +1275,122 @@ void initJITBindings(PyObject* module) {
         }
       });
 
-  auto symint_class = py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
-      .def_static(
-          "new_symint",
-          [](py::object obj) -> c10::SymIntNode {
-            return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
-          })
-      .def(
-          "get_pyobj",
-          [](c10::SymIntNode a) -> py::object {
-            if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
-              return py::reinterpret_borrow<py::object>(psn->getPyObj());
-            }
-            return py::none();
-          })
-      .def(
-          "__add__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->add(snb);
-          })
-      .def(
-          "__radd__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->add(snb);
-          })
-      .def(
-          "__sub__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->sub(snb);
-          })
-      .def(
-          "__mul__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__rmul__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__truediv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->truediv(snb);
-          })
-      .def(
-          "__rtruediv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return snb->truediv(a);
-          })
-      .def(
-          "__floordiv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->floordiv(snb);
-          })
-      .def(
-          "__rfloordiv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return snb->floordiv(a);
-          })
-      .def(
-          "__mod__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mod(snb);
-          })
-      .def(
-          "__eq__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->eq(snb);
-          })
-      .def(
-          "__gt__",
-          [](c10::SymIntNode a, py::object b) {
-            auto snb = toSymIntNode(a, b);
-            return a->gt(snb);
-          })
-      .def(
-          "__lt__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->lt(snb);
-          })
-      .def(
-          "__le__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->le(snb);
-          })
-      .def(
-          "__ge__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->ge(snb);
-          })
-      .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
-      .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
-      .def("__sym_float__", [](c10::SymIntNode a) {
-        // TODO: remove dynamic cast when sym_float is in base class
-        auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get());
-        TORCH_INTERNAL_ASSERT(psn);
-        return psn->sym_float();
-      })
-      .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+  auto symint_class =
+      py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
+          .def_static(
+              "new_symint",
+              [](py::object obj) -> c10::SymIntNode {
+                return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
+              })
+          .def(
+              "get_pyobj",
+              [](c10::SymIntNode a) -> py::object {
+                if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
+                  return py::reinterpret_borrow<py::object>(psn->getPyObj());
+                }
+                return py::none();
+              })
+          .def(
+              "__add__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->add(snb);
+              })
+          .def(
+              "__radd__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->add(snb);
+              })
+          .def(
+              "__sub__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->sub(snb);
+              })
+          .def(
+              "__mul__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->mul(snb);
+              })
+          .def(
+              "__rmul__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->mul(snb);
+              })
+          .def(
+              "__truediv__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->truediv(snb);
+              })
+          .def(
+              "__rtruediv__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return snb->truediv(a);
+              })
+          .def(
+              "__floordiv__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->floordiv(snb);
+              })
+          .def(
+              "__rfloordiv__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return snb->floordiv(a);
+              })
+          .def(
+              "__mod__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->mod(snb);
+              })
+          .def(
+              "__eq__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->eq(snb);
+              })
+          .def(
+              "__gt__",
+              [](c10::SymIntNode a, py::object b) {
+                auto snb = toSymIntNode(a, b);
+                return a->gt(snb);
+              })
+          .def(
+              "__lt__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->lt(snb);
+              })
+          .def(
+              "__le__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->le(snb);
+              })
+          .def(
+              "__ge__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->ge(snb);
+              })
+          .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
+          .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
+          .def(
+              "__sym_float__",
+              [](c10::SymIntNode a) {
+                // TODO: remove dynamic cast when sym_float is in base class
+                auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get());
+                TORCH_INTERNAL_ASSERT(psn);
+                return psn->sym_float();
+              })
+          .def("__str__", [](c10::SymIntNode a) { return a->str(); });
 
   py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
       .def_static(

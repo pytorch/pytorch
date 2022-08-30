@@ -68,8 +68,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/SymIntNodeImpl.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymIntNodeImpl.h>
 
 #include <array>
 #include <cstddef>

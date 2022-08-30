@@ -16,7 +16,7 @@ using SymFloatNode = c10::intrusive_ptr<SymFloatNodeImpl>;
 class C10_API SymFloatNodeImpl : public c10::intrusive_ptr_target {
  public:
   c10::SymFloat toSymFloat();
-  virtual ~SymFloatNodeImpl() {};
+  virtual ~SymFloatNodeImpl(){};
 
   template <typename T>
   c10::intrusive_ptr<T> dyn_cast() const {
