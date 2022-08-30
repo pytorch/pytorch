@@ -1,4 +1,4 @@
-from functools import wraps, partial, reduce
+from functools import wraps, partial
 from itertools import product, chain, islice
 import itertools
 import functools
@@ -6120,7 +6120,7 @@ def error_inputs_view_reshape(op, device, **kwargs):
         else:
             # to avoid having issues with a regex
             shape = ', '.join(map(str, b))
-            size = a if type(a) is int else reduce(operator.mul, a, 1)
+            size = a if type(a) is int else functools.reduce(operator.mul, a, 1)
             error_regex = rf"shape '\[{shape}\]' is invalid for input of size {size}"
 
         # convert to tensor
