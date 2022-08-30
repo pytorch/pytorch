@@ -658,6 +658,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   }
 }
 
+CAFFE_DECLARE_KNOWN_TYPE(Tensor)
 } // namespace caffe2
 
 C10_CLANG_DIAGNOSTIC_POP()
