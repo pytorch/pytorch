@@ -13,7 +13,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_WITH_CROSSREF,
-    DeterministicGuard
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch.overrides import (
