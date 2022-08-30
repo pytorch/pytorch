@@ -1411,18 +1411,17 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
-  const bool skip_torch_function = torch::should_skip_torch_function();
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(self, args, kwargs, parsed_args, true);
     check_deprecated(signature);
-    return PythonArgs(traceable, skip_torch_function, signature, parsed_args);
+    return PythonArgs(traceable, signature, parsed_args);
   }
 
   for (auto& signature : signatures_) {
     if (signature.parse(self, args, kwargs, parsed_args, false)) {
       check_deprecated(signature);
-      return PythonArgs(traceable, skip_torch_function, signature, parsed_args);
+      return PythonArgs(traceable, signature, parsed_args);
     }
   }
 

@@ -9,12 +9,7 @@ import pickle
 import collections
 import unittest
 
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    TEST_WITH_CROSSREF,
-)
-from torch.testing._internal.common_subclass import RedispatchTensor
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -23,11 +18,6 @@ from torch.overrides import (
     is_tensor_method_or_property,
     TorchFunctionMode
 )
-from torch.testing._internal.common_device_type import (
-    ops,
-    instantiate_device_type_tests,
-)
-from torch.testing._internal.common_methods_invocations import op_db
 from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.utils._pytree import tree_map
 
@@ -44,7 +34,7 @@ def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""
     if has_torch_function((a, b, c)):
         return handle_torch_function(foo, (a, b, c), a, b, c=c)
-    if c is not None:
+    if c:
         return a + b + c
     return a + b
 
@@ -1144,7 +1134,7 @@ class TestTorchFunctionMode(TestCase):
         with A():
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
+            self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1587,81 +1577,6 @@ class TestTorchFunctionMode(TestCase):
         s = set()
         s.add(a)
         s.add(DiagTensor(d))
-
-class TestTorchFunctionRedispatch(TestCase):
-    def test_simple(self):
-        x = RedispatchTensor(torch.ones(1))
-        ret = bar(x)
-        self.assertIs(ret, x)
-        self.assertExpectedInline(pprint.pformat(x.call_log), """\
-[('bar',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1.]),),
-  {})]""")
-
-    def test_recursive(self):
-        x = RedispatchTensor(torch.full((1,), 1))
-        y = RedispatchTensor(torch.full((1,), 2))
-        z = RedispatchTensor(torch.full((1,), 3))
-        ret = foo(x, y, z)
-        self.assertEqual(ret, torch.full((1,), 6))
-        self.assertExpectedInline(pprint.pformat(x.call_log), """\
-[('foo',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1]), RedispatchTensor([2])),
-  {'c': RedispatchTensor([3])}),
- ('_TensorBase.add',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1]), RedispatchTensor([2])),
-  None)]""")
-        self.assertExpectedInline(pprint.pformat(y.call_log), """\
-[('foo',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1]), RedispatchTensor([2])),
-  {'c': RedispatchTensor([3])}),
- ('_TensorBase.add',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1]), RedispatchTensor([2])),
-  None)]""")
-        self.assertExpectedInline(pprint.pformat(z.call_log), """\
-[('foo',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([1]), RedispatchTensor([2])),
-  {'c': RedispatchTensor([3])}),
- ('_TensorBase.add',
-  (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,),
-  (RedispatchTensor([3]), RedispatchTensor([3])),
-  None)]""")
-
-
-class TestTorchFunctionRedispatchOps(TestCase):
-    @ops(op_db)
-    def test_redispatch(self, device, dtype, op):
-        def clone_preserving_strides(x):
-            if not x.layout == torch.strided:
-                ret = x.clone()
-            else:
-                ret = torch.empty_strided(x.shape, x.stride(), device=x.device, dtype=x.dtype)
-                ret.copy_(x)
-            ret.requires_grad_(x.requires_grad)
-            return ret
-
-        def wrap(x):
-            if isinstance(x, torch.Tensor):
-                return RedispatchTensor(clone_preserving_strides(x.detach()))
-            return x
-
-        for sample in op.sample_inputs(device=device, dtype=dtype):
-            wrapped = sample.transform(wrap)
-
-            expect = op(sample.input, *sample.args, **sample.kwargs)
-            actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
-
-            with torch._C.DisableTorchFunction():
-                self.assertEqual(expect, actual)
-
-
-instantiate_device_type_tests(TestTorchFunctionRedispatchOps, globals())
 
 
 if __name__ == '__main__':
