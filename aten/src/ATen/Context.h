@@ -415,7 +415,8 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
-#ifdef USE_ROCM
+#if !defined(_WIN32)
+// Windows does not allow TORCH_API + thread_local, so we skip it.
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ~ROCmBackwardPassGuard();

@@ -353,7 +353,7 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
-#ifdef USE_ROCM
+#if !defined(_WIN32)
 // Ops can query this flag to know they are in the backward pass.
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
