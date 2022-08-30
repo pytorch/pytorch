@@ -61,20 +61,20 @@ class IOSJob:
 WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False, extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
-        "use_metal": miniutils.quote(str(int(True))),
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom-ops"), extra_props={
-        "op_list": "mobilenetv2.yaml",
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
+    #     "use_metal": miniutils.quote(str(int(True))),
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom-ops"), extra_props={
+    #     "op_list": "mobilenetv2.yaml",
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("x86_64", "coreml"), is_org_member_context=False, extra_props={
         "use_coreml": miniutils.quote(str(int(True))),
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "coreml"), extra_props={
-        "use_coreml": miniutils.quote(str(int(True))),
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "coreml"), extra_props={
+    #     "use_coreml": miniutils.quote(str(int(True))),
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
 ]
 
 
