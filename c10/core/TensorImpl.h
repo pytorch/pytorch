@@ -411,7 +411,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  *
  *      - A tensor may be DTYPE UNINITIALIZED.  A tensor of this
  *        form has an uninitialized dtype.  This situation most
- *        frequently arises when a user writes Tensor x(CPU).  The dtype and
+ *        frequently arises when a user writes Tensor x(CPU).  The dtype
  *        is subsequently initialized when mutable_data<T>() is
  *        invoked for the first time.
  *
