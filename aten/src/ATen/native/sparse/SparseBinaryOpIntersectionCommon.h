@@ -390,9 +390,10 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   const auto res_shape = broadcasted_shape;
   const auto res_nnz = selected_source_values.size(0);
 
-  get_sparse_impl(res)->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
-  get_sparse_impl(res)->set_indices_and_values_unsafe(res_indices, res_values);
-  get_sparse_impl(res)->set_nnz_and_narrow(res_nnz);
+  auto* res_sparse_impl = get_sparse_impl(res);
+  res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
+  res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
+  res_sparse_impl->set_nnz_and_narrow(res_nnz);
   // Result is coalesced iff arguments are coalesced, conditioned on the fact
   // that we do not check that intersection hash values are sorted and unique.
   // <= : intersection contains only unique indices (or empty), and the algorithm's
