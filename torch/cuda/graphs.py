@@ -224,7 +224,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         they appeared in that callable's ``sample_args``.
 
     .. warning::
-        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled 
+        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
         caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
 
     .. warning::

@@ -3752,7 +3752,8 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True), decorators=[unittest.expectedFailure])],
+    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True),
+                 decorators=[unittest.expectedFailure])],
                  name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
                                                     {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
     def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
