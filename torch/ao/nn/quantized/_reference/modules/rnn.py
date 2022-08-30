@@ -57,6 +57,12 @@ class RNNCellBase(nn.RNNCellBase):
         assert weight_qparams_dict is not None
         for key, weight_qparams in weight_qparams_dict.items():
             # TODO: refactor the duplicated code to utils.py
+            weight_qscheme = weight_qparams["qscheme"]
+            weight_dtype = weight_qparams["dtype"]
+            setattr(self, key + "_qscheme", weight_qscheme)
+            setattr(self, key + "_dtype", weight_dtype)
+            assert weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
+                Exception(f"qscheme: {weight_qscheme} is not support in {self._get_name()}")
             if weight_qscheme is not None:
                 scale = weight_qparams["scale"]
                 scale_tensor = scale.clone().detach() \
