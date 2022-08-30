@@ -774,13 +774,15 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
-        return bool
+        return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        return int  # TODO: sym_int
+        # TODO: type error here is real, replace with sym_int
+        return lambda x: int(x)  # type: ignore[arg-type]
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
-        return complex
+        # TODO: type error here is real, replace with sym_complex
+        return lambda x: complex(x)  # type: ignore[arg-type]
 
     raise ValueError("Invalid dtype!")
 
@@ -1067,7 +1069,7 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
-def number_type(x: Number) -> Type:
+def number_type(x: NumberType) -> Type:
     if isinstance(x, torch.SymIntNode):
         return int
     else:

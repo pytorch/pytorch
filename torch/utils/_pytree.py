@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
 
@@ -190,7 +190,17 @@ def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
 
+# These specializations help with type inference on the lambda passed to this
+# function
+@overload
+def map_only(ty: Tuple[Type[T], Type[S]]) -> Callable[[Callable[[Union[T, S]], Any]], Callable[[Any], Any]]:
+    ...
+
+@overload
 def map_only(ty: Type[T]) -> Callable[[Callable[[T], Any]], Callable[[Any], Any]]:
+    ...
+
+def map_only(ty: Union[Type[Any], Tuple[Type[Any], ...]]) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
     else unchanged.  Ordinarily you would have to write:
