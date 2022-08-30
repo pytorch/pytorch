@@ -419,6 +419,13 @@ c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   return sym_sizes_default();
 }
 
+c10::SymInt TensorImpl::sym_numel_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_numel(this);
+  }
+  return sym_numel_default();
+}
+
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
   if (C10_UNLIKELY(is_python_dispatch())) {
     return load_pyobj_interpreter()->sym_strides(this);
@@ -843,6 +850,9 @@ void TensorImpl::ShareExternalPointer(
       data_type != ScalarType::Undefined,
       "To share with a raw external pointer you need to pass in an "
       "initialized data_type(TypeMeta).");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "ShareExternalPointer() called on tensor with symbolic shape");
   if (!size_bytes) {
     size_bytes = numel_ * data_type.itemsize();
   }
