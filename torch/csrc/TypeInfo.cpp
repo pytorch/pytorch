@@ -56,7 +56,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       return PyErr_Format(
           PyExc_TypeError,
           "torch.finfo() requires a floating point input type. Use torch.iinfo to handle '%s'",
-          type->tp_name);
+          toString(scalar_type));
     }
   }
   return THPFInfo_New(scalar_type);
@@ -82,7 +82,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
     return PyErr_Format(
         PyExc_TypeError,
         "torch.iinfo() requires an integer input type. Use torch.finfo to handle '%s'",
-        type->tp_name);
+        toString(scalar_type));
   }
   return THPIInfo_New(scalar_type);
   END_HANDLE_TH_ERRORS
