@@ -7108,11 +7108,25 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
 
-    # In addition to the regular test cases, we add two for mixed floating point and complex inputs
+    # test COMPLEX_TO_FLOAT promotion
     if dtype.is_complex:
         make = partial(make_tensor, (), device=device, requires_grad=requires_grad)
         yield SampleInput(make(dtype=dtype), args=(make(dtype=torch.double),))
         yield SampleInput(make(dtype=torch.double), args=(make(dtype=dtype),))
+
+def error_inputs_l1_loss(op_info, device, **kwargs):
+    make = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # invalid reduction value
+    yield ErrorInput(SampleInput(make(5, 4), args=(make(5, 4),),
+                     kwargs={'reduction': 'abc'}),
+                     error_type=ValueError,
+                     error_regex='abc is not a valid value for reduction')
+    # invalid input shapes
+    yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
+                     error_regex=(r'The size of tensor a \(4\) must match the '
+                                  r'size of tensor b \(5\) at non-singleton '
+                                  r'dimension 1'))
 
 def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
@@ -14497,6 +14511,7 @@ op_db: List[OpInfo] = [
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
         sample_inputs_func=sample_inputs_l1_loss,
+        error_inputs_func=error_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -16245,6 +16260,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.l1_loss",
         torch_opinfo_name="nn.functional.l1_loss",
+        # TestCommonCUDA::test_python_ref_executor__refs_nn_functional_l1_loss_executor_nvfuser_cuda_float32
+        # - RuntimeError: No reduction axis specified
         supports_nvfuser=False,
     ),
     PythonRefInfo(
