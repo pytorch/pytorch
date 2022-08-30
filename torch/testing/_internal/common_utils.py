@@ -923,9 +923,8 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
 if TEST_WITH_TORCHDYNAMO:
     import torchdynamo
-    # torchdynamo.config.trace = True
-    # torchdynamo.config.debug = True
-    torchdynamo.config.print_internal_exceptions = False
+    import logging
+    torchdynamo.config.log_level = logging.ERROR
     # TODO - Collect errors with fake tensors
     torchdynamo.config.fake_tensor_propagation = False
     # Do not spend time on helper functions that are called with different inputs

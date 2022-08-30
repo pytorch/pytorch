@@ -63,4 +63,16 @@ inline bool areAnyOptionalTensorSubclassLike(
       });
 }
 
+// Helper function to deal testing truthfulness of a scalar tensor
+// in a Composite Compliant manner.
+// NOTE: This function expects a scalar tensor of boolean dtype.
+// Eg.
+// Non-Composite Compliant Pattern : (t == 0).all().item<bool>()
+// Composite Compliant Patter : is_salar_tensor_true((t == 0).all())
+inline bool is_scalar_tensor_true(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT(t.dim() == 0)
+  TORCH_INTERNAL_ASSERT(t.scalar_type() == kBool)
+  return at::equal(t, t.new_ones({}, t.options()));
+}
+
 } // namespace at
