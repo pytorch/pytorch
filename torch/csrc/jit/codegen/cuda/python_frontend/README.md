@@ -4,14 +4,14 @@ This frontend allows for a user to describe the set of operations for nvFuser to
 
 # Usage
 
-## Example
+## Example 1 - Define and Execute a Fusion
 
 ```python
 import torch
-from torch._C._nvfuser import FusionManager, FusionDefinition, DataType
+from torch._C._nvfuser import Fusion, FusionDefinition, DataType
 
-fm = FusionManager.get()
-with FusionDefinition(fm) as fd :
+fs = Fusion()
+with FusionDefinition(fs) as fd :
     t0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1],
                           contiguous=[True, True, True],
                           dtype=DataType.Float)
@@ -27,16 +27,29 @@ with FusionDefinition(fm) as fd :
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
-nvf_out1 = fm.execute([input1, input2])[0]
+nvf_out1 = fs.execute([input1, input2])[0]
+```
+
+## Example 2 - Lookup and Execute a `Fusion` Based on Id
+
+```python
+fid = 1
+fs = Fusion(fid)
+
+input1 = torch.ones(2, 1, 8, device='cuda')
+input2 = torch.ones(2, 4, 8, device='cuda')
+
+nvf_out1 = fs.execute([input1, input2])[0]
 ```
 
 ## Components
 
-### `FusionManager` - Executes and Caches Defined Fusions
-#### `FusionManager` Methods
-* `get()`: Provides a global instance.  You cannot directly construct an instance of the `FusionManager`.
+### `Fusion` - Represents a Fusion
+#### `Fusion` Methods
+* `defined()`: Allows you to query if the `Fusion` is already defined and can be executed.
 * `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs.
-* `print_ir()`: Prints the low level IR for the currently defined fusion.
+* `id()`: Returns the fusion id for a given `Fusion`.
+* `print()`: Prints the low level IR for the currently defined fusion.
 
 ### `FusionDefiniton` Context Manager - Interface for Defining Fusions
 
@@ -95,7 +108,13 @@ python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition
 ```
 #### Notating Outputs
 
-`fd.add_output(tensor|scalar)` is used to indicate an intermediate is an output to the fusion.
+The `FusionDefintion` `add_output` method is used to indicate an intermediate is an output to the fusion.
+
+```python
+fd.add_output(tensor)
+# or
+fd.add_output(scalar)
+```
 
 # Debug Information
 **Query a list of supported operations:**
