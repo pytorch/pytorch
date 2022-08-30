@@ -38,8 +38,7 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Setup miniconda (x86, py3.8)
-        if: ${{ runner.arch == 'X64' }}
+      - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
