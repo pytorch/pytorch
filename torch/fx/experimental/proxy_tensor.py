@@ -570,8 +570,12 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            with fake_tensor_mode:
+                pass
         elif tracing_mode == "symbolic":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                pass
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
@@ -613,7 +617,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, \
+        with decompose(decomposition_table), fake_tensor_mode.restore(), \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 

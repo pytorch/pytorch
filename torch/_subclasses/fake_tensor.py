@@ -585,10 +585,11 @@ class FakeTensorMode(TorchDispatchMode):
             if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
                 return func.prim_meta_impl(*args, **kwargs)
 
-            # Decomposes CompositeImplicitAutograd ops
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+            if torch._C._dispatch_has_kernel(func.name):
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
