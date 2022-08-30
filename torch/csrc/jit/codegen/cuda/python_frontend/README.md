@@ -111,9 +111,9 @@ python -c "from torch._C._nvfuser import FusionDefinition; help(FusionDefinition
 The `FusionDefintion` `add_output` method is used to indicate an intermediate is an output to the fusion.
 
 ```python
-fd.add_output(tensor)
+add_output(output: Tensor)
 # or
-fd.add_output(scalar)
+add_output(output: Scalar)
 ```
 
 # Debug Information
