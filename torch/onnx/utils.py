@@ -1323,11 +1323,18 @@ def _reset_trace_module_map():
 
 
 def _get_module_attributes(module):
+    """Obtains the attributes of a module."""
 
-    annotations = typing.get_type_hints(type(module))
-    base_m_annotations = typing.get_type_hints(torch.nn.Module)
-    [annotations.pop(k, None) for k in base_m_annotations]
-    return {k: getattr(module, k) for k in annotations}
+    names = set(dir(module))
+    base_m_names = set(dir(torch.nn.Module))
+    for key in base_m_names:
+        names.discard(key)
+    names = set(
+        filter(
+            lambda x: not callable(getattr(module, x) and not x.startswith("_")), names
+        )
+    )
+    return {k: getattr(module, k) for k in names}
 
 
 def _export(
