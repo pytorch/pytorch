@@ -19,7 +19,7 @@ import weakref
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt
+from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
 
@@ -156,7 +156,7 @@ class _ProxyTensor:
     constant: Optional[torch.Tensor]
 
 
-def fetch_symint_proxy(tracer):
+def fetch_sym_proxy(tracer):
     def inner(e):
         n = e.get_pyobj()
         if n.constant is not None:
@@ -202,7 +202,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and pytree.tree_all_only(SymInt, lambda _: False, (args, kwargs))
+        and pytree.tree_all_only((SymInt, SymFloat), lambda _: False, (args, kwargs))
     )
 
     if torch.Tag.data_dependent_output in func_overload.tags:  # type: ignore[attr-defined]
@@ -219,8 +219,8 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
         )
 
     proxy_args, proxy_kwargs = pytree.tree_map_only(
-        SymInt,
-        fetch_symint_proxy(proxy_mode.tracer),
+        (SymInt, SymFloat),
+        fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
     proxy_out = func_overload(*proxy_args, **proxy_kwargs)
@@ -315,7 +315,7 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, SymInt):
+        elif isinstance(a, (SymInt, SymFloat)):
             assert a.get_pyobj().constant is not None
             return a.get_pyobj().constant
         return super().create_arg(a)
@@ -434,7 +434,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
-            n_args, n_kwargs = pytree.tree_map_only(SymInt, fetch_symint_proxy(self.tracer), (args, kwargs))
+            n_args, n_kwargs = pytree.tree_map_only((SymInt, SymFloat), fetch_sym_proxy(self.tracer), (args, kwargs))
 
             proxy_out = self.tracer.create_proxy('call_function', func_overload, n_args, n_kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
@@ -464,6 +464,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
 
 SymInt = torch._C.SymIntNode
+SymFloat = torch._C.SymFloatNode
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -488,7 +489,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         if not self.enable_tracing:
             return func(*args, **kwargs)
         p_args, p_kwargs = pytree.tree_map_only(
-            PySymInt,
+            (PySymInt, PySymFloat),
             lambda s: get_proxy_slot(s, self.tracer) if s.constant is None else s.constant,
             (args, kwargs)
         )
@@ -499,7 +500,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
-        assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
+        assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
         set_proxy_slot(out, self.tracer, p_out)
         return out
 
