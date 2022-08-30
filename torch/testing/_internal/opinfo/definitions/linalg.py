@@ -2048,12 +2048,12 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # jit doesn't accept tensor inputs for matrix rank
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
+                dtypes=[torch.complex64, torch.float32],
             ),
         ),
     ),
