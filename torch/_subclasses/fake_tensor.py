@@ -1,9 +1,7 @@
 import contextlib
 import functools
 import itertools
-import typing
 import weakref
-from collections import Counter
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Union
@@ -350,20 +348,6 @@ def in_kernel_invocation_manager(fake_mode):
         torch._C._remove_meta_from_tls_dispatch_include()
 
 
-@contextlib.contextmanager
-def decomp_exclude_manager(fake_mode, operators):
-    decomp_exclude_set = fake_mode.decomp_exclude_set
-    for operator in operators:
-        decomp_exclude_set[operator] += 1
-    try:
-        yield
-    finally:
-        for operator in operators:
-            decomp_exclude_set[operator] -= 1
-            if decomp_exclude_set[operator] == 0:
-                del decomp_exclude_set[operator]
-
-
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
@@ -567,8 +551,6 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
-        self.decomp_exclude_set: typing.Counter[torch._ops.OpOverload] = Counter()
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -626,17 +608,8 @@ class FakeTensorMode(TorchDispatchMode):
         # To avoid endlessly recurring, when we invoke the prim, exclude it from
         # a set of prims we will invoke again.
         if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
-            if func in self.decomp_exclude_set:
-                try:
-                    torch._C._add_meta_to_tls_dispatch_include()
-                    with no_dispatch():
-                        return func(*args, **kwargs)
-                finally:
-                    torch._C._remove_meta_from_tls_dispatch_include()
-            else:
-                manager = decomp_exclude_manager(self, [func])
-                with manager, self.restore():
-                    return func.prim_impl(*args, **kwargs)
+            with self.restore():
+                return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
             constructors = [aten.empty.SymInt]
