@@ -1277,10 +1277,10 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
+                toleranceOverride({torch.float64: tol(atol=1e-4, rtol=1e-4)}),
                 "TestGradients",
                 "test_fn_gradgrad",
                 device="cuda",
-                toleranceOverride({torch.float64: tol(atol=1e-4, rtol=1e-4)}),
             ),
         ),
     ),
