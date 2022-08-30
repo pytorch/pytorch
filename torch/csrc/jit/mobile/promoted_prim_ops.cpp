@@ -68,11 +68,6 @@ void sym_size_int(Stack& stack) {
   push(stack, t.sym_sizes()[dim]);
 }
 
-void sym_numel(Stack& stack) {
-  auto t = std::move(pop(stack)).toTensor();
-  push(stack, t.sym_numel());
-}
-
 void sym_stride(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();
   pack(stack, t.sym_strides().vec());
