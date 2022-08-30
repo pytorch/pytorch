@@ -159,6 +159,12 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return getPyObj().attr("__int__")().cast<int64_t>();
   }
 
+  // TODO: virtualize
+  SymFloat sym_float() {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("__sym_float__")().cast<c10::SymFloat>();
+  }
+
   virtual std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("__str__")().cast<std::string>();
@@ -1373,6 +1379,12 @@ void initJITBindings(PyObject* module) {
           })
       .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
       .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
+      .def("__sym_float__", [](c10::SymIntNode a) {
+        // TODO: remove dynamic cast when sym_float is in base class
+        auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get());
+        TORCH_INTERNAL_ASSERT(psn);
+        return psn->sym_float();
+      })
       .def("__str__", [](c10::SymIntNode a) { return a->str(); });
 
   py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
