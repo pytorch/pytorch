@@ -988,17 +988,34 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
 
 
 def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
-    """Return input with masked-out elements eliminated for the given operations."""
-    if mask is None:
-        return input
-    canonical_mask = _input_mask(input, mask=mask)
-    if callable(op):
-        fill_value = _reduction_identity(op.__name__, input, *args)
-        return _where(canonical_mask, input, fill_value)
-    else:
-        raise ValueError(
-            f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
-        )
+    class Combine(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input, mask):
+            """Return input with masked-out elements eliminated for the given operations."""
+            if mask is None:
+                result = input
+            canonical_mask = _input_mask(input, mask=mask)
+            if callable(op):
+                fill_value = _reduction_identity(op.__name__, input, *args)
+                result = _where(canonical_mask, input, fill_value)
+            else:
+                raise ValueError(
+                    f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
+                )
+
+            ctx.mark_non_differentiable(mask)
+            ctx.save_for_backward(mask)
+
+            return result
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            (mask,)= ctx.saved_tensors
+            grad_data = grad_output.get_data() if torch.masked.is_masked_tensor(grad_output) else grad_output
+            result = torch.masked.masked_tensor(grad_data, mask)
+            return result, None
+
+    return Combine.apply(input, mask)
 
 
 @_apply_docstring_templates
