@@ -78,6 +78,19 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         class FusionInterpreter(torch.fx.Interpreter):
+            def run_node(self, node):
+                # Squeeze requires original shape of args[0]
+                if node.target in [
+                    torch.ops.nvprims.squeeze,
+                    torch.ops.nvprims.squeeze.default,
+                ]:
+                    original_shape = list(node.args[0].meta["tensor_meta"].shape)
+                    assert len(node.args) == 2
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    args = [args[0], original_shape, args[1]]
+                    return self.call_function(node.target, args, node.kwargs)
+                return super().run_node(node)
+
             def call_function(self, target, args, kwargs):
                 # This handles tuple unpacking
                 if "getitem" in str(target):
