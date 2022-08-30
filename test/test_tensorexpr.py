@@ -887,7 +887,7 @@ class TestTensorExprFuser(BaseTestClass):
         }
         fn_dev_dtype = itertools.product(gpu_only_fns.union(fns), self.devices, self.dtypes)
         for torch_fn, dev, data_type in fn_dev_dtype:
-            if torch_fn == test_lgamma and dev=="cuda":
+            if torch_fn == test_lgamma and dev == "cuda":
                 # lgamma_cuda does not support BF16
                 continue
             torch.manual_seed(0)
@@ -903,8 +903,8 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, rand_a, rand_b)
             self.assertLastGraphAllFused()
 
-            _atol=2e-3
-            _rtol=1e-5
+            _atol = 2e-3
+            _rtol = 1e-5
             if data_type is torch.bfloat16 and torch_fn not in gpu_only_fns:
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 y = y.bfloat16()
