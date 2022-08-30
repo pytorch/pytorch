@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
@@ -1953,6 +1954,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
+  m.def(
+      "_quantize_ondevice_ptq_dynamic",
+      [](mobile::Module& m, const std::string& method_name) {
+        mobile::quantization::PTQQuanizationHelper ptq_helper;
+        ptq_helper.quantize_dynamic(m, method_name);
+      });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
