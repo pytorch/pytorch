@@ -642,6 +642,42 @@ def sample_inputs_linalg_invertible(
         yield SampleInput(make_arg(*batch, n, n))
 
 
+def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwargs):
+    """
+    This function produces inputs for matrix rank that test
+    all possible combinations for atol and rtol
+    """
+
+    def make_tol_arg(kwarg_type, inp):
+        if kwarg_type == "none":
+            return None
+        if kwarg_type == "float":
+            return 1.0
+        assert kwarg_type == "tensor"
+        return torch.ones(inp.shape[:-2], device=device)
+
+    for tol_type in ["float", "tensor"]:
+        for atol_type, rtol_type in product(["none", tol_type], repeat=2):
+            if (
+                not atol_type and not rtol_type
+            ):  # default behavior, so skipped here so it's not tested 2 extra times
+                continue
+            for sample in sample_inputs_linalg_invertible(
+                op_info, device, dtype, requires_grad
+            ):
+                assert sample.kwargs == {}
+                sample.kwargs = {
+                    "atol": make_tol_arg(atol_type, sample.input),
+                    "rtol": make_tol_arg(rtol_type, sample.input),
+                }
+                yield sample
+
+    for sample in sample_inputs_linalg_invertible(
+        op_info, device, dtype, requires_grad
+    ):
+        yield sample  # default kwargs
+
+
 def sample_inputs_linalg_pinv_singular(
     op_info, device, dtype, requires_grad=False, **kwargs
 ):
@@ -1995,7 +2031,7 @@ op_db: List[OpInfo] = [
         aten_name="linalg_matrix_rank",
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
-        sample_inputs_func=sample_inputs_linalg_invertible,
+        sample_inputs_func=sample_inputs_matrix_rank,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             DecorateInfo(
@@ -2012,12 +2048,12 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # jit doesn't accept tensor inputs for matrix rank
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
+                dtypes=[torch.complex64, torch.float32],
             ),
         ),
     ),
