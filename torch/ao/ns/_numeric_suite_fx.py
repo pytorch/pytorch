@@ -803,7 +803,14 @@ def prepare_n_shadows_model(
         elif isinstance(prev_node, tuple):
             example_inputs = (x.traced_result for x in prev_node)
         else:
-            example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
+            # currently some ads models do not have a traced_result in every node,
+            # so we have to guard for this case since we cannot quantize without
+            # an example input
+            # TODO(future PR): add a test case for this once we have an easy repro
+            if hasattr(prev_node, 'traced_result'):
+                example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
+            else:
+                continue
 
         for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
@@ -833,6 +840,13 @@ def prepare_n_shadows_model(
                 node_name_to_qconfig = \
                     list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
                 qconfig = node_name_to_qconfig[first_node.name]
+
+                # if no quantization is requested, skip
+                # TODO(future PR): deduplicate equivalent qconfigs that come from
+                #   different qconfig mapping objects
+                if qconfig is None:
+                    continue
+
                 qconfig_mapping = QConfigMapping().set_global(qconfig)
 
                 # create a copy of the submodule, wrapped in a separate module
@@ -884,7 +898,7 @@ def prepare_n_shadows_model(
                             for inner_old_kwarg in old_kwarg:
                                 new_args.append(inner_old_kwarg)
 
-                    new_args = tuple(new_args)
+                    new_args = tuple(new_args)  # type: ignore[assignment]
 
                     new_node = mt.graph.call_module(
                         attr_name, args=new_args, kwargs=new_kwargs)

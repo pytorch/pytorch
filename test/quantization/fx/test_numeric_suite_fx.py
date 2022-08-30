@@ -2151,28 +2151,24 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 self.w1 = nn.Parameter(torch.randn(2, 2))
                 self.b1 = nn.Parameter(torch.zeros(2))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                # self.w2 = nn.Parameter(torch.randn(2, 2))
-                # self.b2 = nn.Parameter(torch.randn(2))
-                self.i = [0]
 
             def forward(self, x):
-                if True:
-                    x = F.sigmoid(x)
-                    x = F.linear(x, self.w1, self.b1)
-                    x = F.linear(x, self.w1[:], self.b1)
-                    x = F.relu(x)
-                    x = x + x
-                    x = torch.cat([x,])
-                    x = torch.cat((x,))
-                    x = torch.cat(tensors=[x,])
-                    # TODO(future PR): enable layernorm
-                    # blocked on FX graph mode quant not inserting observer for
-                    # second arg, if the second arg is a module input
-                    # x = F.layer_norm(x, x.shape)
-                    # x = F.layer_norm(x, x.shape[1:])
-                    # x = x.reshape(1, -1) * 2
-                    # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
-                    x = torch.matmul(x, x.reshape(2, 2))
+                x = F.sigmoid(x)
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w1[:], self.b1)
+                x = F.relu(x)
+                x = x + x
+                x = torch.cat([x,])
+                x = torch.cat((x,))
+                x = torch.cat(tensors=[x,])
+                # TODO(future PR): enable layernorm
+                # blocked on FX graph mode quant not inserting observer for
+                # second arg, if the second arg is a module input
+                # x = F.layer_norm(x, x.shape)
+                # x = F.layer_norm(x, x.shape[1:])
+                # x = x.reshape(1, -1) * 2
+                # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
+                x = torch.matmul(x, x.reshape(2, 2))
                 # TODO: enable below
                 x = torch.matmul(x.reshape(2, 2), x.reshape(2, 2))
                 # TODO: enable below after FX graph mode quantization handles
@@ -2186,6 +2182,35 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         qconfig_mappings = [
             QConfigMapping().set_global(torch.quantization.default_qconfig),
             # QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
+        ]
+        self._test_impl(m, example_input, qconfig_mappings)
+
+    # TODO(this PR): test node without example input
+
+    def test_partial_qconfig_mapping(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(2, 2)
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = self.fc(x)
+                x = F.linear(x, self.w1, self.b1)
+                x = F.relu(x)
+                x = x + x
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+        qconfig = torch.ao.quantization.default_qconfig
+
+        qconfig_mappings = [
+            QConfigMapping().set_global(None)\
+                .set_object_type(F.linear, qconfig)\
+                .set_object_type(F.relu, qconfig)
         ]
         self._test_impl(m, example_input, qconfig_mappings)
 
