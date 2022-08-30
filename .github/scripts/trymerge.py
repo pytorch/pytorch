@@ -1102,7 +1102,8 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = "\n".join((
                     f"The following mandatory check(s) failed (Rule `{rule_name}`):"
                     f"{checks_to_str(failed_checks)}",
-                    f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
+                    "",
+                    f"Debug by [viewing the failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
                 ))
             continue
         elif len(pending_checks) > 0:
@@ -1110,8 +1111,9 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason_score = 20000
                 reject_reason = "\n".join((
                     f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
-                    f"{checks_to_str(pending_checks)}"
-                    f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
+                    f"{checks_to_str(pending_checks)}",
+                    "",
+                    f"Dig deeper by [viewing the checks on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
                 ))
             continue
 
