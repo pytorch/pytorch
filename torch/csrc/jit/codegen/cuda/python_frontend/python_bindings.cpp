@@ -46,7 +46,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def_static(
           "get",
           &nvfuser::FusionCache::get,
-          py::arg("max_fusions") = int(4096),
+          py::arg("max_fusions") = int(8192),
           py::return_value_policy::reference)
       .def("num_fusions", &nvfuser::FusionCache::numFusions);
 
@@ -65,6 +65,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             return self.execute(inputs);
           },
           py::return_value_policy::reference)
+      .def("id", &nvfuser::FusionInterface::id)
       .def("print", &nvfuser::FusionInterface::print);
 
   //! These are the FusionDefinition supported object types that are either

@@ -89,7 +89,7 @@ class TORCH_CUDA_CU_API FusionCache {
   FusionCacheEntry* fusionCachePtr() const;
 
   //! The static pointer to the FusionCache
-  static thread_local FusionCache* singleton_;
+  static FusionCache* singleton_;
 
   //! The max allowed number of fusions in the cache
   size_t max_fusions_;
@@ -99,7 +99,7 @@ class TORCH_CUDA_CU_API FusionCache {
   //! A pointer to the current cache entry in a cache lookup of a fusion
   //! definition.
   FusionCacheEntry* fusion_cache_ptr_;
-  //! A vector of unscheduled nvFuser Fusion IR fusions.
+  //! A vector of nvFuser Fusion IR fusions.
   std::vector<std::unique_ptr<Nvf::FusionExecutorCache>> fusions_;
 };
 

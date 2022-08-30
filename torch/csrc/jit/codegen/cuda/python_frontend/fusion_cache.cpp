@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
+#include <mutex>
 
 namespace nvfuser {
 
-thread_local FusionCache* FusionCache::singleton_ = nullptr;
+static std::mutex fusion_cache_lock;
+FusionCache* FusionCache::singleton_ = nullptr;
 
 FusionCacheEntry::FusionCacheEntry(
     RecordFunctor* rec,
@@ -15,6 +17,7 @@ FusionCacheEntry::FusionCacheEntry(
       fusion_id(_fusion_id) {}
 
 FusionCache* FusionCache::get(size_t max_fusions) {
+  std::lock_guard<std::mutex> guard(fusion_cache_lock);
   if (singleton_ == nullptr) {
     singleton_ = new FusionCache(max_fusions);
   }
