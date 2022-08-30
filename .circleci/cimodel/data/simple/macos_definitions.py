@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from cimodel.lib.miniutils import quote
+from cimodel.data.simple.util.branch_filters import gen_filter_dict_exclude
 
 
 class MacOsJob:
@@ -63,6 +64,7 @@ def get_new_workflow_jobs():
                         "name": "macos-12-py3-x86-64-build",
                         "build-environment": "macos-12-py3-x86-64",
                         "xcode-version": quote("13.3.1"),
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }
@@ -77,6 +79,7 @@ def get_new_workflow_jobs():
                         "shard-number": quote("1"),
                         "num-test-shards": quote("2"),
                         "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }
@@ -91,6 +94,7 @@ def get_new_workflow_jobs():
                         "shard-number": quote("2"),
                         "num-test-shards": quote("2"),
                         "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }
@@ -106,6 +110,7 @@ def get_new_workflow_jobs():
                         "num-test-shards": quote("1"),
                         "test-config": "functorch",
                         "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }
@@ -118,6 +123,7 @@ def get_new_workflow_jobs():
                         "build-environment": "macos-12-py3-lite-interpreter-x86-64",
                         "xcode-version": quote("13.3.1"),
                         "build-generates-artifacts": "false",
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }
@@ -130,6 +136,7 @@ def get_new_workflow_jobs():
                         "build-environment": "macos-12-py3-arm64",
                         "xcode-version": quote("13.3.1"),
                         "python-version": quote("3.9.12"),
+                        "filters": gen_filter_dict_exclude()
                     }
                 )
             }

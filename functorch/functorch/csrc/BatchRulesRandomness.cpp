@@ -220,24 +220,32 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, self_bdim.has_value());
 
-  if (randomness == RandomnessType::Different && !self_bdim) {
-    auto shape = self_value.sizes();
-    VmapDimVector shapeVec(1, maybe_layer->batchSize());
-    shapeVec.reserve(shape.size() + 1);
-    shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    self_value = self_value.expand(shapeVec);
+  if (randomness == RandomnessType::Different) {
+    // 1D cases: S -> BS -> multinomial(BS)
+    //           BS -> multinomial(BS)
+    //
+    // 2D cases: MS -> BMS -> (BM)S -> multinomial((BM)S) -> (BM)S -> BMS
+    //           BMS -> (BM)S -> multinomial((BM)S) -> (BM)S -> BMS
+    const auto is_2D_case = rankWithoutBatchDim(self_value, self_bdim) == 2;
+    if (!self_bdim.has_value()) {
+      self_value = ensure_has_bdim(self_value, self_bdim.has_value(), maybe_layer->batchSize());
+    }
+    if (is_2D_case) {
+      self_value = reshape_dim_into(0, 0, self_value);
+    }
+    auto out = multinomial(self_value, num_samples, replacement, generator);
+    if (is_2D_case) {
+      out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
+    }
+    return makeBatched(out, 0, cur_level);;
   }
-  if (self_value.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
-    self_value = reshape_dim_into(1, 0, self_value);
-  }
-  auto out = multinomial(self_value, num_samples, replacement, generator);
-  if (randomness == RandomnessType::Same && !self_bdim) {
-    return out;
-  }
-  if(self_value.dim() == 3 && self_bdim) {
-    out = out.reshape(self.sizes());
-  }
-  return makeBatched(out, 0, cur_level);
+
+  TORCH_INTERNAL_ASSERT(randomness == RandomnessType::Same); // check_randomness eliminates error randomness
+  TORCH_INTERNAL_ASSERT(!self_bdim.has_value()); // check_randomness eliminates same randomness with batched input
+  // Must be same randomness with unbatched input
+  // 1D case: S -> multinomial(S) -> S
+  // 2D case: MS -> multinomial(MS) -> MS
+  return multinomial(self_value, num_samples, replacement, generator);
 }
 
 template <typename A, A a, typename C>

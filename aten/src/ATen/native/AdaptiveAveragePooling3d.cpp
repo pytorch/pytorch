@@ -8,14 +8,14 @@ namespace native {
 
 namespace {
 
-inline int start_index(int a, int b, int c) {
+inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::floor((float)(a * c) / b);
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-inline int end_index(int a, int b, int c) {
+inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::ceil((float)((a + 1) * c) / b);
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 template <typename scalar_t>
