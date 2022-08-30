@@ -67,11 +67,19 @@ class SyncBatchNorm(Function):
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        # remove stats from empty inputs
-        mask = count_all.squeeze(-1) >= 1
-        count_all = count_all[mask]
-        mean_all = mean_all[mask]
-        invstd_all = invstd_all[mask]
+        if not torch.cuda.is_current_stream_capturing():
+            # The lines below force a synchronization between CUDA and CPU, because
+            # the shape of the result count_all depends on the values in mask tensor.
+            # Such synchronizations break CUDA Graph capturing.
+            # See https://github.com/pytorch/pytorch/issues/78549
+            # FIXME: https://github.com/pytorch/pytorch/issues/78656 describes
+            # a better longer-term solution.
+
+            # remove stats from empty inputs
+            mask = count_all.squeeze(-1) >= 1
+            count_all = count_all[mask]
+            mean_all = mean_all[mask]
+            invstd_all = invstd_all[mask]
 
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(

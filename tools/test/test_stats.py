@@ -85,7 +85,7 @@ def make_report_v2(
         }
         files[file_name] = {
             "suites": suites,
-            "total_seconds": sum(suite["total_seconds"] for suite in suites.values()),
+            "total_seconds": sum(suite["total_seconds"] for suite in suites.values()),  # type: ignore[type-var]
         }
     return {
         **dummy_meta_meta(),  # type: ignore[misc]

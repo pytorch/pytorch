@@ -82,7 +82,7 @@ Single-node multi-worker
 
 ::
 
-    >>> torchrun
+    torchrun
         --standalone
         --nnodes=1
         --nproc_per_node=$NUM_TRAINERS
@@ -101,7 +101,7 @@ port automatically instead of manually assgining different ports for each run.
 
 ::
 
-    >>> torchrun
+    torchrun
         --rdzv_backend=c10d
         --rdzv_endpoint=localhost:0
         --nnodes=1
@@ -114,7 +114,7 @@ Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failur
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -135,7 +135,7 @@ Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -294,6 +294,7 @@ Important Notices
 
 ::
 
+ >>> # xdoctest: +SKIP("stub")
  >>> import torch.distributed as dist
  >>> dist.init_process_group(backend="gloo|nccl")
 

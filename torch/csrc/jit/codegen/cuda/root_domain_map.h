@@ -82,7 +82,8 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   //! \param consumer The consumer tensor of a producer-consumer pair.
   explicit PairwiseRootDomainMap(
       const TensorView* producer,
-      const TensorView* consumer);
+      const TensorView* consumer,
+      bool is_exact = false);
 
   const TensorView* producer() const {
     return producer_tv_;
@@ -91,6 +92,8 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   const TensorView* consumer() const {
     return consumer_tv_;
   }
+
+  std::string toString() const;
 
  protected:
   std::unordered_map<IterDomain*, IterDomain*> map(
@@ -108,9 +111,9 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
  private:
   const TensorView* producer_tv_ = nullptr;
   const TensorView* consumer_tv_ = nullptr;
+  //! If true, does not map broadcast IDs with non-broadcast IDs
+  const bool is_exact_ = false;
 };
-
-TORCH_CUDA_CU_API std::string toString(const PairwiseRootDomainMap& root_map);
 
 //! Represents an iteration domain of a TensorDomain. Only used for
 //! root domain mapping.
@@ -143,13 +146,13 @@ class DomainKey {
         concreteId() == other.concreteId();
   }
 
+  std::string toString() const;
+
  private:
   const TensorDomain* td_ = nullptr;
   const IterDomain* id_ = nullptr;
   const IterDomain* concrete_id_ = nullptr;
 };
-
-std::string toString(const DomainKey& key);
 
 struct DomainKeyHash {
   std::size_t operator()(const DomainKey& key) const {
@@ -186,6 +189,7 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
  private:
   using IterVisitor::handle;
   void handle(ReductionOp* op) override;
+  void handle(GroupedReductionOp* op) override;
   void handle(WelfordOp* op) override;
   void handle(MmaOp* op) override;
 
@@ -205,9 +209,14 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
 //! example:
 //!    T2 [i0,i1] = T1[i2,i3] + T0[i4,i5]
 //! This will create mappings between i0, i2 and i4.
+//!
+//! Note that with views, there can be multiple domains mapped with
+//! the same domain. Thus, obtaining one-to-one maps can
+//! fail. Currently, the only use of this class is getMappableDims,
+//! which just grabs any domain that is mappable, which works no
+//! matter view is used or not.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
-  friend TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap&);
 
  public:
   //! Builds a mapping table by analyzing the current
@@ -253,7 +262,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   //! be a producer-consumer pair. Since they may not be a
   //! producer-consumer pair, this function requires proper root
   //! domains, which may be root or rfactor domains. Also, no error
-  //! check is done as we do not assume producer-consumer relationship.
+  //! check is done as we do not assume producer-consumer
+  //! relationship.
+  //!
+  //! Note that an exception is thrown when a domain is found to be
+  //! mapped to multiple domains, which can happen with views.
   //!
   //! \param from_td A TensorDomain from which a map is created
   //! \param from_root A root domain of from_td
@@ -284,8 +297,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* td_b,
       const IterDomain* id_b) const;
 
-  //! Returns if key_a and key_b are mapped to eachother (equivalent), or are
-  //! the same key.
+  //! Returns if key_a and key_b are mapped to each other (equivalent), or are
+  //! the same key. Returns false if two keys are not known to be mapped.
   bool canMap(const DomainKey& key_a, const DomainKey& key_b) const;
 
   //! Returns the set of (non-broadcast) DomainKeys that id in td is
@@ -313,9 +326,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const std::unordered_set<IterDomain*>& root_dims_to_map,
       bool producer_to_consumer) const override;
 
+  std::string toString() const;
+
  private:
   //! Disjoint set of all mapped <TD, ID> keys to determine axes equivalency
-  DisjointSet<DomainKey, DomainKeyHash> eq_set_;
+  DisjointSets<DomainKey, DomainKeyHash> eq_set_;
 
   //! All IterDomains in the mapping that are a broadcast ID
   DomainKeyMap<std::unordered_set<const IterDomain*>> bcast_map_;
@@ -328,12 +343,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   std::unordered_set<IterDomain*> window_axes_;
 };
 
-TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map);
-
-//! Create a DisjointSet of root IterDomains by traversing the
+//! Create a DisjointSets of root IterDomains by traversing the
 //! current fusion entirely. IterDomains that can be mapped each
 //! other with computeAt are grouped into the same subset in the
-//! DisjointSet.
+//! DisjointSets.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     : private BackwardVisitor {
  public:
@@ -390,8 +403,16 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     mapPointwiseOrReductionOp(op);
   }
 
+  void handle(GroupedReductionOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
   void handle(WelfordOp* wop) override {
     mapPointwiseOrReductionOp(wop);
+  }
+
+  void handle(LoadStoreOp* ldst) override {
+    mapPointwiseOrReductionOp(ldst);
   }
 
   void handle(MmaOp* wop) override {
@@ -402,27 +423,33 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     mapPointwiseOrReductionOp(op);
   }
 
-  void handle(ViewDtypeOp* op) override {
-    mapPointwiseOrReductionOp(op);
-  }
-
   void handle(ViewOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
+
+  void handle(ViewAsScalar* op) override;
 
   void handle(BroadcastOp* op) override;
 
   void handle(TransposeOp* op) override;
 
+  void handle(ExpandOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
   void handle(GatherOp* op) override;
 
   void handle(TensorView* tv) override;
 
-  //! Maps all consumers with a producer.
+  //! Maps all pending mappings.
   //! This is called for each of TensorViews in a backward traversal,
   //! recursively building mappings from the output tensors to the
   //! input tensors.
-  bool mapAllConsumers(const DomainKey& producer_key);
+  void mapAllPendingMappings(const DomainKey& key);
+
+  //! Maps all pending mappings for id of td. When id is a broadcast,
+  //! mapping is done separately for each concrete domain.
+  void mapAllPendingMappings(const TensorDomain* td, IterDomain* id);
 
   bool hasMatchingDomains(const std::vector<DomainKey>& unique_domains);
 
@@ -441,6 +468,27 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   //! Disable UnmappableReductions check, should
   //!  always be false for compute_at use cases
   bool map_through_reduction_ = false;
+};
+
+//! Maps root domains of an entire fusion. Does not map broadcast
+//! domains with non-broadcast domains.
+class TORCH_CUDA_CU_API ExactRootDomainMap : public RootDomainMap {
+ public:
+  ExactRootDomainMap(Fusion* fusion);
+
+  bool areMapped(const IterDomain* id_a, const IterDomain* id_b) const;
+
+  std::string toString() const;
+
+ protected:
+  std::unordered_map<IterDomain*, IterDomain*> map(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
+      const std::unordered_set<IterDomain*>& root_dims_to_map,
+      bool producer_to_consumer) const override;
+
+ private:
+  DisjointSets<const IterDomain*> eq_sets_;
 };
 
 } // namespace cuda

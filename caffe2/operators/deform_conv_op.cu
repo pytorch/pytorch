@@ -308,7 +308,7 @@ void DeformConvOpBase<DType, Context>::DeformableIm2col(
     at::IntArrayRef im_shape,
     at::IntArrayRef col_shape,
     DType* data_col) {
-  CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
+  TORCH_CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());
   const int pad_h = pad_t();
@@ -444,7 +444,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2im(
   index_t channel_per_deformable_group = im_shape[1] / deformable_group_;
   index_t num_kernels = size_from_dim_(0, col_shape);
   // num_axes should be smaller than block size
-  CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
+  TORCH_CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   // To avoid involving atomic operations, we will launch one kernel per
   // bottom dimension, and then in the kernel add up the top dimensions.
   // NOLINT_NEXT_LINE(whitespace/operators)
@@ -592,7 +592,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
       kernel_w() * deformable_group_;
   index_t channel_per_deformable_group = col_shape[0] / deformable_group_;
   // num_axes should be smaller than block size
-  CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
+  TORCH_CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   // To avoid involving atomic operations, we will launch one kernel per
   // bottom dimension, and then in the kernel add up the top dimensions.
   // NOLINT_NEXT_LINE(whitespace/operators)

@@ -21,7 +21,10 @@ struct DimCounter {
 namespace internal {
 
 inline void get_data_ptrs(
-    char** ptrs, ArrayRef<char*> base, IntArrayRef strides, IntArrayRef counter) {
+    char** ptrs,
+    ArrayRef<char*> base,
+    IntArrayRef strides,
+    IntArrayRef counter) {
   const int64_t ntensors = base.size();
   const int64_t ndim = counter.size();
   std::copy(base.begin(), base.end(), ptrs);
@@ -34,9 +37,12 @@ inline void get_data_ptrs(
 }
 
 inline void serial_for_each(
-    IntArrayRef shape, IntArrayRef strides,
-    char** base_ptrs, size_t ntensors,
-    typename TensorIteratorBase::loop2d_t loop, Range range) {
+    IntArrayRef shape,
+    IntArrayRef strides,
+    char** base_ptrs,
+    size_t ntensors,
+    typename TensorIteratorBase::loop2d_t loop,
+    Range range) {
   const auto ndim = shape.size();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       strides.size() == ntensors * std::max(size_t{2}, ndim));
@@ -53,13 +59,14 @@ inline void serial_for_each(
     c10::SmallBuffer<char*, 4> ptrs(ntensors);
     auto counter = DimCounter(shape, range);
     while (!counter.is_done()) {
-      get_data_ptrs(ptrs.data(), {base_ptrs, ntensors}, strides, counter.values);
+      get_data_ptrs(
+          ptrs.data(), {base_ptrs, ntensors}, strides, counter.values);
       auto step = counter.max_2d_step();
       loop(ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
     }
   }
-
 }
 
-}}  // namespace at::internal
+} // namespace internal
+} // namespace at

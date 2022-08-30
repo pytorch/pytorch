@@ -1078,7 +1078,7 @@ void TensorPipeAgent::leaveGroup() {
 }
 
 // TODO: Remove join()
-void TensorPipeAgent::join(bool shutdown) {
+void TensorPipeAgent::join(bool shutdown, float /* unused */) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
   if (!isStaticGroup_) {
     leaveGroup();
@@ -1174,7 +1174,12 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     it = workerNameToInfo_.find(workerName);
   }
   TORCH_CHECK(
-      it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
+      it != workerNameToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerName));
   return it->second;
 }
 
@@ -1185,7 +1190,12 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
     it = workerIdToInfo_.find(workerId);
   }
   TORCH_CHECK(
-      it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
+      it != workerIdToInfo_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination id {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          workerId));
   return it->second;
 }
 
@@ -1205,7 +1215,12 @@ const std::string& TensorPipeAgent::findWorkerURL(
     it = workerNameToURL_.find(worker.name_);
   }
   TORCH_CHECK(
-      it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
+      it != workerNameToURL_.end(),
+      fmt::format(
+          "name:{},rank:{} could not find destination url for name {}",
+          workerInfo_.name_,
+          workerInfo_.id_,
+          worker.name_));
   return it->second;
 }
 

@@ -26,7 +26,7 @@ class FusedReductionInfo {
 //! is unset, which effectively makes the broadcast just a unary set
 //! op.
 //! TODO: Consider moving the warp-based fused reduction here.
-void fuseReductions(Fusion*);
+void fuseReductionsAndBroadcasts(Fusion*);
 
 } // namespace cuda
 } // namespace fuser

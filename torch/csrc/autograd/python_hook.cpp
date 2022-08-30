@@ -2,30 +2,121 @@
 
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/Exceptions.h>
 
 #include <sstream>
 
-using torch::autograd::variable_list;
 using torch::autograd::Variable;
+using torch::autograd::variable_list;
 
 static PyObject* wrap_variables(const variable_list& c_variables);
 static variable_list unwrap_variables(PyObject* py_variables);
 static std::string hook_name(PyObject* hook);
 static void check_result(PyObject* original, PyObject* result, PyObject* hook);
-static void check_single_result(PyObject* original, PyObject* result, PyObject* hook);
+static void check_single_result(
+    PyObject* original,
+    PyObject* result,
+    PyObject* hook);
 
+namespace torch {
+namespace autograd {
 
-namespace torch { namespace autograd {
+namespace {
 
-PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
-  : dict(dict)
-  , value_idx(value_idx)
-{
+// This function is called in 3 different cases:
+//   1) TensorPreHook
+//   2) PreHook
+//   3) PostHook
+//
+// Depending on the case, args and res can hold different types of objects:
+//
+// args:
+// TensorPreHook    (Tensor,)
+// PreHook          ((Tensor, ...),)                (grad_outputs,)
+// PostHook         ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+//
+// res:
+// TensorPreHook    Tensor
+// PreHook          ((Tensor, ...),)                (grad_outputs,)
+// PostHook         ((Tensor, ...),)                (grad_inputs,)
+//
+// This function returns True if any hook returned non-None value, and False
+// otherwise.
+bool _call_hooks(PyObject* dict, PyObject* args) {
+  // Note: [Extend Hook Lifetime]
+  // Hold a reference to hooks till we iterate over them.
+  // This is to handle the case when hook calls `handle.remove` inside it
+  // and it's refcount goes to `0`, Python is free to GC it.
+  // We hold onto a stale pointer and subsequent call to
+  // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
+  // So, we use `PyDict_Values` which returns a new reference to the values
+  // i.e. we hold the reference to the hooks till we have iterated over them.
+  // Reference: https://github.com/pytorch/pytorch/issues/58354
+  auto hooks = THPObjectPtr{PyDict_Values(dict)};
+  bool is_modified = false;
+  const auto len = PyList_Size(hooks);
+  for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    const auto hook = PyList_GetItem(hooks, idx);
+
+    THPObjectPtr res(PyObject_CallObject(hook, args));
+    if (!res)
+      throw python_error();
+    if (res == Py_None)
+      continue;
+
+    PyObject* args0 = PyTuple_GetItem(args, 0);
+    if (res == args0)
+      continue;
+
+    if (PyTuple_CheckExact(args0)) {
+      check_result(args0, res, hook);
+    } else {
+      check_single_result(args0, res, hook);
+    }
+    PyTuple_SetItem(args, 0, res.release());
+
+    is_modified = true;
+  }
+  return is_modified;
+}
+
+} // namespace
+
+PyFunctionTensorPreHook::PyFunctionTensorPreHook(PyObject* dict, int value_idx)
+    : dict(dict), value_idx(value_idx) {
+  Py_INCREF(dict);
+}
+
+PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
+}
+
+auto PyFunctionTensorPreHook::operator()(const variable_list& values)
+    -> variable_list {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
+  if (!value)
+    throw python_error();
+  THPObjectPtr tup(PyTuple_New(1));
+  PyTuple_SET_ITEM(tup.get(), 0, value.release());
+  bool is_tup_modified = _call_hooks(dict, tup.get());
+  variable_list results(values);
+  if (is_tup_modified) {
+    results[value_idx] = THPVariable_Unpack(PyTuple_GetItem(tup.get(), 0));
+  }
+  return results;
+}
+
+PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
@@ -37,36 +128,14 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   }
 }
 
-auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
-{
+auto PyFunctionPreHook::operator()(const variable_list& grad_outputs_)
+    -> variable_list {
   pybind11::gil_scoped_acquire gil;
-
-  THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
-  if (!value) throw python_error();
-
-  // Note: [Extend Hook Lifetime]
-  // Hold a reference to hooks till we iterate over them.
-  // This is to handle the case when hook calls `handle.remove` inside it
-  // and it's refcount goes to `0`, Python is free to GC it.
-  // We hold onto a stale pointer and subsequent call to
-  // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
-  // So, we use `PyDict_Values` which returns a new reference to the values
-  // i.e. we hold the reference to the hooks till we have iterated over them.
-  // Reference: https://github.com/pytorch/pytorch/issues/58354
-  auto hooks = THPObjectPtr{PyDict_Values(dict)};
-  const auto len = PyList_Size(hooks);
-  for (Py_ssize_t idx = 0; idx < len; ++idx) {
-    const auto hook = PyList_GetItem(hooks, idx);
-    THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
-    if (!res) throw python_error();
-    if (res == Py_None) continue;
-    check_single_result(value.get(), res.get(), hook);
-    value = std::move(res);
-  }
-
-  variable_list results(values);
-  if (value != Py_None) results[value_idx] = THPVariable_Unpack(value.get());
-  return results;
+  THPObjectPtr grad_outputs(wrap_variables(grad_outputs_));
+  THPObjectPtr tup(PyTuple_New(1));
+  PyTuple_SET_ITEM(tup.get(), 0, grad_outputs.release());
+  _call_hooks(dict, tup.get());
+  return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
 PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
@@ -83,48 +152,37 @@ PyFunctionPostHook::~PyFunctionPostHook() {
 
 auto PyFunctionPostHook::operator()(
     const variable_list& _outputs, /* grad_inputs */
-    const variable_list& _inputs /* grad_outputs */) -> variable_list
-{
+    const variable_list& _inputs /* grad_outputs */) -> variable_list {
   pybind11::gil_scoped_acquire gil;
-
-  THPObjectPtr outputs(wrap_variables(_outputs));
-  THPObjectPtr inputs(wrap_variables(_inputs));
-
-  // See Note: [Extend Hook Lifetime]
-  auto hooks = THPObjectPtr{PyDict_Values(dict)};
-  const auto len = PyList_Size(hooks);
-  for (Py_ssize_t idx = 0; idx < len; ++idx) {
-    const auto hook = PyList_GetItem(hooks, idx);
-    THPObjectPtr res(PyObject_CallFunctionObjArgs(
-        hook, outputs.get(), inputs.get(), nullptr));
-    if (!res) throw python_error();
-    if (res == Py_None) continue;
-    check_result(outputs, res, hook);
-    outputs = std::move(res);
-  }
-
-  return unwrap_variables(outputs.get());
+  THPObjectPtr grad_inputs(wrap_variables(_outputs));
+  THPObjectPtr grad_outputs(wrap_variables(_inputs));
+  THPObjectPtr tup(PyTuple_New(2));
+  PyTuple_SET_ITEM(tup.get(), 0, grad_inputs.release());
+  PyTuple_SET_ITEM(tup.get(), 1, grad_outputs.release());
+  _call_hooks(dict, tup.get());
+  return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
 
-
-static PyObject *wrap_variables(const variable_list& c_variables)
-{
+static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(num_vars));
-  if (!tuple) throw python_error();
+  if (!tuple)
+    throw python_error();
   for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
-    if (!var) throw python_error();
+    if (!var)
+      throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
   }
   return tuple.release();
 }
 
-static variable_list unwrap_variables(PyObject* py_variables)  {
+static variable_list unwrap_variables(PyObject* py_variables) {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for(const auto i : c10::irange(results.size())) {
+  for (const auto i : c10::irange(results.size())) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;
@@ -142,7 +200,9 @@ static variable_list unwrap_variables(PyObject* py_variables)  {
 
 static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
   if (!PyTuple_Check(result)) {
-    PyErr_Format(PyExc_TypeError, "expected tuple, but hook returned '%s'",
+    PyErr_Format(
+        PyExc_TypeError,
+        "expected tuple, but hook returned '%s'",
         THPUtils_typename(result));
     throw python_error();
   }
@@ -159,19 +219,27 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
   }
 
   for (const auto i : c10::irange(prev_size)) {
-    check_single_result(PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
+    check_single_result(
+        PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
   }
 }
 
-static void check_single_result(PyObject* _original, PyObject* _result, PyObject* hook) {
-  if (_result == Py_None) return;
+static void check_single_result(
+    PyObject* _original,
+    PyObject* _result,
+    PyObject* hook) {
+  if (_result == Py_None)
+    return;
 
   if (_original == Py_None) {
-    throw std::runtime_error("can't replace a None gradient with a non-None value");
+    throw std::runtime_error(
+        "can't replace a None gradient with a non-None value");
   }
 
   if (!PyObject_IsInstance(_result, THPVariableClass)) {
-    PyErr_Format(PyExc_TypeError, "expected Variable, but hook returned '%s'",
+    PyErr_Format(
+        PyExc_TypeError,
+        "expected Variable, but hook returned '%s'",
         THPUtils_typename(_result));
     throw python_error();
   }
@@ -185,7 +253,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
 static std::string hook_name(PyObject* hook) {
   if (PyObject_HasAttrString(hook, "__name__")) {
     THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
-    if (!name) throw python_error();
+    if (!name)
+      throw python_error();
 
     if (name && THPUtils_checkString(name.get())) {
       return THPUtils_unpackString(name.get());

@@ -33,6 +33,7 @@ torch.cuda
     stream
     synchronize
     utilization
+    OutOfMemoryError
 
 Random Number Generator
 -------------------------
@@ -80,6 +81,7 @@ Graphs (beta)
     :toctree: generated
     :nosignatures:
 
+    is_current_stream_capturing
     graph_pool_handle
     CUDAGraph
     graph
@@ -123,3 +125,12 @@ NVIDIA Tools Extension (NVTX)
     nvtx.mark
     nvtx.range_push
     nvtx.range_pop
+
+Jiterator (beta)
+-----------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    jiterator._create_jit_fn
+    jiterator._create_multi_output_jit_fn

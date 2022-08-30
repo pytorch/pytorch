@@ -86,9 +86,7 @@ void SyncMap::build(Fusion* fusion) {
   FUSER_PERF_SCOPE("GpuLower::Lower::validateParallelize");
   FusionGuard fg(fusion);
 
-  const auto& par_map = GpuLower::current()->caParallelMap();
-  const auto& loop_map = GpuLower::current()->caLoopMap();
-  const auto& index_map = GpuLower::current()->caIndexMap();
+  const auto& ca_map = GpuLower::current()->caMap();
   const auto& pred_map = GpuLower::current()->threadPredMap();
 
   auto exprs = StmtSort::getExprs(fusion);
@@ -128,10 +126,33 @@ void SyncMap::build(Fusion* fusion) {
       // Tracking for quick check later
       std::unordered_set<IterDomain*> producer_within_compute_at;
 
+      // Get the parallel types that producer will be predicated off in producer
+      // writes.
+      //  In this case we need a sync whether the producer-consumer axes are
+      //  mapped or not since the predicate pass will generate pattern like
+      //  below to eliminate redundant writes: if(threadIdx.x == 0)
+      //    shared[threadIdx.x + i] = ...
+      // We will need a raw sync after this pattern for correctness.
+      auto producer_redundant_types = GpuLower::current()
+                                          ->threadPredMap()
+                                          .getPredicateInfo(producer)
+                                          .redundant_types;
+      // Get the parallel types that are inactive in consumer's use chains.
+      auto producer_redundant_use_types = GpuLower::current()
+                                              ->threadPredMap()
+                                              .getPredicateInfo(producer)
+                                              .redundant_use_types;
+
+      // In sync info pass we only consider the parallel types in
+      //  producer that are redundantly produced but not redundantly consumed.
+      producer_redundant_types =
+          producer_redundant_types & (~producer_redundant_use_types);
+
       for (const auto producer_i : c10::irange(producer->nDims())) {
         auto producer_axis = producer->axis(producer_i);
         auto producer_ptype =
-            par_map.getConcreteMappedID(producer_axis)->getParallelType();
+            ca_map->getConcreteMappedID(producer_axis, IdMappingMode::LOOP)
+                ->getParallelType();
 
         if (!isParallelTypeThread(producer_ptype)) {
           continue;
@@ -161,7 +182,8 @@ void SyncMap::build(Fusion* fusion) {
         for (const auto consumer_i : c10::irange(consumer->nDims())) {
           auto consumer_axis = consumer->axis(consumer_i);
           auto consumer_ptype =
-              par_map.getConcreteMappedID(consumer_axis)->getParallelType();
+              ca_map->getConcreteMappedID(consumer_axis, IdMappingMode::LOOP)
+                  ->getParallelType();
 
           if (!isParallelTypeThread(consumer_ptype)) {
             continue;
@@ -193,6 +215,19 @@ void SyncMap::build(Fusion* fusion) {
             continue;
           }
 
+          // In the case when the parallel id's are mapped by ca map,
+          //   will additionally need to consider if the producer is
+          //   a redundant write. The raw dim can be skipped only if
+          //   consumer use chains only contain redundant uses.
+          //  TODO:
+          //    still losing a bit precision here for expr ordering
+          //  sensitive cases, but we could wait until that becomes
+          //  a perf limiter to fix.
+          if (producer_redundant_types.get(parallel_type)) {
+            raw_dims.set(parallel_type);
+            continue;
+          }
+
           auto parallel_type_i = getParallelTypeBitMapOffset(parallel_type);
 
           auto p_id = producer_parallel_ids[parallel_type_i];
@@ -201,7 +236,8 @@ void SyncMap::build(Fusion* fusion) {
           if (p_id == nullptr && c_id == nullptr) {
             continue;
           } else if (p_id != nullptr && c_id != nullptr) {
-            if (loop_map.areMapped(p_id, c_id)) {
+            if (GpuLower::current()->caMap()->areMapped(
+                    p_id, c_id, IdMappingMode::PERMISSIVE)) {
               const auto halo_info = GpuLower::current()->haloInfo();
 
               if (halo_info.hasHaloWidth(p_id) !=
@@ -220,7 +256,8 @@ void SyncMap::build(Fusion* fusion) {
                   consumer->domain()->domain().begin(),
                   consumer->domain()->domain().end(),
                   [&](IterDomain* c_id) {
-                    return loop_map.areMapped(p_id, c_id);
+                    return GpuLower::current()->caMap()->areMapped(
+                        p_id, c_id, IdMappingMode::PERMISSIVE);
                   });
 
               // If there isn't a mapping from producer to a consumer domain,
@@ -236,7 +273,8 @@ void SyncMap::build(Fusion* fusion) {
                   producer->domain()->domain().begin(),
                   producer->domain()->domain().end(),
                   [&](IterDomain* p_id) {
-                    return loop_map.areMapped(p_id, c_id);
+                    return GpuLower::current()->caMap()->areMapped(
+                        p_id, c_id, IdMappingMode::PERMISSIVE);
                   });
               if (it == producer->domain()->domain().end()) {
                 // Can't infer anything if producer doesn't have a matching axis
@@ -266,10 +304,12 @@ void SyncMap::build(Fusion* fusion) {
           // B    B      G           G
 
           auto producer_ptype =
-              par_map.getConcreteMappedID(p_id)->getParallelType();
+              ca_map->getConcreteMappedID(p_id, IdMappingMode::LOOP)
+                  ->getParallelType();
           auto consumer_ptype = c_id == nullptr
               ? ParallelType::Serial
-              : par_map.getConcreteMappedID(c_id)->getParallelType();
+              : ca_map->getConcreteMappedID(c_id, IdMappingMode::LOOP)
+                    ->getParallelType();
 
           if (!p_id->isBroadcast() && isParallelTypeThread(producer_ptype) &&
               !(isParallelTypeThread(consumer_ptype) &&
@@ -296,7 +336,7 @@ void SyncMap::build(Fusion* fusion) {
                 consumer->domain()->domain().begin(),
                 consumer->domain()->domain().end(),
                 [&](IterDomain* c_id_) {
-                  return index_map.areMapped(p_id, c_id_);
+                  return ca_map->areMapped(p_id, c_id_, IdMappingMode::EXACT);
                 });
             if (it == consumer->domain()->domain().end()) {
               if (isParallelTypeThread(producer_ptype)) {
@@ -305,6 +345,20 @@ void SyncMap::build(Fusion* fusion) {
               if (isParallelTypeThread(consumer_ptype)) {
                 raw_dims.set(consumer_ptype);
               }
+            }
+          }
+
+          // If any leaf id of producer is block or grid parallel and is
+          // involved
+          //  in any swizzle pattern, track this parallel dim as a communication
+          //  dimension that requires the corresponding synchronization and
+          //  memory type.
+          if (isParallelTypeThread(producer_ptype) &&
+              producer->hasSwizzleOp()) {
+            if (!ir_utils::getAllSwizzlesBetween(
+                     producer->getMaybeRFactorDomain(), {p_id})
+                     .empty()) {
+              raw_dims.set(producer_ptype);
             }
           }
 
@@ -388,7 +442,8 @@ void SyncMap::build(Fusion* fusion) {
 
           // If matching dims and matching parallel types, no comm is necessary.
           if (producer_ptype == consumer_ptype &&
-              loop_map.areMapped(p_id, c_id)) {
+              GpuLower::current()->caMap()->areMapped(
+                  p_id, c_id, IdMappingMode::PERMISSIVE)) {
             continue;
           }
 

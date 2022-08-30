@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <iterator>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
@@ -14,7 +16,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // It corresponds to "dense" functionality, "CPU" backend.
   // This means that it gets a dense functionality bit, and a cpu backend bit
   // set.
-  auto undefined_set = DispatchKeySet();
   auto dense_cpu_set = DispatchKeySet(DispatchKey::CPU);
   ASSERT_TRUE(dense_cpu_set.has(DispatchKey::Dense));
   ASSERT_TRUE(dense_cpu_set.has_backend(BackendComponent::CPUBit));
@@ -48,8 +49,6 @@ TEST(DispatchKeySet, ShowSemantics) {
        DispatchKey::Dense,
        DispatchKey::CUDA,
        DispatchKey::CPU});
-  auto fpga = DispatchKeySet(DispatchKey::FPGA);
-  auto fpga_and_cpu = DispatchKeySet({DispatchKey::FPGA, DispatchKey::CPU});
   // this keyset has all of the building block keys:
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::AutogradFunctionality));
   ASSERT_TRUE(autograd_dense_cpu_cuda.has(DispatchKey::Dense));
@@ -86,8 +85,6 @@ TEST(DispatchKeySet, ShowSemantics) {
   // Iterators allow you to iterate individually through the DispatchKey's in a
   // DispatchKeySet
   auto empty_set = DispatchKeySet();
-  auto t1 = empty_set.begin();
-  auto t2 = empty_set.end();
   ASSERT_EQ(*empty_set.begin(), *empty_set.end());
 
   // However, only keys that correspond to actual runtime indices of kernels in
@@ -185,7 +182,7 @@ TEST(DispatchKeySet, SingletonPerBackendFunctionalityKeys) {
     if (tid == DispatchKey::StartOfDenseBackends ||
         tid == DispatchKey::StartOfSparseBackends ||
         tid == DispatchKey::StartOfQuantizedBackends ||
-        tid == DispatchKey::StartOfAutogradBackends) {
+        tid == DispatchKey::StartOfAutogradFunctionalityBackends) {
       continue;
     }
     DispatchKeySet sing(tid);
@@ -228,13 +225,13 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
           tid1 == DispatchKey::StartOfSparseBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
           tid1 == DispatchKey::StartOfNestedTensorBackends ||
-          tid1 == DispatchKey::StartOfAutogradBackends)
+          tid1 == DispatchKey::StartOfAutogradFunctionalityBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
           tid2 == DispatchKey::StartOfNestedTensorBackends ||
-          tid2 == DispatchKey::StartOfAutogradBackends)
+          tid2 == DispatchKey::StartOfAutogradFunctionalityBackends)
         continue;
 
       auto backend1 = toBackendComponent(tid1);
@@ -370,29 +367,12 @@ TEST(DispatchKeySet, IteratorCrossProduct) {
 
 TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (const auto& it : full_set) {
-    i++;
-  }
-  // Total # of runtime entries includes an entry for DispatchKey::Undefined,
-  // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
-}
-
-TEST(DispatchKeySet, IteratorRangeFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint8_t i = 0;
-
-  for (DispatchKey dispatch_key : full_set) {
-    i++;
-  }
+  std::ptrdiff_t count = std::distance(full_set.begin(), full_set.end());
 
   // Total # of runtime entries includes an entry for DispatchKey::Undefined,
   // which is not included when iterating through the DispatchKeySet.
-  ASSERT_EQ(i, num_runtime_entries - 1);
+  ASSERT_EQ(count, std::ptrdiff_t{num_runtime_entries} - 1);
 }
-
 TEST(DispatchKeySet, FailAtEndIterator) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint64_t raw_repr = full_set.raw_repr();
@@ -406,41 +386,45 @@ TEST(DispatchKeySet, FailAtEndIterator) {
       c10::Error);
 }
 
-TEST(DispatchKeySet, TestKeyOrderingInvariants) {
-  for (uint8_t i = static_cast<uint8_t>(DispatchKey::StartOfDenseBackends);
-       i <= static_cast<uint8_t>(DispatchKey::EndOfRuntimeBackendKeys);
+TEST(DispatchKeySet, TestBackendComponentToString) {
+  std::unordered_set<std::string> seen_strings;
+  for (int64_t i = 0;
+       i <= static_cast<int64_t>(BackendComponent::EndOfBackendKeys);
        i++) {
+    auto k = static_cast<BackendComponent>(i);
+    auto res = std::string(toString(k));
+    ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
+    ASSERT_FALSE(seen_strings.count(res) > 0);
+    seen_strings.insert(res);
+  }
+}
+
+TEST(DispatchKeySet, TestEndOfRuntimeBackendKeysAccurate) {
+  DispatchKey k;
+#define SETTER(fullname, prefix) k = DispatchKey::EndOf##fullname##Backends;
+  C10_FORALL_FUNCTIONALITY_KEYS(SETTER)
+#undef SETTER
+  ASSERT_TRUE(k == DispatchKey::EndOfRuntimeBackendKeys);
+}
+
+TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
+  std::unordered_set<std::string> seen_strings;
+  for (int i = 0; i <= static_cast<int>(DispatchKey::EndOfAliasKeys); i++) {
     auto k = static_cast<DispatchKey>(i);
-    // Note [The Ordering of Per-Backend Dispatch Keys Matters!]
-    // The DispatchKey enum includes all of the runtime keys for
-    // Dense/Sparse/Quantized/Autograd, (e.g. CPU, CUDA, SparseCPU, SparseCUDA,
-    // AutogradCPU, AutogradCUDA, etc). And we expect the ordering of those keys
-    // to be the same as the ordering of the backends in the `BackendComponent`
-    // enum. This makes several utilities in `DispatchKey.h` and
-    // `DispatchKeySet.h` significantly easier to implement. The purpose of the
-    // test is to assert (through CI) that this invariant is maintained.
-    //
-    // The only way that we can really check this invariant is by
-    // comparing the string names of each enum.
-    // We only really care about the ordering for "real" keys that are actually
-    // used, which we expect to be able to print properly. This saves us from
-    // having to enumerate the full set of possible runtime keys in
-    // DispatchKey::toString(). It also relies on toString() being implemented
-    // correctly.
-    auto functionality_str = std::string(toString(k));
-    if (functionality_str == "UNKNOWN_TENSOR_TYPE_ID")
+    // These synthetic keys never actually get used and don't need
+    // to be printed
+    if (k == DispatchKey::EndOfFunctionalityKeys ||
+        k == DispatchKey::StartOfDenseBackends ||
+        k == DispatchKey::StartOfQuantizedBackends ||
+        k == DispatchKey::StartOfSparseBackends ||
+        k == DispatchKey::StartOfNestedTensorBackends ||
+        k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;
-
-    auto computed_backend_k = toBackendComponent(k);
-    auto computed_backend_str = std::string(toString(computed_backend_k));
-    // Skip, e.g., the "Bit" from "CPUBit"
-    computed_backend_str =
-        computed_backend_str.substr(0, computed_backend_str.size() - 3);
-
-    ASSERT_TRUE(
-        functionality_str.find(computed_backend_str) != std::string::npos)
-        << "DispatchKey invariant broken! Found a key that is not ordered correctly"
-        << " with its backend bit. key = " << toString(k) << ", " << k
-        << ", computed backend = " << toString(computed_backend_k);
+    auto res = std::string(toString(k));
+    ASSERT_TRUE(res.find("Unknown") == std::string::npos)
+        << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
+        << ")";
+    ASSERT_TRUE(seen_strings.count(res) == 0);
+    seen_strings.insert(res);
   }
 }

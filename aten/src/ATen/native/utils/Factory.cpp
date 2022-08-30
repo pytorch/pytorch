@@ -11,7 +11,7 @@ Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
     const c10::MemoryFormat memory_format,
-    const DimnameList maybe_names) {
+    c10::optional<DimnameList> maybe_names) {
   auto* const allocator_ptr = c10::GetDefaultMobileCPUAllocator();
   const int64_t nelements = c10::multiply_integers(size);
   size_t size_bytes = nelements * dtype.itemsize();
@@ -27,7 +27,7 @@ Tensor empty_with_tail_padding(
       DispatchKeySet{DispatchKey::CPU},
       dtype));
 
-  return namedinference::propagate_names_if_nonempty(
+  return namedinference::propagate_names_if_present_and_nonempty(
       tensor.resize_(size, memory_format),
       maybe_names);
 }
@@ -55,7 +55,7 @@ Tensor allocate_padded_contiguous_if_needed(
       input.sizes(),
       input.options().dtype(),
       memory_format,
-      input.names());
+      input.opt_names());
 
   return padded_input.copy_(input);
 }

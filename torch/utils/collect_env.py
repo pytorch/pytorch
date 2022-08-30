@@ -88,20 +88,28 @@ def run_and_return_first_line(run_lambda, command):
 
 
 def get_conda_packages(run_lambda):
-    if get_platform() == 'win32':
-        system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-        findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma mypy"'.format(findstr_cmd)
-    else:
-        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma\|mypy"'
     conda = os.environ.get('CONDA_EXE', 'conda')
-    out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
+    out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
         return out
-    # Comment starting at beginning of line
-    comment_regex = re.compile(r'^#.*\n')
-    return re.sub(comment_regex, '', out)
 
+    return "\n".join(
+        line
+        for line in out.splitlines()
+        if not line.startswith("#")
+        and any(
+            name in line
+            for name in {
+                "torch",
+                "numpy",
+                "cudatoolkit",
+                "soumith",
+                "mkl",
+                "magma",
+                "mkl",
+            }
+        )
+    )
 
 def get_gcc_version(run_lambda):
     return run_and_parse_first_match(run_lambda, 'gcc --version', r'gcc (.*)')
@@ -275,13 +283,19 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
-        if get_platform() == 'win32':
-            system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-            findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-            grep_cmd = r'{} /R "numpy torch mypy"'.format(findstr_cmd)
-        else:
-            grep_cmd = r'grep "torch\|numpy\|mypy"'
-        return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
+        out = run_and_read_all(run_lambda, "{} list --format=freeze".format(pip))
+        return "\n".join(
+            line
+            for line in out.splitlines()
+            if any(
+                name in line
+                for name in {
+                    "torch",
+                    "numpy",
+                    "mypy",
+                }
+            )
+        )
 
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
     out = run_with_pip(sys.executable + ' -mpip')
