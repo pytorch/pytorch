@@ -102,13 +102,11 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
       switch (*tag_it) {
         case Tag::Tensor: {
           const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
+          for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
             out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
           if (md.layout_ == at::kStrided) {
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
+            for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
               out.strides_.back().push_back(*tensor_size_strides_it++);
             }
           }
@@ -285,10 +283,9 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
-  for (C10_UNUSED const auto _ :
-       c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
+  for (C10_UNUSED const auto _ : c10::irange(1, op_events_.size())) {
     auto& first = it->basic_fields_;
-    auto& second = (++it)->basic_fields_;
+    const auto& second = (++it)->basic_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
         first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
@@ -505,9 +502,8 @@ void RecordQueue::stop() {
 
 namespace {
 void mark_finished(std::shared_ptr<Result>& r) {
-  TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
+  SOFT_ASSERT(!r->finished_, r->name());
   r->finished_ = true;
-  TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
 static constexpr const char* indexKey = "Profiler Event Index";
@@ -530,8 +526,7 @@ void passEventsToKineto(
         e->start_time_ns_ / 1000,
         e->endTimeNS() / 1000);
 
-    TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
-    if (activity) {
+    if (SOFT_ASSERT(activity || !kKinetoAvailable) && activity) {
       addMetadata(activity, indexKey, std::to_string(i));
     }
   }
@@ -574,12 +569,15 @@ class TransferEvents {
       std::vector<std::shared_ptr<Result>>& results,
       trace_ptr_t& trace)
       : results_{results} {
-    auto* trace_activities_ptr = trace->get()->activities();
-    TORCH_INTERNAL_ASSERT(trace_activities_ptr != nullptr);
-    trace_activities_ = *trace_activities_ptr;
-    reassociate();
-    extractEventsFromTrace();
-    setParents();
+    if (SOFT_ASSERT(trace && *trace && trace->get())) {
+      auto* trace_activities_ptr = trace->get()->activities();
+      if (SOFT_ASSERT(trace_activities_ptr)) {
+        trace_activities_ = *trace_activities_ptr;
+        reassociate();
+        extractEventsFromTrace();
+        setParents();
+      }
+    }
   }
 
  private:
@@ -805,7 +803,6 @@ trace_ptr_t addKinetoEvents(
   }
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
-  TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
   TransferEvents transfer{results, trace};
   return trace;
 }
