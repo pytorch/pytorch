@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 // Require namespace for perf scope instrumentation
@@ -38,10 +39,11 @@ const char* dtypeToPyString(Nvf::DataType t) {
 }
 
 FusionDefinition::FusionDefinition(
-    FusionManager* fusion_manager,
+    FusionInterface* fusion,
     size_t max_length)
     : max_length_(max_length),
-      fusion_manager_(fusion_manager),
+      fusion_(fusion),
+      fusion_cache_(FusionCache::get()),
       end_record_(new EndRecord()),
       recording_(),
       recording_state_(),
@@ -50,7 +52,7 @@ FusionDefinition::FusionDefinition(
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  Nvf::FusionGuard fg(fusionManagerPtr()->fusionPtr());
+  auto fusion_guard = fusionInterfacePtr()->guard();
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
@@ -58,27 +60,36 @@ void FusionDefinition::buildFusionIr() {
   }
 }
 
-FusionManager* FusionDefinition::fusionManagerPtr() const {
+FusionCache* FusionDefinition::fusionCachePtr() const {
   TORCH_INTERNAL_ASSERT(
-      fusion_manager_ != nullptr, "FusionManager pointer is null!");
-  return fusion_manager_;
+      fusion_cache_ != nullptr, "FusionCache pointer is null!");
+  return fusion_cache_;
+}
+
+FusionInterface* FusionDefinition::fusionInterfacePtr() const {
+  TORCH_INTERNAL_ASSERT(
+      fusion_ != nullptr, "FusionInterface pointer is null!");
+  return fusion_;
 }
 
 FusionDefinition* FusionDefinition::enter() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
-  fusionManagerPtr()->resetFusionCachePtr();
+  TORCH_CHECK(!fusionInterfacePtr()->defined(),
+      "Fusion Interface is already defined!"); 
+  fusionCachePtr()->resetFusionCachePtr();
   return this;
 }
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
   auto cache_entry =
-      fusionManagerPtr()->lookupFusionCacheEntry(end_record_.get());
+      fusionCachePtr()->lookupFusionCacheEntry(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    fusionManagerPtr()->createTerminalFusionCacheEntry(end_record_.get());
-    fusionManagerPtr()->traverseFusionCache(end_record_.get());
+    auto fusion_id = fusionCachePtr()->createTerminalFusionCacheEntry(end_record_.get());
+    fusionInterfacePtr()->define(fusion_id);
+    fusionCachePtr()->traverseFusionCache(end_record_.get());
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
@@ -87,13 +98,14 @@ void FusionDefinition::exit() {
     buildFusionIr();
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::FusionIrPresched)) {
-      fusionManagerPtr()->printIr();
+      fusionInterfacePtr()->print();
     }
   } else {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
-    fusionManagerPtr()->traverseFusionCache(end_record_.get());
+    fusionInterfacePtr()->define(cache_entry.value()->fusion_id);
+    fusionCachePtr()->traverseFusionCache(end_record_.get());
   }
 }
 
@@ -130,7 +142,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
   auto cache_entry =
-      fusionManagerPtr()->lookupFusionCacheEntry(recording_.back().get());
+      fusionCachePtr()->lookupFusionCacheEntry(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
@@ -145,16 +157,16 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
-    fusionManagerPtr()->createFusionCacheEntry(recording_.back().get());
+    fusionCachePtr()->createFusionCacheEntry(recording_.back().get());
   }
-  fusionManagerPtr()->traverseFusionCache(recording_.back().get());
+  fusionCachePtr()->traverseFusionCache(recording_.back().get());
 }
 
 void FusionDefinition::addInput(Nvf::Val* input) {
-  fusionManagerPtr()->fusionPtr()->addInput(input);
+  fusionInterfacePtr()->addInput(input);
 }
 void FusionDefinition::addOutput(Nvf::Val* output) {
-  fusionManagerPtr()->fusionPtr()->addOutput(output);
+  fusionInterfacePtr()->addOutput(output);
 }
 
 Nvf::Val* FusionDefinition::getFusionState(size_t index) const {

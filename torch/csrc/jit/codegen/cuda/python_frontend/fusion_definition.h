@@ -8,8 +8,9 @@ namespace Nvf = torch::jit::fuser::cuda;
 
 namespace nvfuser {
 
+class FusionCache;
+class FusionInterface;
 struct RecordFunctor;
-class FusionManager;
 
 //! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
@@ -79,7 +80,7 @@ struct Scalar {
 //!   help(FusionDefinition.Operators)
 class TORCH_CUDA_CU_API FusionDefinition {
  public:
-  FusionDefinition(FusionManager* fusion_manager, size_t max_length);
+  FusionDefinition(FusionInterface* fusion, size_t max_length=256);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member
@@ -121,16 +122,21 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! Builds an nvFuser Fusion IR object upon exit of a FusionDefintion
   //! when a cache lookup fails.
   void buildFusionIr();
-  //! Returns the FusionManager Ptr that holds the cache of Fusions
-  FusionManager* fusionManagerPtr() const;
+  //! Returns the FusionCache Ptr that holds the cache of Fusions
+  FusionCache* fusionCachePtr() const;
+  //! Returns the FusionInterface Ptr that represents the corresponding
+  //! Fusion IR object.
+  FusionInterface* fusionInterfacePtr() const;
 
   //! Holds the defined maximum length of a FusionDefinition in order to
   //! prevent a run away error. The user should feel free to increase this
   //! number as appropriate.
   size_t max_length_;
 
-  //! A pointer the FusionManager that holds the cache of fusions
-  FusionManager* fusion_manager_;
+  //! A pointer to an interface for an nvFusion Fusion IR object.
+  FusionInterface* fusion_;
+  //! A pointer to the FusionCache.
+  FusionCache* fusion_cache_;
 
   //! Holds an End Record
   std::unique_ptr<RecordFunctor> end_record_;

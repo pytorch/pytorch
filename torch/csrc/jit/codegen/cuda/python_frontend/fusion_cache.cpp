@@ -1,47 +1,38 @@
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 
 namespace nvfuser {
 
-thread_local FusionManager* FusionManager::singleton_ = nullptr;
+thread_local FusionCache* FusionCache::singleton_ = nullptr;
 
-FusionCacheEntry::FusionCacheEntry(RecordFunctor* rec, bool _is_terminal)
+FusionCacheEntry::FusionCacheEntry(RecordFunctor* rec, bool _is_terminal, int _fusion_id)
     : record(rec),
       record_hash_map(),
       is_terminal(_is_terminal),
-      fusion_executor_cache(nullptr) {
-  if (is_terminal) {
-    fusion_executor_cache = std::make_unique<Nvf::FusionExecutorCache>(
-        std::make_unique<Nvf::Fusion>());
-  }
-}
+      fusion_id(_fusion_id) {}
 
-FusionManager* FusionManager::get(size_t max_fusions) {
+FusionCache* FusionCache::get(size_t max_fusions) {
   if (singleton_ == nullptr) {
-    singleton_ = new FusionManager(max_fusions);
+    singleton_ = new FusionCache(max_fusions);
   }
   return singleton_;
 }
 
-FusionManager::FusionManager(size_t max_fusions)
+size_t FusionCache::numFusions() const {
+  return fusions_.size();
+}
+
+FusionCache::FusionCache(size_t max_fusions)
     : max_fusions_(max_fusions),
-      num_fusions_(0),
       fusion_cache_start_(nullptr),
-      fusion_cache_ptr_(nullptr) {
+      fusion_cache_ptr_(nullptr),
+      fusions_() {
   RecordFunctor* start = new StartRecord();
   fusion_cache_start_ = std::make_unique<FusionCacheEntry>(start);
   fusion_cache_ptr_ = fusion_cache_start_.get();
 }
 
-std::vector<at::Tensor> FusionManager::execute(
-    const at::ArrayRef<c10::IValue>& inputs) {
-  return fusionExecutorCachePtr()->runFusionWithInputs(inputs);
-}
-void FusionManager::printIr() const {
-  fusionExecutorCachePtr()->printFusion();
-}
-
-c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
+c10::optional<FusionCacheEntry*> FusionCache::lookupFusionCacheEntry(
     RecordFunctor* rec) const {
   TORCH_CHECK(
       !fusionCachePtr()->is_terminal,
@@ -54,7 +45,7 @@ c10::optional<FusionCacheEntry*> FusionManager::lookupFusionCacheEntry(
     return c10::optional<FusionCacheEntry*>(cache_entry->second.get());
   }
 }
-void FusionManager::createFusionCacheEntry(RecordFunctor* rec) {
+void FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
   TORCH_CHECK(
       !fusionCachePtr()->is_terminal,
       "Cannot create a cache entryfrom a terminal entry!");
@@ -74,20 +65,19 @@ void FusionManager::createFusionCacheEntry(RecordFunctor* rec) {
               << "\n";
   }
 }
-void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
+size_t FusionCache::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   TORCH_CHECK(
       !fusionCachePtr()->is_terminal,
-      "Cannot create a cache entryfrom a terminal entry!");
+      "Cannot create a cache entry from a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
   TORCH_CHECK(
       rec->recordType() == RecordType::End,
       "A Terminal Cache Entry can only be created with an EndRecord!");
-  ++num_fusions_;
   TORCH_CHECK(
-      num_fusions_ <= max_fusions_,
+      (fusions_.size() + 1) <= max_fusions_,
       "The number of fusions in nvfuser has exceeded ",
       max_fusions_,
-      "fusions.  The max_fusions for the FusionManager might need to be ",
+      "fusions.  The max_fusions for the FusionCache might need to be ",
       "increased if the max number is not being exceeded due to an error.");
 
   // Copying the record owned by the FusionDefinition that calls this function
@@ -95,19 +85,22 @@ void FusionManager::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   // than managing a shared pointer that would  only share with
   // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
+  fusions_.push_back(std::make_unique<Nvf::FusionExecutorCache>(std::make_unique<Nvf::Fusion>()));
+  auto fusion_id = fusions_.size() - 1;
   fusionCachePtr()->record_hash_map[new_rec] =
-      std::make_unique<FusionCacheEntry>(new_rec, true);
+      std::make_unique<FusionCacheEntry>(new_rec, true, fusion_id);
   if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
     new_rec->print(ss);
     std::cout << "\nFusionDefinition: Create new terminal cache entry.\n";
   }
+  return fusion_id;
 }
-void FusionManager::resetFusionCachePtr() {
+void FusionCache::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
   TORCH_CHECK(fusionCachePtr()->record->recordType() == RecordType::Start);
 }
-void FusionManager::traverseFusionCache(RecordFunctor* rec) {
+void FusionCache::traverseFusionCache(RecordFunctor* rec) {
   TORCH_CHECK(
       !fusionCachePtr()->is_terminal,
       "Cannot traverse cache from a terminal entry!");
@@ -119,25 +112,11 @@ void FusionManager::traverseFusionCache(RecordFunctor* rec) {
   fusion_cache_ptr_ = cache_entry->second.get();
 }
 
-FusionCacheEntry* FusionManager::fusionCachePtr() const {
+FusionCacheEntry* FusionCache::fusionCachePtr() const {
   TORCH_INTERNAL_ASSERT(
       fusion_cache_ptr_ != nullptr,
       "The fusion cache entry is unexpectedly null.");
   return fusion_cache_ptr_;
-}
-Nvf::FusionExecutorCache* FusionManager::fusionExecutorCachePtr() const {
-  if (fusionCachePtr()->fusion_executor_cache) {
-    return fusionCachePtr()->fusion_executor_cache.get();
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "The Fusion Executor Cache Pointer is Null");
-    return nullptr;
-  }
-}
-Nvf::Fusion* FusionManager::fusionPtr() const {
-  TORCH_INTERNAL_ASSERT(
-      fusionExecutorCachePtr()->fusion() != nullptr,
-      "The fusion pointer is null.");
-  return fusionExecutorCachePtr()->fusion();
 }
 
 } // namespace nvfuser

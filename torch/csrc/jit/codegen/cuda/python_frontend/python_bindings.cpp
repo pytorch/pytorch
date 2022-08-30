@@ -9,7 +9,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/composite.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -37,17 +38,27 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
 
-  //! Binding the FusionManager that holds a cache of Fusions
-  py::class_<nvfuser::FusionManager> fusion_manager(nvfuser, "FusionManager");
-  fusion_manager
+  //! Binding the FusionCache that holds a cache of Fusions
+  //! This is only bound to provide an interface to get the number of fusions
+  //! that are cached.
+  py::class_<nvfuser::FusionCache> fusion_cache(nvfuser, "FusionCache");
+  fusion_cache
       .def_static(
           "get",
-          &nvfuser::FusionManager::get,
+          &nvfuser::FusionCache::get,
           py::arg("max_fusions") = int(4096),
           py::return_value_policy::reference)
+      .def("num_fusions", &nvfuser::FusionCache::numFusions);
+  
+  py::class_<nvfuser::FusionInterface> fusion(nvfuser, "Fusion");
+  fusion
+      .def(py::init<>())
+      .def(py::init<size_t>(), py::arg("fusion_id"))
+      .def("define", &nvfuser::FusionInterface::define)
+      .def("defined", &nvfuser::FusionInterface::defined)
       .def(
           "execute",
-          [](nvfuser::FusionManager& self, const py::iterable& iter) {
+          [](nvfuser::FusionInterface& self, const py::iterable& iter) {
             std::vector<IValue> inputs;
             for (py::handle obj : iter) {
               inputs.push_back(toIValue(obj, c10::AnyType::get()));
@@ -55,7 +66,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             return self.execute(inputs);
           },
           py::return_value_policy::reference)
-      .def("print_ir", [](nvfuser::FusionManager& self) { self.printIr(); });
+      .def("print", &nvfuser::FusionInterface::print);
 
   //! These are the FusionDefinition supported object types that are either
   //! defined as inputs or the output of an operation.
@@ -68,8 +79,8 @@ void initNvFuserPythonBindings(PyObject* module) {
   py::class_<nvfuser::FusionDefinition> fusion_def(nvfuser, "FusionDefinition");
   fusion_def
       .def(
-          py::init<nvfuser::FusionManager*, int>(),
-          py::arg("fusion_manager"),
+          py::init<nvfuser::FusionInterface*, int>(),
+          py::arg("fusion"),
           py::arg("max_length") = int(256))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(

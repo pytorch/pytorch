@@ -15,10 +15,10 @@ struct RecordFunctor;
 
 //! \struct FusionCacheEntry
 //! \brief Is the container for a Node in the cache contained in the
-//! FusionManager that is organized as a prefix tree.
+//! FusionCache that is organized as a prefix tree.
 
 struct TORCH_CUDA_CU_API FusionCacheEntry {
-  FusionCacheEntry(RecordFunctor* rec, bool _is_terminal = false);
+  FusionCacheEntry(RecordFunctor* rec, bool _is_terminal=false, int _fusion_id=-1);
 
   //! An entry's primary data is the record it holds
   std::unique_ptr<RecordFunctor> record;
@@ -30,73 +30,41 @@ struct TORCH_CUDA_CU_API FusionCacheEntry {
 
   //! This boolean indicates a leaf node with a cached nvFuser Fusion
   bool is_terminal;
-  //! A pointer to the nvFuser object that holds an unscheduled Fusion
-  std::unique_ptr<Nvf::FusionExecutorCache> fusion_executor_cache;
+  //! An index into FusionCache's vector of nvFuser object that holds an
+  //! unscheduled Fusion.  The id is only valid if the entry is terminal.
+  int fusion_id;
 };
 
-//! \class FusionManager
+//! \class FusionCache
 //! \brief A singleton class used in the nvFuser python interface
 //! to manage the caching of fusions.
 //!
-//! Example:
-//!
-//!   fm = FusionManager.get()
-//!
-//!   with FusionDefinition(fm) as fd :
-//!       t0 = fd.define_tensor(3)
-//!       s1 = fd.define_constant(3.)
-//!       t2 = fd.ops.add(t0, s1)
-//!       fd.add_output(t2)
-//!
-//!   input = torch.ones(2, 4, 8, device='cuda')
-//!
-//!   for _ in range(5) :
-//!      outputs = fm.execute([input])
-//!
-//! The python class defintion is effecively:
-//! class FusionManager :
-//!     # Static Methods
-//!     def get(max_fusions=4096):
-//!        ....
-//!     def reset():
-//!        ....
-//!     # Methods
-//!     def execute(inputs):
-//!        ....
-//!     def print_ir():
-//!        ....
-//!
-//! The fusion manager implements a prefix tree of records in order to cache
+//! The fusion cache implements a prefix tree of records in order to cache
 //! fusions.  A leaf of the tree with a terminal node contains an nvFuser
 //! Fusion IR container for a cached instance.
 //!
 //! \todo Add the ability to evict a fusion.  There is currently a max number
 //! of fusions that is checked to prevent a runaway case.
 
-class TORCH_CUDA_CU_API FusionManager {
-  //! The constructor is private given the FusionManager is only constructed
+class TORCH_CUDA_CU_API FusionCache {
+  //! The constructor is private given the FusionCache is only constructed
   //! as a singleton.
-  FusionManager(size_t max_fusions);
+  FusionCache(size_t max_fusions);
 
-  //! Copy and Assignment of the FusionManager is not supported
-  FusionManager(const FusionManager&) = delete;
-  FusionManager& operator=(const FusionManager&) = delete;
+  //! Copy and Assignment of the FusionCache is not supported
+  FusionCache(const FusionCache&) = delete;
+  FusionCache& operator=(const FusionCache&) = delete;
 
  public:
-  //! The next 4 pubic methods are the python interface methods
+  //! The next 2 pubic methods are the python interface methods
 
   //! Gets a pointer to the singleton and creates a new one if necessary
-  static FusionManager* get(size_t max_fusions);
-  //! Executes a fusion if the current cache pointer points at a terminal node
-  std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs);
-  //! Prints the nvFuser IR if the current cache pointer is a terminal node
-  void printIr() const;
+  static FusionCache* get(size_t max_fusions=8192);
+  //! Number of fusions cached
+  size_t numFusions() const;
 
   //! The rest of the public methods are only used in C++
 
-  //! Returns a pointer for the Fusion associated with the current cache
-  //! pointer if the current cache entry is a terminal node.
-  Nvf::Fusion* fusionPtr() const;
   //! Queries the current cache entry to see if a record matches one of its
   //! children
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
@@ -104,33 +72,32 @@ class TORCH_CUDA_CU_API FusionManager {
   //! Creates a child node for the current cache entry
   void createFusionCacheEntry(RecordFunctor* rec);
   //! Creates a child node for the current cache entry that is terminal
-  void createTerminalFusionCacheEntry(RecordFunctor* rec);
+  size_t createTerminalFusionCacheEntry(RecordFunctor* rec);
   //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
   //! Traverses the cache from the current entry to the child associated
   //! with the record given.
   void traverseFusionCache(RecordFunctor* rec);
 
+  friend class FusionInterface;
+
  private:
-  //! Gives a pointer to the FusionExecutorCache associated with the
-  //! current cache entry if it is a terminal node.
-  Nvf::FusionExecutorCache* fusionExecutorCachePtr() const;
   //! Returns the pointer to the current cache entry
   FusionCacheEntry* fusionCachePtr() const;
 
-  //! The static pointer to the FusionManager
-  static thread_local FusionManager* singleton_;
+  //! The static pointer to the FusionCache
+  static thread_local FusionCache* singleton_;
 
   //! The max allowed number of fusions in the cache
   size_t max_fusions_;
-  //! The current number of fusions in the cache.
-  size_t num_fusions_;
   //! The top of the prefix tree used to start a cache look up of a given
   //! fusion definition.
   std::unique_ptr<FusionCacheEntry> fusion_cache_start_;
   //! A pointer to the current cache entry in a cache lookup of a fusion
   //! definition.
   FusionCacheEntry* fusion_cache_ptr_;
+  //! A vector of unscheduled nvFuser Fusion IR fusions.
+  std::vector<std::unique_ptr<Nvf::FusionExecutorCache>> fusions_;
 };
 
 } // namespace nvfuser

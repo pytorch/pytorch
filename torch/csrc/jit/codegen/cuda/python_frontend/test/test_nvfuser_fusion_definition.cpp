@@ -5,7 +5,8 @@
 #include <torch/torch.h>
 
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_manager.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
 // Tests go in torch::jit
@@ -35,7 +36,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
     try {
       fd.enter();
-      FAIL() << "You should trigger an assert with a null FusionManager!";
+      FAIL() << "You should trigger an assert with a null FusionInterface!";
     } catch (...) {
       SUCCEED();
     }
@@ -43,7 +44,8 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
   // Create a new FusionDefinition that is not found in the cache
   {
-    FusionDefinition fd(FusionManager::get(1), 4);
+    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>();
+    FusionDefinition fd(fusion.get(), 4);
 
     try {
       fd.enter();
@@ -109,9 +111,23 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
     }
   }
 
+  // Look up a FusionDefinition with a defined Fusion
+  {
+    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>(0);
+    FusionDefinition fd(fusion.get(), 1);
+    
+    try {
+      fd.enter();
+      FAIL() << "You should trigger an assert with a defined FusionInterface!";
+    } catch (const std::exception& e) {
+      SUCCEED();
+    }
+  }
+
   // Look up a FusionDefinition completely in the cache
   {
-    FusionDefinition fd(FusionManager::get(1), 4);
+    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>();
+    FusionDefinition fd(fusion.get(), 4);
 
     try {
       fd.enter();
