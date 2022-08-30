@@ -3395,6 +3395,23 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
+dtype_abbrs = {
+    torch.bfloat16: 'bf16',
+    torch.float64: 'f64',
+    torch.float32: 'f32',
+    torch.float16: 'f16',
+    torch.complex32: 'c32',
+    torch.complex64: 'c64',
+    torch.complex128: 'c128',
+    torch.int8: 'i8',
+    torch.int16: 'i16',
+    torch.int32: 'i32',
+    torch.int64: 'i64',
+    torch.bool: 'b8',
+    torch.uint8: 'u8',
+}
+
+
 def set_single_threaded_if_parallel_tbb(fn):
     """Set test to be single threaded for parallel tbb.
 

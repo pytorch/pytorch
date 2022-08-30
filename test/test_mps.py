@@ -20,7 +20,7 @@ from torch._six import inf
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file,
-     TEST_WITH_UBSAN)
+     TEST_WITH_UBSAN, dtype_abbrs)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -6399,35 +6399,6 @@ MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
 
-bf16 = torch.bfloat16
-f64 = torch.float64
-f32 = torch.float32
-f16 = torch.float16
-c32 = torch.complex32
-c64 = torch.complex64
-c128 = torch.complex128
-i8 = torch.int8
-i16 = torch.int16
-i32 = torch.int32
-i64 = torch.int64
-b8 = torch.bool
-u8 = torch.uint8
-
-dtype_abbrs = {
-    torch.bfloat16: 'bf16',
-    torch.float64: 'f64',
-    torch.float32: 'f32',
-    torch.float16: 'f16',
-    torch.complex32: 'c32',
-    torch.complex64: 'c64',
-    torch.complex128: 'c128',
-    torch.int8: 'i8',
-    torch.int16: 'i16',
-    torch.int32: 'i32',
-    torch.int64: 'i64',
-    torch.bool: 'b8',
-    torch.uint8: 'u8',
-}
 
 class TestConsistency(TestCase):
     # TODO: This is only used while some ops are being added.
@@ -7042,8 +7013,6 @@ class TestConsistency(TestCase):
                     raise e
                 forward_failed = True
                 all_forward_pass = False
-
-
 
             if not (dtype.is_floating_point or dtype.is_complex):
                 # Maybe we should error here instead?
