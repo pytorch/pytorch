@@ -898,8 +898,6 @@ symbolic_tensor_failures = {
     xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
     xfail('_masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
-    xfail('addmm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
-    xfail('addmm', 'decomposed'),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('all', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
@@ -1051,7 +1049,6 @@ symbolic_tensor_failures = {
     xfail('meshgrid', 'list_of_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('meshgrid', 'variadic_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('min', 'reduction_with_dim'),  # aten.min.dim - couldn't find symbolic meta function/decomposition
-    xfail('mm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
@@ -1124,7 +1121,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.soft_margin_loss', ''),  # aten.soft_margin_loss.default - couldn't find symbolic meta function/de...
     xfail('nn.functional.triplet_margin_loss', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing element...
-    xfail('nn.functional.triplet_margin_with_distance_loss', ''),  # Unexpected type <class 'torch.SymIntNode'> when com...
     xfail('nn.functional.unfold', ''),  # aten.im2col.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.upsample_bilinear', ''),  # aten.upsample_bilinear2d.vec - couldn't find symbolic meta function/de...
     xfail('nn.functional.upsample_nearest', ''),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/deco...
