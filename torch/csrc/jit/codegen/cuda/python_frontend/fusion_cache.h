@@ -18,7 +18,10 @@ struct RecordFunctor;
 //! FusionCache that is organized as a prefix tree.
 
 struct TORCH_CUDA_CU_API FusionCacheEntry {
-  FusionCacheEntry(RecordFunctor* rec, bool _is_terminal=false, int _fusion_id=-1);
+  FusionCacheEntry(
+      RecordFunctor* rec,
+      bool _is_terminal = false,
+      size_t _fusion_id = 0);
 
   //! An entry's primary data is the record it holds
   std::unique_ptr<RecordFunctor> record;
@@ -32,7 +35,7 @@ struct TORCH_CUDA_CU_API FusionCacheEntry {
   bool is_terminal;
   //! An index into FusionCache's vector of nvFuser object that holds an
   //! unscheduled Fusion.  The id is only valid if the entry is terminal.
-  int fusion_id;
+  size_t fusion_id;
 };
 
 //! \class FusionCache
@@ -59,7 +62,7 @@ class TORCH_CUDA_CU_API FusionCache {
   //! The next 2 pubic methods are the python interface methods
 
   //! Gets a pointer to the singleton and creates a new one if necessary
-  static FusionCache* get(size_t max_fusions=8192);
+  static FusionCache* get(size_t max_fusions = 8192);
   //! Number of fusions cached
   size_t numFusions() const;
 

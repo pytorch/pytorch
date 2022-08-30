@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -38,9 +38,7 @@ const char* dtypeToPyString(Nvf::DataType t) {
   return nullptr;
 }
 
-FusionDefinition::FusionDefinition(
-    FusionInterface* fusion,
-    size_t max_length)
+FusionDefinition::FusionDefinition(FusionInterface* fusion, size_t max_length)
     : max_length_(max_length),
       fusion_(fusion),
       fusion_cache_(FusionCache::get()),
@@ -67,15 +65,14 @@ FusionCache* FusionDefinition::fusionCachePtr() const {
 }
 
 FusionInterface* FusionDefinition::fusionInterfacePtr() const {
-  TORCH_INTERNAL_ASSERT(
-      fusion_ != nullptr, "FusionInterface pointer is null!");
+  TORCH_INTERNAL_ASSERT(fusion_ != nullptr, "FusionInterface pointer is null!");
   return fusion_;
 }
 
 FusionDefinition* FusionDefinition::enter() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
-  TORCH_CHECK(!fusionInterfacePtr()->defined(),
-      "Fusion Interface is already defined!"); 
+  TORCH_CHECK(
+      !fusionInterfacePtr()->defined(), "Fusion Interface is already defined!");
   fusionCachePtr()->resetFusionCachePtr();
   return this;
 }
@@ -87,7 +84,8 @@ void FusionDefinition::exit() {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    auto fusion_id = fusionCachePtr()->createTerminalFusionCacheEntry(end_record_.get());
+    auto fusion_id =
+        fusionCachePtr()->createTerminalFusionCacheEntry(end_record_.get());
     fusionInterfacePtr()->define(fusion_id);
     fusionCachePtr()->traverseFusionCache(end_record_.get());
 

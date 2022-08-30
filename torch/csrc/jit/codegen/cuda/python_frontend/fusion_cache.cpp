@@ -5,7 +5,10 @@ namespace nvfuser {
 
 thread_local FusionCache* FusionCache::singleton_ = nullptr;
 
-FusionCacheEntry::FusionCacheEntry(RecordFunctor* rec, bool _is_terminal, int _fusion_id)
+FusionCacheEntry::FusionCacheEntry(
+    RecordFunctor* rec,
+    bool _is_terminal,
+    size_t _fusion_id)
     : record(rec),
       record_hash_map(),
       is_terminal(_is_terminal),
@@ -85,7 +88,8 @@ size_t FusionCache::createTerminalFusionCacheEntry(RecordFunctor* rec) {
   // than managing a shared pointer that would  only share with
   // FusionDefinition that creates a cache entry but not cache lookups
   RecordFunctor* new_rec = rec->clone();
-  fusions_.push_back(std::make_unique<Nvf::FusionExecutorCache>(std::make_unique<Nvf::Fusion>()));
+  fusions_.push_back(std::make_unique<Nvf::FusionExecutorCache>(
+      std::make_unique<Nvf::Fusion>()));
   auto fusion_id = fusions_.size() - 1;
   fusionCachePtr()->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec, true, fusion_id);

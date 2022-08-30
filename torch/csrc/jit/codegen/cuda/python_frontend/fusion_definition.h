@@ -80,7 +80,7 @@ struct Scalar {
 //!   help(FusionDefinition.Operators)
 class TORCH_CUDA_CU_API FusionDefinition {
  public:
-  FusionDefinition(FusionInterface* fusion, size_t max_length=256);
+  FusionDefinition(FusionInterface* fusion, size_t max_length = 256);
 
   // The copy/move/assign constructors/operators are being removed
   // because it is not possible to copy the fusion_recording data member

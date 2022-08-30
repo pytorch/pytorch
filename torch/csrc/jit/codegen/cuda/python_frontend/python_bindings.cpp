@@ -8,8 +8,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/composite.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
@@ -49,10 +49,9 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("max_fusions") = int(4096),
           py::return_value_policy::reference)
       .def("num_fusions", &nvfuser::FusionCache::numFusions);
-  
+
   py::class_<nvfuser::FusionInterface> fusion(nvfuser, "Fusion");
-  fusion
-      .def(py::init<>())
+  fusion.def(py::init<>())
       .def(py::init<size_t>(), py::arg("fusion_id"))
       .def("define", &nvfuser::FusionInterface::define)
       .def("defined", &nvfuser::FusionInterface::defined)

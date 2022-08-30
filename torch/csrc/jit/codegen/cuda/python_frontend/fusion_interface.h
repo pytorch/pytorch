@@ -52,7 +52,8 @@ class TORCH_CUDA_CU_API FusionInterface {
   //! Adds an Output to the represented Fusion IR.
   void addOutput(Nvf::Val* output) const;
   //! Executes a fusion if the current cache pointer points at a terminal node
-  std::vector<at::Tensor> execute(const at::ArrayRef<c10::IValue>& inputs) const;
+  std::vector<at::Tensor> execute(
+      const at::ArrayRef<c10::IValue>& inputs) const;
   //! Activates a guard around the represented Fusion IR.
   Nvf::FusionGuard guard() const;
   //! Prints the represented nvFuser IR

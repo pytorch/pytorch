@@ -44,7 +44,8 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
   // Create a new FusionDefinition that is not found in the cache
   {
-    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>();
+    std::unique_ptr<FusionInterface> fusion =
+        std::make_unique<FusionInterface>();
     FusionDefinition fd(fusion.get(), 4);
 
     try {
@@ -113,9 +114,10 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
   // Look up a FusionDefinition with a defined Fusion
   {
-    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>(0);
+    std::unique_ptr<FusionInterface> fusion =
+        std::make_unique<FusionInterface>(0);
     FusionDefinition fd(fusion.get(), 1);
-    
+
     try {
       fd.enter();
       FAIL() << "You should trigger an assert with a defined FusionInterface!";
@@ -126,7 +128,8 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
 
   // Look up a FusionDefinition completely in the cache
   {
-    std::unique_ptr<FusionInterface> fusion = std::make_unique<FusionInterface>();
+    std::unique_ptr<FusionInterface> fusion =
+        std::make_unique<FusionInterface>();
     FusionDefinition fd(fusion.get(), 4);
 
     try {
