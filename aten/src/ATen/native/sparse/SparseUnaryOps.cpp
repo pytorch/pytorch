@@ -183,6 +183,10 @@ COALESCED_UNARY_UFUNC_NO_INPLACE(isposinf);
 COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan);
 COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf);
 
+Tensor isinf_sparse_meta(const Tensor& self) {
+  TORCH_CHECK_NOT_IMPLEMENTED(0, "nyi isinf for SparseMeta");
+}
+
 Tensor nan_to_num_sparse(
     const Tensor &self, c10::optional<double> nan,
     c10::optional<double> posinf, c10::optional<double> neginf) {

@@ -1,8 +1,8 @@
 import random
 import unittest
+from typing import Dict, List, Tuple
 
 from tools.testing.test_selections import calculate_shards
-from typing import Dict, List, Tuple
 
 
 class TestCalculateShards(unittest.TestCase):
@@ -63,6 +63,29 @@ class TestCalculateShards(unittest.TestCase):
         ]
         self.assert_shards_equal(
             expected_shards, calculate_shards(2, self.tests, self.test_times)
+        )
+
+    def test_calculate_1_shard_with_complete_test_times(self) -> None:
+        expected_shards = [
+            (
+                118.31,
+                [
+                    "super_long_test",
+                    "long_test1",
+                    "long_test2",
+                    "normal_test1",
+                    "normal_test2",
+                    "normal_test3",
+                    "short_test1",
+                    "short_test2",
+                    "short_test3",
+                    "short_test4",
+                    "short_test5",
+                ],
+            ),
+        ]
+        self.assert_shards_equal(
+            expected_shards, calculate_shards(1, self.tests, self.test_times)
         )
 
     def test_calculate_5_shards_with_complete_test_times(self) -> None:

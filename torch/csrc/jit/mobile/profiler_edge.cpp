@@ -1,4 +1,6 @@
+#include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
+#include <c10/util/overloaded.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
 #include <string>
 #include <vector>
@@ -28,33 +30,26 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   torch::autograd::profiler::prepareProfiler(
       config, {torch::autograd::profiler::ActivityType::CPU});
   if (with_modules || with_stack) {
-    auto post_processing =
-        [this, with_stack, with_modules](
-            std::vector<torch::autograd::profiler::KinetoEvent>& events) {
-          std::string no_debug_info(
-              "Model was not saved with debug information");
-          for (auto& e : events) {
-            if (with_modules) {
-              // Since KinetoEvents's module hierarchy takes vector of strings
-              // we just construct a temporary vector using one string element
-              if (this->m_.hasDebugHandles()) {
-                e.moduleHierarchy(std::vector<std::string>(
-                    {this->m_.getModuleHierarchy(e.debugHandle())}));
-              } else {
-                e.moduleHierarchy(std::vector<std::string>({no_debug_info}));
-              }
-            } else if (with_stack) {
-              // Since KinetoEvents's stack trace takes vector of strings we
-              // just construct a temporary vector using one string element
-              if (this->m_.hasDebugHandles()) {
-                e.stack(std::vector<std::string>(
-                    {this->m_.getCallStack(e.debugHandle())}));
-              } else {
-                e.stack(std::vector<std::string>({no_debug_info}));
-              }
-            }
-          }
-        };
+    auto post_processing = [this, with_stack, with_modules](
+                               int64_t debug_handle,
+                               std::vector<std::string>& jit_stack,
+                               std::vector<std::string>& jit_modules) {
+      std::string no_debug_info("Model was not saved with debug information");
+      if (with_modules) {
+        // Since KinetoEvents's module hierarchy takes vector of strings
+        // we just construct a temporary vector using one string element
+        jit_modules = std::vector<std::string>(
+            {this->m_.hasDebugHandles()
+                 ? this->m_.getModuleHierarchy(debug_handle)
+                 : no_debug_info});
+      } else if (with_stack) {
+        // Since KinetoEvents's stack trace takes vector of strings we
+        // just construct a temporary vector using one string element
+        jit_stack = std::vector<std::string>(
+            {this->m_.hasDebugHandles() ? this->m_.getCallStack(debug_handle)
+                                        : no_debug_info});
+      }
+    };
     torch::autograd::profiler::enableProfilerWithEventPostProcess(
         config,
         {torch::autograd::profiler::ActivityType::CPU},
@@ -70,6 +65,16 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   TORCH_CHECK(
       tls_edge_profiler == nullptr, "Edge profiler is already profiling.")
   tls_edge_profiler = this;
+}
+
+void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
+    void* ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    c10::Device device) {
+  c10::reportMemoryUsageToProfiler(
+      ptr, alloc_size, total_allocated, total_reserved, device);
 }
 
 void KinetoEdgeCPUProfiler::recordBackendEvent(

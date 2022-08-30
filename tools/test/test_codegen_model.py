@@ -1,21 +1,29 @@
 # Owner(s): ["module: codegen"]
 
-import expecttest
-import unittest
-import yaml
 import textwrap
+import unittest
+from typing import cast
 
-from torchgen.model import NativeFunctionsGroup, DispatchKey
+import expecttest
+
 import torchgen.dest as dest
 import torchgen.gen as gen
+import yaml
 from torchgen.gen import LineLoader, parse_native_yaml_struct
+from torchgen.model import (
+    Annotation,
+    CustomClassType,
+    DispatchKey,
+    NativeFunctionsGroup,
+    Type,
+)
 
 
 class TestCodegenModel(expecttest.TestCase):
     def assertParseErrorInline(self, yaml_str: str, expect: str) -> None:
         es = yaml.load(yaml_str, Loader=LineLoader)
         try:
-            parse_native_yaml_struct(es)
+            parse_native_yaml_struct(es, set())
         except AssertionError as e:
             # hack to strip out the context
             msg, _ = str(e).split("  in ", 2)
@@ -26,7 +34,7 @@ class TestCodegenModel(expecttest.TestCase):
     def assertUfuncErrorInline(self, yaml_str: str, expect: str) -> None:
         # parse a single structured group out of the yaml to g
         es = yaml.load(yaml_str, Loader=LineLoader)
-        parsed_yaml = parse_native_yaml_struct(es)
+        parsed_yaml = parse_native_yaml_struct(es, set())
         native_functions, backend_indices = (
             parsed_yaml.native_functions,
             parsed_yaml.backend_indices,
@@ -139,6 +147,59 @@ ScalarOnly and Generic must have same ufunc name""",
             """\
 cannot use CUDAFunctorOnSelf on non-binary function""",
         )
+
+    def test_parse_custom_class_type(self) -> None:
+        custom_class_name = "namespace_foo.class_bar"
+        custom_class_name_with_prefix = f"__torch__.torch.classes.{custom_class_name}"
+        custom_class_type = cast(
+            CustomClassType, Type.parse(custom_class_name_with_prefix)
+        )
+        self.assertTrue(isinstance(custom_class_type, CustomClassType))
+        self.assertEqual(custom_class_name, custom_class_type.class_name)
+        self.assertEqual(custom_class_name_with_prefix, str(custom_class_type))
+
+
+class TestAnnotation(expecttest.TestCase):
+    def test_single_alias_no_write(self) -> None:
+        a = Annotation.parse("a")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertFalse(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple())
+
+    def test_single_alias_is_write(self) -> None:
+        a = Annotation.parse("a!")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple())
+
+    def test_single_alias_is_write_to_wildcard(self) -> None:
+        a = Annotation.parse("a! -> *")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple("*"))
+
+    def test_alias_set(self) -> None:
+        a = Annotation.parse("a|b")
+        self.assertEqual(a.alias_set, ("a", "b"))
+
+    def test_alias_set_is_write_raises_exception(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError, r"alias set larger than 1 is not mutable"
+        ):
+            Annotation.parse("a|b!")
+
+    def test_single_alias_is_write_to_alias_set(self) -> None:
+        a = Annotation.parse("a! -> a|b")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, ("a", "b"))
+
+    def test_before_and_after_alias_set_larger_than_1_raises_exception(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"before alias set and after alias set cannot be larger than 1 at the same time",
+        ):
+            Annotation.parse("a|b -> c|d")
 
 
 if __name__ == "__main__":

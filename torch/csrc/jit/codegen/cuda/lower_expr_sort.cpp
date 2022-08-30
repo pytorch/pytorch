@@ -252,8 +252,10 @@ class ExprSegmentationSorter {
   // Allocate an empty expr group and return it
   ExprGroup* makeEmptyGroup();
 
-  // Allocate an expr group with the provided expr and return it
-  ExprGroup* makeEmptyGroup(Expr*);
+  // Allocate an expr group with the provided expr and return it. Also requires
+  // information on if this expression is a terminating expression (none of its
+  // outputs are used in other expressions being sorted).
+  ExprGroup* makeEmptyGroup(Expr*, bool terminating_expr);
 
   // Returns if sg1 and sg2 should be merged together, is called if they can
   // based on the current status of the DAG.
@@ -305,7 +307,7 @@ class ExprSegmentationSorter {
 
   std::deque<ExprGroup*> to_visit_;
 
-  std::unordered_set<ExprGroup*> to_merge_;
+  std::vector<std::pair<ExprGroup*, ExprGroup*>> to_merge_;
 
   Fusion* fusion_;
 
@@ -538,14 +540,19 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
   return groups_.back().get();
 }
 
-ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
+ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
+    Expr* expr,
+    bool terminating_expr) {
   auto group = makeEmptyGroup();
   group->exprs().push_back(expr);
   if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
-    for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
-      group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+    // If not connected to consumers, doesn't mater what compute at is set to
+    if (!terminating_expr) {
+      for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
+        group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+      }
     }
     for (const auto tv_i : c10::irange(out_tv->getMaxProducerPosition())) {
       group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
@@ -555,39 +562,41 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
 }
 
 // Debug function that prints the current state of the sorter.
-std::string ExprSegmentationSorter::toString(int verbosity) const {
-  std::stringstream ss;
-  ss << "{\n";
-  for (auto& group : groups_) {
-    ss << "  " << group.get() << "\n";
+//
+// Uncomment if needed.
+// std::string ExprSegmentationSorter::toString(int verbosity) const {
+//   std::stringstream ss;
+//   ss << "{\n";
+//   for (auto& group : groups_) {
+//     ss << "  " << group.get() << "\n";
 
-    if (verbosity > 1) {
-      if (group->producerEdges().size() > 0) {
-        ss << "Produced by groups with edges: { \n";
-        for (auto producer_edge : group->producerEdges()) {
-          ss << producer_edge->producer_val_ << " -> "
-             << producer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
+//     if (verbosity > 1) {
+//       if (group->producerEdges().size() > 0) {
+//         ss << "Produced by groups with edges: { \n";
+//         for (auto producer_edge : group->producerEdges()) {
+//           ss << producer_edge->producer_val_ << " -> "
+//              << producer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
 
-    if (verbosity > 1) {
-      if (group->consumerEdges().size() > 0) {
-        ss << "Consumed by groups with edges: { \n";
-        for (auto consumer_edge : group->consumerEdges()) {
-          ss << consumer_edge->producer_val_ << " -> "
-             << consumer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
-  }
-  ss << "}\n";
-  return ss.str();
-}
+//     if (verbosity > 1) {
+//       if (group->consumerEdges().size() > 0) {
+//         ss << "Consumed by groups with edges: { \n";
+//         for (auto consumer_edge : group->consumerEdges()) {
+//           ss << consumer_edge->producer_val_ << " -> "
+//              << consumer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
+//   }
+//   ss << "}\n";
+//   return ss.str();
+// }
 
 namespace {
 
@@ -651,13 +660,14 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
 
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
-    const ComputeAtMap& map,
     const std::unordered_set<IterDomain*> filter,
     const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
         concrete_id_dependencies) {
   if (exprs.empty()) {
     return std::vector<IterDomain*>();
   }
+
+  const auto& ca_map = GpuLower::current()->caMap();
 
   std::unordered_set<IterDomain*> domains;
 
@@ -677,14 +687,17 @@ std::vector<IterDomain*> getLocalDomainOrdering(
                   tv_input->getComputeAtPosition(),
                   tv_input->getMaxProducerPosition()),
           std::back_inserter(domain),
-          [&map](IterDomain* id) { return map.getConcreteMappedID(id); });
+          [&ca_map](IterDomain* id) {
+            return ca_map->getConcreteMappedID(id, IdMappingMode::LOOP);
+          });
 
       domain.erase(
           std::remove_if(
               domain.begin(),
               domain.end(),
-              [&filter, &map](IterDomain* id) {
-                return filter.find(map.getConcreteMappedID(id)) == filter.end();
+              [&filter, &ca_map](IterDomain* id) {
+                return filter.find(ca_map->getConcreteMappedID(
+                           id, IdMappingMode::LOOP)) == filter.end();
               }),
           domain.end());
 
@@ -697,7 +710,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
       merged_domain.begin(),
       merged_domain.end(),
       IterDomainDependencySorter(
-          concrete_id_dependencies, GpuLower::current()->caParallelMap()));
+          concrete_id_dependencies, GpuLower::current()->caMap()));
   return merged_domain;
 }
 } // namespace
@@ -782,8 +795,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
-        ca_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
-            tv->axis(tv_i)));
+        ca_ids.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+            tv->axis(tv_i), IdMappingMode::LOOP));
       }
     }
   }
@@ -797,8 +810,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
-        pa_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
-            tv->axis(tv_i)));
+        pa_ids.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+            tv->axis(tv_i), IdMappingMode::LOOP));
       }
     }
   }
@@ -807,10 +820,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   all_ca_pa_ids.insert(pa_ids.begin(), pa_ids.end());
 
   auto ordered_ids = getLocalDomainOrdering(
-      joined_groups->exprs(),
-      GpuLower::current()->caParallelMap(),
-      all_ca_pa_ids,
-      concrete_id_dependencies);
+      joined_groups->exprs(), all_ca_pa_ids, concrete_id_dependencies);
 
   for (auto id : ordered_ids) {
     if (ca_ids.count(id)) {
@@ -856,8 +866,8 @@ bool canReducePA(ExprGroup* group) {
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
     for (const auto i : c10::irange(consumer_tv->getMaxProducerPosition())) {
-      if (GpuLower::current()->caParallelMap().areMapped(
-              consumer_tv->axis(i), group_pa_last_id)) {
+      if (GpuLower::current()->caMap()->areMapped(
+              consumer_tv->axis(i), group_pa_last_id, IdMappingMode::LOOP)) {
         has_matching_pa = true;
         break;
       }
@@ -873,8 +883,10 @@ bool canReducePA(ExprGroup* group) {
              static_cast<int>(producer_tv->getComputeAtPosition());
          producer_pos_i > 0;
          producer_pos_i--) {
-      if (GpuLower::current()->caParallelMap().areMapped(
-              producer_tv->axis(producer_pos_i - 1), group_pa_last_id)) {
+      if (GpuLower::current()->caMap()->areMapped(
+              producer_tv->axis(producer_pos_i - 1),
+              group_pa_last_id,
+              IdMappingMode::LOOP)) {
         return false;
       }
     }
@@ -932,10 +944,12 @@ void ExprSegmentationSorter::mergeNodes() {
   std::unordered_set<ExprGroupConnections*> clean_up_edges;
 
   while (!to_merge_.empty()) {
-    auto group1 = *to_merge_.begin();
-    auto group2 = group1->payload()->merge_with;
-    to_merge_.erase(group1);
-    to_merge_.erase(group2);
+    ExprGroup *group1 = nullptr, *group2 = nullptr;
+    std::tie(group1, group2) = to_merge_.back();
+    to_merge_.pop_back();
+    TORCH_INTERNAL_ASSERT(
+        group2 == group1->payload()->merge_with,
+        "Expression Sorter: inconsistent to_merge packing");
     clean_up_groups.emplace(group1);
     clean_up_groups.emplace(group2);
     makeMergedNode(group1, group2);
@@ -968,8 +982,8 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
          tv_id_i > 0;
          tv_id_i--) {
       auto tv_id = tv->axis((int)(tv_id_i - 1));
-      auto concrete_id =
-          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id);
+      auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          tv_id, IdMappingMode::LOOP);
 
       if (concrete_id_dependencies.find(concrete_id) ==
           concrete_id_dependencies.end()) {
@@ -980,8 +994,8 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       }
 
       // Loops after tv_id are dependent on tv_id
-      dependencies.emplace(
-          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id));
+      dependencies.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+          tv_id, IdMappingMode::LOOP));
     }
   }
 
@@ -1122,8 +1136,6 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  const auto& parallel_map = GpuLower::current()->caParallelMap();
-
   // If inner loop dependencies have not been resolved, cannot merge.
   if (!loopReady(producer_ca_domain.back()) ||
       !loopReady(consumer_pa_domain.back())) {
@@ -1159,11 +1171,13 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
       continue;
     }
 
-    if (!parallel_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
+    if (!GpuLower::current()->caMap()->areMapped(
+            compute_at_dim, producer_ca_domain.back(), IdMappingMode::LOOP)) {
       continue;
     }
 
-    if (parallel_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
+    if (GpuLower::current()->caMap()->areMapped(
+            compute_at_dim, consumer_pa_domain.back(), IdMappingMode::LOOP)) {
       return true;
     }
   }
@@ -1212,9 +1226,24 @@ void ExprSegmentationSorter::sort() {
   // Need this for initialization of the DAG that is processed
   std::unordered_map<Expr*, ExprGroup*> expr2group;
 
+  auto all_exprs = fusion_->exprs();
+
+  // Figure out all the values used as inputs to the expressions we're sorting
+  // (to find terminating expressions). There could be branches of expressions
+  // not used to produce outputs, so can't simply check val->uses() to figure
+  // out if it's actually used in the expressions we're sorting.
+  std::unordered_set<Val*> used_vals;
+  for (auto expr : all_exprs) {
+    used_vals.insert(expr->inputs().begin(), expr->inputs().end());
+  }
+
   // Initialize DAG, convert each expr to a segment group
-  for (auto expr : fusion_->exprs()) {
-    auto group = makeEmptyGroup(expr);
+  for (auto expr : all_exprs) {
+    bool is_terminating_expr = std::none_of(
+        expr->outputs().begin(),
+        expr->outputs().end(),
+        [&used_vals](Val* output) { return used_vals.count(output) > 0; });
+    auto group = makeEmptyGroup(expr, is_terminating_expr);
     expr2group.insert(std::make_pair(expr, group));
   }
 
@@ -1274,8 +1303,7 @@ void ExprSegmentationSorter::sort() {
             continue;
           }
 
-          to_merge_.emplace(group.get());
-          to_merge_.emplace(*candidate_it);
+          to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
 
           group->payload()->merged = true;
           group->payload()->merge_with = *candidate_it;
@@ -1327,8 +1355,7 @@ void ExprSegmentationSorter::sort() {
           if (testStillDag(group.get(), *candidate_it)) {
             // Mark in same style as default algorithm for convenience even
             // though we will only merge once with the fallback
-            to_merge_.emplace(group.get());
-            to_merge_.emplace(*candidate_it);
+            to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
 
             group->payload()->merged = true;
             group->payload()->merge_with = *candidate_it;

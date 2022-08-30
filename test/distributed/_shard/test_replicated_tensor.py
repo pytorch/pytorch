@@ -22,17 +22,17 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
     gen_binary_op_func
 )
+from torch.testing._internal.distributed._shard.sharded_tensor import TEST_GPU_NUM
 
 
 class TestReplicatedTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_basics(self):
         local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}") * 4
         replica_tensor = ReplicatedTensor(local_tensor)
-        print(replica_tensor.process_group)
         # validate it's a replicated tensor by checking values on all rank
         validated = replica_tensor.validate()
         self.assertEqual(validated, True)
@@ -49,7 +49,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             replica_tensor.validate()
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_replicated_tensor(self):
         local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}")
@@ -69,7 +69,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_tensor(self):
         local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}") * 4
@@ -84,7 +84,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         self.assertEqual(new_tensor, local_tensor + local_rand_tensor)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor(self):
         torch.manual_seed(self.rank)
@@ -112,7 +112,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             res = binary_op(st, replica_tensor)
             self.assertIsInstance(res, sharded_tensor.ShardedTensor)
             self.assertNotIsInstance(res, ReplicatedTensor)
-            output = torch.empty((12, 3)) if self.rank == 0 else None
+            output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             res.gather(dst=0, out=output)
 
             if self.rank == 0:
@@ -123,7 +123,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             reflect_res = binary_op(replica_tensor, st)
             self.assertIsInstance(reflect_res, sharded_tensor.ShardedTensor)
             self.assertNotIsInstance(reflect_res, ReplicatedTensor)
-            reflect_output = torch.empty((12, 3)) if self.rank == 0 else None
+            reflect_output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             reflect_res.gather(dst=0, out=reflect_output)
 
             if self.rank == 0:
@@ -132,7 +132,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_implicit_broadcasting(self):
         #  use same seed
@@ -165,7 +165,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             res = binary_op(st, replica_tensor)
 
             self.assertIsInstance(res, sharded_tensor.ShardedTensor)
-            output = torch.empty((12, 3)) if self.rank == 0 else None
+            output = torch.empty((12, 3), device=self.rank) if self.rank == 0 else None
             res.gather(dst=0, out=output)
 
             if self.rank == 0:
@@ -174,7 +174,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_replicated_tensor_inter_op_sharded_tensor_errors(self):
         local_tensor = torch.ones(3, 3, device=f"cuda:{self.rank}") * 4
@@ -201,7 +201,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             st1 % replica_tensor
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_with_ddp(self):
         # Test Replicated params for DDP
@@ -306,3 +306,31 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             buffer.seek(0)
             obj = torch.load(buffer)
             self.assertEqual(expected_state_dict, obj.state_dict())
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_unsqueeze(self):
+        local_tensor = torch.rand(3, 3, device=self.rank)
+        replicated_tensor = ReplicatedTensor(local_tensor)
+
+        unsqueezed_replicated_tensor = replicated_tensor.unsqueeze(0)
+        unsqueezed_local_tensor = local_tensor.unsqueeze(0)
+
+        self.assertIsInstance(unsqueezed_replicated_tensor, ReplicatedTensor)
+        self.assertIsInstance(torch.unsqueeze(replicated_tensor, 0), ReplicatedTensor)
+        self.assertEqual(unsqueezed_local_tensor, unsqueezed_replicated_tensor)
+        self.assertEqual(torch.unsqueeze(replicated_tensor, 0), unsqueezed_replicated_tensor)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_getitem(self):
+        local_tensor = torch.rand(3, 3, device=self.rank)
+        replicated_tensor = ReplicatedTensor(local_tensor)
+
+        replicated_tensor_view = replicated_tensor[0]
+        local_tensor_view = local_tensor[0]
+
+        self.assertIsInstance(replicated_tensor_view, ReplicatedTensor)
+        self.assertEqual(local_tensor_view, replicated_tensor_view)

@@ -645,6 +645,14 @@ class JitTestCase(JitCommonTestCase):
 
         return sm
 
+class NoTracerWarnContextManager(object):
+    def __enter__(self):
+        self.prev = torch._C._jit_get_tracer_state_warn()
+        torch._C._jit_set_tracer_state_warn(False)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_tracer_state_warn(self.prev)
+
 @contextmanager
 def inline_everything_mode(should_inline):
     old = torch._C._jit_get_inline_everything_mode()
@@ -779,6 +787,7 @@ class TensorExprTestOptions():
         torch._C._debug_set_fusion_group_inlining(False)
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
+        self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(False)
 
     def restore(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -789,6 +798,7 @@ class TensorExprTestOptions():
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
 
 def clone_inputs(args):
     inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []

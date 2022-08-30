@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 
-import os
 import argparse
+import os
 import sys
 
 sys.path.append(
@@ -85,6 +85,7 @@ includes = [
     "aten/src/ATen/cuda/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
+    "aten/src/ATen/native/quantized/cudnn/*",
     "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
@@ -98,11 +99,13 @@ includes = [
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
+includes = [os.path.join(proj_dir, include) for include in includes]
+
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, "**/*")
-        includes.append(new_dir)
+        abs_new_dir = os.path.join(abs_new_dir, "**/*")
+        includes.append(abs_new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
@@ -110,6 +113,9 @@ ignores = [
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    # Correct path to generate HIPConfig.h:
+    #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
+    "aten/src/ATen/cuda/CUDAConfig.h",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
@@ -120,6 +126,8 @@ ignores = [
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
+
+ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 # Check if the compiler is hip-clang.
 def is_hip_clang() -> bool:
@@ -152,7 +160,7 @@ if os.path.exists(gloo_cmake_file):
     do_write = False
     with open(gloo_cmake_file, "r") as sources:
         lines = sources.readlines()
-    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIBRARY_PATH") for line in lines]
+    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIB_PATH") for line in lines]
     if lines == newlines:
         print("%s skipped" % gloo_cmake_file)
     else:

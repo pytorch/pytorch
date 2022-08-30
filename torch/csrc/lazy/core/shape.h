@@ -16,7 +16,10 @@ class TORCH_API Shape {
  public:
   Shape() = default;
 
-  Shape(at::ScalarType scalar_type, c10::ArrayRef<int64_t> sizes);
+  Shape(
+      at::ScalarType scalar_type,
+      c10::ArrayRef<int64_t> sizes,
+      c10::optional<std::vector<bool>> is_symbolic = c10::nullopt);
 
   std::string to_string() const;
 
@@ -56,20 +59,20 @@ class TORCH_API Shape {
  private:
   c10::ScalarType scalar_type_{c10::ScalarType::Undefined};
 
+  // Sizes are the upper bound sizes for a tensor, used by XLA.
+  std::vector<int64_t> sizes_;
   // Stores which dimmensions are symbolic
   // If nullopt, either it hasn't been initialized or the symbolic
   // dimmensions are not calculatable
   c10::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
-  // Sizes are the upper bound sizes for a tensor, used by XLA.
-  std::vector<int64_t> sizes_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
-bool symbolicShapeEnabled();
+TORCH_API bool symbolicShapeEnabled();
 // Calculate and applies symbolic shapes onto the
 // Shape objects passed to result_shapes
-void applySymbolicShapesOnLT(
+TORCH_API void applySymbolicShapesOnLT(
     const char* schema_str,
     std::vector<c10::IValue> args,
     std::vector<Shape>& result_shapes);

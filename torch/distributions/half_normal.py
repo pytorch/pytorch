@@ -1,11 +1,13 @@
 import math
 
+import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['HalfNormal']
 
 class HalfNormal(TransformedDistribution):
     r"""
@@ -16,6 +18,7 @@ class HalfNormal(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = HalfNormal(torch.tensor([1.0]))
         >>> m.sample()  # half-normal distributed with scale=1
         tensor([ 0.1046])
@@ -24,7 +27,7 @@ class HalfNormal(TransformedDistribution):
         scale (float or Tensor): scale of the full Normal distribution
     """
     arg_constraints = {'scale': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
@@ -43,6 +46,10 @@ class HalfNormal(TransformedDistribution):
     @property
     def mean(self):
         return self.scale * math.sqrt(2 / math.pi)
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
 
     @property
     def variance(self):

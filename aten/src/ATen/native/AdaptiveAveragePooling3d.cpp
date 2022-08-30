@@ -8,14 +8,14 @@ namespace native {
 
 namespace {
 
-inline int start_index(int a, int b, int c) {
+inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::floor((float)(a * c) / b);
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-inline int end_index(int a, int b, int c) {
+inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::ceil((float)((a + 1) * c) / b);
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 template <typename scalar_t>
@@ -98,7 +98,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "adaptive_avg_pool3d(): Expected 3D or 4D tensor, but got ",
+      "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
       input.sizes());
   TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());

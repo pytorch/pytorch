@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Gamma']
 
 def _standard_gamma(concentration):
     return torch._standard_gamma(concentration)
@@ -16,6 +17,7 @@ class Gamma(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
         tensor([ 0.1046])
@@ -27,13 +29,17 @@ class Gamma(ExponentialFamily):
             (often referred to as beta)
     """
     arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
     _mean_carrier_measure = 0
 
     @property
     def mean(self):
         return self.concentration / self.rate
+
+    @property
+    def mode(self):
+        return ((self.concentration - 1) / self.rate).clamp(min=0)
 
     @property
     def variance(self):
@@ -66,8 +72,8 @@ class Gamma(ExponentialFamily):
         value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
-        return (self.concentration * torch.log(self.rate) +
-                (self.concentration - 1) * torch.log(value) -
+        return (torch.xlogy(self.concentration, self.rate) +
+                torch.xlogy(self.concentration - 1, value) -
                 self.rate * value - torch.lgamma(self.concentration))
 
     def entropy(self):

@@ -182,11 +182,17 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
-UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
+UnaryOp::UnaryOp(
+    IrBuilderPasskey passkey,
+    UnaryOpType type,
+    Val* out,
+    Val* in,
+    int rng_offset)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
       out_{out},
-      in_{in} {
+      in_{in},
+      rng_offset_(rng_offset) {
   addOutput(out);
   addInput(in);
 }
@@ -195,7 +201,8 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       unary_op_type_(src->unary_op_type_),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      rng_offset_(src->rng_offset_) {}
 
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -382,13 +389,14 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in,
-    bool is_fused)
-    : Expr(passkey, ExprType::ReductionOp),
+    bool is_allreduce,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
       in_(in),
-      is_fused_(is_fused) {
+      is_allreduce_(is_allreduce) {
   TORCH_CHECK(
       out->getValType().value() == ValType::TensorView ||
       out->getValType().value() == ValType::TensorIndex);
@@ -415,6 +423,59 @@ ReductionOp::ReductionOp(
   addInput(in);
 }
 
+GroupedReductionOp::GroupedReductionOp(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    bool is_fused,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
+      reduction_op_types_(std::move(reduction_op_types)),
+      init_vals_(std::move(init_vals)),
+      is_allreduce_(is_fused) {
+  for (auto out : outputs) {
+    addOutput(out);
+  }
+
+  for (auto in : inputs) {
+    addInput(in);
+  }
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    const GroupedReductionOp* src,
+    IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_types_(src->reduction_op_types_),
+      init_vals_(ir_cloner->clone(src->init_vals_)),
+      is_allreduce_(src->is_allreduce_) {}
+
+bool GroupedReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+
+  auto grouped_rop = dynamic_cast<const GroupedReductionOp*>(other);
+  if (grouped_rop == nullptr) {
+    return false;
+  }
+
+  if (!Expr::sameAs(other) ||
+      getReductionOpTypes() != grouped_rop->getReductionOpTypes()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(numExprs())) {
+    if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 WelfordOp::WelfordOp(
     IrBuilderPasskey passkey,
     Val* out_avg,
@@ -435,9 +496,9 @@ WelfordOp::WelfordOp(
       init_var_(init_var),
       init_N_(init_N),
       in_avg_(in_avg),
-      in_var_(in_var),
+      in_var_(in_var == nullptr ? in_avg->container()->zeroVal() : in_var),
       in_N_(in_N),
-      is_fused_(is_fused) {
+      is_allreduce_(is_fused) {
   // Check output type
   TORCH_INTERNAL_ASSERT(
       out_avg->getValType().value() == ValType::TensorView ||
@@ -482,18 +543,22 @@ WelfordOp::WelfordOp(
         in_var &&
         (in_var->getValType().value() == ValType::TensorView ||
          in_var->getValType().value() == ValType::TensorIndex));
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        in_var == nullptr || in_var->isZeroInt(),
+        "Invalid var input, which must be either nullptr or scalar zero when the N input is one.");
   }
 
-  addOutput(out_avg);
-  addOutput(out_var);
-  addOutput(out_N);
+  addOutput(out_avg_);
+  addOutput(out_var_);
+  addOutput(out_N_);
 
-  addInput(in_avg);
-  // Conditionally adding this input?
-  if (!in_N->isOneInt()) {
-    addInput(in_var);
-  }
-  addInput(in_N);
+  addInput(in_avg_);
+  // Previously in_var_ was allowed to be null
+  TORCH_INTERNAL_ASSERT(
+      in_var_ != nullptr, "Welford var input nullptr not allowed");
+  addInput(in_var_);
+  addInput(in_N_);
 }
 
 WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
@@ -507,7 +572,7 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
       in_N_(ir_cloner->clone(src->in_N_)),
-      is_fused_(src->is_fused_) {}
+      is_allreduce_(src->is_allreduce_) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -528,6 +593,11 @@ bool WelfordOp::sameAs(const Statement* other) const {
         init_N_->sameAs(other_wop->init_N_);
   }
   return false;
+}
+
+std::vector<Val*> WelfordOp::getInitVals() const {
+  std::vector<Val*> init_vals({init_avg_, init_var_, init_N_});
+  return init_vals;
 }
 
 MmaOp::MmaOp(
@@ -567,7 +637,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init,
-    MmaOptions options)
+    OptionsInMma options)
     : MmaOp(passkey, out, in_a, in_b, init) {
   options_ = options;
 }
@@ -598,7 +668,7 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      is_fused_(src->is_fused_) {}
+      is_allreduce_(src->is_allreduce_) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -619,7 +689,7 @@ TransposeOp::TransposeOp(
     IrBuilderPasskey passkey,
     TensorView* out,
     TensorView* in,
-    std::vector<int> new2old)
+    std::vector<int64_t> new2old)
     : Expr(passkey, ExprType::TransposeOp),
       out_(out),
       in_(in),
@@ -628,17 +698,14 @@ TransposeOp::TransposeOp(
   // should be checked at function transpose.
 
   TORCH_INTERNAL_ASSERT(
-      !in->hasRFactor(), "Transposing rFactor tensors is not supported.");
+      TensorDomain::noReductions(in->getMaybeRFactorDomain()).size() ==
+      out->getMaybeRFactorDomain().size());
 
-  TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(in->getRootDomain()).size() ==
-      out->getRootDomain().size());
-
-  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getMaybeRFactorDomain().size());
 
   // Make sure the entries of new2old are unique and range from 0 to
   // N-1, where N == new2old.size().
-  std::set<int> old_positions(new2old_.begin(), new2old_.end());
+  std::set<int64_t> old_positions(new2old_.begin(), new2old_.end());
   TORCH_INTERNAL_ASSERT(old_positions.size() == new2old_.size());
   // old_positions is sorted, so the first entry must be 0.
   TORCH_INTERNAL_ASSERT(
@@ -661,6 +728,45 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
+
+std::vector<int64_t> TransposeOp::old2new() const {
+  std::vector<int64_t> old2new(new2old_.size());
+  for (auto new_axis : c10::irange(new2old_.size())) {
+    auto old_axis = new2old_.at(new_axis);
+    old2new[old_axis] = new_axis;
+  }
+  return old2new;
+}
+
+ExpandOp::ExpandOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    std::vector<Val*> _expanded_extents)
+    : Expr(passkey, ExprType::ExpandOp),
+      out_(out),
+      in_(in),
+      expanded_extents_(std::move(_expanded_extents)) {
+  addOutput(out);
+  addInput(in);
+  for (auto expanded_extent : expanded_extents_) {
+    TORCH_INTERNAL_ASSERT(expanded_extent != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        expanded_extent->dtype() == DataType::Int,
+        "Expanded extents must be of Int type.");
+    addInput(expanded_extent);
+  }
+}
+
+ExpandOp::ExpandOp(const ExpandOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {
+  expanded_extents_.reserve(src->expanded_extents_.size());
+  for (const auto expanded_extent : src->expanded_extents_) {
+    expanded_extents_.push_back(ir_cloner->clone(expanded_extent));
+  }
+}
 
 ShiftOp::ShiftOp(
     IrBuilderPasskey passkey,
@@ -795,21 +901,27 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
-ViewDtypeOp::ViewDtypeOp(
+ViewAsScalar::ViewAsScalar(
     IrBuilderPasskey passkey,
-    TensorView* out,
-    TensorView* in,
-    DataType dtype)
-    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+    Val* out,
+    Val* in,
+    IterDomain* vector_id,
+    Val* index)
+    : Expr(passkey, ExprType::ViewAsScalar),
+      out_(out),
+      in_(in),
+      vector_id_(vector_id),
+      index_(index) {
   addOutput(out);
   addInput(in);
 }
 
-ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+ViewAsScalar::ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      dtype_(src->dtype()) {}
+      vector_id_(ir_cloner->clone(src->vector_id_)),
+      index_(ir_cloner->clone(src->index_)) {}
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
@@ -822,39 +934,144 @@ ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-IterDomain::IterDomain(
+LoadStoreOp::LoadStoreOp(
     IrBuilderPasskey passkey,
-    Val* start,
-    Val* extent,
-    ParallelType parallel_type,
-    IterType iter_type,
-    bool is_rfactor_domain)
-    : IterDomain(
-          passkey,
-          start,
-          extent,
-          nullptr,
-          parallel_type,
-          iter_type,
-          is_rfactor_domain) {}
+    LoadStoreOpType op_type,
+    Val* out,
+    Val* in)
+    : Expr(passkey, ExprType::LoadStoreOp),
+      load_store_type_(op_type),
+      out_(out),
+      in_(in) {
+  addOutput(out);
+  addInput(in);
+}
+
+LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      load_store_type_(src->load_store_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
+IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
+    : start_(_start), extent_(_extent) {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+}
+
+IterDomainBuilder::IterDomainBuilder(const IterDomain* id)
+    : start_(id->start()),
+      extent_(id->extent()),
+      expanded_extent_(
+          id->hasExpandedExtent() ? id->expandedExtent() : nullptr),
+      stop_offset_(id->stopOffset()),
+      parallel_type_(id->getParallelType()),
+      iter_type_(id->getIterType()),
+      is_rfactor_domain_(id->isRFactorProduct()),
+      is_padded_dimension_(id->hasPaddingToMultipleOfWarp()),
+      padded_to_size_(id->getMaybeSizeAfterPadding()),
+      is_mma_swizzled_(id->isMmaSwizzled()) {}
+
+IterDomainBuilder& IterDomainBuilder::resetSchedulingParams() {
+  parallel_type_ = ParallelType::Serial;
+  is_rfactor_domain_ = false;
+  is_padded_dimension_ = false;
+  padded_to_size_ = c10::nullopt;
+  is_mma_swizzled_ = false;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::resetRfactor() {
+  return is_rfactor_domain(false);
+}
+
+IterDomainBuilder& IterDomainBuilder::start(Val* _start) {
+  start_ = _start;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::extent(Val* _extent) {
+  extent_ = _extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::expanded_extent(Val* _expanded_extent) {
+  expanded_extent_ = _expanded_extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::stop_offset(Val* _stop_offset) {
+  stop_offset_ = _stop_offset;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::parallel_type(
+    ParallelType _parallel_type) {
+  parallel_type_ = _parallel_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::iter_type(IterType _iter_type) {
+  iter_type_ = _iter_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_rfactor_domain(
+    bool _is_rfactor_domain) {
+  is_rfactor_domain_ = _is_rfactor_domain;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_padded_dimension(
+    bool _is_padded_dimension) {
+  is_padded_dimension_ = _is_padded_dimension;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::padded_to_size(
+    c10::optional<int64_t> _padded_to_size) {
+  padded_to_size_ = _padded_to_size;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_mma_swizzled(bool _is_mma_swizzled) {
+  is_mma_swizzled_ = _is_mma_swizzled;
+  return *this;
+}
+
+IterDomain* IterDomainBuilder::build() const {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+  return IrBuilder::create<IterDomain>(start_->container(), *this);
+}
 
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
     Val* start,
     Val* extent,
+    Val* expanded_extent,
     Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
-    bool is_rfactor_domain)
+    bool is_rfactor_domain,
+    bool is_padded_dimension,
+    c10::optional<int64_t> padded_to_size,
+    bool is_mma_swizzled)
     : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       extent_(extent),
+      expanded_extent_(expanded_extent),
       stop_offset_(
           stop_offset == nullptr ? passkey.ir_container_->zeroVal()
                                  : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
-      is_rfactor_domain_(is_rfactor_domain) {
+      is_rfactor_domain_(is_rfactor_domain),
+      is_padded_dimension_(is_padded_dimension),
+      padded_to_size_(padded_to_size),
+      is_mma_swizzled_(is_mma_swizzled) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
@@ -872,10 +1089,28 @@ IterDomain::IterDomain(
       " .");
 }
 
+IterDomain::IterDomain(IrBuilderPasskey passkey, const IterDomainBuilder& args)
+
+    : IterDomain(
+          passkey,
+          args.start_,
+          args.extent_,
+          args.expanded_extent_,
+          args.stop_offset_,
+          args.parallel_type_,
+          args.iter_type_,
+          args.is_rfactor_domain_,
+          args.is_padded_dimension_,
+          args.padded_to_size_,
+          args.is_mma_swizzled_) {}
+
 IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      expanded_extent_(
+          src->hasExpandedExtent() ? ir_cloner->clone(src->expandedExtent())
+                                   : nullptr),
       stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
@@ -896,7 +1131,8 @@ bool IterDomain::sameAs(const Statement* other) const {
   const IterDomain* other_id = other->as<IterDomain>();
 
   bool is_same = isReduction() == other_id->isReduction() &&
-      getParallelType() == other_id->getParallelType();
+      getParallelType() == other_id->getParallelType() &&
+      isVectorComponent() == other_id->isVectorComponent();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
   is_same =
@@ -905,19 +1141,11 @@ bool IterDomain::sameAs(const Statement* other) const {
   return is_same;
 }
 
-// Returns a new IterDomain matching properties of this
-IterDomain* IterDomain::clone() const {
-  auto cloned = IrBuilder::create<IterDomain>(
-      ir_container_,
-      start(),
-      extent(),
-      stopOffset(),
-      getParallelType(),
-      getIterType(),
-      isRFactorProduct());
+// Returns a new IterDomain matching properties of this except for
+// is_rfactor_domain_
+IterDomain* IterDomain::cloneWithoutRFactor() const {
+  auto cloned = IterDomainBuilder(this).resetRfactor().build();
 
-  cloned->is_padded_dimension_ = is_padded_dimension_;
-  cloned->padded_to_size_ = padded_to_size_;
   return cloned;
 }
 
@@ -928,7 +1156,7 @@ std::vector<IterDomain*> IterDomain::clone(
       domains.begin(),
       domains.end(),
       std::back_inserter(cloned_domains),
-      [](auto id) { return id->clone(); });
+      [](auto id) { return id->cloneWithoutRFactor(); });
   return cloned_domains;
 }
 
@@ -956,14 +1184,28 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   IterType itype = outer->getIterType();
 
   if (outer->isBroadcast() && inner->isBroadcast()) {
-    if (outer->getIterType() == IterType::BroadcastWithStride ||
-        inner->getIterType() == IterType::BroadcastWithStride) {
-      itype = IterType::BroadcastWithStride;
-    } else {
-      itype = IterType::BroadcastWithoutStride;
-    }
+    itype = IterType::Broadcast;
   } else if (outer->isBroadcast() || inner->isBroadcast()) {
     itype = IterType::Iteration;
+  }
+
+  Val* expanded_extent = nullptr;
+  if (outer->hasExpandedExtent() || inner->hasExpandedExtent()) {
+    if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      expanded_extent = mul(outer->expandedExtent(), inner->expandedExtent());
+    } else if (outer->hasExpandedExtent() && !inner->hasExpandedExtent()) {
+      if (inner->isBroadcast()) {
+        expanded_extent = outer->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->expandedExtent(), inner->extent());
+      }
+    } else if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      if (outer->isBroadcast()) {
+        expanded_extent = inner->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->extent(), inner->expandedExtent());
+      }
+    }
   }
 
   // Merging trivial reduction with iter domain, that's fine, just make it an
@@ -973,13 +1215,13 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
     itype = IterType::Iteration;
   }
 
-  IterDomain* merged_id = IrBuilder::create<IterDomain>(
-      outer->container(),
-      outer->container()->zeroVal(),
-      merged_id_size->as<Int>(),
-      outer->getParallelType(),
-      itype,
-      outer->isRFactorProduct() || inner->isRFactorProduct());
+  IterDomain* merged_id =
+      IterDomainBuilder(
+          outer->container()->zeroVal(), merged_id_size->as<Int>())
+          .parallel_type(outer->getParallelType())
+          .expanded_extent(expanded_extent)
+          .iter_type(itype)
+          .build();
 
   IrBuilder::create<Merge>(outer->container(), merged_id, outer, inner);
 
@@ -1019,6 +1261,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop size
   Val* remainder =
       ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+  Val* expanded_remainder = nullptr;
+  if (in->hasExpandedExtent()) {
+    expanded_remainder = ceilDiv(
+        Split::extent(in->expandedExtent(), start_offset, stop_offset), factor);
+  }
 
   if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
       (stop_offset != nullptr && !stop_offset->isZeroInt())) {
@@ -1027,22 +1274,28 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Partial split is only allowed with root domains");
   }
   // outer loop IterDomain
-  IterDomain* ido = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? remainder->as<Int>() : factor,
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* ido =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? remainder->as<Int>() : factor)
+          .expanded_extent(
+              in->hasExpandedExtent() && inner_split ? expanded_remainder
+                                                     : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   // inner loop IterDomain
-  IterDomain* idi = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? factor : remainder->as<Int>(),
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* idi =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? factor : remainder->as<Int>())
+          .expanded_extent(
+              in->hasExpandedExtent() && !inner_split ? expanded_remainder
+                                                      : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1077,16 +1330,56 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
   return split_out;
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    SwizzleMode swizzle_mode) {
+  TORCH_CHECK(
+      !in_x->extent()->isZeroInt() && !in_y->extent()->isZeroInt(),
+      "Invalid swizzling of a empty dimension.");
+
+  // TODO: reduction check on swizzle:
+  TORCH_CHECK(
+      !in_x->isReduction() && !in_y->isReduction(),
+      "swizzled reduction not yet supported");
+
+  for (auto input : InputsOf::outputs(in_x->fusion(), {in_x, in_y})) {
+    TORCH_CHECK(
+        !input->as<IterDomain>()->isBroadcast(),
+        "swizzling broadcast axes not yet supported");
+  }
+
+  // TODO: gather and shift check on swizzle
+  TORCH_INTERNAL_ASSERT(
+      !in_x->isGather() && !in_y->isGather(),
+      "Swizzled gather not yet supported");
+
+  IterDomain* out_x = IterDomainBuilder(in_x).build();
+
+  IterDomain* out_y = IterDomainBuilder(in_y).build();
+
+  IrBuilder::create<Swizzle2D>(
+      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type, swizzle_mode);
+
+  return std::make_pair(out_x, out_y);
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
-  parallel_type_ = t;
-  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
+  if (parallel_type_ == t) {
+    // No op, don't do any more checks, it was already set to this value.
+    return;
+  }
+
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t) ||
+      t == ParallelType::Group) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, unswitching and grouping are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
@@ -1094,11 +1387,28 @@ void IterDomain::parallelize(ParallelType t) {
         " .");
   }
 
-  if (isMmaSwizzled()) {
+  if (t == ParallelType::Group) {
     TORCH_CHECK(
-        t == ParallelType::Vectorize,
-        "Parallel type other than vectorize not allowed for warp mapped ids");
+        getIterType() == IterType::Iteration,
+        "Grouping IterDomain of non Iteration type is not allowed. ",
+        getIterType());
   }
+
+  if (isMmaSwizzled()) {
+    // Mma swizzled axes represent data representation within a warp
+    //  so only allow updates that keep the parallelization within
+    //  a warp.
+    // Note && TODO: this check is actually used to allow indexing path
+    //  to make copies of the iterdomains. We might eventually just want
+    //  to lock these parallel types and not allowing any changes once
+    //  they are swizzled.
+    TORCH_CHECK(
+        t == ParallelType::Vectorize || t == ParallelType::TIDx ||
+            t == ParallelType::Serial,
+        "Parallel type other than serial, tidx, vectorize not allowed for mma swizzled ids");
+  }
+
+  parallel_type_ = t;
 }
 
 bool IterDomain::maybePartial() const {
@@ -1237,18 +1547,6 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       contiguity_(src->contiguity()),
       has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
 
-namespace {
-std::vector<IterDomain*> lowerIterDomains(
-    const std::vector<fuser::cuda::IterDomain*>& domains) {
-  std::vector<IterDomain*> lowered_domains;
-  lowered_domains.reserve(domains.size());
-  for (const auto iter_domain : domains) {
-    lowered_domains.push_back(iter_domain);
-  }
-  return lowered_domains;
-};
-} // namespace
-
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->isBroadcast() && id->isThreadDim();
@@ -1356,6 +1654,22 @@ bool TensorDomain::hasBroadcast() const {
 
 bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
+}
+
+bool TensorDomain::hasViewLikeRFactor() const {
+  if (!hasRFactor()) {
+    // Can't have view like rfactor if there is no rfactor domain
+    return false;
+  }
+
+  // If there's an rfactor domain and no rfactor product is a reduction, this is
+  // a view like rfactor
+  return std::none_of(
+      getMaybeRFactorDomain().begin(),
+      getMaybeRFactorDomain().end(),
+      [](IterDomain* id) {
+        return id->isReduction() && id->isRFactorProduct();
+      });
 }
 
 bool TensorDomain::hasVectorize() const {
@@ -1517,6 +1831,39 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   return reordered_domain;
 }
 
+void TensorDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    int x,
+    int y,
+    SwizzleMode swizzle_mode) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
+
+  TORCH_CHECK(
+      x >= 0 && (unsigned int)x < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  TORCH_CHECK(
+      y >= 0 && (unsigned int)y < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  IterDomain* axis_x = axis(x);
+  IterDomain* axis_y = axis(y);
+
+  IterDomain* axis_out_x = nullptr;
+  IterDomain* axis_out_y = nullptr;
+
+  std::tie(axis_out_x, axis_out_y) =
+      IterDomain::swizzle(swizzle_type, axis_x, axis_y, swizzle_mode);
+
+  domain_.erase(domain_.begin() + x);
+  domain_.insert(domain_.begin() + x, axis_out_x);
+
+  domain_.erase(domain_.begin() + y);
+  domain_.insert(domain_.begin() + y, axis_out_y);
+
+  resetDomains();
+}
+
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
@@ -1576,10 +1923,54 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
   return false;
 }
 
-TensorDomain* TensorDomain::view(
-    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+TensorDomain* TensorDomain::view(const AnalyzeViewResult& view_analysis) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
-  return transformView(this, transforms);
+  return transformView(this, view_analysis);
+}
+
+TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
+  if (start_dim < 0) {
+    start_dim += nDims();
+  }
+  if (end_dim < 0) {
+    end_dim += nDims();
+  }
+
+  std::vector<IterDomain*> new_root_domain;
+  auto inp_domain = noReductions(getMaybeRFactorDomain());
+  new_root_domain.reserve(inp_domain.size());
+  for (auto id : inp_domain) {
+    new_root_domain.push_back(id->cloneWithoutRFactor());
+  }
+
+  std::vector<IterDomain*> rfactor_domain;
+  rfactor_domain.reserve(new_root_domain.size() - (end_dim - start_dim));
+  for (auto i : c10::irange(start_dim)) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  IterDomain* merged_id = new_root_domain[start_dim];
+  for (auto i : c10::irange(start_dim + 1, end_dim + 1)) {
+    IterDomain* new_merged_id =
+        IterDomainBuilder(
+            merged_id->container()->zeroVal(),
+            mul(merged_id->extent(), new_root_domain[i]->extent()))
+            .is_rfactor_domain(true)
+            .build();
+    IrBuilder::create<Merge>(new_merged_id, merged_id, new_root_domain[i]);
+    merged_id = new_merged_id;
+  }
+  rfactor_domain.push_back(merged_id);
+
+  for (auto i : c10::irange(end_dim + 1, nDims())) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  return IrBuilder::create<TensorDomain>(
+      new_root_domain,
+      rfactor_domain,
+      rfactor_domain,
+      std::vector<bool>(rfactor_domain.size(), true));
 }
 
 // TODO: Rfactor a Welford
@@ -1587,48 +1978,7 @@ TensorDomain* TensorDomain::view(
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
-
-  std::vector<int> axes(axes_.size());
-
-  auto ndims = nDims();
-  std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
-    return i < 0 ? i + ndims : i;
-  });
-
-  TORCH_CHECK(
-      std::none_of(
-          axes.begin(),
-          axes.end(),
-          [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
-      "RFactor axes less than 0 or >= ndims.");
-
-  // We might be able to lift this constraint in some instances, but needs more
-  // investigation.
-  TORCH_CHECK(
-      !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
-
-  std::unordered_set<int> axes_set(axes.begin(), axes.end());
-
-  bool rfactor_found = false;
-  bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
-    if (axis(i)->isReduction()) {
-      if (axes_set.find(i) != axes_set.end()) {
-        rfactor_found = true;
-      } else {
-        reduction_found = true;
-      }
-    }
-  }
-
-  TORCH_CHECK(
-      rfactor_found && reduction_found,
-      "Invalid rfactor found, rfactor must be provided at least one reduction axis, but not all reduction axes.");
-
-  return std::pair<TensorDomain*, TensorDomain*>{
-      TransformRFactor::runReplay(this, axes),
-      TransformRFactor::runReplay2(this, axes)};
+  return TransformRFactor::runReplay(this, axes_);
 }
 
 Split::Split(
@@ -1726,6 +2076,49 @@ bool Merge::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other);
 }
+
+Swizzle2D::Swizzle2D(
+    IrBuilderPasskey passkey,
+    IterDomain* out_x,
+    IterDomain* out_y,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    Swizzle2DType swizzle_type,
+    SwizzleMode swizzle_mode)
+    : Expr(passkey, ExprType::Swizzle2D),
+      out_x_{out_x},
+      out_y_{out_y},
+      in_x_{in_x},
+      in_y_{in_y},
+      swizzle_type_(swizzle_type),
+      swizzle_mode_(swizzle_mode) {
+  addOutput(out_x);
+  addOutput(out_y);
+  addInput(in_x);
+  addInput(in_y);
+}
+
+bool Swizzle2D::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Swizzle2D>()) {
+    return false;
+  }
+  if (!(swizzle_type_ == other->as<Swizzle2D>()->swizzle_type_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+Swizzle2D::Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_x_(ir_cloner->clone(src->out_x_)),
+      out_y_(ir_cloner->clone(src->out_y_)),
+      in_x_(ir_cloner->clone(src->in_x_)),
+      in_y_(ir_cloner->clone(src->in_y_)),
+      swizzle_type_(src->swizzle_type_),
+      swizzle_mode_(src->swizzle_mode_) {}
 
 NamedScalar::NamedScalar(
     IrBuilderPasskey passkey,

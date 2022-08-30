@@ -1,7 +1,10 @@
 import builtins
+
 import torch
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
+    EnumerableShardingSpec,
+    ShardMetadata,
 )
 from torch.distributed._shard.sharding_spec._internals import (
     get_chunked_dim_size,
@@ -40,6 +43,35 @@ def generate_chunk_sharding_specs_for_test(sharding_dim):
                 "rank:2/cuda:2",
             ],
         ),
+    ]
+
+
+def generate_enumerable_sharding_specs_for_test():
+    return [
+        EnumerableShardingSpec(
+            [
+                ShardMetadata(
+                    shard_offsets=[0, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:0/cuda:0",
+                ),
+                ShardMetadata(
+                    shard_offsets=[5, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:1/cuda:1",
+                ),
+                ShardMetadata(
+                    shard_offsets=[0, 5],
+                    shard_sizes=[5, 5],
+                    placement="rank:2/cuda:2",
+                ),
+                ShardMetadata(
+                    shard_offsets=[5, 5],
+                    shard_sizes=[5, 5],
+                    placement="rank:3/cuda:3",
+                ),
+            ]
+        )
     ]
 
 
@@ -87,10 +119,12 @@ def clone_module_parameter(module, param_name):
     tensor = getattr(module, param_name)
     return torch.nn.Parameter(tensor.detach().clone())
 
-def gen_binary_op_func(python_op):
+def gen_binary_op_func(python_op, inplace=False):
     src_lines = ['def f(lhs, rhs):']
     if "torch" in python_op:
         src_lines.append(f'  return {python_op}(lhs, rhs)\n')
+    elif inplace:
+        src_lines.append(f'  lhs {python_op}= rhs\n  return lhs\n')
     else:
         src_lines.append(f'  return lhs {python_op} rhs\n')
 

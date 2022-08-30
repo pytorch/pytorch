@@ -49,9 +49,17 @@ runs:
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
-        env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
     - name: ROCm set GPU_FLAG
       shell: bash
       run: |
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        # Examine the runner name. If it ends with "-2", this is the second runner on the host.
+        if [[ ${{ runner.name }} == *-2 ]]; then
+            # select the last two GPUs on the host
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD130 --device=/dev/dri/renderD131 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        else
+            # select the first two GPUs on the host
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        fi

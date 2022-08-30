@@ -18,6 +18,7 @@ tag="${DOCKER_TAG}"
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
+ghcr_image="ghcr.io/pytorch/ci-image"
 
 login() {
   aws ecr get-authorization-token --region us-east-1 --output text --query 'authorizationData[].authorizationToken' |
@@ -46,7 +47,22 @@ fi
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
-docker push "${image}:${tag}"
+# Only push if `DOCKER_SKIP_PUSH` = false
+if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
+  # Only push if docker image doesn't exist already.
+  # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
+  # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
+  if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
+    docker push "${image}:${tag}"
+  fi
+
+  if [ "${PUSH_GHCR_IMAGE:-}" = "true" ]; then
+    # Push docker image to the ghcr.io
+    echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+    docker tag "${image}:${tag}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
+    docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+  fi
+fi
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
   trap "rm -rf ${IMAGE_NAME}:${tag}.tar" EXIT

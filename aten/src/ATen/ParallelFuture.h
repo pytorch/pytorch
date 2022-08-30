@@ -10,4 +10,4 @@ namespace at {
 TORCH_API c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func);
 
-}  // namespace at
+} // namespace at

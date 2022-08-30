@@ -7,10 +7,11 @@
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
-    - [Making release branch specific changes](#making-release-branch-specific-changes)
-    - [Getting CI signal on release branches:](#getting-ci-signal-on-release-branches)
-  - [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
+    - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
+    - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
+  - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
+    - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
@@ -22,6 +23,11 @@
     - [Triage](#triage)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
+- [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
+  - [Python](#python)
+    - [TL;DR](#tldr)
+  - [Accelerator Software](#accelerator-software)
+    - [Special support cases](#special-support-cases)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
@@ -55,19 +61,24 @@ Following Requirements needs to be met prior to final RC Cut:
 
 Release branches are typically cut from the branch [`viable/strict`](https://github.com/pytorch/pytorch/tree/viable/strict) as to ensure that tests are passing on the release branch.
 
-There's a convenience script to create release branches from current `viable/strict` (from root `pytorch/pytorch`):
+There's a convenience script to create release branches from current `viable/strict`. Perform following actions :
+* Perform a fresh clone of pytorch repo using
+```bash
+git clone git@github.com:pytorch/pytorch.git
+```
 
+* Execute following command from PyTorch repository root folder:
 ```bash
 DRY_RUN=disabled scripts/release/cut-release-branch.sh
 ```
-
 This script should create 2 branches:
 * `release/{MAJOR}.{MINOR}`
 * `orig/release/{MAJOR}.{MINOR}`
 
 ### `pytorch/builder` / PyTorch domain libraries
 
-Convenience script can also be used domains as well as `pytorch/builder`
+*Note*:  Release branches for individual domain libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Domain Library POC.
+Builder branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains as well as `pytorch/builder`
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
 
@@ -75,32 +86,32 @@ Convenience script can also be used domains as well as `pytorch/builder`
 DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
 
-### Making release branch specific changes
+### Making release branch specific changes for PyTorch
 
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies
-  * Example: https://github.com/pytorch/pytorch/pull/40706
+  * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
-  * Example PR (CircleCI, to be removed): https://github.com/pytorch/pytorch/pull/65433
-  * Example PR (GHA): https://github.com/pytorch/pytorch/pull/72739
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
 * Nightly versions should be updated in all version files to the next MINOR release (i.e. 0.9.0 -> 0.10.0) in the default branch:
-  * Example: https://github.com/pytorch/pytorch/pull/65435
+  * Example: https://github.com/pytorch/pytorch/pull/77984
 
-### Getting CI signal on release branches:
+### Making release branch specific changes for domain libraries
 
-Create a PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.
+Domain library branch cut is done a week after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Domain Library POC.
+After the branch cut is performed, the Pytorch Dev Infra memeber should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
-Example:
-* https://github.com/pytorch/pytorch/pull/51995
+Follow these examples of PR that updates the version and sets RC Candidate upload channel:
+* torchvision : https://github.com/pytorch/vision/pull/5400
+* torchaudio: https://github.com/pytorch/audio/pull/2210
 
-## Drafting RCs (Release Candidates)
+## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
-To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository.
+To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository. Please note: exactly same process is used for each of the domain library
 
 The git tag for a release candidate must follow the following format:
 ```
@@ -109,13 +120,25 @@ v{MAJOR}.{MINOR}.{PATCH}-rc{RC_NUMBER}
 
 An example of this would look like:
 ```
-v1.8.1-rc1
+v1.12.0-rc1
+```
+You can use following commands to perform tag from pytorch core repo (not fork):
+* Checkout and validate the repo history before tagging
+```
+git checkout release/1.12
+git log --oneline
+```
+* Perform tag and push it to github (this will trigger the binary release build)
+```
+git tag -f  v1.12.0-rc2
+git push origin  v1.12.0-rc2
 ```
 
 Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
 
 This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/master/.github/pytorch-circleci-labels.yml)
 
+To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
 ### Release Candidate Storage
 
 Release candidates are currently stored in the following places:
@@ -125,6 +148,16 @@ Release candidates are currently stored in the following places:
 * Libtorch: https://download.pytorch.org/libtorch/test
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
+
+### Release Candidate health validation
+
+Validate the release jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
+
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
 
 ### Cherry Picking Fixes
 
@@ -215,6 +248,32 @@ Patch releases should be considered if a regression meets the following criteria
 
 1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
+
+# Hardware / Software Support in Binary Build Matrix
+
+PyTorch has a support matrix across a couple of different axis. This section should be used as a decision making framework to drive hardware / software support decisions
+
+## Python
+
+For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
+
+### TL;DR
+
+* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
+* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
+
+## Accelerator Software
+
+For acclerator software like CUDA and ROCm we will typically use the following criteria:
+* Support latest 2 minor versions
+
+### Special support cases
+
+In some instances support for a particular version of software will continue if a need is found. For example, our CUDA 11 binaries do not currently meet
+the size restrictions for publishing on PyPI so the default version that is published to PyPI is CUDA 10.2.
+
+These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
+need to support these particular versions of software.
 
 # Special Topics
 
