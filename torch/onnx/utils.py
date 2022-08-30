@@ -1327,14 +1327,13 @@ def _get_module_attributes(module):
 
     names = set(dir(module))
     base_m_names = set(dir(torch.nn.Module))
-    for key in base_m_names:
-        names.discard(key)
-    names = set(
+    names -= base_m_names
+    filtered_names = set(
         filter(
-            lambda x: not callable(getattr(module, x) and not x.startswith("_")), names
+            lambda x: not callable(getattr(module, x)) and not x.startswith("_"), names
         )
     )
-    return {k: getattr(module, k) for k in names}
+    return {k: getattr(module, k) for k in filtered_names}
 
 
 def _export(
