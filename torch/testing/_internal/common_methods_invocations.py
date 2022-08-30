@@ -695,6 +695,16 @@ def error_inputs_arange(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(float('inf'), 2)), error_type=RuntimeError, error_regex='unsupported range')
     yield ErrorInput(SampleInput(float('-inf'), args=(1, 2)), error_type=RuntimeError, error_regex='unsupported range')
 
+def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
+    samples = (
+        (1,),
+        (2, 2),
+        (3, 3, 3),
+        (4, 4, 4, 4),
+    )
+    for sample in samples:
+        yield SampleInput(sample, kwargs={"dtype": dtype, "device": device})
+
 def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     int_samples = (
         # positive direction
@@ -8000,6 +8010,51 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Lazy tensor failures
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+
+               # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
+               # We don't have an op for aten::arange but it isn't a special case.
+               # Argument types: bool, bool, bool, int, int, Device, boo
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+
+               # Captured graph does not contain aten::arange (succeeds on complex!)
+               # g: graph():
+               #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+               #   return (%25)
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('rand',
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           supports_out=True,
+           supports_autograd=False,
+           is_factory_function=True,
+           sample_inputs_func=sample_inputs_uniform,
+
+           skips=(
+                # Can not assertEquals
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
+               DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_operator"),
+
+
+               # https://github.com/pytorch/pytorch/issues/81774
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
 
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
