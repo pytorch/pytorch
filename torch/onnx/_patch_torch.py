@@ -20,7 +20,7 @@ _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 def _graph_op(
     g: _C.Graph,
     opname: str,
-    *raw_args: Union[torch.Tensor, torch._C.Value],
+    *raw_args: Union[torch.Tensor, _C.Value],
     outputs: int = 1,
     **kwargs,
 ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
@@ -101,7 +101,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 
 
 @_beartype.beartype
-def _block_op(b: _C.Block, opname: str, *args, **kwargs):
+def _block_op(b: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
         aten = False
         ns_opname = opname
@@ -122,7 +122,7 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
 
 @_beartype.beartype
 def _new_node(
-    g: _C.Graph, namespace: str, op: str, outputs: int, *args, **kwargs
+    g: _C.Graph, namespace: str, op: str, outputs: int, *args: _C.Value, **kwargs
 ) -> _C.Node:
     """Creates a new node in the graph.
 
@@ -161,7 +161,7 @@ def _scalar(x: torch.Tensor):
 
 
 @_beartype.beartype
-def _is_caffe2_aten_fallback():
+def _is_caffe2_aten_fallback() -> bool:
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and _C_onnx._CAFFE2_ATEN_FALLBACK

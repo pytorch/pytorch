@@ -127,7 +127,7 @@ def _ort_session(
 
 @_beartype.beartype
 def _compare_ort_pytorch_outputs(
-    ort_outs: Union[Sequence[_NumericType], Sequence, Dict],
+    ort_outs: Union[Sequence[_NumericType], Sequence],
     pt_outs: Union[_NumericType, Sequence[_NumericType], Sequence, Dict],
     rtol: float,
     atol: float,

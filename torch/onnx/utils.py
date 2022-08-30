@@ -1744,7 +1744,7 @@ def _get_aten_op_overload_name(n: _C.Node) -> str:
     return _C.parse_schema(schema).overload_name
 
 
-# @_beartype.beartype
+@_beartype.beartype
 def _run_symbolic_function(
     g: _C.Graph,
     block: _C.Block,
