@@ -1280,7 +1280,7 @@ op_db: List[OpInfo] = [
                 "TestGradients",
                 "test_fn_gradgrad",
                 device="cuda",
-                toleranceOverride({torch.float64: tol(atol=1e-4, rtol=1e-4)})
+                toleranceOverride({torch.float64: tol(atol=1e-4, rtol=1e-4)}),
             ),
         ),
     ),
