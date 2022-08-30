@@ -1,5 +1,7 @@
 #include <torch/csrc/profiler/api.h>
 
+#include <torch/csrc/profiler/util.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -56,6 +58,38 @@ ProfilerConfig ProfilerConfig::fromIValue(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
       ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
       ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
+}
+
+/*explicit*/ ProfilerThreadLocalStateBase::ProfilerThreadLocalStateBase(
+    const ProfilerConfig& config)
+    : c10::MemoryReportingInfoBase(), config_(config) {}
+
+ProfilerThreadLocalStateBase::~ProfilerThreadLocalStateBase() {
+  if (handle_) {
+    auto handle = handle_;
+    removeCallback();
+    SOFT_ASSERT(false, "Leaked callback handle: ", handle);
+  }
+}
+
+void ProfilerThreadLocalStateBase::setCallbackHandle(
+    at::CallbackHandle handle) {
+  if (handle_) {
+    at::removeCallback(handle_);
+    SOFT_ASSERT(
+        false,
+        "ProfilerStateBase already has a registered callback. "
+        "Removing to avoid leaked callback.");
+  }
+
+  handle_ = handle;
+}
+
+void ProfilerThreadLocalStateBase::removeCallback() {
+  if (handle_) {
+    at::removeCallback(handle_);
+    handle_ = 0;
+  }
 }
 
 bool profilerEnabled() {

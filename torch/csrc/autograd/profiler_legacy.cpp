@@ -162,6 +162,10 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
     return ActiveProfilerType::LEGACY;
   }
 
+  void leakHandle() {
+    handle_ = 0;
+  }
+
  protected:
   RangeEventList& getEventList(int64_t thread_id = -1);
 
@@ -452,10 +456,7 @@ thread_event_lists disableProfilerLegacy(
       state_ptr && !state_ptr->config().disabled(),
       "Can't disable profiler when it's not running");
 
-  if (cleanupTLSState) {
-    at::removeCallback(state_ptr->callbackHandle());
-  }
-
+  cleanupTLSState ? state_ptr->removeCallback() : state_ptr->leakHandle();
   if (!consolidate ||
       state_ptr->config().state == torch::profiler::impl::ProfilerState::NVTX) {
     return thread_event_lists();

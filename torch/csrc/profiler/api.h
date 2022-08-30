@@ -88,9 +88,8 @@ struct TORCH_API ProfilerConfig {
 
 struct TORCH_API ProfilerThreadLocalStateBase
     : public c10::MemoryReportingInfoBase {
-  explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config)
-      : c10::MemoryReportingInfoBase(), config_(config) {}
-  ~ProfilerThreadLocalStateBase() override = default;
+  explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config);
+  ~ProfilerThreadLocalStateBase() override;
 
   static ProfilerThreadLocalStateBase* getTLS() {
     return static_cast<ProfilerThreadLocalStateBase*>(
@@ -101,17 +100,8 @@ struct TORCH_API ProfilerThreadLocalStateBase
     return config_;
   }
 
-  void setCallbackHandle(at::CallbackHandle handle) {
-    handle_ = handle;
-  }
-
-  at::CallbackHandle callbackHandle() const {
-    return handle_;
-  }
-
-  bool hasCallbackHandle() {
-    return handle_ > 0;
-  }
+  void setCallbackHandle(at::CallbackHandle handle);
+  void removeCallback();
 
   bool memoryProfilingEnabled() const override {
     return config_.profile_memory;
