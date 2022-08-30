@@ -1057,8 +1057,11 @@ def find_matching_merge_rule(pr: GitHubPR,
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
-                reject_reason = (f"Not all files match rule `{rule_name}`. {num_matching_files} files matched, but there are still non-matching files: " +
-                                 f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Not all files match rule `{rule_name}`."
+                    f"{num_matching_files} files matched, but there are still non-matching files:"
+                    f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                ))
             continue
 
         # If rule needs approvers but PR has not been reviewed, skip it
@@ -1081,8 +1084,10 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Approval needed from one of the following (Rule '{rule_name}'): " +
-                                 f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
+                ))
             continue
 
         # Does the PR pass the checks required by this rule?
@@ -1094,18 +1099,20 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = "\n".join(
-                    f"The following mandatory check(s) failed (Rule `{rule_name}`): {checks_to_str(failed_checks)}",
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) failed (Rule `{rule_name}`):"
+                    f"{checks_to_str(failed_checks)}",
                     f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
-                )
+                ))
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = "\n".join(
-                    f"The following mandatory check(s) pending/not yet run (Rule `{rule_name}`): {checks_to_str(pending_checks)}"
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
+                    f"{checks_to_str(pending_checks)}"
                     f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
-                )
+                ))
             continue
 
         if not skip_internal_checks and pr.has_internal_changes():
