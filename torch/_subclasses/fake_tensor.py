@@ -602,12 +602,8 @@ class FakeTensorMode(TorchDispatchMode):
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
-
-        # Temporary - ops like `torch.cos` register the prim as a decomposition
-        # to aten.cos, and the prim itself invokes aten.cos
-        # To avoid endlessly recurring, when we invoke the prim, exclude it from
-        # a set of prims we will invoke again.
-        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
+        # TODO - we should be use the prim aten impl
+        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0 and hasattr(func, "prim_meta_impl"):
             with self.restore():
                 return func.prim_meta_impl(*args, **kwargs)
 
