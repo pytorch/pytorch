@@ -32,7 +32,6 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-
 jobs:
   test:
     # Don't run on forked repos.
@@ -149,6 +148,7 @@ jobs:
 
       - name: Stop monitoring script
         if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |

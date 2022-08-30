@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
+#include <torch/csrc/jit/passes/onnx/naming.h>
 
 namespace torch {
 namespace jit {
@@ -653,7 +654,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   auto& func_ctx = *func_ctxs_[scope_key];
 
   const std::string module_class_name(
-      func_ctx.scope_key_->name().toUnqualString());
+      ONNXScopeName::className(func_ctx.scope_key_));
   auto pos = module_class_name.rfind('.');
   TORCH_INTERNAL_ASSERT(pos != std::string::npos);
 
@@ -748,7 +749,8 @@ bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
   if (&other_ctx == this) {
     return true;
   }
-  if (this->scope_->name() != other_ctx.scope_->name()) {
+  if (ONNXScopeName::className(this->scope_) !=
+      ONNXScopeName::className(other_ctx.scope_)) {
     return false;
   }
   if (this->inputs_.size() != other_ctx.inputs_.size() ||
@@ -1046,7 +1048,7 @@ NodeAttrNameMap FunctionExtractor::run() {
   // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
   for (const auto& scope_key : sorted_scope_keys) {
-    if (module_names_.find(scope_key->name().toUnqualString()) !=
+    if (module_names_.find(ONNXScopeName::className(scope_key)) !=
         module_names_.end()) {
       ConvertScopeToFunction(
           scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
