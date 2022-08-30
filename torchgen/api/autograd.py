@@ -538,7 +538,9 @@ def gen_differentiable_outputs(
     info = fn.info[key] if fn.info else None
     outputs: List[DifferentiableOutput] = [
         DifferentiableOutput(
-            name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type()
+            name=name,
+            type=ret.type,
+            cpp_type=cpp.return_type(ret, symint=True).cpp_type(),
         )
         for name, ret in zip(cpp.return_names(f), f.func.returns)
     ]
