@@ -15,8 +15,8 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.masked import masked_tensor, masked_bmm
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS
+
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS
-from torch.masked.maskedtensor.reductions import NATIVE_REDUCE_MAP
 
 
 def _compare_mt_t(mt_result, t_result):
@@ -283,7 +283,7 @@ class TestReductions(TestCase):
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.mean().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor(0.5).expand_as(m), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
 
     def test_amax(self):
         d = torch.tensor([[0, 1, 3, -3], [3, -4, 1.0, 3]])
@@ -303,7 +303,7 @@ class TestReductions(TestCase):
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.amax().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor([[0.0, 0, 0], [0, 1, 0]]), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
 
     def test_amin(self):
         d = torch.tensor([[0, 1, 3, -3], [3, -4, 1.0, 3]])
@@ -323,7 +323,7 @@ class TestReductions(TestCase):
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.amin().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor([[1.0, 0, 0], [0, 0, 0]]), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
 
     def test_prod(self):
         d = torch.tensor([[0, 1, 3, 0.0], [float("nan"), 4, 1.0, 5.0]])
@@ -339,11 +339,11 @@ class TestReductions(TestCase):
         )
 
     def test_prod_grad(self):
-        d = torch.tensor([[2, float("nan"), 2], [3, 4, 5.0]])
+        d = torch.tensor([[0, float("nan"), 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m, requires_grad=True)
         mt.prod().backward()
-        _compare_mts(mt.grad, masked_tensor(torch.tensor([[4.0, 0, 0], [0, 2, 0]]), m))
+        _compare_mts(mt.grad, masked_tensor(torch.tensor(1.0).expand_as(m), m))
 
     def test_all(self):
         d = torch.tensor([[True, True, False, False], [False, True, True, True]])

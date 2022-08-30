@@ -36,19 +36,9 @@ def masked_tensor(data, mask, requires_grad=False):
     if is_masked_tensor(mask):
         raise TypeError("mask is already a MaskedTensor but must be a regular Tensor")
 
-    class Constructor(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, data, mask):
-            return MaskedTensor(data.clone(), mask.clone())
-
-        @staticmethod
-        def backward(ctx, grad_output):
-            return grad_output, None
-
-    result = Constructor.apply(data, mask)
-    if requires_grad:
-        result.requires_grad_(requires_grad)
-    return result
+    data = data.clone().detach()
+    mask = mask.clone().detach()
+    return MaskedTensor(data, mask, requires_grad)
 
 
 # New function as_masked_tensor with autograd support to
