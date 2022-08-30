@@ -54,7 +54,7 @@ c10::optional<FusionCacheEntry*> FusionCache::lookupFusionCacheEntry(
 void FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
   TORCH_CHECK(
       !fusionCachePtr()->is_terminal,
-      "Cannot create a cache entryfrom a terminal entry!");
+      "Cannot create a cache entry from a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
 
   // Copying the record owned by the FusionDefinition that calls this function
