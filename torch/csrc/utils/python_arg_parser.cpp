@@ -1494,6 +1494,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // get read out.  Make it a big and weird looking number to help
     // people figure out if there's aproblem.
     scalar = at::Scalar(7777777);
+  } else if (torch::is_symfloat_node(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add

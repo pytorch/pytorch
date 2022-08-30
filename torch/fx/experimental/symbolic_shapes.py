@@ -137,7 +137,7 @@ class PySymInt(object):
         # TODO: consider constant prop here
         # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
         # not?
-        return torch.SymFloatNode.new_symfloat(PySymFloat(self.expr, self.shape_env))
+        return PySymFloat(self.expr, self.shape_env)
 
     def __bool__(self):
         return bool(self.shape_env.evaluate_expr(self.expr))

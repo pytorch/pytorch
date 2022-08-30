@@ -43,9 +43,9 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
-NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex)
+NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex], Type[torch.SymIntNode], Type[torch.SymFloatNode]]
+NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -764,6 +764,27 @@ def dtype_to_type(dtype: torch.dtype) -> type:
     raise ValueError("Invalid dtype!")
 
 
+def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]:
+    """
+    Computes the corresponding Python type constructor for the
+    given dtype.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_float
+
+    assert isinstance(dtype, torch.dtype)
+
+    if dtype is torch.bool:
+        return bool
+    if dtype in _integer_dtypes:
+        return int  # TODO: sym_int
+    if dtype in _float_dtypes:
+        return sym_float
+    if dtype in _complex_dtypes:
+        return complex
+
+    raise ValueError("Invalid dtype!")
+
+
 def type_to_dtype(typ: type) -> torch.dtype:
     """
     Computes the corresponding dtype for a Number type.
@@ -1046,7 +1067,7 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
-def number_type(x: Union[Number, torch.SymIntNode]) -> Type:
+def number_type(x: Number) -> Type:
     if isinstance(x, torch.SymIntNode):
         return int
     else:
@@ -1147,7 +1168,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike, torch.SymIntNode)):
+        if not isinstance(x, (Number, TensorLike)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1155,7 +1176,7 @@ def elementwise_dtypes(
             )
             raise ValueError(msg)
 
-        if isinstance(x, (Number, torch.SymIntNode)):
+        if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
         else:
             # x is a TensorLike

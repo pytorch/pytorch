@@ -160,10 +160,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   }
 
   // TODO: virtualize
-  SymFloat sym_float() {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__sym_float__")().cast<c10::SymFloat>();
-  }
+  SymFloat sym_float();
 
   virtual std::string str() override {
     py::gil_scoped_acquire acquire;
@@ -263,6 +260,11 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
+
+SymFloat PythonSymIntNodeImpl::sym_float() {
+  py::gil_scoped_acquire acquire;
+  return c10::make_intrusive<PythonSymFloatNodeImpl>(getPyObj().attr("__sym_float__")())->toSymFloat();
+}
 
 namespace {
 
@@ -1273,7 +1275,7 @@ void initJITBindings(PyObject* module) {
         }
       });
 
-  py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
+  auto symint_class = py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
       .def_static(
           "new_symint",
           [](py::object obj) -> c10::SymIntNode {

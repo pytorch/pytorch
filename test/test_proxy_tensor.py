@@ -766,13 +766,28 @@ def forward(self, a_1):
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     return empty""")
 
-    @unittest.expectedFailure
     def test_symint_to_tensor(self):
         def f(a):
             return a / a.shape[0]
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
-        # self.assertExpectedInline(r, """""")
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    div_tensor = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
+    sym_size_1 = torch.ops.aten.sym_size(div_tensor, 0)
+    return div_tensor""")
+
+        r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size)
+    lt = sym_size < 0
+    eq = sym_size == sym_size;  sym_size = None
+    div_default = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
+    sym_size_1 = torch.ops.aten.sym_size(div_default, 0)
+    return div_default""")
 
     def test_cat(self):
         def f(a, b):

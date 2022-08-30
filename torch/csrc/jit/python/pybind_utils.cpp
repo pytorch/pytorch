@@ -10,6 +10,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <limits>
+
 namespace torch {
 namespace jit {
 
@@ -67,6 +69,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         } else if (torch::is_symint_node(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(7777777);
+        } else if (torch::is_symfloat_node(py::handle(obj))) {
+          save_symint = true;
+          scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
