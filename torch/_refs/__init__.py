@@ -2640,6 +2640,7 @@ def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=True)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
     return self.reshape(other.size())
 
@@ -3147,6 +3148,7 @@ def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
     return self.view(other.size())
 
