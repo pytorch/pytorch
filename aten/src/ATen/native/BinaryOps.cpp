@@ -79,6 +79,10 @@ TORCH_META_FUNC(special_chebyshev_polynomial_w) (const Tensor& self, const Tenso
   build_borrowing_binary_float_op(maybe_get_output(), self, n);
 }
 
+TORCH_META_FUNC(special_complete_carlson_elliptic_r_f) (const Tensor& x, const Tensor& y) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
 TORCH_META_FUNC(special_hermite_polynomial_h) (const Tensor& self, const Tensor& n) {
   build_borrowing_binary_float_op(maybe_get_output(), self, n);
 }
@@ -288,6 +292,7 @@ DEFINE_DISPATCH(chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(complete_carlson_elliptic_r_f_stub);
 DEFINE_DISPATCH(hermite_polynomial_h_stub);
 DEFINE_DISPATCH(hermite_polynomial_he_stub);
 DEFINE_DISPATCH(laguerre_polynomial_l_stub);
@@ -355,6 +360,10 @@ TORCH_IMPL_FUNC(special_chebyshev_polynomial_v_out) (const Tensor& self, const T
 }
 
 TORCH_IMPL_FUNC(special_chebyshev_polynomial_w_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_w_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_complete_carlson_elliptic_r_f_out) (const Tensor& x, const Tensor& y, const Tensor& result) {
   chebyshev_polynomial_w_stub(device_type(), *this);
 }
 
@@ -512,6 +521,22 @@ Tensor& special_chebyshev_polynomial_w_out(const Scalar& self, const Tensor& n, 
 
 Tensor& special_chebyshev_polynomial_w_out(const Tensor& self, const Scalar& n, Tensor& result) {
   return at::special_chebyshev_polynomial_w_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_complete_carlson_elliptic_r_f(const Scalar& x, const Tensor& y) {
+  return at::special_complete_carlson_elliptic_r_f(wrapped_scalar_tensor(x), y);
+}
+
+Tensor special_complete_carlson_elliptic_r_f(const Tensor& x, const Scalar& y) {
+  return at::special_complete_carlson_elliptic_r_f(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& special_complete_carlson_elliptic_r_f_out(const Scalar& self, const Tensor& y, Tensor& result) {
+  return at::special_complete_carlson_elliptic_r_f_out(result, wrapped_scalar_tensor(self), y);
+}
+
+Tensor& special_complete_carlson_elliptic_r_f_out(const Tensor& self, const Scalar& y, Tensor& result) {
+  return at::special_complete_carlson_elliptic_r_f_out(result, self, wrapped_scalar_tensor(y));
 }
 
 Tensor special_hermite_polynomial_h(const Scalar& x, const Tensor& n) {

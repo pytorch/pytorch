@@ -13341,6 +13341,43 @@
   python_module: special
   variants: function
 
+- func: special_complete_carlson_elliptic_r_f(Tensor x, Tensor y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  structured_delegate: special_complete_carlson_elliptic_r_f.out
+  variants: function
+
+- func: special_complete_carlson_elliptic_r_f.x_scalar(Scalar x, Tensor y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_complete_carlson_elliptic_r_f.y_scalar(Tensor x, Scalar y) -> Tensor
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_complete_carlson_elliptic_r_f.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: special_complete_carlson_elliptic_r_f_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_complete_carlson_elliptic_r_f.x_scalar_out(Scalar x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
+- func: special_complete_carlson_elliptic_r_f.y_scalar_out(Tensor x, Scalar y, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: special_complete_carlson_elliptic_r_f_out
+  device_check: NoCheck
+  python_module: special
+  variants: function
+
 - func: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special

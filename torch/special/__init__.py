@@ -1032,6 +1032,21 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+complete_carlson_elliptic_r_f = _add_docstr(_special.special_complete_carlson_elliptic_r_f,
+                                            r"""
+complete_carlson_elliptic_r_f(x, y, *, out=None) -> Tensor
+
+Complete Carlson elliptic integral, :math:`R_{F}\left(x, y\right)`.
+
+""" + r"""
+Args:
+    x (Tensor):
+    y (Tensor): 
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
                                    r"""
 hermite_polynomial_h(input, n, *, out=None) -> Tensor

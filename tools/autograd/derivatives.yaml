@@ -2982,3 +2982,13 @@
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
+
+- name: special_complete_carlson_elliptic_r_f(Tensor x, Tensor y) -> Tensor
+  x: non_differentiable
+  y: non_differentiable
+
+- name: special_complete_carlson_elliptic_r_f.x_scalar(Scalar x, Tensor y) -> Tensor
+  y: non_differentiable
+
+- name: special_complete_carlson_elliptic_r_f.y_scalar(Tensor x, Scalar y) -> Tensor
+  x: non_differentiable

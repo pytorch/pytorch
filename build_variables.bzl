@@ -1163,6 +1163,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/ScatterGatherKernel.cpp",
     "aten/src/ATen/native/cpu/SoftMaxKernel.cpp",
     "aten/src/ATen/native/cpu/SortingKernel.cpp",
+    "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/cpu/StackKernel.cpp",
     "aten/src/ATen/native/cpu/SumKernel.cpp",
     "aten/src/ATen/native/cpu/TensorCompareKernel.cpp",
@@ -1174,12 +1175,12 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
     "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/complete_carlson_elliptic_r_f.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
-    "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 

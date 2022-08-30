@@ -1143,6 +1143,14 @@ void chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
     });
 } // chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator)
 
+void complete_carlson_elliptic_r_f_kernel(TensorIteratorBase& iterator) {
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "complete_carlson_elliptic_r_f_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x, scalar_t y) -> scalar_t {
+            return at::native::special_functions::complete_carlson_elliptic_r_f(x, y);
+        });
+    });
+} // complete_carlson_elliptic_r_f_kernel(TensorIteratorBase& iterator)
+
 void hermite_polynomial_h_kernel(TensorIteratorBase& iterator) {
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "hermite_polynomial_h_cpu", [&]() {
         cpu_kernel(iterator, [](scalar_t x, scalar_t n) -> scalar_t {
@@ -1258,6 +1266,7 @@ REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_kernel);
 REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel);
+REGISTER_DISPATCH(complete_carlson_elliptic_r_f_stub, &complete_carlson_elliptic_r_f_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
 REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel);
@@ -1266,6 +1275,5 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_t_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_u_stub, &shifted_chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel);
 REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polynomial_w_kernel);
-
 } // namespace native
 } // namespace at

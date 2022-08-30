@@ -13,6 +13,7 @@ Functions
 -----------------------
 
 .. autofunction:: airy_ai
+.. autofunction:: complete_carlson_elliptic_r_f
 .. autofunction:: digamma
 .. autofunction:: entr
 .. autofunction:: erf

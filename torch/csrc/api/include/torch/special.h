@@ -894,6 +894,52 @@ inline Tensor& chebyshev_polynomial_w_out(
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
+/// Complete Carlson elliptic integral, :math:`R_{F}\left(x, y\right)`.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_carlson_elliptic_r_f.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_carlson_elliptic_r_f(x, y);
+/// ```
+inline Tensor complete_carlson_elliptic_r_f(const Tensor& x, const Tensor& y) {
+  return torch::special_complete_carlson_elliptic_r_f(x, y);
+}
+
+inline Tensor complete_carlson_elliptic_r_f(const Scalar& x, const Tensor& y) {
+  return torch::special_complete_carlson_elliptic_r_f(x, y);
+}
+
+inline Tensor complete_carlson_elliptic_r_f(const Tensor& x, const Scalar& y) {
+  return torch::special_complete_carlson_elliptic_r_f(x, y);
+}
+
+inline Tensor& complete_carlson_elliptic_r_f_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& y) {
+  return torch::special_complete_carlson_elliptic_r_f_out(output, x, y);
+}
+
+inline Tensor& complete_carlson_elliptic_r_f_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& y) {
+  return torch::special_complete_carlson_elliptic_r_f_out(output, x, y);
+}
+
+inline Tensor& complete_carlson_elliptic_r_f_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& y) {
+  return torch::special_complete_carlson_elliptic_r_f_out(output, x, y);
+}
+
 /// Physicist’s Hermite polynomial.
 ///
 /// See

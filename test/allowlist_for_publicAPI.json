@@ -1667,6 +1667,7 @@
     "chebyshev_polynomial_u",
     "chebyshev_polynomial_v",
     "chebyshev_polynomial_w",
+    "complete_carlson_elliptic_r_f",
     "digamma",
     "entr",
     "erf",
