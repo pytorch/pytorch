@@ -3223,7 +3223,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", MinusOne())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3276,7 +3276,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3314,7 +3314,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "bias", Double())
         parametrize.register_parametrization(model, "bias", MinusOne())
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, bias=True, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
@@ -3353,7 +3353,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             3, 3, qconfig=torch.ao.quantization.get_default_qconfig()
         )
 
@@ -13644,6 +13644,46 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
 
+    @onlyCPU
+    def test_conv_contiguous_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/80837.
+        for dtype in [torch.float, torch.bfloat16]:
+            conv = nn.Conv2d(
+                1,
+                128,
+                kernel_size=(5, 2),
+                stride=(2, 1),
+                padding=(0, 1),
+                dilation=(1, 1),
+                groups=1,
+                bias=True,
+                padding_mode='zeros').to(dtype=dtype)
+
+            x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
+            x = torch.transpose(x, 1, 4)
+            x2 = x[..., 0]
+            inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
+            if torch.backends.mkldnn.is_available():
+                y = conv(x2)
+                # Disable MKLDNN explicitly
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_ = conv(x2)
+                    self.assertEqual(y, y_)
+
+    @onlyCPU
+    def test_conv_ic1_channels_last_for_oneDNN(self):
+        # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
+        for dtype in [torch.float, torch.bfloat16]:
+            conv = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), padding=(1, 1), bias=False)
+            conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
+            x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
+            if torch.backends.mkldnn.is_available():
+                y = conv(x)
+                # Disable MKLDNN explicitly
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_ = conv(x)
+                    self.assertEqual(y, y_)
+
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -14390,7 +14430,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 0, device=device)
+            inp = torch.randn(2, 1, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14398,7 +14438,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 40, 0, device=device)
+            inp = torch.randn(2, 1, 40, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14406,7 +14446,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            inp = torch.randn(2, 1, 50, 0, 40, device=device, dtype=dtype)
             mod(inp)
 
     def test_group_conv_empty(self, device):
@@ -15763,7 +15803,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
-    def test_softmax_64bit_indexing(self, device, dtype):
+    def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
@@ -15777,6 +15817,22 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    @largeTensorTest("90GB", "cpu")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            self.assertEqual(y[0], y[-1])
+            self.assertEqual(x.grad[0], x.grad[-1])
+
+        run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -15909,6 +15965,7 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         issue_24823_2()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/945")
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
@@ -19228,6 +19285,7 @@ class TestModuleGlobalHooks(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
