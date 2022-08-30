@@ -131,7 +131,7 @@ NestedTensorImpl::NestedTensorImpl(
     const caffe2::TypeMeta data_type,
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
-    std::vector<int64_t> offsets)
+    std::vector<int64_t>&& offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
@@ -154,14 +154,14 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
-    std::vector<int64_t> offsets)
+    std::vector<int64_t>&& offsets)
     : NestedTensorImpl(
           buffer.storage(),
           generate_nested_key_set(buffer),
           buffer.dtype(),
           nested_size_tensor,
           nested_stride_tensor,
-          offsets) {
+          std::move(offsets)) {
 
   TORCH_INTERNAL_ASSERT(
       buffer.dim() == 1,
@@ -234,11 +234,6 @@ int64_t NestedTensorImpl::numel_custom() const {
   return static_cast<int64_t>(num_elements);
 }
 
-
-c10::SymInt NestedTensorImpl::sym_numel_custom() const {
-  return NestedTensorImpl::numel_custom();
-}
-
 bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
@@ -286,7 +281,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       data_type_,
       nested_size_tensor_,
       nested_stride_tensor_,
-      offsets_);
+      std::vector<int64_t>(offsets_));
 
       copy_tensor_metadata(
           /*src_impl=*/this,

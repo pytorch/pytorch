@@ -194,6 +194,7 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
 
   if ((train.has_value() && !train) || randomness == RandomnessType::Different) {
     auto res = at::native_dropout(tensor_value, p, train);
+    tensor_value = ensure_has_bdim(tensor_value, tensor_bdim.has_value(), maybe_layer->batchSize());
     return std::make_tuple(makeBatched(std::get<0>(res), 0, cur_level), makeBatched(std::get<1>(res), 0, cur_level));
   }
 
