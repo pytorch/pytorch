@@ -1096,6 +1096,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
+        hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
@@ -1103,7 +1104,7 @@ def find_matching_merge_rule(pr: GitHubPR,
                     f"The following mandatory check(s) failed (Rule `{rule_name}`):"
                     f"{checks_to_str(failed_checks)}",
                     "",
-                    f"Debug by [viewing the failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
+                    f"Debug by [viewing the failures on hud]({hud_link})."
                 ))
             continue
         elif len(pending_checks) > 0:
@@ -1113,7 +1114,7 @@ def find_matching_merge_rule(pr: GitHubPR,
                     f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
                     f"{checks_to_str(pending_checks)}",
                     "",
-                    f"Dig deeper by [viewing the checks on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']})."
+                    f"Dig deeper by [viewing the checks on hud]({hud_link})."
                 ))
             continue
 
