@@ -1013,6 +1013,8 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    options.continue_through_error = True
+
     if options.verbose:
         print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
 
