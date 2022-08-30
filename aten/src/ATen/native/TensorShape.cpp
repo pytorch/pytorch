@@ -123,11 +123,11 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
     size_t size_at_dim = 0;
     for (const auto i : c10::irange(materialized.size())) {
       const Tensor& t = materialized[i];
+      all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
       if (!at::native::cat_should_skip_tensor(t)) {
         at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
         size_at_dim += t.size(dim);
         all_contiguous = all_contiguous && t.is_contiguous(memory_format);
-        all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
         all_same_sizes_and_stride = all_same_sizes_and_stride &&
             t.sizes() == materialized[valid].get().sizes() &&
             t.strides() == materialized[valid].get().strides();
@@ -300,7 +300,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   new_values_size[0] = new_indices_size[1];
 
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
-  Tensor new_indices = at::native::new_empty(indices, new_indices_size);
+  Tensor new_indices = indices.new_empty(new_indices_size);
   if (broadcast_sizes.size()>0) {
     // ones(broadcast_sizes).nonzero() is equivalent to
     // product(map(arange, broadcast_sizes)) but avoids creating
@@ -542,14 +542,14 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
       zeros_sizes[0] = t._values().size(0);
       zeros_sizes[values_dim] = cumulative_size;
       cumulative_size += t._values().size(values_dim);
-      auto z1 = native::zeros(
+      auto z1 = at::zeros(
           zeros_sizes,
           optTypeMetaToScalarType(t._values().options().dtype_opt()),
           t._values().options().layout_opt(),
           t._values().options().device_opt(),
           t._values().options().pinned_memory_opt());
       zeros_sizes[values_dim] = total_size - cumulative_size;
-      auto z2 = native::zeros(
+      auto z2 = at::zeros(
           zeros_sizes,
           optTypeMetaToScalarType(t._values().options().dtype_opt()),
           t._values().options().layout_opt(),
@@ -843,12 +843,9 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
-  auto size = asIntArrayRefSlow(packed_size);
-  return self.expand(size, implicit);
-}
-
-Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
+Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
+  // TODO: properly support SymInt expand
+  auto size = asIntArrayRefSlow(sym_size);
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -927,12 +924,9 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
-Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return self.narrow_copy(dim, start, sym_length.expect_int());
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  // TODO: properly support SymInt narrow_copy
+  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -2199,7 +2193,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
     TORCH_CHECK(length >= 0,
              "split_with_sizes expects split_sizes have only non-negative ",
              "entries, but got split_sizes=", split_sizes);
-    splits.push_back(self.narrow(dim, start_idx, length));
+    splits.push_back(at::native::slice(self, dim, start_idx, start_idx + length, 1));
     start_idx += length;
   }
   TORCH_CHECK(start_idx == dim_size,
@@ -2782,7 +2776,7 @@ Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
   if (dim <= sparse_dim) {
     auto new_indices = at::cat(
         {indices.narrow(0, 0, dim),
-         native::zeros(
+         at::zeros(
              {1, indices.size(1)},
              kLong,
              indices.options().layout_opt(),
@@ -3118,14 +3112,15 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view(const Tensor& self,
-            IntArrayRef size) {
-  return view_impl(self, size);
+Tensor view_meta(const Tensor& self,
+            at::SymIntArrayRef size) {
+  // TODO: Properly support SymInt view
+  return view_impl(self, c10::asIntArrayRefSlow(size));
 }
 
-Tensor view_symint(const Tensor& self,
-            c10::SymIntArrayRef size) {
-  return self.view(c10::asIntArrayRefSlow(size));
+Tensor view(const Tensor& self,
+            at::IntArrayRef size) {
+  return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {
@@ -3250,7 +3245,7 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
-              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+              src, " dims) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());
@@ -3505,8 +3500,8 @@ at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef 
 }
 
 
-at::Tensor& expand_copy_out(const at::Tensor & self, at::IntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand(size, implicit);
+at::Tensor& expand_copy_out(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+  auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
 }
@@ -3661,8 +3656,8 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
 }
 
 
-at::Tensor& view_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
-  auto tmp = self.view(size);
+at::Tensor& view_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
+  auto tmp = self.view_symint(size);
   out.copy_(tmp);
   return out;
 }
