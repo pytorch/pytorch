@@ -15013,7 +15013,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestTorchFunctionRedispatchOps", "test_redispatch",
                          device_type="cuda"),
             ),
-        ),
         supports_expanded_weight=True,
         supports_out=False,
     ),
