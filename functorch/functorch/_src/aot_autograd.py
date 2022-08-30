@@ -892,6 +892,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
 
     forward.zero_grad = mod.zero_grad
+    forward.named_parameters = mod.named_parameters
     return forward
 
 
