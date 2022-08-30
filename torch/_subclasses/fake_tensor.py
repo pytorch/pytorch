@@ -602,14 +602,14 @@ class FakeTensorMode(TorchDispatchMode):
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
-
-        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
-            try:
-                torch._C._add_meta_to_tls_dispatch_include()
-                with no_dispatch():
-                    return func(*args, **kwargs)
-            finally:
-                torch._C._remove_meta_from_tls_dispatch_include()
+        # TODO - we should be use the prim aten impl
+        if (
+            "prims::" in func._schema.name
+            and len(flat_arg_tensors) != 0
+            and hasattr(func, "prim_meta_impl")
+        ):
+            with self.restore():
+                return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
             constructors = [aten.empty.memory_format]
