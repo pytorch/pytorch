@@ -195,6 +195,7 @@ __global__ void multilabel_margin_loss_backward_kernel(
       grad_input_k[target_idx] += static_cast<scalar_t>(total_sum);
     }
   }
+  __syncthreads();
 
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
     grad_input_k[d] *= *grad_output_k;
