@@ -1990,10 +1990,10 @@ aten::mm""")
         try:
             with open("./torchtidy_report.json") as f:
                 report = json.load(f)
-            self.assertTrue("test_profiler.py" in report)
-            self.assertTrue(len(report["test_profiler.py"]) > 0)
+            self.assertTrue("profiler/test_profiler.py" in report)
+            self.assertTrue(len(report["profiler/test_profiler.py"]) > 0)
             expected_fields = sorted(["line_number", "name", "url", "message"])
-            for event in report["test_profiler.py"]:
+            for event in report["profiler/test_profiler.py"]:
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
         finally:
