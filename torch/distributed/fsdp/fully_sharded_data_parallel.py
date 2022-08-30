@@ -2233,12 +2233,7 @@ class FullyShardedDataParallel(nn.Module):
         for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
             module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
-            try:
-                param = state_dict.pop(fqn)
-            except Exception as e:
-                import logging
-                logging.warning(state_dict.keys())
-                raise e
+            param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
             shards = param.local_shards()
