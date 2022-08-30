@@ -15,7 +15,7 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
+Tensor empty_override(SymIntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
                       c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
@@ -44,7 +44,7 @@ Tensor empty_strided_override(
   c10::optional<c10::Device> device,
   c10::optional<bool> pin_memory) {
 
-  return empty_override(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return empty_override(SymIntArrayRef::fromIntArrayRef(size), dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 TORCH_LIBRARY_IMPL(aten, ORT, m) {
