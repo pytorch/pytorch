@@ -156,7 +156,7 @@ class _ProxyTensor:
     constant: Optional[torch.Tensor]
 
 
-def fetch_symint_proxy(tracer):
+def fetch_sym_proxy(tracer):
     def inner(e):
         n = e.get_pyobj()
         if n.constant is not None:
@@ -220,7 +220,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
 
     proxy_args, proxy_kwargs = pytree.tree_map_only(
         (SymInt, SymFloat),
-        fetch_symint_proxy(proxy_mode.tracer),
+        fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
     proxy_out = func_overload(*proxy_args, **proxy_kwargs)
@@ -434,7 +434,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func_overload is torch.ops.aten.lift_fresh.default:
                 func_overload = torch.ops.aten.lift_fresh_copy.default
 
-            n_args, n_kwargs = pytree.tree_map_only((SymInt, SymFloat), fetch_symint_proxy(self.tracer), (args, kwargs))
+            n_args, n_kwargs = pytree.tree_map_only((SymInt, SymFloat), fetch_sym_proxy(self.tracer), (args, kwargs))
 
             proxy_out = self.tracer.create_proxy('call_function', func_overload, n_args, n_kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
