@@ -15440,6 +15440,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
         skips=(
             # RuntimeError:
