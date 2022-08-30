@@ -28,8 +28,7 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        fn(gm)
-        return PassResult(gm, True)
+        return fn(gm) or PassResult(gm, True)
 
     if wrapped_fn.__name__ == 'wrapped_fn':
         wrapped_fn.__name__ = str(fn)
