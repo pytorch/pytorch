@@ -19,7 +19,6 @@ from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
-from .decompositions import register_decomposition
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 
@@ -178,11 +177,6 @@ def normalize_as_list(x):
 
 aot_autograd_decompositions = {}
 
-# TODO: Remove these stupid decompositions
-@register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
-def _reshape_alias(x, shape, strides):
-    return aten.view(x, shape)
-
 
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
@@ -298,15 +292,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         _num_outs = 1
 
     joint_inputs = (flat_args, out)
-    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.use_functionalize:
-        # Functionalize the foward backward graph. First create a
-        # fake fn to make functionalize happy
+        # Trace once without decompositions, into a graph of ATen ops.
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
         def fake_fn(primals, tangents):
             return fx_g(primals, tangents)
 
-        fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        # Trace a second time, running functionalization, and THEN running decompositions.
+        # functionalization only acts on ATen today, and doesn't currently handle
+        # view and inplace ops that come from primtorch.
+        # Eventually, functionalization should support primtorch view/inplace ops,
+        # which will make it ok to run decompositions before functionalization.
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+    else:
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")
@@ -891,6 +892,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
 
     forward.zero_grad = mod.zero_grad
+    forward.named_parameters = mod.named_parameters
     return forward
 
 
