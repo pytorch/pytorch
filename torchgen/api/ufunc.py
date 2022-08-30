@@ -40,7 +40,8 @@ def kernel_name(g: NativeFunctionsGroup, dispatch_key: DispatchKey) -> str:
 #
 # NB: used for CPU only
 def dispatchstub_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
-    r = cpp.valuetype_type(t, binds=binds)
+    # Dispatch stubs are always plain ints
+    r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
         return r
 
@@ -64,7 +65,7 @@ def opmath_type(scalar_t: BaseCppType) -> BaseCppType:
 #
 # NB: CUDA only
 def ufunctor_ctor_type(t: Type, *, binds: ArgName, scalar_t: BaseCppType) -> NamedCType:
-    r = cpp.valuetype_type(t, binds=binds)
+    r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
         return r
 
@@ -93,7 +94,7 @@ def ufunctor_apply_type(
 # is done in the computation type.  compute_t is opmath_t in CUDA and scalar_t
 # in CPU
 def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
-    r = cpp.valuetype_type(t, binds=binds)
+    r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
         return r
 
