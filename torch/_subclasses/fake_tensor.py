@@ -606,7 +606,7 @@ class FakeTensorMode(TorchDispatchMode):
                         "It's likely that this is from calling tensor.shape in C++"
                     )
 
-            constructors = [aten.empty.SymInt]
+            constructors = [aten.empty.memory_format]
             if func not in constructors:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"

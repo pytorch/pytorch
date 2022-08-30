@@ -20,6 +20,7 @@ from torch._prims_common import (
     DimsType,
     Number,
     NumberType,
+    RETURN_TYPE,
     ShapeType,
     StrideType,
     TensorLike,
@@ -246,10 +247,6 @@ def TensorMeta(
     else:
         return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
-
-#
-# Common datastructures and helpers
-#
 
 # Describes the return type of the primitive:
 #
