@@ -29,5 +29,7 @@ TORCH_API void run_jit_decomposition(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack);
 
+TORCH_API bool has_jit_decomposition(const FunctionSchema& schema);
+
 } // namespace jit
 } // namespace torch

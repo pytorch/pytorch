@@ -176,6 +176,10 @@ void run_jit_decomposition(
   }
 }
 
+bool has_jit_decomposition(const FunctionSchema& schema) {
+  return GetDecompositionFunction(schema).has_value();
+}
+
 Function* GetDecompositionExecutor(const FunctionSchema& schema) {
   auto maybe_func = GetDecompositionFunction(schema);
   TORCH_INTERNAL_ASSERT(maybe_func);
