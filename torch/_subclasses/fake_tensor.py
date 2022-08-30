@@ -4,7 +4,7 @@ import itertools
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Union, Type, TypeVar
+from typing import Callable, Type, TypeVar, Union
 
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -15,7 +15,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map, PyTree
+from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
 aten = torch.ops.aten
 T = TypeVar("T")
@@ -536,6 +536,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
     flat_vals, _ = tree_flatten(pytree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
+
 class FakeTensorMode(TorchDispatchMode):
     def __init__(self, *, allow_fallback_kernels=True, allow_meta=False):
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -583,8 +584,13 @@ class FakeTensorMode(TorchDispatchMode):
             # and ensure that Meta kernels are dispatched to (see)
             # Fake Tensor Dispatch Keys
             # TODO - we should be use the prim aten impl
-            if "prims::" in func._schema.name and len(flat_arg_tensors) != 0 and hasattr(func, "prim_meta_impl"):
-                return func.prim_meta_impl(*args, **kwargs)
+            if (
+                "prims::" in func._schema.name
+                and len(flat_arg_tensors) != 0
+                and hasattr(func, "prim_meta_impl")
+            ):
+                with self.restore():
+                    return func.prim_meta_impl(*args, **kwargs)
 
             if torch._C._dispatch_has_kernel(func.name):
                 # Decomposes CompositeImplicitAutograd ops
