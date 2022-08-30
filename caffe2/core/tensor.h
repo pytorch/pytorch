@@ -439,10 +439,6 @@ class TORCH_API Tensor final {
     return impl_->sym_sizes();
   }
 
-  inline c10::SymInt sym_numel() const {
-    return impl_->sym_numel();
-  }
-
   inline c10::SymIntArrayRef sym_strides() const {
     return impl_->sym_strides();
   }
