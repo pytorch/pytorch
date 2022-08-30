@@ -116,7 +116,7 @@ def reduce_package_graph_module(
 def reduce_deploy_graph_module(
     importer: PackageImporter, body: Dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
-    ns = dict()
+    ns = {}
     ns["__builtins__"] = importer.patched_builtins
     fn_src = body.get('_code')
     assert fn_src is not None
@@ -160,7 +160,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
 
     com = CodeOnlyModule(body)
 
-    graph = KeepModules().trace(com)
+    tracer_extras = body.get('_tracer_extras', {})
+    graph = KeepModules().trace(com, **tracer_extras)
 
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
@@ -240,7 +241,10 @@ class _WrappedCall:
     def _generate_error_message(frame_summary: traceback.FrameSummary) -> str:
         # auxiliary variables (for readability)
         err_lineno = frame_summary.lineno
-        err_line_len = len(frame_summary.line)
+        assert err_lineno is not None
+        line = frame_summary.line
+        assert line is not None
+        err_line_len = len(line)
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
@@ -260,7 +264,7 @@ class _WrappedCall:
             if self.cls_call is not None:
                 return self.cls_call(obj, *args, **kwargs)
             else:
-                return super(self.cls, obj).__call__(*args, **kwargs)
+                return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \
@@ -370,6 +374,10 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_cls and '<locals>' not in self.graph._tracer_cls.__qualname__:
             self._tracer_cls = self.graph._tracer_cls
 
+        self._tracer_extras = {}
+        if self.graph._tracer_extras:
+            self._tracer_extras = self.graph._tracer_extras
+
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
@@ -411,8 +419,11 @@ class GraphModule(torch.nn.Module):
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
+        custom_builtins = '\n'.join([v.import_str for v in _custom_builtins.values()])
         model_str = f"""
 import torch
+{custom_builtins}
+
 from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):
@@ -638,7 +649,7 @@ class {module_name}(torch.nn.Module):
         cls_call = cls.__call__ if "__call__" in vars(cls) else None
 
         if '_wrapped_call' not in vars(cls):
-            cls._wrapped_call = _WrappedCall(cls, cls_call)
+            cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
@@ -695,9 +706,30 @@ class {module_name}(torch.nn.Module):
     def __copy__(self):
         return GraphModule(self, self.graph)
 
+    @compatibility(is_backward_compatible=False)
+    def print_readable(self):
+        """
+        Return the Python code generated for current GraphModule and its children GraphModules
+        """
+        verbose_python_code = self._graph.python_code(root_module='self', verbose=True)
+        module_code = verbose_python_code.src
+        module_code = module_code.lstrip('\n')
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, GraphModule):
+                submodule_code_list.append(submodule.__nested_code())
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        print(module_code + submodule_code)
+
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
+        return '\n'.join([orig_str, self._code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()

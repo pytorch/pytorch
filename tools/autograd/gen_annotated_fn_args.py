@@ -5,6 +5,7 @@ test/test_overrides.py.
 
 python -m tools.autograd.gen_annotated_fn_args \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -13,31 +14,37 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/testing/_internal/generated
 """
 
-from collections import defaultdict
 import argparse
 import os
 import textwrap
+from collections import defaultdict
 
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+
+import torchgen.api.python as python
+from torchgen.context import with_native_function
 
 from torchgen.gen import parse_native_yaml
-from torchgen.utils import FileManager
-from torchgen.context import with_native_function
 from torchgen.model import BaseOperatorName, NativeFunction
-import torchgen.api.python as python
+from torchgen.utils import FileManager
+
 from .gen_python_functions import (
-    should_generate_py_binding,
-    is_py_torch_function,
-    is_py_nn_function,
-    is_py_linalg_function,
-    is_py_variable_method,
-    is_py_special_function,
     is_py_fft_function,
+    is_py_linalg_function,
+    is_py_nn_function,
+    is_py_special_function,
+    is_py_torch_function,
+    is_py_variable_method,
+    should_generate_py_binding,
 )
 
 
-def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+def gen_annotated(
+    native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str
+) -> None:
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     mappings = (
         (is_py_torch_function, "torch._C._VariableFunctions"),
         (is_py_nn_function, "torch._C._nn"),
@@ -90,12 +97,13 @@ def main() -> None:
     parser.add_argument(
         "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
     )
+    parser.add_argument("tags", metavar="TAGS", help="path to tags.yaml")
     parser.add_argument("out", metavar="OUT", help="path to output directory")
     parser.add_argument(
         "autograd", metavar="AUTOGRAD", help="path to template directory"
     )
     args = parser.parse_args()
-    gen_annotated(args.native_functions, args.out, args.autograd)
+    gen_annotated(args.native_functions, args.tags, args.out, args.autograd)
 
 
 if __name__ == "__main__":

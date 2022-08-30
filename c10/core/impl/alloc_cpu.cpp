@@ -58,27 +58,30 @@ void* alloc_cpu(size_t nbytes) {
   void* data;
 #ifdef __ANDROID__
   data = memalign(gAlignment, nbytes);
-#elif defined(_MSC_VER)
-  data = _aligned_malloc(nbytes, gAlignment);
-#else
-  int err = posix_memalign(&data, gAlignment, nbytes);
-  if (err != 0) {
-    CAFFE_THROW(
-        "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
-        nbytes,
-        " bytes. Error code ",
-        err,
-        " (",
-        strerror(err),
-        ")");
-  }
-#endif
-
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
       " bytes.");
+#elif defined(_MSC_VER)
+  data = _aligned_malloc(nbytes, gAlignment);
+  CAFFE_ENFORCE(
+      data,
+      "DefaultCPUAllocator: not enough memory: you tried to allocate ",
+      nbytes,
+      " bytes.");
+#else
+  int err = posix_memalign(&data, gAlignment, nbytes);
+  CAFFE_ENFORCE(
+      err == 0,
+      "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
+      nbytes,
+      " bytes. Error code ",
+      err,
+      " (",
+      strerror(err),
+      ")");
+#endif
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());

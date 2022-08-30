@@ -2,10 +2,10 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -233,7 +233,12 @@ at::Tensor PackedLinearWeight::apply_dynamic_relu(
 #ifdef USE_PYTORCH_QNNPACK
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
-    at::Tensor input) {
+    at::Tensor input,
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+  }
+
   using at::Tensor;
   TORCH_CHECK(
       input.dim() >= 2,
@@ -375,14 +380,14 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic(
     at::Tensor input,
-    bool /* reduce_range */) {
-  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input), reduce_range);
 }
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(
     at::Tensor input,
-    bool /* reduce_range */) {
-  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
+    bool reduce_range ) {
+  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input), reduce_range);
 }
 
 #endif // USE_PYTORCH_QNNPACK
@@ -410,14 +415,21 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
-  // Call the fp16 gemm interface
-  fbgemm::cblas_gemm_compute(
-      fbgemm::matrix_op_t::NoTranspose,
-      M,
-      input_ptr,
-      packed_weight_fp16,
-      0.0f,
-      output.data_ptr<float>());
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (const auto task_id : c10::irange(begin, end)) {
+      // Call the fp16 gemm interface
+      fbgemm::cblas_gemm_compute(
+          /*transa=*/fbgemm::matrix_op_t::NoTranspose,
+          /*m=*/static_cast<int>(M),
+          /*A=*/input_ptr,
+          /*Bp=*/packed_weight_fp16,
+          /*beta=*/0.0f,
+          /*C=*/output.data_ptr<float>(),
+          /*thread_id=*/static_cast<int>(task_id),
+          /*num_threads=*/num_tasks);
+    }
+  });
 
   // Add bias term
   if (bias_.has_value()) {

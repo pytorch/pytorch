@@ -26,13 +26,14 @@ def implements_per_sample_grads(torch_function):
 #
 # Needs to be a tensor subclass to allow reparamaterization
 class ExpandedWeight(torch.Tensor):
-    def __init__(self, orig_weight, batch_size):
+    def __init__(self, orig_weight, batch_size, loss_reduction):
         self.batch_size = batch_size
         self.orig_weight = orig_weight
+        self.loss_reduction = loss_reduction
 
     handled_functions = HANDLED_FUNCTIONS
 
-    def __new__(cls, orig_weight, _):
+    def __new__(cls, orig_weight, batch_size, loss_reduction):
         if not isinstance(orig_weight, torch.Tensor):
             raise RuntimeError(f"Can only make Expanded Weights of Tensors, got {type(orig_weight).__name__}")
         if not orig_weight.requires_grad:

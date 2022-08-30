@@ -12,6 +12,7 @@
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/tensor_memoryformats.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -66,7 +67,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
   if (opt_memory_format.has_value()) {
-    PyTuple_SET_ITEM(tuple.get(), 3, THPMemoryFormat_New(opt_memory_format.value(), "unused_name"));
+    PyTuple_SET_ITEM(tuple.get(), 3, torch::utils::getTHPMemoryFormat(opt_memory_format.value()).release().ptr());
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 3, Py_None);

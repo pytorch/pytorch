@@ -4,8 +4,8 @@ import time
 from typing import Any, Dict, List, Set, Tuple
 
 from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
     CompilerType,
+    JSON_FOLDER_BASE_DIR,
     TestList,
     TestPlatform,
     TestStatusType,
@@ -26,7 +26,7 @@ from .print_report import (
 )
 
 
-# coverage_records: Dict[str, LineInfo] = dict()
+# coverage_records: Dict[str, LineInfo] = {}
 covered_lines: Dict[str, Set[int]] = {}
 uncovered_lines: Dict[str, Set[int]] = {}
 tests_type: TestStatusType = {"success": set(), "partial": set(), "fail": set()}

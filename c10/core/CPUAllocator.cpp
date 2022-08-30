@@ -1,3 +1,4 @@
+#include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/alignment.h>
@@ -16,7 +17,13 @@ namespace c10 {
 struct C10_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
-    void* data = alloc_cpu(nbytes);
+    void* data = nullptr;
+    try {
+      data = c10::alloc_cpu(nbytes);
+    } catch (c10::Error& e) {
+      profiledCPUMemoryReporter().OutOfMemory(nbytes);
+      throw e;
+    }
     profiledCPUMemoryReporter().New(data, nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
   }
@@ -112,13 +119,18 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     } else if (profiling_allocator_ptr != nullptr) {
       data = profiling_allocator_ptr->allocate(alloc_size);
     } else {
-      data = c10::alloc_cpu(alloc_size);
+      try {
+        data = c10::alloc_cpu(alloc_size);
+      } catch (c10::Error& e) {
+        profiledCPUMemoryReporter().OutOfMemory(alloc_size);
+        throw e;
+      }
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
         allocation_planner->record_allocation(alloc_size, data);
       }
     }
-    //  profiledCPUMemoryReporter().New(data, alloc_size);
+    profiledCPUMemoryReporter().New(data, alloc_size);
     return {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
         data,
@@ -232,6 +244,30 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   if (profile_memory) {
     reportMemoryUsageToProfiler(
         ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+  }
+}
+
+void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
+  auto profile_memory = memoryProfilingEnabled();
+  size_t allocated = 0;
+  if (FLAGS_caffe2_report_cpu_memory_usage || profile_memory) {
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    allocated = allocated_;
+  }
+  if (nbytes == 0) {
+    return;
+  }
+  if (FLAGS_caffe2_report_cpu_memory_usage) {
+    LOG(INFO) << "C10 Out of Memory. Trying to allocate " << nbytes
+              << " bytes, total alloc " << allocated << " bytes.";
+  }
+  if (profile_memory) {
+    reportOutOfMemoryToProfiler(
+        static_cast<int64_t>(nbytes),
+        static_cast<int64_t>(allocated),
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 

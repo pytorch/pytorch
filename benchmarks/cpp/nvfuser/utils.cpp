@@ -1,4 +1,4 @@
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
@@ -31,9 +31,10 @@ std::string toString(ReductionParams rparams) {
                                        : "")
      << (rparams.split_grid_dim_iter_dom ? "split grid dimension / " : "")
      << (rparams.vectorize_iter_dom ? "vectorize / " : "")
-     << (rparams.unroll_iter_dom && !rparams.vectorize_iter_dom ? "unroll / "
-                                                                : "");
-  if (rparams.unroll_iter_dom || rparams.vectorize_iter_dom) {
+     << (rparams.unroll_factor_iter_dom > 1 && !rparams.vectorize_iter_dom
+             ? "unroll / "
+             : "");
+  if (rparams.unroll_factor_iter_dom > 1 || rparams.vectorize_iter_dom) {
     ss << "factor " << rparams.unroll_factor_iter_dom;
   }
 
@@ -53,10 +54,12 @@ std::string toString(ReductionParams rparams) {
              ? "split grid dimension / "
              : "")
      << (rparams.vectorize_inner_reduction ? "vectorize / " : "")
-     << (rparams.unroll_inner_reduction && !rparams.vectorize_inner_reduction
+     << (rparams.unroll_factor_inner_reduction > 1 &&
+                 !rparams.vectorize_inner_reduction
              ? "unroll / "
              : "");
-  if (rparams.unroll_inner_reduction || rparams.vectorize_inner_reduction) {
+  if (rparams.unroll_factor_inner_reduction > 1 ||
+      rparams.vectorize_inner_reduction) {
     ss << "factor " << rparams.unroll_factor_inner_reduction;
   }
   return ss.str();
@@ -76,14 +79,28 @@ std::string toString(PointwiseParams params) {
     ss << "1D"
        << "/";
   }
-  if (params.inner_factor > 1) {
+  if (params.unroll_factor > 1) {
     if (params.vectorize) {
-      ss << "Vectorize, Factor: " << params.inner_factor;
+      ss << "Vectorize, Factor: " << params.unroll_factor;
     } else {
-      ss << "Unroll, Factor: " << params.inner_factor;
+      ss << "Unroll, Factor: " << params.unroll_factor;
     }
   }
   return ss.str();
+}
+
+std::string toString(const std::shared_ptr<HeuristicParams>& params) {
+  auto rparams = std::dynamic_pointer_cast<ReductionParams>(params);
+  if (rparams) {
+    return toString(*rparams);
+  }
+  auto pparams = std::dynamic_pointer_cast<PointwiseParams>(params);
+  if (pparams) {
+    return toString(*pparams);
+  }
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Unknown heuristic parameter type. Did you just added a new heuristic parameter type but forget to update here?");
 }
 
 std::string toString(LaunchParams lparams) {
@@ -108,11 +125,29 @@ void clearL2Cache() {
   torch::Tensor t1 = torch::clone(t0);
 };
 
+TensorView* makeSymbolicTensor(size_t ndims, DataType dtype) {
+  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
+}
+
 TensorView* makeContigTensor(size_t ndims, DataType dtype) {
   return TensorViewBuilder()
       .ndims(ndims)
       .dtype(dtype)
       .contiguity(std::vector<bool>(ndims, true))
+      .build();
+}
+
+TensorView* makeConcreteTensor(std::vector<int64_t> shape, DataType dtype) {
+  return TensorViewBuilder().shape(shape).dtype(dtype).build();
+}
+
+TensorView* makeContigConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype) {
+  return TensorViewBuilder()
+      .shape(shape)
+      .dtype(dtype)
+      .contiguity(std::vector<bool>(shape.size(), true))
       .build();
 }
 
@@ -122,22 +157,26 @@ void runBenchmarkIterations(
     std::vector<c10::IValue>& aten_inputs) {
   fusion_executor_cache->runFusionWithInputs(aten_inputs);
   bool segmented =
-      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented();
+      fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented() &&
+      fusion_executor_cache->getMostRecentKernelRuntime()
+              ->fusionSegments()
+              ->groups()
+              .size() > 1;
 
   if (!segmented) {
     fusion_executor_cache->profile(true);
     fusion_executor_cache->runFusionWithInputs(aten_inputs);
     auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
     auto executor_instance = compile_log.fusion_executor;
-    TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
-    TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
-    auto rparams = toString(compile_log.reduction_params.value());
-    auto lparams = toString(compile_log.launch_constraints.value());
-    benchmark_state.SetLabel(rparams + lparams);
+
+    auto params = toString(compile_log.params);
+    auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
+    benchmark_state.SetLabel(params + lparams);
+
     executor_instance->setMeasureKernelTimeFlag(true);
 
     // Sync everything up before we start
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     for (auto _ : benchmark_state) {
       clearL2Cache();
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
@@ -146,7 +185,7 @@ void runBenchmarkIterations(
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   } else {
     // Segmented
     // Sync everything up before we start
@@ -154,7 +193,7 @@ void runBenchmarkIterations(
       // Compile/warmup
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
     }
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     CudaKernelTimer timer;
     for (auto _ : benchmark_state) {
       clearL2Cache();
@@ -164,7 +203,7 @@ void runBenchmarkIterations(
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 

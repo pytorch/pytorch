@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
@@ -258,6 +259,14 @@ Table(const std::vector<std::pair<std::string, IValue>>& entries);
 // TODO remove these switches once interface call is rolled out.
 TORCH_API void enableMobileInterfaceCallExport();
 bool getMobileInterfaceCallExport();
+
+CompilationOptions getOptionsFromGlobal();
+
+extern void (*_save_jit_module_to)(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func);
 
 } // namespace jit
 } // namespace torch

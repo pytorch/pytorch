@@ -43,7 +43,7 @@ for branch in "release/${RELEASE_VERSION}" "orig/release/${RELEASE_VERSION}"; do
             set -x
             git checkout "${GIT_REMOTE}/${GIT_BRANCH_TO_CUT_FROM}"
             git checkout -b "${branch}"
-            git push "${GIT_REMOTE}" "${branch}"
+            git push -q ${DRY_RUN_FLAG} "${GIT_REMOTE}" "${branch}"
         )
     fi
 done

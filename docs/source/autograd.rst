@@ -72,16 +72,8 @@ Locally disabling gradient computation
 
 See :ref:`locally-disable-grad-doc` for more information on the differences
 between no-grad and inference mode as well as other related mechanisms that
-may be confused with the two.
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    no_grad
-    enable_grad
-    set_grad_enabled
-    inference_mode
+may be confused with the two. Also see :ref:`torch-rst-local-disable-grad`
+for a list of functions that can be used to locally disable gradients.
 
 .. _default-grad-layouts:
 
@@ -231,10 +223,12 @@ Profiler
 ^^^^^^^^
 
 Autograd includes a profiler that lets you inspect the cost of different
-operators inside your model - both on the CPU and GPU. There are two modes
+operators inside your model - both on the CPU and GPU. There are three modes
 implemented at the moment - CPU-only using :class:`~torch.autograd.profiler.profile`.
-and nvprof based (registers both CPU and GPU activity) using
+nvprof based (registers both CPU and GPU activity) using
 :class:`~torch.autograd.profiler.emit_nvtx`.
+and vtune profiler based using
+:class:`~torch.autograd.profiler.emit_itt`.
 
 .. autoclass:: torch.autograd.profiler.profile
 
@@ -248,6 +242,7 @@ and nvprof based (registers both CPU and GPU activity) using
     profiler.profile.total_average
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
+.. autoclass:: torch.autograd.profiler.emit_itt
 
 
 .. autosummary::

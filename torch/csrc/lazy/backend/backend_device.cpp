@@ -2,19 +2,22 @@
 
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/tensor.h>
 
 namespace torch {
 namespace lazy {
 
-// TODO(alanwaketan): Use the backend API to get the default device type.
 BackendDevice::BackendDevice()
-  : type_(std::make_shared<BackendDeviceType>()), ordinal_(-1) {}
+    : type_(getBackend()->GetDefaultDeviceType()),
+      ordinal_(getBackend()->GetDefaultDeviceOrdinal()) {}
 
-BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal)
-  : type_(std::move(type)), ordinal_(ordinal) {}
+BackendDevice::BackendDevice(
+    std::shared_ptr<BackendDeviceType>&& type,
+    int64_t ordinal)
+    : type_(std::move(type)), ordinal_(ordinal) {}
 
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);
@@ -23,11 +26,7 @@ int8_t BackendDevice::type() const {
 
 std::string BackendDevice::toString() const {
   TORCH_INTERNAL_ASSERT(type_);
-  std::string str = type_->toString();
-  if (has_index()) {
-    str.append(std::to_string(ordinal_));
-  }
-  return str;
+  return c10::str(type_->toString(), ordinal_);
 }
 
 int BackendDevice::compare(const BackendDevice& rhs) const {
@@ -44,7 +43,9 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
 
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
-  int64_t ordinal = device.has_index() ? device.index() : -1;
+  int64_t ordinal = device.has_index()
+      ? device.index()
+      : getBackend()->GetDefaultDeviceOrdinal();
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
@@ -54,7 +55,7 @@ c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
 }
 
 c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
-  for (auto& tensor: tensors) {
+  for (auto& tensor : tensors) {
     if (auto lt = TryGetLtcTensor(tensor)) {
       return lt->GetDevice();
     }
@@ -69,9 +70,17 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   return c10::nullopt;
 }
 
+c10::optional<BackendDevice> GetBackendDevice(
+    const c10::optional<c10::Device> device) {
+  if (device) {
+    return c10::make_optional(atenDeviceToBackendDevice(*device));
+  }
+  return c10::nullopt;
+}
+
 c10::optional<BackendDevice> GetBackendDevice() {
   return c10::nullopt;
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch
