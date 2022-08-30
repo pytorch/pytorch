@@ -152,7 +152,9 @@ class FakeTensorConverter(object):
             out = FakeTensor(fake_mode, meta_t, existing_device)
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        if t.grad is not None:
+        with torch.no_grad():
+            grad_not_none = t.grad is not None
+        if grad_not_none:
             out.grad = self.from_real_tensor(fake_mode, t.grad)
         self.set_tensor_memo(t, out)
         return out
