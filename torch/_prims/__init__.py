@@ -248,19 +248,6 @@ def TensorMeta(
         return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
-# Describes the return type of the primitive:
-#
-#   - NEW, a new tensor is created
-#   - VIEW, a view of an input tensor is returned
-#   - INPLACE, one or more input tensors is modified
-#
-# these descriptors are mututally exclusive and exhaustive.
-class RETURN_TYPE(Enum):
-    NEW = (0,)
-    VIEW = (1,)
-    INPLACE = (2,)
-
-
 def _make_prim(
     *,
     schema: str,
