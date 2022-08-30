@@ -992,7 +992,9 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
   //     4) dim == input.dim() - 1
   // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
   if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
-    TORCH_CHECK(mask.sizes() == input.sizes(), "Mask shape should match input shape; transformer_mask is not supported in the fallback case.");
+    if (is_BxT_mask) {
+      mask = mask.view({mask_.size(0), 1, 1, mask_.size(1)}).expand(input.sizes());
+    }
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,

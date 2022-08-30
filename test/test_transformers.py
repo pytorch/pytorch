@@ -86,36 +86,96 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
-    @parametrize("use_torchscript", [True, False])
-    @parametrize("with_no_grad", [True, False])
-    @parametrize("training", [True, False])
-    def test_transformerencoder_fastpath_torchscript(self, use_torchscript, with_no_grad, training):
+    @parametrize("device", device_list)
+    @parametrize("use_torchscript", [False])
+    @parametrize("enable_nested_tensor", [True, False])
+    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor):
         """
-        Test TransformerEncoder does not crash
+        Test TransformerEncoder fastpath output matches slowpath output
         """
-        model = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True),
-            num_layers=2,
-            enable_nested_tensor=True
-        )
+        torch.manual_seed(1234)
+        d_model = 12
+        nhead = 4
+        dim_feedforward = 12
+        batch_first = True
 
-        if training:
-            model = model.train()
-        else:
-            model = model.eval()
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                batch_first=batch_first),
+            num_layers=2,
+            enable_nested_tensor=enable_nested_tensor
+        ).to(device).eval()
 
         if use_torchscript:
             model = torch.jit.script(model)
 
-        x = torch.Tensor([[[1, 2], [3, 4]]]).to(torch.float)
-        mask = torch.Tensor([[0, 1]]).to(torch.bool)
+        # each input is (input, mask)
+        input_mask_pairs = [
+            (
+                torch.rand(3, 2, d_model),
+                [
+                    [0, 1],
+                    [0, 1],
+                    [1, 1]
+                ]
+            ),
+            (
+                torch.rand(2, 100, d_model),
+                [
+                    [0] * 98 + [1] * 2,
+                    [0] * 90 + [1] * 10
+                ]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1024.
+            (
+                torch.rand(2, 1024, d_model),
+                [
+                    [0] * 1020 + [1] * 4,
+                    [0] * 1024,
+                ]
+            ),
+            (
+                torch.rand(1, 1026, d_model),
+                [[0] * 1024 + [1] * 2]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test range of masks above 1024.
+            (
+                torch.rand(4, 1040, d_model),
+                [
+                    [0] * 1024 + [1] * 16,
+                    [0] * 1025 + [1] * 15,
+                    [0] * 1031 + [1] * 9,
+                    [0] * 1040,
+                ]
+            )
+        ]
+        input_mask_pairs = [
+            (
+                torch.tensor(pair[0], device=device, dtype=torch.float32),  # float input
+                torch.tensor(pair[1], device=device, dtype=torch.bool)  # bool mask
+            ) for pair in input_mask_pairs
+        ]
 
-        if with_no_grad:
-            cm = torch.no_grad()
-        else:
-            cm = contextlib.nullcontext()
-        with cm:
-            model(x, src_key_padding_mask=mask)
+        for input, src_key_padding_mask in input_mask_pairs:
+            with torch.no_grad():
+                fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
+            slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
+
+            # Make sure fastpath_output is same shape as slowpath_output and mask.
+            # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
+            # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
+            # Expand back to old size to match.
+            bs, true_seqlen, embed_dim = fastpath_output.shape
+            expanded_seqlen = src_key_padding_mask.shape[1]
+            fastpath_output_expanded = torch.zeros(bs, expanded_seqlen, embed_dim, device=device)
+            fastpath_output_expanded[:, :true_seqlen, :] = fastpath_output
+            # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
+            fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+            slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+            torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
 
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
