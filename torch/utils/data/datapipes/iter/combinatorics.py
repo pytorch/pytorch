@@ -117,14 +117,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def set_seed(self, seed: int):
         self._seed = seed
+        return self
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._enabled:
             for x in self.datapipe:
                 yield x
         else:
-            self._rng.seed(self._seed)
-            self._seed = None
             for x in self.datapipe:
                 if len(self._buffer) == self.buffer_size:
                     idx = self._rng.randint(0, len(self._buffer) - 1)
@@ -132,9 +131,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
                     yield val
                 else:
                     self._buffer.append(x)
-            self._rng.shuffle(self._buffer)
             while self._buffer:
-                yield self._buffer.pop()
+                idx = self._rng.randint(0, len(self._buffer) - 1)
+                yield self._buffer.pop(idx)
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -145,6 +144,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._buffer = []
         if self._enabled and self._seed is None:
             self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        self._rng.seed(self._seed)
+        self._seed = None
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
@@ -154,9 +155,10 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.buffer_size,
             self._enabled,
             self._seed,
+            self._buffer,
+            self._rng.getstate(),
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            self._rng.getstate(),
         )
         return state
 
@@ -166,13 +168,13 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self.buffer_size,
             self._enabled,
             self._seed,
+            self._buffer,
+            rng_state,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
-            rng_state,
         ) = state
         self._rng = random.Random()
         self._rng.setstate(rng_state)
-        self._buffer = []
 
     def __del__(self):
         self._buffer.clear()
