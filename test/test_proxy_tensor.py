@@ -1047,7 +1047,6 @@ symbolic_tensor_failures = {
     xfail('matmul', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('max', 'reduction_with_dim'),  # aten.max.dim - couldn't find symbolic meta function/decomposition
-    xfail('mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
     xfail('meshgrid', 'list_of_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('meshgrid', 'variadic_tensors'),  # Tensors of type TensorImpl do not have numel
@@ -1059,7 +1058,6 @@ symbolic_tensor_failures = {
     xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
@@ -1101,9 +1099,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'nearest'),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/d...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.kl_div', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type pro...
     xfail('nn.functional.l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type...
     xfail('nn.functional.linear', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
@@ -1115,7 +1111,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.mse_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
-    xfail('nn.functional.multilabel_soft_margin_loss', ''),  # aten.new_empty.default - couldn't find symbolic meta functio...
     xfail('nn.functional.normalize', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'constant'),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
@@ -1208,8 +1203,6 @@ symbolic_tensor_failures = {
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('std', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
-    xfail('std_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
@@ -1226,8 +1219,6 @@ symbolic_tensor_failures = {
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
-    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
-    xfail('var', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
     xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
