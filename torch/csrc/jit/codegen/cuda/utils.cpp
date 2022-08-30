@@ -106,13 +106,13 @@ auto parseDebugDumpOptions() {
             "Invalid debug dump option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, debug_info, launch_param, segmented_fusion, fusion_args,\n",
-            "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
-            "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose,\n",
-            "\tpython_definition, python_frontend_debug, ttransform_propagator,\n",
-            "\tinline_propagator\n");
+            "\tfusion_ir, fusion_ir_math, fusion_ir_presched, kernel_ir, ca_map,\n",
+            "\tcuda_kernel, cuda_full, cuda_to_file, debug_info, launch_param,\n",
+            "\tsegmented_fusion, fusion_args, kernel_args, dump_eff_bandwidth,\n",
+            "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
+            "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
+            "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
+            "\ttransform_propagator, inline_propagator\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
