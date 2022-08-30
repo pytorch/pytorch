@@ -16,11 +16,11 @@ from typing import (
 )
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
+import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._shard_utils import (
     _create_chunk_sharded_tensor,
@@ -862,7 +862,8 @@ def _rekey_sharded_optim_state_dict(
     optim: torch.optim.Optimizer,
     optim_input: Optional[
         Union[
-            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+            List[Dict[str, Any]],
+            Iterable[torch.nn.Parameter],
         ]
     ],
     using_optim_input: bool,
@@ -954,9 +955,12 @@ def _get_param_id_to_param(
 
 def _get_param_id_to_param_from_optim_input(
     model: torch.nn.Module,
-    optim_input: Optional[Union[
-        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
-    ]] = None,
+    optim_input: Optional[
+        Union[
+            List[Dict[str, Any]],
+            Iterable[torch.nn.Parameter],
+        ]
+    ] = None,
 ) -> List[torch.nn.Parameter]:
     """
     Constructs a mapping from parameter IDs to parameters. This may be used
@@ -1007,18 +1011,17 @@ def _get_param_id_to_param_from_optim_input(
         all_tensors &= isinstance(param, torch.Tensor)
         all_dicts &= isinstance(param, dict)
     if not all_tensors and not all_dicts:
-        raise TypeError(
-            "Optimizer input should be an iterable of Tensors or dicts"
-        )
+        raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
         return params  # type: ignore[return-value]
     assert all_dicts
     param_id_to_param = []
     for param_group in params:
         has_params_key = "params" in param_group  # type: ignore[operator]
-        assert has_params_key, \
-            "A parameter group should map \"params\" to a list of the " \
+        assert has_params_key, (
+            'A parameter group should map "params" to a list of the '
             "parameters in the group"
+        )
         for param in param_group["params"]:  # type: ignore[index]
             # Implicitly map `flat_param_id` (current length of the list) to
             # `param`
@@ -1036,15 +1039,16 @@ def _get_param_to_param_id(
 
 def _get_param_to_param_id_from_optim_input(
     model: torch.nn.Module,
-    optim_input: Optional[Union[
-        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
-    ]] = None,
+    optim_input: Optional[
+        Union[
+            List[Dict[str, Any]],
+            Iterable[torch.nn.Parameter],
+        ]
+    ] = None,
 ) -> Dict[torch.nn.Parameter, int]:
     """Constructs the inverse mapping of :func:`_get_param_id_to_param`."""
     param_id_to_param = _get_param_id_to_param_from_optim_input(model, optim_input)
-    return {
-        param: param_id for param_id, param in enumerate(param_id_to_param)
-    }
+    return {param: param_id for param_id, param in enumerate(param_id_to_param)}
 
 
 def _get_unflat_to_flat_param_ids(
@@ -1097,9 +1101,12 @@ def _is_zero_dim_tensor(x: Any) -> bool:
 def _optim_state_dict(
     model: torch.nn.Module,
     optim: torch.optim.Optimizer,
-    optim_input: Optional[Union[
-        List[Dict[str, Any]], Iterable[torch.nn.Parameter],
-    ]],
+    optim_input: Optional[
+        Union[
+            List[Dict[str, Any]],
+            Iterable[torch.nn.Parameter],
+        ]
+    ],
     rank0_only: bool,
     shard_state: bool,
     group: Optional[dist.ProcessGroup],
