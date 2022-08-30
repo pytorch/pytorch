@@ -121,6 +121,7 @@ def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> 
                "--pytorch-src", pytorch_path, "--torchbench-src", torchbench_path,
                "--config", os.path.join(output_dir, TORCHBENCH_CONFIG_NAME),
                "--output", os.path.join(output_dir, "result.txt")]
+    print(f"Running torchbench command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
 def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, head_sha: str,
