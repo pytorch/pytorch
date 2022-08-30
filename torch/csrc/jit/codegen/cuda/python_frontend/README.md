@@ -27,7 +27,7 @@ with FusionDefinition(fs) as fd :
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
-nvf_out1 = fs.execute([input1, input2])[0]
+nvf_out = fs.execute([input1, input2])[0]
 ```
 
 ## Example 2 - Lookup and Execute a `Fusion` Based on Id
@@ -39,7 +39,7 @@ fs = Fusion(fid)
 input1 = torch.ones(2, 1, 8, device='cuda')
 input2 = torch.ones(2, 4, 8, device='cuda')
 
-nvf_out1 = fs.execute([input1, input2])[0]
+nvf_out = fs.execute([input1, input2])[0]
 ```
 
 ## Components
@@ -47,7 +47,7 @@ nvf_out1 = fs.execute([input1, input2])[0]
 ### `Fusion` - Represents a Fusion
 #### `Fusion` Methods
 * `defined()`: Allows you to query if the `Fusion` is already defined and can be executed.
-* `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs.
+* `execute([inputs])`:  Allows you to execute the currently defined fusion with a list of given inputs and returns a list of tensors.
 * `id()`: Returns the fusion id for a given `Fusion`.
 * `print()`: Prints the low level IR for the currently defined fusion.
 
