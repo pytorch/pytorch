@@ -70,7 +70,10 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*UNSAFE_impl_ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*UNSAFE_storage_data_ptr_=*/t.has_storage()
+            ? t.storage().data()
+            : nullptr,
         /*device_type_*/ t.device().type(),
         /*device_index_*/ t.device().index(),
         /*dtype=*/t.scalar_type(),

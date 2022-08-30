@@ -1259,6 +1259,53 @@ def find_node_with_name(nodes, name):
             return result
 
 class TestTorchTidyProfiler(ProfilerTestCase):
+    def test_pointers(self):
+        a = torch.randn(4, 3)
+        a_initial_storage_data = a.storage().data_ptr()
+
+        # Views of tensors can share the same storage, but have different TensorImpls
+        b = a.view((1, 12))
+        c = torch.randn(4, 1)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = a + c
+            _ = b * c
+            # Resize should change the data_ptr but
+            # keep the TensorImpl the same
+            f = a.resize_(128, 129)
+            _ = torch.relu(f)
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+
+        def get_pointers(op_name, index):
+            node = find_node_with_name(nodes, op_name)
+            self.assertIsNotNone(node)
+            self.assertIsInstance(
+                node.extra_fields,
+                torch._C._profiler._ExtraFields_TorchOp)
+            tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+            return tensor_info.impl_ptr, tensor_info.storage_data_ptr
+
+        a_impl, a_storage_data = get_pointers("aten::add", 0)
+        b_impl, b_storage_data = get_pointers("aten::mul", 0)
+
+        # Profiler matches ground truth from Python API.
+        self.assertEqual(a_storage_data, a_initial_storage_data)
+
+        # Views are handled correctly.
+        self.assertEqual(a_storage_data, b_storage_data)
+        self.assertNotEqual(a_impl, b_impl)
+
+        # The same Tensor used in multiple calls gives identical results.
+        c_impl, c_storage_data = get_pointers("aten::add", 1)
+        self.assertEqual((c_impl, c_storage_data), get_pointers("aten::mul", 1))
+        self.assertEqual(c_storage_data, c.storage().data_ptr())
+
+        # Mutations to the underlying storage are reflected.
+        f_impl, f_storage_data = get_pointers("aten::relu", 0)
+        self.assertEqual(a_impl, f_impl)
+        self.assertNotEqual(a_storage_data, f_storage_data)
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))

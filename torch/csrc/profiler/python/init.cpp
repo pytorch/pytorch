@@ -120,7 +120,22 @@ void initPythonBindings(PyObject* module) {
           })
       .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
+  auto int_or_none = [](void* ptr) {
+    return ptr ? c10::optional<intptr_t>(reinterpret_cast<intptr_t>(ptr))
+               : c10::nullopt;
+  };
+
   py::class_<TensorMetadata>(m, "_TensorMetadata")
+      .def_property_readonly(
+          "impl_ptr",
+          [&int_or_none](const TensorMetadata& metadata) {
+            return int_or_none(metadata.UNSAFE_impl_ptr_);
+          })
+      .def_property_readonly(
+          "storage_data_ptr",
+          [&int_or_none](const TensorMetadata& metadata) {
+            return int_or_none(metadata.UNSAFE_storage_data_ptr_);
+          })
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
