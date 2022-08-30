@@ -81,7 +81,7 @@ enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
 #undef DEFINE_ENUM
-  Undefined,
+      Undefined,
   NumOptions
 };
 
@@ -103,7 +103,7 @@ struct ScalarTypeToCPPType;
     /* This is a workaround for the CUDA bug which prevents */               \
     /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
     /* ambiguous reference which can't to be resolved. For some reason it */ \
-    /* can't pick between at::detail and at::cuda::detail. */                 \
+    /* can't pick between at::detail and at::cuda::detail. */                \
     /* For repro example, please see: */                                     \
     /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
     /* TODO: remove once the bug is fixed. */                                \
