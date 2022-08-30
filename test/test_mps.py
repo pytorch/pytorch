@@ -7014,11 +7014,10 @@ class TestConsistency(TestCase):
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
-        nb_samples = len(list(get_samples()))
 
         all_forward_pass = True
         all_backward_pass = True
-        for i, cpu_sample in enumerate(cpu_samples):
+        for cpu_sample in cpu_samples:
             #
             # Forward check
             #
@@ -7044,11 +7043,7 @@ class TestConsistency(TestCase):
                 forward_failed = True
                 all_forward_pass = False
 
-            # Skip the grad test if it is not part of the allow list
-            if not generate_new_truth and not run_grad_test:
-                # if i == 0:
-                #     print(f"Skipping gradient check because {op.name} is not on the allow list")
-                continue
+
 
             if not (dtype.is_floating_point or dtype.is_complex):
                 # Maybe we should error here instead?
@@ -7057,6 +7052,14 @@ class TestConsistency(TestCase):
             #
             # Backward check
             #
+
+            # Skip the grad test if it is not part of the allow list
+            if not generate_new_truth and not run_grad_test:
+                # TODO: maybe there is a way to print only when we have -v
+                # if i == 0:
+                #     print(f"Skipping gradient check because {op.name} is not on the allow list")
+                continue
+
             try:
                 if forward_failed:
                     # We would've failed immediately anyway, but this error is clearer
@@ -7074,6 +7077,7 @@ class TestConsistency(TestCase):
                 diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
                 diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
                 self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
+                self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
                 if len(diff_cpu_out) == 0:
                     continue
@@ -7098,18 +7102,16 @@ class TestConsistency(TestCase):
                 self.NEW_ALLOW_LIST[op.name].append(dtype_abbrs[dtype])
             # We could write it only once. But I don't know how to detect that the current test is the last one
             # So each test append to the dict and write it.
-            if i >= nb_samples - 1:
-                with open("new_mps_allowlist.txt", "w") as f:
-                    pprint.pprint(self.NEW_ALLOW_LIST, stream=f)
+            with open("new_mps_allowlist.txt", "w") as f:
+                pprint.pprint(self.NEW_ALLOW_LIST, stream=f)
 
         if all_backward_pass and generate_new_truth and dtype.is_floating_point:
             if dtype_abbrs[dtype] not in self.NEW_ALLOW_LIST_GRAD[op.name]:
                 self.NEW_ALLOW_LIST_GRAD[op.name].append(dtype_abbrs[dtype])
             # We could write it only once. But I don't know how to detect that the current test is the last one
             # So each test append to the dict and write it.
-            if i >= nb_samples - 1:
-                with open("new_mps_allowlist_grad.txt", "w") as f:
-                    pprint.pprint(self.NEW_ALLOW_LIST_GRAD, stream=f)
+            with open("new_mps_allowlist_grad.txt", "w") as f:
+                pprint.pprint(self.NEW_ALLOW_LIST_GRAD, stream=f)
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now.
