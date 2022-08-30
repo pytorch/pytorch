@@ -866,7 +866,12 @@ def prepare_n_shadows_model(
                     if first_node.target in BINARY_FUNCTIONS:
                         prev_node_0 = get_normalized_nth_input(first_node, mt, 0)
                         prev_node_1 = get_normalized_nth_input(first_node, mt, 1)
-                        new_args = (prev_node_0, prev_node_1)
+                        new_args = []
+                        if isinstance(prev_node_0, Node):
+                            new_args.append(prev_node_0)
+                        if isinstance(prev_node_1, Node):
+                            new_args.append(prev_node_1)
+                        new_args = tuple(new_args)  # type: ignore[assignment]
                     else:
                         prev_node = get_normalized_nth_input(first_node, mt, 0)
                         if isinstance(prev_node, (list, tuple)):

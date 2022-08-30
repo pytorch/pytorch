@@ -406,7 +406,12 @@ def create_submodule_from_subgraph(
                                 f'arg: {arg.format_node()}, ' + \
                                 f'cur_node_orig: {cur_node_orig.format_node()}'
                             )
-
+                    elif arg.op == 'call_method':
+                        old_target = arg.args[0]
+                        new_target = old_name_to_new_node[old_target.name]
+                        new_arg_args = (new_target, *arg.args[1:])
+                        new_arg_node = g.call_method(arg.target, new_arg_args)
+                        cur_args_copy.append(new_arg_node)
                     else:
                         raise AssertionError(
                             f'{arg.op} not handled yet for arg ' + \
