@@ -10435,7 +10435,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
-                   active_if=TEST_CUDNN)],
+                   active_if=TEST_CUDNN),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
+                   'TestTorchFunctionRedispatchOps', 'test_redispatch', device_type='cuda'),
+           ],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -15005,6 +15009,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
+            # Not a problem: embedding does weird stuff to its input (it renormalizes)
+            DecorateInfo(unittest.skip("Skipped!"), "TestTorchFunctionRedispatchOps", "test_redispatch",
+                         device_type="cuda"),
+            ),
         ),
         supports_expanded_weight=True,
         supports_out=False,
