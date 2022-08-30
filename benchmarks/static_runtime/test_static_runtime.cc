@@ -2509,11 +2509,20 @@ TEST(StaticRuntime, Index_Put) {
   )JIT";
 
   auto a = at::randn({2});
-  auto indicies_a = std::make_tuple(torch::tensor({0}, at::kLong));
+  auto indices_a = std::make_tuple(torch::tensor({0}, at::kLong));
   auto values_a = at::randn({1});
 
-  std::vector<IValue> args0{a, indicies_a, values_a, false};
+  std::vector<IValue> args0{a, indices_a, values_a, false};
   testStaticRuntime(index_put_str, args0);
+
+  const auto index_put_non_optional_str = R"JIT(
+    def forward(self, a: Tensor, indices: List[Tensor], values: Tensor, accumulate: bool):
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  auto indices_b = c10::List<at::Tensor>{torch::tensor({0}, at::kLong)};
+  std::vector<IValue> args1{a, indices_b, values_a, false};
+  testStaticRuntime(index_put_non_optional_str, args1);
 }
 
 TEST(StaticRuntime, Item) {
