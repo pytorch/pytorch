@@ -626,8 +626,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             func = f
 
-        with decompose(decomposition_table), restore_fake_tensor_mode(), sym_mode, proxy_mode:  # type: ignore[attr-defined]
-            t = dispatch_trace(wrap_key(func, args, proxy_mode, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
+        # We disable the autocast cache as the autocast cache causes type conversions on parameters to
+        # check a cache, which introduces untracked tensors into the graph
+        with decompose(decomposition_table), restore_fake_tensor_mode(), \
+             sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
+            t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         t.shape_env = shape_env  # type: ignore[assignment]
