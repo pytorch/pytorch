@@ -12,8 +12,12 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
-from torch.utils._pytree import tree_map
+    run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
+from torch.testing._internal.profiler_utils import (
+    ProfilerTestCase,
+    TorchDispatchTensor,
+    TorchFunctionTensor,
+)
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -40,38 +44,6 @@ PRUNE_FUNCTIONS = {
 #
 # TODO: We also fail to capture events for Windows on some platforms.
 ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
-
-
-class TorchFunctionTensor(torch.Tensor):
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        return super().__torch_function__(func, types, args, kwargs)
-
-
-class TorchDispatchTensor(torch.Tensor):
-
-    @staticmethod
-    def __new__(cls, elem):
-        t = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-        t.elem = elem
-        return t
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-
-        def unwrap(x):
-            return x.elem if isinstance(x, TorchDispatchTensor) else x
-
-        def wrap(x):
-            return TorchDispatchTensor(x) if isinstance(x, torch.Tensor) else x
-
-        args = tree_map(unwrap, args)
-        kwargs = tree_map(unwrap, kwargs or {})
-
-        return tree_map(wrap, func(*args, **kwargs))
 
 
 class ProfilerTree:
@@ -202,7 +174,7 @@ class ProfilerTree:
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(TestCase):
+class TestProfilerTree(ProfilerTestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -668,7 +640,7 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               <built-in method add of type object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): __torch_function__
+                torch/testing/_internal/profiler_utils.py(...): __torch_function__
                   torch/_tensor.py(...): __torch_function__
                     <built-in function all>
                       torch/_tensor.py(...): <genexpr>
@@ -703,7 +675,7 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
-                test_profiler_tree.py(...): __torch_dispatch__
+                torch/testing/_internal/profiler_utils.py(...): __torch_dispatch__
                   torch/utils/_pytree.py(...): tree_map
                     ...
                   torch/utils/_pytree.py(...): tree_map
