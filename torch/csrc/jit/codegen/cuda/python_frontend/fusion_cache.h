@@ -18,10 +18,11 @@ struct RecordFunctor;
 //! FusionCache that is organized as a prefix tree.
 
 struct TORCH_CUDA_CU_API FusionCacheEntry {
-  FusionCacheEntry(
-      RecordFunctor* rec,
-      bool _is_terminal = false,
-      size_t _fusion_id = 0);
+  FusionCacheEntry(RecordFunctor* rec, size_t _fusion_id = 0);
+
+  // Queries whether the entry denotes a leaf node which also represents
+  // a the end of Fusion entry in the cache.
+  bool isTerminal() const;
 
   //! An entry's primary data is the record it holds
   std::unique_ptr<RecordFunctor> record;
@@ -30,9 +31,6 @@ struct TORCH_CUDA_CU_API FusionCacheEntry {
   //! the hash function is virtual.
   std::unordered_map<RecordFunctor*, std::unique_ptr<FusionCacheEntry>>
       record_hash_map;
-
-  //! This boolean indicates a leaf node with a cached nvFuser Fusion
-  bool is_terminal;
   //! An index into FusionCache's vector of nvFuser object that holds an
   //! unscheduled Fusion.  The id is only valid if the entry is terminal.
   size_t fusion_id;
@@ -72,10 +70,9 @@ class TORCH_CUDA_CU_API FusionCache {
   //! children
   c10::optional<FusionCacheEntry*> lookupFusionCacheEntry(
       RecordFunctor* rec) const;
-  //! Creates a child node for the current cache entry
-  void createFusionCacheEntry(RecordFunctor* rec);
-  //! Creates a child node for the current cache entry that is terminal
-  size_t createTerminalFusionCacheEntry(RecordFunctor* rec);
+  //! Creates a child node for the current cache entry and an optional
+  //! fusion_id is returned if the new entry is terminal
+  c10::optional<size_t> createFusionCacheEntry(RecordFunctor* rec);
   //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
   //! Traverses the cache from the current entry to the child associated

@@ -48,7 +48,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->createTerminalFusionCacheEntry(null_record.get());
+      auto id = fc->createFusionCacheEntry(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
@@ -105,20 +105,11 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
       FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
     }
 
-    // Try to add terminal cache entry with a record that is not of End Type.
-
-    try {
-      fc->createTerminalFusionCacheEntry(test_record.get());
-      FAIL() << "Terminal Cache Entries should only accept EndRecords!";
-    } catch (...) {
-      SUCCEED();
-    }
-
     // Add a terminal cache entry and check methods
 
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      fc->createTerminalFusionCacheEntry(end_record.get());
+      auto id = fc->createFusionCacheEntry(end_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert on Terminal Cache Entry creation!"
@@ -204,7 +195,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      fc->createTerminalFusionCacheEntry(end_record.get());
+      auto id = fc->createFusionCacheEntry(end_record.get());
       FAIL() << "Expected the cache to assert because it is full!";
     } catch (...) {
       SUCCEED();

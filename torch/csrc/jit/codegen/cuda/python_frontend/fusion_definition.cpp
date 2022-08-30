@@ -76,6 +76,7 @@ FusionDefinition* FusionDefinition::enter() {
   fusionCachePtr()->resetFusionCachePtr();
   return this;
 }
+
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
   auto cache_entry =
@@ -85,8 +86,9 @@ void FusionDefinition::exit() {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
     auto fusion_id =
-        fusionCachePtr()->createTerminalFusionCacheEntry(end_record_.get());
-    fusionInterfacePtr()->define(fusion_id);
+        fusionCachePtr()->createFusionCacheEntry(end_record_.get());
+    TORCH_CHECK(fusion_id.has_value(), "Invalid fusion id!");
+    fusionInterfacePtr()->define(fusion_id.value());
     fusionCachePtr()->traverseFusionCache(end_record_.get());
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
@@ -124,12 +126,14 @@ Scalar FusionDefinition::defineScalar() {
   recording_state_.emplace_back(out(), StateType::Scalar);
   return out;
 }
+
 Tensor FusionDefinition::defineTensor() {
   FUSER_PERF_SCOPE("FusionDefinition::defineTensor");
   Tensor out(recording_state_.size());
   recording_state_.emplace_back(out(), StateType::Tensor);
   return out;
 }
+
 void FusionDefinition::defineRecord(RecordFunctor* record) {
   FUSER_PERF_SCOPE("FusionDefinition::defineRecord");
   TORCH_CHECK(
