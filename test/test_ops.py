@@ -1579,6 +1579,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
+        '_refs.instance_norm',
+        '_refs.native_batch_norm',
+        '_refs.native_group_norm',
     }
 
     not_in_decomp_table = {
@@ -1587,8 +1590,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.instance_norm',
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
-        '_refs.native_group_norm',
+        '_refs.expand_as',
         '_refs.instance_norm',
+        '_refs.native_group_norm',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
