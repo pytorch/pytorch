@@ -810,6 +810,9 @@ def prepare_n_shadows_model(
             if hasattr(prev_node, 'traced_result'):
                 example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
             else:
+                print(
+                    'unable to get example input for node ' + \
+                    f'{first_node.format_node()}, skipping')
                 continue
 
         for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
