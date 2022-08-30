@@ -269,30 +269,15 @@ at::Tensor LazyNativeFunctions::_to_copy(
   }
 };
 
-at::Tensor LazyNativeFunctions::empty_symint(
-    c10::SymIntArrayRef size,
-    c10::optional<at::ScalarType> dtype,
-    c10::optional<at::Layout> layout,
-    c10::optional<at::Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<at::MemoryFormat> memory_format) {
-  // TODO: support SymIntNodes as well
-  return empty(
-      c10::asIntArrayRefSlow(size),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      memory_format);
-}
-
 at::Tensor LazyNativeFunctions::empty(
-    at::IntArrayRef size,
+    at::SymIntArrayRef sym_size,
     c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout,
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
+  // TODO: support this directly
+  auto size = c10::asIntArrayRefSlow(sym_size);
   const auto device_type = torch::lazy::getBackend()->EagerFallbackDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
@@ -322,7 +307,13 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  at::Tensor t = empty(size, dtype, layout, device, pin_memory, c10::nullopt);
+  at::Tensor t = empty(
+      c10::SymIntArrayRef::fromIntArrayRef(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      c10::nullopt);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
@@ -418,7 +409,8 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  return LazyNativeFunctions::view_copy(self, size);
+  return LazyNativeFunctions::view_copy(
+      self, c10::SymIntArrayRef::fromIntArrayRef(size));
 }
 
 // This is needed by the torch.tensor constructor.
@@ -460,8 +452,8 @@ at::Tensor LazyNativeFunctions::new_empty_strided(
 at::Tensor LazyNativeFunctions::narrow_copy(
     const at::Tensor& self,
     int64_t dim,
-    int64_t start,
-    int64_t length) {
+    c10::SymInt start,
+    c10::SymInt length) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       narrow_copy)>::call(self, dim, start, length);
 }

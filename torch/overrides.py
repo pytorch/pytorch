@@ -48,7 +48,6 @@ __all__ = [
     "wrap_torch_function",
     "enable_reentrant_dispatch",
     "get_buffer",
-    "redispatch_function",
 ]
 
 @functools.lru_cache(None)
@@ -1958,24 +1957,3 @@ def get_buffer(tensor_subclass, data, prefix):
         setattr(tensor_subclass, buffer_name, SizeType(*data))
     ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
     return (ptr, len(data))
-
-def redispatch_function(func, types, args, kwargs):
-    """An alternative to ``Tensor.__torch_function__`` that reentrantly calls the
-    torch implelementation, allowing python functions to re-dispatch component
-    function calls.
-
-    This should only be used inside of a __torch_function__ implementation, and
-    func *must* support ``__torch_function__`` dispatch.
-
-    Example
-    -------
-    ```
-    class LoggingTensor:
-
-        def __torch_function__(func, types, args, kwargs=None):
-            log(func, types, args, kwargs)
-            return torch.overrides.redispatch_function(
-                func, types, args, kwargs)
-    ```
-    """
-    return torch._C._skip_one_hop_torch_function(func, types, args, kwargs)

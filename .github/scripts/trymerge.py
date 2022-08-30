@@ -26,6 +26,7 @@ from typing import (
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from warnings import warn
+from pathlib import Path
 
 from gitutils import (
     GitRepo,
@@ -401,6 +402,8 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
+MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -965,10 +968,20 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
-def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
-    from pathlib import Path
+def gen_new_issue_link(
+    org: str,
+    project: str,
+    labels: List[str],
+    template: str = "bug-report.yml"
+) -> str:
+    labels_str = ",". join(labels)
+    return (f"https://github.com/{org}/{project}/issues/new?"
+            f"labels={urllib.parse.quote(labels_str)}&"
+            f"template={urllib.parse.quote(template)}")
 
-    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
+
+def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -996,8 +1009,18 @@ def find_matching_merge_rule(pr: GitHubPR,
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
+    issue_link = gen_new_issue_link(
+        org=pr.org,
+        project=pr.project,
+        labels=["module: ci"],
+    )
+    reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
+
     rules = read_merge_rules(repo, pr.org, pr.project)
-    reject_reason = f"PR {pr.pr_num} does not match merge rules"
+    if not rules:
+        reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
+        raise RuntimeError(reject_reason)
+
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
@@ -1066,6 +1089,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
+
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason)
     raise RuntimeError(reject_reason)
@@ -1330,13 +1354,32 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f"\nReason: {e}"
+    def handle_exception(e: Exception, title: str = "Merge failed") -> None:
+        exception = f"**Reason**: {e}"
+
+        troubleshooting = ""
+        if args.land_checks:
+            troubleshooting += get_land_check_troubleshooting_message()
+
+        internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
-            msg += f"\nRaised by [workflow job]({run_url})"
-        if args.land_checks:
-            msg += get_land_check_troubleshooting_message()
+            # Hide this behind a collapsed bullet since it's not helpful to most devs
+            internal_debugging = "\n".join((
+                "<details><summary>Details for Dev Infra team</summary>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                "</details>"
+            ))
+
+        msg = "\n".join((
+            f"## {title}",
+            f"{exception}",
+            "",
+            f"{troubleshooting}",
+            "",
+            f"{internal_debugging}"
+        ))
+
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
