@@ -39,6 +39,22 @@ struct ContextConv final {
         attr_(attr) {}
 };
 
+struct ContextLinear final {
+  ideep::tensor weight_packed_;
+  c10::optional<at::Tensor> at_bias_;
+  ideep::attr_t attr_;
+
+  ContextLinear() = delete;
+
+  ContextLinear(
+      ideep::tensor&& weight_packed,
+      c10::optional<at::Tensor> at_bias,
+      ideep::attr_t attr)
+      : weight_packed_(std::move(weight_packed)),
+        at_bias_(std::move(at_bias)),
+        attr_(attr) {}
+};
+
 } // namespace mkldnn
 } // namespace native
 } // namespace at

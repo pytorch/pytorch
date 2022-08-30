@@ -1,9 +1,22 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/operators/matmul.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+bool mkldnnPrepackedLinearIsSupported(
+    const TensorInfo& input,
+    const TensorInfo& weight) {
+  // TODO: only support BF16 to make sure there's no performance regression
+  // if (input.dtype != c10::ScalarType::BFloat16 ||
+  //     weight.dtype != c10::ScalarType::BFloat16) {
+  //   GRAPH_DEBUG("mkldnnPrepackedLinearIsSupported: only bfloat16 allowed");
+  //   return false;
+  // }
+  return true;
+}
 
 Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
@@ -74,6 +87,26 @@ Tensor computeAddMM(
           {c10::get<int64_t>(inputs[3]),
            c10::get<int64_t>(
                inputs[4])})); // TODO: handle other dtypes of alpha and beta
+}
+
+Tensor computeMkldnnPrepackedLinearRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf(
+      "mkldnn_prepacked_linear_run", outputShape, outputStrides, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_mkldnn_prepacked_linear_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

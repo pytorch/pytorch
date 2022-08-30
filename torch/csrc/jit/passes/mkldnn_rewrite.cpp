@@ -141,6 +141,59 @@ void insertPrePackedConvOpForNode(Node* n) {
   n->output()->replaceAllUsesWith(prepack_conv->output());
 }
 
+void insertPrePackedLinearOpForNode(Node* n) {
+  constexpr int POS_INPUT = 0;
+  constexpr int POS_WEIGHT = 1;
+  if (!tensorexpr::isContiguous(n->input(POS_INPUT))) {
+    GRAPH_DEBUG("insertPrePackedLinearOpForNode: input is not contiguous");
+    return;
+  }
+
+  if (!tensorexpr::isContiguous(n->input(POS_WEIGHT))) {
+    GRAPH_DEBUG("insertPrePackedLinearOpForNode: weight is not contiguous");
+    return;
+  }
+
+  WithInsertPoint guard(n);
+  auto graph = n->owningGraph();
+
+  auto input_sizes = getSizesOf(n, POS_INPUT);
+  IValue input_size_value(*input_sizes.concrete_sizes());
+  auto input_size = graph->insertConstant(input_size_value);
+
+  auto prepack_node = graph->create(
+      Symbol::fromQualString("mkldnn_prepacked::linear_prepack"), 1);
+
+  // skip input value
+  for (auto i = 1; i < n->inputs().size(); i++) {
+    Value* v = n->input(i);
+    prepack_node->addInput(v);
+  }
+  prepack_node->addInput(input_size);
+  auto attr = graph->insertConstant(IValue("none"));
+  prepack_node->addInput(attr);
+
+  std::vector<c10::optional<at::Scalar>> empty_scalars;
+  auto scalars = graph->insertConstant(IValue(empty_scalars));
+  prepack_node->addInput(scalars);
+
+  c10::optional<std::string> empty_algorithm;
+  auto algorithm = graph->insertConstant(IValue(empty_algorithm));
+  prepack_node->addInput(algorithm);
+
+  prepack_node->output()->setType(
+      getCustomClass("__torch__.torch.classes.mkldnn.LinearOpContext"));
+  graph->insertNode(prepack_node);
+
+  auto prepack_linear = graph->insertNode(
+      graph->create(Symbol::fromQualString("mkldnn_prepacked::linear_run"), 1));
+  prepack_linear->addInput(n->input(0));
+  prepack_linear->addInput(prepack_node->output());
+  prepack_linear->output()->setType(n->output()->type()->cast<TensorType>());
+
+  n->output()->replaceAllUsesWith(prepack_linear->output());
+}
+
 bool isTensorTypeCPU(Node* node) {
   for (const auto& input : node->inputs()) {
     auto type = input->type()->cast<TensorType>();
@@ -173,6 +226,21 @@ void insertPrePackedConvOp(Block* b) {
   EliminateDeadCode(b);
 }
 
+void insertPrePackedLinearOp(Block* b) {
+  for (Node* n : b->nodes()) {
+    for (Block* b : n->blocks()) {
+      insertPrePackedLinearOp(b);
+    }
+
+    if (n->kind() == aten::linear) {
+      if (isTensorTypeCPU(n)) {
+        insertPrePackedLinearOpForNode(n);
+      }
+    }
+  }
+  EliminateDeadCode(b);
+}
+
 void insertMkldnnPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
@@ -180,8 +248,13 @@ void insertMkldnnPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   insertPrePackedConvOp(graph->block());
 }
 
+void insertMkldnnPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  insertPrePackedLinearOp(graph->block());
+}
+
 void insertMkldnnPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertMkldnnPrePackedConv2dOp(graph);
+  insertMkldnnPrePackedLinearOp(graph);
 }
 
 void insertMkldnnPrePackedOps(script::Module& module) {
@@ -282,14 +355,23 @@ void FuseEltwiseWithPackedOps(std::shared_ptr<Graph>& graph) {
           "%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int,"),
       std::string("%weight, %bias, %stride, %padding, %dilation, %groups,"));
 
-  // TODO: add linear
+  RewriteEltwiseGraph<mkldnn::PostOp>(
+      graph,
+      mkldnn::fusion_rewrite_map(),
+      std::string("mkldnn_prepacked::linear_prepack"),
+      std::string("mkldnn_prepacked::linear_run"),
+      std::string("mkldnn.LinearOpContext"),
+      std::string("%input, %weight, %bias,"),
+      std::string("%weight, %bias,"));
 }
 
 void PrePackingOpsFolder(Block* b) {
   auto is_foldable_op = [](const Node* n) -> bool {
     return (
         n->kind() ==
-        Symbol::fromQualString("mkldnn_prepacked::conv2d_prepack"));
+            Symbol::fromQualString("mkldnn_prepacked::conv2d_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("mkldnn_prepacked::linear_prepack"));
   };
 
   std::unordered_set<Node*> nodes_to_delete;

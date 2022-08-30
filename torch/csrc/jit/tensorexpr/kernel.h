@@ -26,6 +26,9 @@ struct SmallSizeTPairHash {
 bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this conv2d with mkldnn prepacked conv.
 bool mkldnnPrepackedConvIsSupportedJit(const Node* node);
+// Returns true if the TE fuser supports this linear with mkldnn prepacked
+// linear.
+bool mkldnnPrepackedLinearIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
 template <typename T>

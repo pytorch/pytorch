@@ -99,6 +99,61 @@ class MkldnnConvOpContext final : public ConvOpContext {
       const ideep::attr_t& attr);
 };
 
+using SerializationTypeLinearPrePack = std::tuple<
+    at::Tensor,
+    c10::optional<at::Tensor>,
+    std::vector<int64_t>,
+    std::string,
+    std::vector<c10::optional<at::Scalar>>,
+    c10::optional<std::string>>;
+
+class LinearOpContext : public torch::jit::CustomClassHolder {
+ protected:
+  Tensor orig_weight_;
+  c10::optional<Tensor> orig_bias_;
+  std::vector<int64_t> input_size_;
+  std::string attr_;
+  std::vector<c10::optional<at::Scalar>> scalars_;
+  c10::optional<std::string> algorithm_;
+
+ public:
+  SerializationTypeLinearPrePack unpack() {
+    return std::make_tuple(
+        orig_weight_, orig_bias_, input_size_, attr_, scalars_, algorithm_);
+  }
+
+  virtual at::Tensor run(const at::Tensor& input) = 0;
+
+  virtual void run(const Tensor& input, void* output) = 0;
+};
+
+class MkldnnLinearOpContext final : public LinearOpContext {
+ private:
+  ContextLinear op_context_;
+
+ public:
+  MkldnnLinearOpContext(
+      Tensor&& weight,
+      c10::optional<Tensor>&& bias,
+      std::vector<int64_t>&& input_size,
+      ContextLinear&& op_context)
+      : op_context_(std::move(op_context)) {
+    orig_weight_ = std::move(weight);
+    orig_bias_ = std::move(bias);
+    input_size_ = std::move(input_size);
+  }
+
+  at::Tensor run(const at::Tensor& input) override;
+
+  void run(const Tensor& input, void* output) override;
+
+  static c10::intrusive_ptr<LinearOpContext> create_context(
+      at::Tensor&& weight,
+      c10::optional<at::Tensor>&& bias,
+      std::vector<int64_t>&& input_size,
+      const ideep::attr_t& attr);
+};
+
 } // namespace mkldnn
 } // namespace native
 } // namespace at

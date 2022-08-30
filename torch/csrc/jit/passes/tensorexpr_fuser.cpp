@@ -81,6 +81,7 @@ static const OperatorSet& supported_non_eltwise_set() {
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
+      "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor",
   };
   // clang-format on
   return supported_non_eltwise_set;
@@ -898,6 +899,7 @@ class TensorExprFuser {
     static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
+      "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor",
     };
     static const OperatorSet gpu_only_operator_set{
       // On CPU, these are slower and less accurate than ATen kernels, because
@@ -1055,6 +1057,12 @@ class TensorExprFuser {
     if (node->kind() == aten::matmul) {
       if (!tensorexpr::matmulIsSupported(node)) {
         GRAPH_DEBUG("Shapes of matmul inputs are not supported");
+        return false;
+      }
+    }
+    if (node->kind() == aten::linear) {
+      if (!tensorexpr::mkldnnPrepackedLinearIsSupportedJit(node)) {
+        GRAPH_DEBUG("Shapes of linear inputs are not supported");
         return false;
       }
     }
