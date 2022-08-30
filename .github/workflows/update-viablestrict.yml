@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   do_update_viablestrict:
-    runs-on: ubuntu-20.04
+    runs-on: linux.2xlarge
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
