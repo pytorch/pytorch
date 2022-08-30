@@ -870,7 +870,7 @@ def _rekey_sharded_optim_state_dict(
     """
     Rekeys the optimizer state dict from unflattened parameter names to
     flattened parameter IDs according to the calling rank's ``optim``, which
-    may be different across ranks. In particular, the unflattener parameter
+    may be different across ranks. In particular, the unflattened parameter
     names are represented as :class:`_OptimStateKey` s.
     """
     param_to_flat_param_id = (
