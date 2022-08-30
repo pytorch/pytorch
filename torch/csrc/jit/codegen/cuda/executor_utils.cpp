@@ -16,10 +16,13 @@
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/array.h>
+#include <nvfuser_resources/array_rocm.h>
 #include <nvfuser_resources/bf16_support.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
@@ -36,6 +39,7 @@
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
+#include <nvfuser_resources/warp_rocm.h>
 #include <nvfuser_resources/welford.h>
 
 #ifndef USE_ROCM
@@ -53,7 +57,7 @@ namespace executor_utils {
 std::string kernelPreamble() {
   std::stringstream ss;
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
@@ -73,12 +77,18 @@ std::string kernelPreamble() {
 #define __align__(x) __attribute__((aligned(x)))
 #endif
   )";
+  // fp16 support is automatic, bf16 is not
+  ss << nvfuser_resources::bf16_support_rocm_cu;
 #endif
 
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::type_traits_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::array_cu;
+#else
+  ss << nvfuser_resources::array_rocm_cu;
+#endif
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
@@ -88,7 +98,11 @@ std::string kernelPreamble() {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
+#ifndef USE_ROCM
     ss << nvfuser_resources::block_sync_default_cu;
+#else
+    ss << nvfuser_resources::block_sync_default_rocm_cu;
+#endif
   }
   ss << nvfuser_resources::grid_sync_cu;
 
@@ -98,9 +112,13 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
+#else
+  ss << nvfuser_resources::warp_rocm_cu;
+#endif
   ss << nvfuser_resources::fused_reduction_cu;
   ss << nvfuser_resources::swizzle_cu;
 
@@ -981,7 +999,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
@@ -1007,7 +1025,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 #endif
 
   const bool disable_fma = isOptionDisabled(DisableOption::Fma);
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
@@ -1189,7 +1207,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
