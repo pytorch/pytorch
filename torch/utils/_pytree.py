@@ -4,6 +4,7 @@ from collections import namedtuple, OrderedDict
 
 T = TypeVar('T')
 S = TypeVar('S')
+R = TypeVar('R')
 
 """
 Contains utility functions for working with nested python data structures.
@@ -190,17 +191,26 @@ def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
 
+Type2 = Tuple[Type[T], Type[S]]
+TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+
+Fn2 = Callable[[Union[T, S]], R]
+Fn = Callable[[T], R]
+FnAny = Callable[[Any], R]
+
+MapOnlyFn = Callable[T, Callable[[Any], Any]]
+
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
-def map_only(ty: Tuple[Type[T], Type[S]]) -> Callable[[Callable[[Union[T, S]], Any]], Callable[[Any], Any]]:
+def map_only(ty: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 @overload
-def map_only(ty: Type[T]) -> Callable[[Callable[[T], Any]], Callable[[Any], Any]]:
+def map_only(ty: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
-def map_only(ty: Union[Type[Any], Tuple[Type[Any], ...]]) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
+def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
     else unchanged.  Ordinarily you would have to write:
@@ -229,7 +239,15 @@ def map_only(ty: Union[Type[Any], Tuple[Type[Any], ...]]) -> Callable[[Callable[
         return inner
     return deco
 
-def tree_map_only(ty: Type[T], fn: Callable[[T], Any], pytree: PyTree) -> PyTree:
+@overload
+def tree_map_only(ty: Type[T], fn: Fn[T, Any], pytree: PyTree) -> PyTree:
+    ...
+
+@overload
+def tree_map_only(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree:
+    ...
+
+def tree_map_only(ty: TypeAny, pred: FnAny, pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
 
 def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
@@ -240,11 +258,27 @@ def tree_any(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
     flat_args, _ = tree_flatten(pytree)
     return any(map(pred, flat_args))
 
-def tree_all_only(ty: Type[T], pred: Callable[[T], bool], pytree: PyTree) -> bool:
+@overload
+def tree_all_only(ty: Type[T], pred: Fn[T, bool], pytree: PyTree) -> bool:
+    ...
+
+@overload
+def tree_all_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> bool:
+    ...
+
+def tree_all_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
     flat_args, _ = tree_flatten(pytree)
     return all(pred(x) for x in flat_args if isinstance(x, ty))
 
-def tree_any_only(ty: Type[T], pred: Callable[[T], bool], pytree: PyTree) -> bool:
+@overload
+def tree_any_only(ty: Type[T], pred: Fn[T, bool], pytree: PyTree) -> bool:
+    ...
+
+@overload
+def tree_any_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> bool:
+    ...
+
+def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
     flat_args, _ = tree_flatten(pytree)
     return any(pred(x) for x in flat_args if isinstance(x, ty))
 
