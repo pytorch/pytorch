@@ -90,10 +90,16 @@ install_centos() {
   yum update -y
   yum install -y kmod
   yum install -y wget
-  yum install -y openblas-devel
+  
+  if [[ $OS_VERSION == 9 ]]; then 
+      dnf install -y openblas-serial
+      dnf install -y dkms kernel-headers kernel-devel
+  else
+      yum install -y openblas-devel
+      yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
+  fi
 
   yum install -y epel-release
-  yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
 
   if [[ $(ver $ROCM_VERSION) -ge $(ver 4.5) ]]; then
       # Add amdgpu repository
@@ -115,7 +121,11 @@ install_centos() {
       echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
   fi
 
-  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}"
+  if [[ $OS_VERSION == 9 ]]; then
+      local rocm_baseurl="invalid-url"
+  else
+      local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}/main"
+  fi
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
   echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
@@ -123,15 +133,28 @@ install_centos() {
   echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
 
-  yum update -y
-
-  yum install -y \
+  if [[ $OS_VERSION == 9 ]]; then
+      yum update -y --nogpgcheck
+      dnf --enablerepo=crb install -y perl-File-BaseDir
+      yum install -y --nogpgcheck rocm-ml-sdk rocm-developer-tools
+  else
+      yum update -y
+      yum install -y \
                    rocm-dev \
                    rocm-utils \
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
                    roctracer-dev
+  fi
+
+  # if search fails it will abort this script; use true to avoid case where search fails
+  MIOPENKERNELS=$(yum -q search miopenkernels | grep miopenkernels- | awk '{print $1}'| grep -F kdb. || true)
+  if [[ "x${MIOPENKERNELS}" = x ]]; then
+    echo "miopenkernels package not available"
+  else
+    yum install -y ${MIOPENKERNELS}
+  fi
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
@@ -157,6 +180,8 @@ install_centos() {
   rm -rf /var/lib/yum/yumdb
   rm -rf /var/lib/yum/history
 }
+
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
 
 # Install Python packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')

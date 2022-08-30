@@ -324,6 +324,12 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
+if [[ "$image" == *centos9* ]]; then
+ DOCKERFILE_NAME="Dockerfile.centos.stream"
+else
+ DOCKERFILE_NAME="Dockerfile"
+fi
+
 # Build image
 docker build \
        --no-cache \
@@ -361,7 +367,7 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       -f $(dirname ${DOCKERFILE})/Dockerfile \
+       -f $(dirname ${DOCKERFILE})/${DOCKERFILE_NAME} \
        -t "$tmp_tag" \
        "$@" \
        .
