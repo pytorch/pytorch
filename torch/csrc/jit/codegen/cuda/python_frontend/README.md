@@ -33,7 +33,7 @@ nvf_out = fs.execute([input1, input2])[0]
 ## Example 2 - Lookup and Execute a `Fusion` Based on Id
 
 ```python
-fid = 1
+fid = 0
 fs = Fusion(fid)
 
 input1 = torch.ones(2, 1, 8, device='cuda')
