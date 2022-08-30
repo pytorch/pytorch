@@ -411,7 +411,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  *
  *      - A tensor may be DTYPE UNINITIALIZED.  A tensor of this
  *        form has an uninitialized dtype.  This situation most
- *        frequently arises when a user writes Tensor x(CPU).  The dtype and
+ *        frequently arises when a user writes Tensor x(CPU).  The dtype
  *        is subsequently initialized when mutable_data<T>() is
  *        invoked for the first time.
  *
@@ -596,7 +596,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::SymIntArrayRef sym_strides() const {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
-            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
     return sym_strides_default();
@@ -1525,7 +1525,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * ] for details.
    */
   void set_allow_tensor_metadata_change(bool value) {
-    allow_tensor_metadata_change_ = value;
+    // TODO: at some point, we should kill this field completely.
+    allow_tensor_metadata_change_ = true;
   }
 
   /**
