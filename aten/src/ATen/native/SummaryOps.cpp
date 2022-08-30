@@ -20,7 +20,7 @@ Tensor _bincount_cpu_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
-    return native::zeros({minlength}, kLong);
+    return at::zeros({minlength}, kLong);
   }
   if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
@@ -38,7 +38,7 @@ Tensor _bincount_cpu_template(
 
   const input_t* self_p = self.data_ptr<input_t>();
   if (has_weights) {
-    output = native::zeros(
+    output = at::zeros(
         {nbins},
         optTypeMetaToScalarType(weights.options().dtype_opt()),
         weights.options().layout_opt(),
@@ -50,7 +50,7 @@ Tensor _bincount_cpu_template(
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
-    output = native::zeros({nbins}, kLong);
+    output = at::zeros({nbins}, kLong);
     int64_t* output_p = output.data_ptr<int64_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += 1L;
