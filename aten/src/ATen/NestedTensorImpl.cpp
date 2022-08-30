@@ -7,6 +7,9 @@
 #include <c10/util/Exception.h>
 #include <c10/core/TensorImpl.h>
 
+#include <numeric>
+#include <functional>
+
 namespace {
 inline void validate_nested_tensor_metadata(
     const at::Tensor& nested_sizes,
@@ -20,7 +23,7 @@ inline void validate_nested_tensor_metadata(
   TORCH_INTERNAL_ASSERT(nested_sizes.sizes() == nested_strides.sizes());
   TORCH_INTERNAL_ASSERT(
       (size_dim == 0 && (int64_t)offsets.empty()) ||
-      (size_dim == 2 && nested_sizes.size(0) == (int64_t)offsets.size()));
+      (size_dim == 2 && nested_sizes.size(0) + 1 == (int64_t)offsets.size()));
 }
 
 } // namespace
@@ -85,15 +88,24 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
   return strides;
 }
 
-// assume contiguous, we can construct offsets from size
+/**
+   * Create a vector of offsets assuming the nested tensor is contiguous
+   *
+   * This function iterates over the implicit ntensor outer dimension
+   * populating a vector with the num_elements in each implicit tensor.
+   * The  first element is always 0 and the length of the returned vector
+   * is n_tensor + 1.
+   * num_elements in ntensor[i] = offsets[i+1] - offsets[i]
+   *
+   * @return A vector of offsets
+  */
 inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return std::vector<int64_t>();
   }
-  int64_t ntensors = sizes.size(0),
-      orig_dim = sizes.size(1);
-  std::vector<int64_t> offsets(ntensors);
+  int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
+  std::vector<int64_t> offsets(ntensors + 1);
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
     std::iota(offsets.begin(), offsets.end(), 0);
@@ -101,11 +113,8 @@ inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
   }
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
   offsets[0] = 0;
-  for (int64_t i = 0; i < ntensors - 1; i++) {
-    int64_t row_product = sizes_ptr[0];
-    for (int64_t j = 1; j < orig_dim; j++) {
-      row_product *= sizes_ptr[j];
-    }
+  for (const auto i : c10::irange(ntensors)) {
+    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
     offsets[i + 1] = offsets[i] + row_product;
     sizes_ptr += orig_dim;
   }
