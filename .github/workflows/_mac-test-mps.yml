@@ -15,7 +15,6 @@ on:
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
 
-
 jobs:
   run_mps_test:
     name: "Run MPS tests"
@@ -41,7 +40,7 @@ jobs:
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.8
+          python-version: 3.9
 
       - name: Install PyTorch
         env:
