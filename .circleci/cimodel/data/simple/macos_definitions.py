@@ -1,3 +1,8 @@
+from collections import OrderedDict
+from cimodel.lib.miniutils import quote
+from cimodel.data.simple.util.branch_filters import gen_filter_dict_exclude
+
+
 class MacOsJob:
     def __init__(self, os_version, is_build=False, is_test=False, extra_props=tuple()):
         # extra_props is tuple type, because mutable data structures for argument defaults
@@ -11,10 +16,14 @@ class MacOsJob:
         non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
 
         extra_name_list = [name for name, exist in self.extra_props.items() if exist]
-        full_job_name_list = non_phase_parts + extra_name_list + [
-            'build' if self.is_build else None,
-            'test' if self.is_test else None,
-        ]
+        full_job_name_list = (
+            non_phase_parts
+            + extra_name_list
+            + [
+                "build" if self.is_build else None,
+                "test" if self.is_test else None,
+            ]
+        )
 
         full_job_name = "_".join(list(filter(None, full_job_name_list)))
 
@@ -41,11 +50,98 @@ WORKFLOW_DATA = [
         "10_13",
         is_build=True,
         is_test=True,
-        extra_props=tuple({
-            "lite_interpreter": True
-        }.items()),
-    )
+        extra_props=tuple({"lite_interpreter": True}.items()),
+    ),
 ]
+
+
+def get_new_workflow_jobs():
+    return [
+        OrderedDict(
+            {
+                "mac_build": OrderedDict(
+                    {
+                        "name": "macos-12-py3-x86-64-build",
+                        "build-environment": "macos-12-py3-x86-64",
+                        "xcode-version": quote("13.3.1"),
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+        OrderedDict(
+            {
+                "mac_test": OrderedDict(
+                    {
+                        "name": "macos-12-py3-x86-64-test-1-2-default",
+                        "build-environment": "macos-12-py3-x86-64",
+                        "xcode-version": quote("13.3.1"),
+                        "shard-number": quote("1"),
+                        "num-test-shards": quote("2"),
+                        "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+        OrderedDict(
+            {
+                "mac_test": OrderedDict(
+                    {
+                        "name": "macos-12-py3-x86-64-test-2-2-default",
+                        "build-environment": "macos-12-py3-x86-64",
+                        "xcode-version": quote("13.3.1"),
+                        "shard-number": quote("2"),
+                        "num-test-shards": quote("2"),
+                        "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+        OrderedDict(
+            {
+                "mac_test": OrderedDict(
+                    {
+                        "name": "macos-12-py3-x86-64-test-1-1-functorch",
+                        "build-environment": "macos-12-py3-x86-64",
+                        "xcode-version": quote("13.3.1"),
+                        "shard-number": quote("1"),
+                        "num-test-shards": quote("1"),
+                        "test-config": "functorch",
+                        "requires": ["macos-12-py3-x86-64-build"],
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+        OrderedDict(
+            {
+                "mac_build": OrderedDict(
+                    {
+                        "name": "macos-12-py3-x86-64-lite-interpreter-build-test",
+                        "build-environment": "macos-12-py3-lite-interpreter-x86-64",
+                        "xcode-version": quote("13.3.1"),
+                        "build-generates-artifacts": "false",
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+        OrderedDict(
+            {
+                "mac_build": OrderedDict(
+                    {
+                        "name": "macos-12-py3-arm64-build",
+                        "build-environment": "macos-12-py3-arm64",
+                        "xcode-version": quote("13.3.1"),
+                        "python-version": quote("3.9.12"),
+                        "filters": gen_filter_dict_exclude()
+                    }
+                )
+            }
+        ),
+    ]
 
 
 def get_workflow_jobs():
