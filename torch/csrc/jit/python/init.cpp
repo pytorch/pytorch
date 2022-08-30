@@ -102,6 +102,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
+#include <c10/core/SymFloat.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <pybind11/cast.h>
@@ -215,6 +216,40 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
 
   virtual SymIntNode ge(const SymIntNode& other) override {
     return dispatch_common_(__FUNCTION__, other);
+  }
+
+  py::handle getPyObj() {
+    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
+  }
+  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
+};
+
+class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
+ public:
+  PythonSymFloatNodeImpl(py::object pyobj) : c10::SymFloatNodeImpl() {
+    pyobj_ = std::make_shared<c10::SafePyObject>(
+        pyobj.release().ptr(), getPyInterpreter());
+  };
+
+  virtual SymFloatNode wrap(double num) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("wrap")(num);
+    return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
+  }
+
+  virtual std::string str() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("__str__")().cast<std::string>();
+  }
+
+  SymFloatNode dispatch_common_(
+      const char* fname,
+      const SymFloatNode& other) {
+    auto pother = dynamic_cast<PythonSymFloatNodeImpl*>(other.get());
+    TORCH_CHECK(pother);
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr(fname)(pother->getPyObj());
+    return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
   }
 
   py::handle getPyObj() {
@@ -1339,6 +1374,22 @@ void initJITBindings(PyObject* module) {
       .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
       .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
       .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+
+  py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
+      .def_static(
+          "new_symfloat",
+          [](py::object obj) -> c10::SymFloatNode {
+            return c10::make_intrusive<PythonSymFloatNodeImpl>(obj);
+          })
+      .def(
+          "get_pyobj",
+          [](c10::SymFloatNode a) -> py::object {
+            if (auto* psn = dynamic_cast<PythonSymFloatNodeImpl*>(a.get())) {
+              return py::reinterpret_borrow<py::object>(psn->getPyObj());
+            }
+            return py::none();
+          })
+      .def("__str__", [](c10::SymFloatNode a) { return a->str(); });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
