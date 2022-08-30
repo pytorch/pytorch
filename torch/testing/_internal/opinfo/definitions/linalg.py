@@ -1276,6 +1276,11 @@ op_db: List[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                "TestGradients",
+                "test_fn_gradgrad",
+                toleranceOverride({torch.float64: tol(atol=1e-4, rtol=1e-4)})
+            ),
         ),
     ),
     OpInfo(
