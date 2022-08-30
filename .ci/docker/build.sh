@@ -283,6 +283,12 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
+if [[ "$image" == *centos9* ]]; then
+ DOCKERFILE_NAME="Dockerfile.centos.stream"
+else
+ DOCKERFILE_NAME="Dockerfile"
+fi
+
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
 # it's no longer needed.
@@ -321,7 +327,7 @@ docker build \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
-       -f $(dirname ${DOCKERFILE})/Dockerfile \
+       -f $(dirname ${DOCKERFILE})/${DOCKERFILE_NAME} \
        -t "$tmp_tag" \
        "$@" \
        .

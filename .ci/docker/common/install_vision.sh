@@ -16,11 +16,14 @@ install_ubuntu() {
 install_centos() {
   # Need EPEL for many packages we depend on.
   # See http://fedoraproject.org/wiki/EPEL
-  yum --enablerepo=extras install -y epel-release
-
-  yum install -y \
-      opencv-devel \
-      ffmpeg-devel
+  if [[ $OS_VERSION == 9 ]]; then
+      yum install -y epel-release
+  else
+      yum --enablerepo=extras install -y epel-release
+      yum install -y \
+          opencv-devel \
+          ffmpeg-devel
+  fi
 
   # Cleanup
   yum clean all
@@ -28,6 +31,8 @@ install_centos() {
   rm -rf /var/lib/yum/yumdb
   rm -rf /var/lib/yum/history
 }
+
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
 
 # Install base packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
