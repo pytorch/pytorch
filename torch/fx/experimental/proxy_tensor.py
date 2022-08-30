@@ -659,7 +659,7 @@ def disable_proxy_modes_tracing():
             proxy_mode.enable_tracing = old
 
 
-def get_isolated_graphmodule(func, args, kwargs):
+def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
     """A helper function used to get the GraphModule for the given func.
 
     It's expected to be used in the ProxyTensor tracing context.
@@ -669,5 +669,5 @@ def get_isolated_graphmodule(func, args, kwargs):
     wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     with disable_proxy_modes_tracing():
-        gm = make_fx(wrapped)(all_args)
+        gm = make_fx(wrapped, tracing_mode=tracing_mode)(all_args)
     return gm
