@@ -14390,7 +14390,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 0, device=device)
+            inp = torch.randn(2, 1, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14398,7 +14398,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 40, 0, device=device)
+            inp = torch.randn(2, 1, 40, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14406,7 +14406,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            inp = torch.randn(2, 1, 50, 0, 40, device=device, dtype=dtype)
             mod(inp)
 
     def test_group_conv_empty(self, device):
