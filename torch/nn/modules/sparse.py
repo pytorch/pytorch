@@ -69,6 +69,7 @@ class Embedding(Module):
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding(input)
         tensor([[[-0.0251, -1.6902,  0.7172],
                  [-0.6431,  0.0748,  0.6969],
@@ -200,6 +201,7 @@ class Embedding(Module):
             >>> embedding = nn.Embedding.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
@@ -277,6 +279,7 @@ class EmbeddingBag(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
         >>> offsets = torch.tensor([0,4], dtype=torch.long)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding_sum(input, offsets)
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
@@ -427,6 +430,7 @@ class EmbeddingBag(Module):
             >>> embeddingbag = nn.EmbeddingBag.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([[1, 0]])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """

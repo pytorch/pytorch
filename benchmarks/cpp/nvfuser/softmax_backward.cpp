@@ -116,7 +116,7 @@ static void Baseline_Softmax_BWD(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *

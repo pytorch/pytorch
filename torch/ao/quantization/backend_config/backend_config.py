@@ -1,17 +1,18 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
-from torch.ao.quantization.backend_config.observation_type import ObservationType
 from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
+from enum import Enum
 
 
 __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
+    "ObservationType",
 ]
 
 
@@ -43,6 +44,17 @@ INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
 OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
 OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
+# TODO: maybe rename this to something that's not related to observer
+# e.g. QParamsType
+class ObservationType(Enum):
+    # this means input and output are observed with different observers, based
+    # on qconfig.activation
+    # example: conv, linear, softmax
+    OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT = 0
+    # this means the output will use the same observer instance as input, based
+    # on qconfig.activation
+    # example: torch.cat, maxpool
+    OUTPUT_SHARE_OBSERVER_WITH_INPUT = 1
 
 @dataclass
 class DTypeConfig:
@@ -151,10 +163,19 @@ class BackendConfig:
 
     def set_backend_pattern_config(self, config: BackendPatternConfig) -> BackendConfig:
         """
-        Set the config for an op that can be run on the target backend.
-        This overrides any existing config for the given op.
+        Set the config for an pattern that can be run on the target backend.
+        This overrides any existing config for the given pattern.
         """
         self.configs[config.pattern] = config
+        return self
+
+    def set_backend_pattern_configs(self, configs: List[BackendPatternConfig]) -> BackendConfig:
+        """
+        Set the configs for patterns that can be run on the target backend.
+        This overrides any existing config for a given pattern if it was previously registered already.
+        """
+        for conf in configs:
+            self.set_backend_pattern_config(conf)
         return self
 
     @classmethod
@@ -165,11 +186,8 @@ class BackendConfig:
             "name": the name of the target backend
             "configs": a list of dictionaries that each represents a `BackendPatternConfig`
         """
-        for dict_key in [NAME_DICT_KEY, CONFIGS_DICT_KEY]:
-            if dict_key not in backend_config_dict:
-                raise ValueError("backend_config_dict must contain '%s'" % dict_key)
-        conf = cls(backend_config_dict[NAME_DICT_KEY])
-        for d in backend_config_dict[CONFIGS_DICT_KEY]:
+        conf = cls(backend_config_dict.get(NAME_DICT_KEY, ""))
+        for d in backend_config_dict.get(CONFIGS_DICT_KEY, []):
             if isinstance(d, BackendPatternConfig):
                 conf.set_backend_pattern_config(d)
             elif isinstance(d, Dict):
@@ -210,10 +228,10 @@ class BackendPatternConfig:
         self.pattern = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         self.dtype_configs: List[DTypeConfig] = []
-        self.root_module: Optional[torch.nn.Module] = None
-        self.qat_module: Optional[torch.nn.Module] = None
-        self.reference_quantized_module: Optional[torch.nn.Module] = None
-        self.fused_module: Optional[torch.nn.Module] = None
+        self.root_module: Optional[Type[torch.nn.Module]] = None
+        self.qat_module: Optional[Type[torch.nn.Module]] = None
+        self.reference_quantized_module: Optional[Type[torch.nn.Module]] = None
+        self.fused_module: Optional[Type[torch.nn.Module]] = None
         self.fuser_method: Optional[Callable] = None
 
         # Temporary/internal configs
@@ -239,7 +257,15 @@ class BackendPatternConfig:
         self.dtype_configs.append(dtype_config)
         return self
 
-    def set_root_module(self, root_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_dtype_configs(self, dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
+        """
+        Set the supported input/output activation, weight, and bias data types for this pattern,
+        overriding all previously registered data types.
+        """
+        self.dtype_configs = dtype_configs
+        return self
+
+    def set_root_module(self, root_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the root for this pattern.
         For example, the root module for :class:`torch.nn.intrinsic.LinearReLU` should be :class:`torch.nn.Linear`.
@@ -247,21 +273,21 @@ class BackendPatternConfig:
         self.root_module = root_module
         return self
 
-    def set_qat_module(self, qat_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_qat_module(self, qat_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the QAT implementation for this pattern.
         """
         self.qat_module = qat_module
         return self
 
-    def set_reference_quantized_module(self, reference_quantized_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_reference_quantized_module(self, reference_quantized_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the reference quantized implementation for this pattern's root module.
         """
         self.reference_quantized_module = reference_quantized_module
         return self
 
-    def set_fused_module(self, fused_module: torch.nn.Module) -> BackendPatternConfig:
+    def set_fused_module(self, fused_module: Type[torch.nn.Module]) -> BackendPatternConfig:
         """
         Set the module that represents the fused implementation for this pattern.
         """

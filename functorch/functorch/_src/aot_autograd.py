@@ -1,27 +1,34 @@
+import collections
+import dataclasses
+import warnings
 from contextlib import contextmanager, nullcontext
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.nn as nn
-from torch import Tensor
-from functorch import make_fx
-from torch.fx import immutable_collections
-from torch._subclasses import FakeTensorMode
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
-from torch.nn.utils import _stateless
+from torch import Tensor
+from torch._subclasses import FakeTensorMode
+from torch.fx import immutable_collections, Interpreter
+from torch.nn.utils import stateless
+
+from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
-from .decompositions import register_decomposition
+from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-from .named_members_polyfill import _named_parameters, _named_buffers
-from typing import Callable, List, Dict, Any, Tuple, Optional
-from functools import wraps
 
 try:
     from torchdynamo import disable as disable_torchdynamo
 except ImportError:
+
     def disable_torchdynamo(x):
         return x
+
 
 pytree._register_pytree_node(
     immutable_collections.immutable_list,
@@ -35,23 +42,6 @@ pytree._register_pytree_node(
         {key: value for key, value in zip(c, x)}
     ),
 )
-
-# TODO - move this to PyTorch core. This overrides the pytree implementation for
-# dict to maintain parity with Deepmind pytree.
-Context = Any
-
-
-def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    keys = sorted(d.keys())
-    values = [d[key] for key in keys]
-    return values, keys
-
-
-def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return {key: value for key, value in zip(context, values)}
-
-
-pytree._register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 
 aten = torch.ops.aten
 
@@ -67,6 +57,70 @@ def preserve_rng_state():
         torch.random.set_rng_state(rng_state)
         if torch.cuda.is_available():
             torch.cuda.set_rng_state(cuda_rng_state)
+
+
+# Set up hooks so that during backward the fx's stack_trace is properly set
+callback_set = False
+
+
+def setup_stacktrace_preservation_hooks(roots: List):
+    def iter_graph(roots):
+        if not roots:
+            return
+        seen = set()
+        q = collections.deque()
+        for node in roots:
+            if node is not None:
+                seen.add(node)
+                q.append(node)
+
+        while q:
+            node = q.popleft()
+            for fn, _idx in node.next_functions:
+                if fn in seen or fn is None:
+                    continue
+                seen.add(fn)
+                q.append(fn)
+
+            yield node
+
+    def get_callback(saved_stack_):
+        def callback():
+            global callback_set
+            fx_traceback.set_stack_trace(saved_stack_)
+            callback_set = False
+
+        return callback
+
+    def get_prehook(stack_):
+        def prehook(grad_output):
+            global callback_set
+
+            if not callback_set:
+                torch.autograd.variable.Variable._execution_engine.queue_callback(
+                    get_callback(fx_traceback.format_stack())
+                )
+                callback_set = True
+
+            fx_traceback.set_stack_trace(stack_)
+
+        return prehook
+
+    def get_posthook(special_stack_):
+        def posthook(grad_input, grad_output):
+            fx_traceback.set_stack_trace(special_stack_)
+
+        return posthook
+
+    for node in iter_graph(roots):
+        forward_node_stack = node.metadata.get("traceback_", [])
+        node.register_prehook(get_prehook(forward_node_stack))
+
+        special_stack = forward_node_stack.copy()
+        special_stack.append(
+            "Gradient addition node due to mulitple use of tensor around:"
+        )
+        node.register_hook(get_posthook(special_stack))
 
 
 def create_joint_forward_backward(fn):
@@ -92,15 +146,19 @@ def create_joint_forward_backward(fn):
             if isinstance(out, Tensor) and out.requires_grad:
                 needed_outs.append(out)
                 needed_tangents.append(tangent)
+
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            backward_out = torch.autograd.grad(
-                needed_outs,
-                grad_primals,
-                grad_outputs=needed_tangents,
-                allow_unused=True,
-            )
+            with fx_traceback.override_stack_trace():
+                backward_out = torch.autograd.grad(
+                    needed_outs,
+                    grad_primals,
+                    grad_outputs=needed_tangents,
+                    allow_unused=True,
+                )
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -120,22 +178,8 @@ def normalize_as_list(x):
 aot_autograd_decompositions = {}
 
 
-@register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
-def _reshape_alias(x, shape, strides):
-    return aten.view(x, shape)
-
-
-@register_decomposition(aten.new_zeros, aot_autograd_decompositions)
-def new_zeros(inp, size, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.zeros(size, dtype=inp.dtype, device=inp.device)
-
-
-@register_decomposition(aten.new_full, aot_autograd_decompositions)
-def new_full(inp, size, value, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.full(size, value, dtype=inp.dtype, device=inp.device)
-
-
-graph_being_compiled: str = None
+# This is a list since looking forward, we can have this arbitrarily nested.
+graph_being_compiled: List[str] = []
 nth_graph: int = 0
 model_name: str = "model"
 
@@ -145,27 +189,188 @@ def set_model_name(name):
     model_name = name
 
 
-def get_graph_being_compiled() -> str:
+def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+    return list(graph_being_compiled), model_name, nth_graph
+
+
+def get_aot_graph_name() -> str:
     """
     Returns the name of the graph being compiled.
     """
     global model_name, graph_being_compiled, nth_graph
-    return f"{model_name}_{graph_being_compiled}_{nth_graph}"
+    return f"{model_name}_{'_'.join(graph_being_compiled)}_{nth_graph}"
+
+
+get_graph_being_compiled = get_aot_graph_name
 
 
 @contextmanager
 def track_graph_compiling(graph_name, increment_index=False):
     global graph_being_compiled
-    graph_being_compiled = graph_name
+    graph_being_compiled = [graph_name]
     yield
     if increment_index:
         global nth_graph
         nth_graph += 1
-    graph_being_compiled = None
+    graph_being_compiled = []
 
 
-def create_aot_autograd_function(
-    flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
+def make_boxed_func(f):
+    def g(args):
+        return f(*args)
+
+    g._boxed_call = True
+    return g
+
+
+def make_boxed_compiler(compiler):
+    @wraps(compiler)
+    def f(fx_g, inps):
+        out_f = compiler(fx_g, inps)
+        fx_g = make_boxed_func(out_f)
+        return fx_g
+
+    return f
+
+
+def call_func_with_args(f, args, steal_args=False):
+    if not steal_args:
+        args = list(args)
+    assert isinstance(args, list)
+
+    if hasattr(f, "_boxed_call"):
+        out = normalize_as_list(f(args))
+    else:
+        # TODO: Please remove soon
+        # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
+        warnings.warn(
+            "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+            "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
+            "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+        )
+        out = normalize_as_list(f(*args))
+    return out
+
+
+@dataclasses.dataclass
+class AOTConfig:
+    """
+    Configuration for AOTDispatcher
+    """
+
+    fw_compiler: Callable
+    bw_compiler: Callable
+    partition_fn: Callable
+    decompositions: Dict[Callable, Callable]
+
+
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    with track_graph_compiling("inference"):
+        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+
+    @wraps(compiled_fw)
+    def new_fn(args):
+        fw_outs = call_func_with_args(compiled_fw, args)
+        return fw_outs
+
+    return new_fn
+
+
+def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    joint_forward_backward = create_joint_forward_backward(flat_fn)
+
+    out = flat_fn(*flat_args)
+    out = pytree.tree_map(
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+        out,
+    )
+
+    if isinstance(out, (list, tuple)):
+        _num_outs = len(out)
+    else:
+        _num_outs = 1
+
+    joint_inputs = (flat_args, out)
+
+    if config.use_functionalize:
+        # Trace once without decompositions, into a graph of ATen ops.
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
+        def fake_fn(primals, tangents):
+            return fx_g(primals, tangents)
+
+        # Trace a second time, running functionalization, and THEN running decompositions.
+        # functionalization only acts on ATen today, and doesn't currently handle
+        # view and inplace ops that come from primtorch.
+        # Eventually, functionalization should support primtorch view/inplace ops,
+        # which will make it ok to run decompositions before functionalization.
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+    else:
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+
+    if config.debug_joint:
+        print("====== Joint graph ======")
+        fx_g.print_readable()
+
+    with torch.no_grad():
+        with track_graph_compiling("joint"):
+            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+
+        if config.debug_graphs:
+            print("====== Forward graph ======")
+            fw_module.print_readable()
+            print("====== Backward graph ======")
+            bw_module.print_readable()
+
+        with track_graph_compiling("forward"):
+            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
+
+        if config.debug_partitioner:
+            fw_outs = call_func_with_args(compiled_fw_func, flat_args)
+            activation_sizes = 0
+            for out in fw_outs[_num_outs:]:
+                if isinstance(out, torch.Tensor):
+                    activation_sizes += out.storage().nbytes()
+            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+
+    class CompiledFunction(torch.autograd.Function):
+        compiled_fw = compiled_fw_func
+        compiled_bw = None
+        num_outs = _num_outs
+
+        @staticmethod
+        @disable_torchdynamo
+        def forward(ctx, *flat_tensor_args):
+            fw_outs = call_func_with_args(
+                CompiledFunction.compiled_fw, flat_tensor_args
+            )
+            num_outs = CompiledFunction.num_outs
+            ctx.save_for_backward(*fw_outs[num_outs:])
+            return tuple(fw_outs[0:num_outs])
+
+        @staticmethod
+        @disable_torchdynamo
+        def backward(ctx, *flat_args):
+            contiguous_args = [t.contiguous() for t in flat_args]
+            all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            if CompiledFunction.compiled_bw is None:
+                with track_graph_compiling("backward", True):
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, all_args
+                    )
+            ctx.maybe_clear_saved_tensors()
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw, all_args, steal_args=True
+            )
+
+            return tuple(out)
+
+    return CompiledFunction.apply
+
+
+def create_aot_dispatcher_function(
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -179,100 +384,64 @@ def create_aot_autograd_function(
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
     """
-    if decompositions is None:
-        decompositions = {}
-    joint_forward_backward = create_joint_forward_backward(flat_fn)
+    if aot_config.decompositions is None:
+        aot_config.decompositions = {}
 
-    compiled_fw = None
-    compiled_bw = None
-    num_outs = None
+    aot_config.decompositions = {
+        **aot_autograd_decompositions,
+        **aot_config.decompositions,
+    }
+    fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
 
-    class CompiledFunction(torch.autograd.Function):
-        @staticmethod
-        @disable_torchdynamo
-        def forward(ctx, *flat_tensor_args):
-            nonlocal compiled_fw, compiled_bw, num_outs
-            # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
-            # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
-            old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
-            if compiled_fw is None:
-                flat_tensor_args = pytree.tree_map(
-                    lambda x: x.detach().requires_grad_(x.requires_grad)
-                    if isinstance(x, Tensor) else x, flat_tensor_args
+    with preserve_rng_state(), fake_mode as mode:
+
+        def process_inputs(flat_args):
+            if mode:
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor, mode.from_tensor, flat_args
                 )
-                fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
-                with preserve_rng_state(), fake_mode as mode:
-                    # Set input tensors that require grad to leaves
-                    fake_flat_tensor_args = pytree.tree_map(
-                        lambda x: mode.from_tensor(x) if mode else x
-                        if isinstance(x, Tensor) else x, flat_tensor_args
-                    )
-                    with torch.set_grad_enabled(grad_state):
-                        out = flat_fn(*fake_flat_tensor_args)
-                    out = pytree.tree_map(
-                        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x, out
-                    )
-
-                    if isinstance(out, (list, tuple)):
-                        num_outs = len(out)
-                    else:
-                        num_outs = 1
-
-                    joint_inputs = (fake_flat_tensor_args, out)
-                    aot_decompositions = {**aot_autograd_decompositions, **decompositions}
-                    with torch.set_grad_enabled(grad_state):
-                        fx_g = make_fx(joint_forward_backward, aot_decompositions)(
-                            *joint_inputs
-                        )
-
-                        if config.use_functionalize:
-                            # Functionalize the foward backward graph. First create a
-                            # fake fn to make functionalize happy
-                            def fake_fn(primals, tangents):
-                                return fx_g(primals, tangents)
-                            fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
-
-                if config.debug_joint:
-                    print(fx_g.code)
-
-                with track_graph_compiling("joint"):
-                    fw_module, bw_module = partition_fn(fx_g, joint_inputs)
-
-                if config.debug_graphs:
-                    print(fw_module.code, bw_module.code)
-
-                with track_graph_compiling("forward"):
-                    compiled_fw = fw_compiler(fw_module, flat_tensor_args)
-                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
-                if config.debug_partitioner:
-                    activation_sizes = 0
-                    for out in fw_outs[num_outs:]:
-                        if isinstance(out, torch.Tensor):
-                            activation_sizes += out.storage().nbytes()
-                    print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
-
-                bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
-                with track_graph_compiling("backward", True):
-                    compiled_bw = bw_compiler(bw_module, bw_args)
             else:
-                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
-            torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
-            ctx.save_for_backward(*fw_outs[num_outs:])
-            return tuple(fw_outs[0:num_outs])
+                # The detach().requires_grad_() pattern can cause some subtle bugs.
+                # These will be fixed once FakeTensor is always-on for AOTAutograd.
+                #
+                # For models that might resize their inputs, the input tensors
+                # must have allow_tensor_metadata_change() set to true.
+                # detach() returns a view tensor, but with that field set to false.
+                #
+                # Specifically, this breaks quantized models
+                # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
+                # because they use a "running-mean" style op that requires
+                # resizing the running counter buffers stored on the module.
+                def make_input(x):
+                    return x.detach().requires_grad_(x.requires_grad)
 
-        @staticmethod
-        @disable_torchdynamo
-        def backward(ctx, *flat_args):
-            # Disable the JIT Autocast flag to prevent re-autocasting of jitted graph.
-            # TODO - Remove when https://github.com/pytorch/functorch/pull/794 is fixed.
-            old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
-            contiguous_args = [t.contiguous() for t in flat_args]
-            # contiguous_args = [t for t in flat_args]
-            out = normalize_as_list(compiled_bw(*ctx.saved_tensors, *contiguous_args))
-            torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
-            return tuple(out)
+                fake_flat_tensor_args = pytree.tree_map_only(
+                    Tensor,
+                    make_input,
+                    flat_args,
+                )
+            return fake_flat_tensor_args
 
-    return CompiledFunction
+        fake_flat_tensor_args = process_inputs(flat_args)
+
+        needs_autograd = (
+            any(
+                [
+                    x.requires_grad
+                    for x in fake_flat_tensor_args
+                    if isinstance(x, Tensor)
+                ]
+            )
+            and torch.is_grad_enabled()
+        )
+        # crappy version of dispatcher
+        # TODO: Do this properly
+        if needs_autograd:
+            return make_boxed_func(
+                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
+            )
+        else:
+            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
 
 class _CompileCache(CompileCache):
@@ -280,12 +449,6 @@ class _CompileCache(CompileCache):
 
 
 # using a C++-based pytree reduces the overhead by about 50%
-try:
-    import tree
-
-    HAS_TREE = True
-except ImportError:
-    HAS_TREE = False
 compile_cache = None
 
 
@@ -450,6 +613,12 @@ def aot_function(
         compile_cache = CompileCache()
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    aot_config = AOTConfig(
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
+        partition_fn=partition_fn,
+        decompositions=decompositions,
+    )
     cached_res = None
 
     fn_id = id(fn)
@@ -482,10 +651,7 @@ def aot_function(
             ) = filter_tensor_and_static_args(args, static_argnums)
 
         # Now flatten the tensor args
-        if HAS_TREE:
-            flat_tensor_args = tree.flatten((tensor_args, kwargs))
-        else:
-            flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
+        flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
 
         # Check if the fn is already compiled
         num_tensor_args = len(flat_tensor_args)
@@ -538,14 +704,11 @@ def aot_function(
                 out_spec.set(spec)
                 return flat_out
 
-            compiled_fn = create_aot_autograd_function(
+            compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
-                fw_compiler,
-                bw_compiler,
-                partition_fn,
-                decompositions,
-                grad_state=torch.is_grad_enabled(),
-            ).apply
+                flat_tensor_args,
+                aot_config,
+            )
             cached_res = (compiled_fn, out_spec)
 
             # Save the compiled_fn in the cache
@@ -560,7 +723,7 @@ def aot_function(
             )
 
         cached_fn, out_spec = cached_res
-        out = cached_fn(*flat_tensor_args)
+        out = cached_fn(flat_tensor_args)
         return out_spec.unflatten(out)
 
     return returned_function
@@ -612,7 +775,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
-        return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
+        return stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
     compiled_f = aot_function(functional_call, *args, **kwargs)
 
@@ -654,10 +817,19 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     params_len = len(params_flat)
 
     def functional_call(*args, **kwargs):
-        with _stateless.reparametrize_module(
+        with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
-            out = mod(*args[params_len:], **kwargs)
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a tuple(). This is so that we can avoid "
@@ -678,27 +850,41 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         assert static_argnums is None
         if bw_compiler is None:
             bw_compiler = fw_compiler
-        compiled_fn = create_aot_autograd_function(
-            fn,
-            fw_compiler,
-            bw_compiler,
-            partition_fn,
-            decompositions,
-            grad_state=torch.is_grad_enabled(),
-        ).apply
+        aot_config = AOTConfig(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+            decompositions=decompositions,
+        )
 
-        return compiled_fn
+        compiled_fn = None
+
+        @wraps(fn)
+        def new_func(*args):
+            nonlocal compiled_fn
+            if compiled_fn is None:
+                compiled_fn = create_aot_dispatcher_function(
+                    fn,
+                    args,
+                    aot_config,
+                )
+            return compiled_fn(args)
+
+        return new_func
 
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
     if top_kwargs:
+
         def forward(*args, **kwargs):
             return compiled_f(
                 *params_flat,
                 *args,
                 **kwargs,
             )
+
     else:
+
         def forward(*args):
             return compiled_f(
                 *params_flat,
@@ -706,6 +892,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
 
     forward.zero_grad = mod.zero_grad
+    forward.named_parameters = mod.named_parameters
     return forward
 
 

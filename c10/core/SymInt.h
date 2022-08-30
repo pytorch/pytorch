@@ -27,11 +27,28 @@ namespace c10 {
 // SymInt will be extenteded to represent a union structure Union[int64_t,
 // SymIntNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
+
+#ifdef C10_MOBILE
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(_) \
+  do {                                \
+  } while (0)
+#else
+#define SKIP_IS_SYMBOLIC_ON_MOBILE(X) TORCH_CHECK(X)
+#endif
+
 class C10_API SymInt {
+  enum Unchecked {
+    UNCHECKED,
+  };
+
  public:
-  // TODO: this needs to only accept integers, not pointers
-  /*implicit*/ SymInt(int64_t d) : data_(d){};
-  SymInt() = default;
+  /*implicit*/ SymInt(int64_t d) : data_(d) {
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
+  };
+  SymInt() : data_(0) {}
+
+  // unchecked c-tor accepting raw `data_`
+  SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
@@ -55,12 +72,14 @@ class C10_API SymInt {
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
+    release_(); // release the current SymIntNode if any
     data_ = s.data_;
     if (s.is_symbolic())
       s.data_ = 0;
     return *this;
   }
 
+#ifndef C10_MOBILE
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
@@ -70,35 +89,58 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  ~SymInt() {
+  void release_() {
     if (is_symbolic()) {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
+#else
+  void release_() {}
+#endif
+
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
+
+  ~SymInt() {
+    release_();
+  }
 
   int64_t expect_int() const {
-    TORCH_CHECK(!is_symbolic());
+    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
     return data_;
   }
 
-  bool is_symbolic() const {
+  // N.B. It's important to keep this definition in the header
+  // as we expect if checks to be folded for mobile builds
+  // where `is_symbolic` is always false
+  C10_ALWAYS_INLINE bool is_symbolic() const {
+#ifdef C10_MOBILE
+    return false;
+#else
     return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
+#endif
   }
 
   SymInt operator+(SymInt sci) const;
+  SymInt operator-(SymInt sci) const;
   SymInt operator*(SymInt sci) const;
+  SymInt operator/(SymInt sci) const;
+  SymInt operator%(SymInt sci) const;
   bool operator==(SymInt sci) const;
   bool operator!=(SymInt p2) const;
   bool operator<(SymInt sci) const;
+  bool operator<=(SymInt sci) const;
+  bool operator>(SymInt sci) const;
+  bool operator>=(SymInt sci) const;
   void operator*=(SymInt sci);
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
   bool operator==(int64_t sci) const;
   bool operator!=(int64_t sci) const;
-
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
+  bool operator<=(int64_t sci) const;
+  bool operator>(int64_t sci) const;
+  bool operator>=(int64_t sci) const;
 
   int64_t as_int_unchecked() const {
     return data_;
@@ -133,6 +175,8 @@ class C10_API SymInt {
   static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
+
+#undef SKIP_IS_SYMBOLIC_ON_MOBILE
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10

@@ -60,8 +60,10 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
@@ -94,12 +96,6 @@ jobs:
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-    secrets:
-      SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-      SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-      ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
-      ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-bionic-py3_7-clang9-slow-build:
     name: linux-bionic-py3.7-clang9-slow
@@ -157,6 +153,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "macos-12" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "macos-12" },
         ]}
+      arch: x86_64
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -177,20 +174,40 @@ jobs:
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
+      sync-tag: macos-12-py3-arm64-build
       build-environment: macos-12-py3-arm64
       xcode-version: "13.3.1"
       runner-type: macos-12-xl
       build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python_version: 3.9.12
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
+    name: macos-12-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test-mps.yml
+    needs: macos-12-py3-arm64-build
+    with:
+      sync-tag: macos-12-py3-arm64-mps-test
+      build-environment: macos-12-py3-arm64
+
+  macos-12-py3-arm64-test:
     name: macos-12-py3-arm64
-    uses: ./.github/workflows/_mac-test-arm64.yml
+    uses: ./.github/workflows/_mac-test.yml
     needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
+          { config: "default", shard: 2, num_shards: 2, runner: "macos-m1-12" },
+        ]}
+      arch: arm64
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   win-vs2019-cuda11_6-py3-build:
     name: win-vs2019-cuda11.6-py3

@@ -218,6 +218,28 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
+  class CoalescedWorkNCCL
+      : public ProcessGroup::Work,
+        public std::enable_shared_from_this<CoalescedWorkNCCL> {
+   public:
+    // Constructor takes a list of WorkNCCL works
+    CoalescedWorkNCCL(
+        std::vector<ProcessGroupNCCL::WorkNCCL> works,
+        int rank,
+        OpType opType);
+
+    ~CoalescedWorkNCCL() override;
+
+    // Same as calling synchronize() for NCCL work.
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
+
+   protected:
+    // The cached list of CUDA devices to operate on
+    std::vector<ProcessGroupNCCL::WorkNCCL> works_;
+
+    friend class ProcessGroupNCCL;
+  };
+
   struct Options : ProcessGroup::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -275,9 +297,19 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       return std::string(NCCL_BACKEND_NAME);
   }
 
+  void startCoalescing() override;
+
+  void endCoalescing(
+      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& reqs) override;
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const BroadcastOptions& opts = BroadcastOptions());
 
   c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
@@ -291,6 +323,11 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _reduce_oop(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceOptions& opts = ReduceOptions());
 
   c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -400,6 +437,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       OpType opType,
       const char* profilingTitle=nullptr,
       const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+
+  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
+  initCoalescedWork(
+      const std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& works,
+      int rank,
+      OpType opType);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -583,6 +626,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Device Indexes used for all collectives in this group
   std::set<int> usedDeviceIdxs_;
+
+  // Flag to denote if a coalescing groupStart/groupEnd block is active
+  bool coalescing_active_ = false;
+
+  // Stores device indexes for all collectives run inside a coalescing block
+  std::vector<std::vector<at::Device>> coalescedDevices_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific

@@ -114,6 +114,7 @@ struct TORCH_API DispatchStubImpl {
     std::atomic<void*> cpu_dispatch_ptr;
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
+    void* mps_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;

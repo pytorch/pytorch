@@ -18,6 +18,7 @@ __all__ = ['DistributedOptimizer']
 
 logger = logging.getLogger(__name__)
 
+
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
 # compile the FunctionalOptimizer class into TorchScript
 # This is because ScriptClass instance still lives in
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 class _ScriptLocalOptimizerInterface(object):
     def step(self, autograd_ctx_id: int) -> None:
         pass
+
 
 class _ScriptLocalOptimizer(nn.Module):
     # TorchScript does not support multithread concurrent compiling.
@@ -106,6 +108,7 @@ def _new_script_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
         return rpc.RRef(
             script_optim, _ScriptLocalOptimizerInterface)
 
+
 @jit.script
 def _script_local_optimizer_step(
     local_optim_rref: RRef[_ScriptLocalOptimizerInterface],
@@ -113,6 +116,7 @@ def _script_local_optimizer_step(
 ) -> None:
     local_optim = local_optim_rref.local_value()
     local_optim.step(autograd_ctx_id)
+
 
 def _wait_for_all(rpc_futs):
     # TODO: improve error propagation
@@ -163,6 +167,7 @@ class DistributedOptimizer:
         kwargs: arguments to pass to the optimizer constructor on each worker.
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> import torch.distributed.autograd as dist_autograd
         >>> import torch.distributed.rpc as rpc
         >>> from torch import optim

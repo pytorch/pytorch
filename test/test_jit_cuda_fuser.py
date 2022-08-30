@@ -674,12 +674,12 @@ class TestCudaFuser(JitTestCase):
                       torch.nn.functional.softplus,
                       torch.nn.functional.gelu,
                       torch.nn.functional.leaky_relu,
+                      torch.nn.functional.silu,
                       torch.relu,
                       torch.sigmoid,
                       torch.bitwise_not,
                       torch.tan,
-                      torch.tanh,
-                      torch.nn.functional.silu]
+                      torch.tanh]
         skip_complex = {torch.rsqrt, torch.reciprocal}
         for op, dtype in itertools.product(operations, data_types):
             if dtype.is_complex and op in skip_complex:
@@ -4942,6 +4942,28 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x0, x1, x2, check_stride=True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_disable_const_chunk_propagation_for_normalization(self):
+        device = "cuda"
+        x0 = torch.randn(10, 12, device=device)
+        x1 = torch.randn(10, 4, device=device)
+        w0 = torch.randn(12, device=device)
+        w1 = torch.randn(4, device=device)
+
+        def t(x, y, w0, w1):
+            ih = torch.layer_norm(x, (12,), w0)
+            i_r, i_z, i_n = ih.chunk(3, dim=1)
+            i_n = torch.layer_norm(i_n, (4,), w1)
+            r = torch.sigmoid(i_r)
+            n = torch.tanh(i_n + r * i_z)
+            h = n + r * y
+            return h
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x0, x1, w0, w1, check_stride=True)
+
 
 class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):
@@ -5094,7 +5116,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         def _get_extremal_sample(sample: SampleInput, val, dtype):
             extremal_sample = SampleInput(
                 input=_get_extremal_input(sample.input, val, dtype),
-                args=[_get_extremal_input(x, val, dtype) for x in sample.args],
+                args=tuple(_get_extremal_input(x, val, dtype) for x in sample.args),
                 kwargs={k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()},
             )
             return extremal_sample
@@ -5103,7 +5125,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             vals = [float('inf'), float('-inf'), float('nan')]
             if dtype.is_complex:
                 complex_vals = itertools.product(vals, vals)
-                vals = list(map(lambda x: complex(*x), complex_vals))
+                vals = tuple(map(lambda x: complex(*x), complex_vals))
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 

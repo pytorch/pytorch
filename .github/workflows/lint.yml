@@ -14,19 +14,23 @@ jobs:
   lintrunner:
     runs-on: ubuntu-18.04
     steps:
+      - name: Checkout PyTorch
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: 1
+
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
           architecture: x64
-
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.9.*
+        run: pip install lintrunner==0.9.2
 
       - name: Initialize lint dependencies
         run: lintrunner init

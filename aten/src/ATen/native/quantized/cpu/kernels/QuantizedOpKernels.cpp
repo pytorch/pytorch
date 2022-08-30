@@ -671,17 +671,14 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Helper to convert 1d tensors or scalar tensor to an nd tensor that broadcasts with input
+  // Weight should be a 1d or scalar tensor
+  // Reshape it to an nd tensor that broadcasts with input
   // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1), strides(input_ndim, 0);
-  auto as_nd = [&](const Tensor& t) {
-    TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
-    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-    return t.as_strided(sizes, strides);
-  };
-
-  auto qw_nd = as_nd(qw);
+  DimVector sizes(input_ndim, 1);
+  if (input_ndim > 1) {
+    sizes[1] = qw.numel();
+  }
+  auto qw_nd = qw.reshape(sizes);
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
@@ -2750,18 +2747,26 @@ void quantized_normalize_kernel(
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
-                qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
-                  .store(Y_ptr + vecStartIdx);
               }
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
             }
-            for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
-                 remIdx < chEndIdx;
-                 remIdx++) {
-              auto qXVal = X_ptr[remIdx];
-              float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
-              float dqY =
-                (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
-              Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+
+            // Remainder
+            if (kNonVecRemInChannel > 0) {
+              int64_t remIdx = chEndIdx - kNonVecRemInChannel;
+              auto qXVec = qVec::loadu(X_ptr + remIdx, kNonVecRemInChannel);
+              auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                    x_fake_scale_zp_neg_premul_vec);
+              int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
+              for (int i = 0; i < validDqvecLen; ++i) {
+                auto &dq = dqXVec[i];
+                dq =
+                  (dq - layer_mean_div_scale_xVec) *
+                    gamma_p_vec + beta_vec;
+              }
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + remIdx, kNonVecRemInChannel);
             }
           } // chIdx
 
@@ -3703,8 +3708,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (const auto b : c10::irange(batches)) {
-      for (const auto e : c10::irange(elements_per_channel)) {
+    for (C10_UNUSED const auto b : c10::irange(batches)) {
+      for (C10_UNUSED const auto e : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int32x4_t voffset0123 = vld1q_s32(&zero_points_int32t[c]);
@@ -3738,7 +3743,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (const auto b : c10::irange(batches)) {
+    for (C10_UNUSED const auto b : c10::irange(batches)) {
       for (const auto c : c10::irange(channels)) {
         uint32_t e = 0;
         const int32x4_t voffset = vdupq_n_s32(zero_points_int32t[c]);

@@ -77,6 +77,49 @@
 #include <vector>
 
 namespace torch {
+inline bool is_symint_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
+  if (py::isinstance(obj, tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+} // namespace torch
+
+namespace pybind11 {
+namespace detail {
+template <>
+struct type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  bool load(py::handle src, bool) {
+    if (torch::is_symint_node(src)) {
+      value = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
+      return true;
+    }
+
+    auto raw_obj = src.ptr();
+    if (THPUtils_checkIndex(raw_obj)) {
+      value = c10::SymInt{THPUtils_unpackIndex(raw_obj)};
+      return true;
+    }
+    return false;
+  }
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl()).release()
+                            : py::cast(si.expect_int()).release();
+  }
+};
+} // namespace detail
+} // namespace pybind11
+
+namespace torch {
 
 bool should_allow_numbers_as_tensors(const std::string& name);
 
@@ -474,17 +517,6 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline bool is_symint_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
-  // TODO: switch this to `isinstance`
-  if (obj.get_type().equal(tp_symn)) {
-    TORCH_CHECK(
-        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
-    return true;
-  }
-  return false;
-}
-
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
     auto r = py::cast(symint.toSymIntNodeImpl()).release().ptr();
@@ -715,8 +747,7 @@ inline at::Device toDevice(PyObject* obj) {
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(
-        dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
+    return torch::tensors::get_default_device();
   }
   return toDevice(args[i]);
 }
@@ -855,10 +886,8 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
-  if (torch::is_symint_node(py::handle(args[i]))) {
-    return py::handle(args[i]).cast<c10::SymIntNodeImpl*>()->toSymInt();
-  }
-  return c10::SymInt(THPUtils_unpackLong(args[i]));
+
+  return py::cast<c10::SymInt>(py::handle(args[i]));
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {

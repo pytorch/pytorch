@@ -84,6 +84,7 @@ static inline at::DeviceType DefaultDevice() {
 
 } // namespace
 
+#ifndef C10_MOBILE
 TEST(LazyDynamicOpsTest, NarrowCopy) {
   auto x = torch::rand({5, 10, 10}).to(kLazy);
   const size_t Y_DIM = 3;
@@ -110,6 +111,7 @@ TEST(LazyDynamicOpsTest, NarrowCopyViaSymSizes) {
   AllClose(z.cpu(), zc);
   FLAGS_ltc_enable_symbolic_shapes = false;
 }
+#endif
 
 TEST_F(LazyOpsTest, TestScalarTensor) {
   torch::Tensor scalar_tensor = torch::scalar_tensor(

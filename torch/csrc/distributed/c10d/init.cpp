@@ -1353,6 +1353,15 @@ Arguments:
           .def(
               "_get_backend_name",
               &::c10d::ProcessGroup::getBackendName,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_start_coalescing",
+              &::c10d::ProcessGroup::startCoalescing,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_end_coalescing",
+              &::c10d::ProcessGroup::endCoalescing,
+              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding

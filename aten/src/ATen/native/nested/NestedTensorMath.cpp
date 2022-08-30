@@ -96,10 +96,6 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_buffer();
-}
-
 std::vector<at::Tensor> NestedTensor_unbind(
     const at::Tensor& self,
     int64_t dim) {
@@ -119,14 +115,15 @@ std::vector<at::Tensor> NestedTensor_unbind(
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   const std::vector<int64_t>& offsets = self_ptr->get_offsets();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const int64_t i: c10::irange(ntensors)){
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets[i]);
   }
   return result_tensors;
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  at::relu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()));
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  at::relu_(buffer);
   return self;
 }
 
@@ -135,7 +132,8 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  at::gelu_(const_cast<Tensor&>(get_nested_tensor_impl(self)->get_buffer()), approximate);
+  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  at::gelu_(buffer, approximate);
   return self;
 }
 
@@ -147,7 +145,7 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
-Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask) {
+Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
     TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
     TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
     TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
@@ -165,7 +163,8 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask)
     sizes = sizes.cumsum(1).select(1, L - 1);
     nums = nums.to(sizes.options());
 
-    TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
+    if (mask_check)
+      TORCH_CHECK(sizes.equal(nums), "Mask must be left-aligned without gaps");
 
     sizes = sizes.reshape({N, 1});
     // N, ([d1=D, d2=D, ... dN=D])
@@ -706,22 +705,25 @@ at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
   return get_nested_size_tensor(self);
 }
 
-Tensor dropout_nested(const Tensor& input, double p, bool train) {
+std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
   auto input_ptr = get_nested_tensor_impl(input);
   const Tensor& input_buffer = input_ptr->get_buffer(),
       & sizemat = input_ptr->get_nested_size_tensor(),
       & stridemat = input_ptr->get_nested_stride_tensor();
   const std::vector<int64_t>& offsets = input_ptr->get_offsets();
-  Tensor output_buffer = at::dropout(input_buffer, p, train);
+  Tensor output_buffer, mask_buffer;
+  if (input_buffer.numel() == 0) {
+    output_buffer = input_buffer.clone();
+    mask_buffer = input_buffer.clone();
+  }
+  else {
+    std::tie(output_buffer, mask_buffer) = at::native_dropout(input_buffer, p, train);
+  }
   // regular tensor dropout reuses input size and stride
   // i.e. if input is not contiguous, then output is also discontiguous
-  return wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets);
-}
-
-Tensor& dropout_nested_(Tensor& input, double p, bool train) {
-  Tensor input_buffer = get_buffer(input);
-  at::dropout_(input_buffer, p, train);
-  return input;
+  Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets)),
+      mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
+  return std::make_tuple(output, mask);
 }
 
 Tensor softmax_nested(
@@ -731,7 +733,7 @@ Tensor softmax_nested(
   auto input_ptr = get_nested_tensor_impl(input);
   int64_t ntensors = input_ptr->size(0);
   if (ntensors == 0) {
-    return input;
+    return input.clone();
   }
   int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
   TORCH_CHECK(
@@ -819,10 +821,18 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-// utilities support _NestedTensor_GeneralizedBMM
+// utilities support `matmul_nested`
 namespace {
+// Args:
+//     self_sizes: the sizes of `self` in `matmul_nested`
+//     mat2_sizes: the sizes of `mat2` in `matmul_nested`
+//     buffer_op: the options for new buffer
+//     sizemat_op: the options for new size matrix
+// Returns:
+//     the batch size of each input underlying tensor, i.e. the product of batch-dimension sizes
+//     the empty output nested tensor
 inline std::tuple<std::vector<int64_t>, Tensor>
-_NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+matmul_nested_helper(
     const std::vector<IntArrayRef>& self_sizes,
     const std::vector<IntArrayRef>& mat2_sizes,
     const c10::TensorOptions& buffer_op,
@@ -869,14 +879,16 @@ _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
 }
 }
 
-// This is a generalized batched matmul dedicated to nested tensors,
+// Note [nested tensor matmul]
+// This is really a generalized batched matmul dedicated to nested tensors,
 // where `self` and `mat2` have same number (>= 3) of dimensions.
 // The last 2 dimensions will be considered as matrix dimensions,
 // so they should be matrix-multiplicable.
 // The leading dimensions are considered as batch dimensions,
 // and since nested tensor does not support broadcasting for now,
 // for each batch dimension `self` and `mat2` must have same size.
-Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
+// TODO: Should make full matmul semantics support some day
+Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   if (self.is_nested() && !mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
   }
@@ -913,7 +925,7 @@ Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
   // create a contiguous output
   std::vector<int64_t> batch_sizes;
   Tensor output;
-  std::tie(batch_sizes, output) = _NestedTensor_GeneralizedBMM_BatchSizes_OutputMemory(
+  std::tie(batch_sizes, output) = matmul_nested_helper(
       self_sizes, mat2_sizes, self_buffer.options(), self_ptr->get_nested_size_tensor().options());
   // call tensor matmul
   // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
@@ -945,6 +957,28 @@ Tensor _NestedTensor_GeneralizedBMM(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
+Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& result) {
+  // TODO: this is a very quick and dirty implementation
+  //       should improve it to avoid the intermediate memory usage
+  Tensor function_result = at::matmul(tensor1, tensor2);
+  auto function_result_ptr = get_nested_tensor_impl(function_result);
+  // TODO: this is to reproduce function_result_ptr->opt_sizes_
+  //       if an accessor is provided in the future, can replace this
+  std::vector<int64_t> sizes;
+  for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
+    c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
+    if (opt_size.has_value()) {
+      sizes.push_back(*opt_size);
+    }
+    else {
+      sizes.push_back(-1);
+    }
+  }
+  result.reshape(sizes);
+  result.copy_(function_result);
+  return result;
+}
+
 Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_ptr = get_nested_tensor_impl(self);
   // check input dimensions
@@ -970,7 +1004,8 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   // create transposed `sizemat` and `stridemat`
   Tensor sizemat_transposed = at::index_select(sizemat, 1, column_indices),
       stridemat_transposed = at::index_select(stridemat, 1, column_indices);
-  return wrap_buffer(self_ptr->get_buffer(), sizemat_transposed, stridemat_transposed, self_ptr->get_offsets());
+  return create_nested_view_tensor(
+      self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_offsets()));
 }
 
 // utilities supporting `_reshape_nested`
@@ -1005,24 +1040,18 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
     // some negative sizes remain to be infered
     if (ndims_underlying < ndims_underlying_reshaped) {
       // replace negative sizes for old dimensions with old sizes
-      int64_t numel = 1, numel_reshaped = 1;
       for (int64_t idim = 0; idim < ndims_underlying; idim++) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
         TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
         if (size_reshaped == -1) {
           size_reshaped = size[idim];
         }
-        numel *= size[idim];
-        numel_reshaped *= size_reshaped;
       }
       // infer negative size for new dimension
       int64_t infer_index = -1;
       for (int64_t idim = ndims_underlying; idim < ndims_underlying_reshaped; idim++) {
         const int64_t& size_reshaped = size_reshaped_vector[idim];
-        if (size_reshaped >= 0) {
-          numel_reshaped *= size_reshaped;
-        }
-        else if (size_reshaped == -1) {
+        if (size_reshaped == -1) {
           if (infer_index > -1) {
             throw std::runtime_error("only one dimension can be inferred");
           }
@@ -1030,7 +1059,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_reshape_size_stride(
             infer_index = idim;
           }
         }
-        else {
+        else if (size_reshaped < 0) {
           AT_ERROR("invalid shape dimension ", size_reshaped);
         }
       }
@@ -1098,7 +1127,7 @@ inline void NestedTensor_reshape_copy(
           buffer.as_strided(sizes[i], strides[i], offsets[i]).reshape(sizes_reshaped[i]));
     }
 }
-}
+} // namespace
 
 // Special rules for reshape(nested tensor):
 // 1. Only 1 regular dimension can be collapsed with
@@ -1142,7 +1171,7 @@ Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   std::tie(reshape_as_view, sizemat_reshaped, stridemat_reshaped) = NestedTensor_reshape_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   if (reshape_as_view) {
-    return wrap_buffer(buffer, sizemat_reshaped, stridemat_reshaped, offsets);
+    return wrap_buffer(buffer, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(offsets));
   }
   Tensor buffer_reshaped = buffer.new_empty(buffer.sizes());
   Tensor output = wrap_buffer(buffer_reshaped, sizemat_reshaped);
