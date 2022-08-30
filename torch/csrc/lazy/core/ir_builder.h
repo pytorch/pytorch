@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/trie.h>
 #include <vector>
 
@@ -264,6 +265,22 @@ static inline NodePtr MakeSizeMul(const Value& a, const Value& b) {
 }
 static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
   return getIrBuilder()->MakeSizeDiv(a, b);
+}
+
+inline Value GetSymIntValue(c10::SymInt a) {
+  return Value(
+      dynamic_cast<torch::lazy::SymIntNodeImpl*>(a.toSymIntNodeImpl().get())
+          ->node_,
+      0);
+}
+
+// TODO: this should return Value
+inline std::vector<int64_t> GetSymIntArrayRefValue(c10::SymIntArrayRef arr) {
+  std::vector<int64_t> r;
+  for (const auto& a : arr) {
+    r.emplace_back(a.expect_int());
+  }
+  return r;
 }
 
 } // namespace lazy

@@ -171,7 +171,7 @@ bool compatibleType(const torch::jit::Value* val) {
           DataType::Null) {
         return false;
       }
-      if (!isEnabled(EnableOption::Complex)) {
+      if (!isOptionEnabled(EnableOption::Complex)) {
         // Complex is disabled by default until its support is completely added
         // TODO: remove this logic
         if (isComplexType(

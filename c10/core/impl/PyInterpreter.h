@@ -176,7 +176,6 @@ struct C10_API PyInterpreter {
   using sym_sizes_sig =
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
-  using sym_numel_sig = c10::SymInt(const PyInterpreter*, const TensorImpl*);
   using sym_strides_sig =
       c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
 
@@ -192,7 +191,6 @@ struct C10_API PyInterpreter {
       sizes_sig* sizes,
       sym_sizes_sig* sym_sizes,
       layout_sig* layout,
-      sym_numel_sig* sym_numel,
       sym_strides_sig* sym_strides,
       GPUTraceFunctionWrapper trace_gpu_functions)
       : name_fn_(name_fn),
@@ -206,7 +204,6 @@ struct C10_API PyInterpreter {
         sizes_fn_(sizes),
         sym_sizes_fn_(sym_sizes),
         layout_fn_(layout),
-        sym_numel_fn_(sym_numel),
         trace_gpu_functions(trace_gpu_functions),
         sym_strides_fn_(sym_strides) {}
 
@@ -221,7 +218,6 @@ struct C10_API PyInterpreter {
   sizes_sig* sizes_fn_;
   sym_sizes_sig* sym_sizes_fn_;
   layout_sig* layout_fn_;
-  sym_numel_sig* sym_numel_fn_;
   GPUTraceFunctionWrapper trace_gpu_functions;
   sym_strides_sig* sym_strides_fn_;
 
@@ -284,11 +280,6 @@ struct C10_API PyInterpreter {
 
   __ubsan_ignore_function__ c10::Layout layout(const TensorImpl* self) const {
     return (*layout_fn_)(this, self);
-  }
-
-  __ubsan_ignore_function__ c10::SymInt sym_numel(
-      const TensorImpl* self) const {
-    return (*sym_numel_fn_)(this, self);
   }
 
   __ubsan_ignore_function__ void trace_gpu_event_creation(
