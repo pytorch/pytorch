@@ -1570,6 +1570,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.item',
+        '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
         '_refs.std_var',
@@ -1588,14 +1589,12 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.transpose',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
-        '_refs.swap_axes',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
@@ -1626,6 +1625,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.reshape',
         '_refs.square',
         '_refs.tensor_split',
+        '_refs.to',
         '_refs.true_divide',
         '_refs.trunc_divide',
         '_refs.vsplit',
@@ -1635,8 +1635,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
-        # CompositeExplicitAutograd,
-        '_refs.unbind',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
