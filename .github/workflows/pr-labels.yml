@@ -11,14 +11,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up python
-        uses: actions/setup-python@v2
-
-      - name: Install requests
-        run: pip3 install requests==2.26
-
       - name: Checkout repository
         uses: actions/checkout@v2
+
+      - name: Set up python
+        uses: actions/setup-python@v2
+        with:
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install requests
+        run: pip install requests==2.26
 
       - name: Process commit and find merger responsible for labeling
         id: commit
