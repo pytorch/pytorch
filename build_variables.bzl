@@ -134,6 +134,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
     "torch/csrc/profiler/itt_observer.cpp",
+    "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
