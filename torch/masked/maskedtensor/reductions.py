@@ -45,28 +45,28 @@ def _get_masked_fn(fn):
 def _torch_reduce_all(fn):
     def reduce_all(self):
         masked_fn = _get_masked_fn(fn)
-        data = self.get_data()
-        mask = self.get_mask()
+        if self.is_sparse():
+            data = self.get_data().values()
+            mask = self.get_mask().values()
+        else:
+            data = self.get_data()
+            mask = self.get_mask()
         # When reduction is "all", then torch.argmin/torch.argmax needs to return the index of the
         # element corresponding to the min/max, but this operation isn't supported correctly for sparse layouts.
         # Therefore, this implementation calculates it using the strides.
         if fn in {"argmin", "argmax"} and self.is_sparse():
             sparse_idx = masked_fn(data, mask=mask).to(dtype=torch.int)
             indices = (
-                data.to_sparse_coo().indices()
+                self._masked_data.to_sparse_coo().indices()
                 if not self.is_sparse_coo()
-                else data.indices()
+                else self._masked_data.indices()
             )
             idx = indices.unbind(1)[sparse_idx]
-            stride = data.size().numel() / torch.tensor(
-                data.size()
+            stride = self._masked_data.size().numel() / torch.tensor(
+                self._masked_data.size()
             ).cumprod(0)
 
             return masked_tensor(torch.sum(idx * stride), torch.any(mask))
-
-        if self.is_sparse():
-            data = data.values()
-            mask = mask.values()
 
         return masked_tensor(masked_fn(data, mask=mask), torch.any(mask))
 
@@ -88,9 +88,9 @@ def _torch_reduce_dim(fn):
         if not is_masked_tensor(self):
             raise TypeError("Input to reduce_dim must be a MaskedTensor")
 
-        masked_fn = _get_masked_fn(fn)
         data = self.get_data()
         mask = self.get_mask()
+        masked_fn = _get_masked_fn(fn)
         if fn == "all":
             result_data = masked_fn(data, dim=dim, keepdim=keepdim, mask=mask)
         else:
@@ -111,11 +111,29 @@ def _torch_reduce(fn):
     return torch_sum
 
 
+def _torch_grad_reduce_all(fn):
+    class MaskedReduceAll(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input):
+            mask = input._masked_mask
+            ctx.mark_non_differentiable(mask)
+            ctx.save_for_backward(mask)
+            return _torch_reduce_all(fn)(input)
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            (mask,) = ctx.saved_tensors
+            grad_data = grad_output._masked_data.expand_as(mask)
+            return masked_tensor(grad_data, mask)
+
+    return MaskedReduceAll.apply
+
+
 def _torch_grad_reduce_dim(fn):
     class MaskedReduceDim(torch.autograd.Function):
         @staticmethod
         def forward(ctx, input, dim, keepdim, dtype):
-            mask = input.get_mask()
+            mask = input._masked_mask
             ctx.mark_non_differentiable(mask)
             ctx.save_for_backward(mask)
             return _torch_reduce_dim(fn)(input, dim, keepdim, dtype)
@@ -123,7 +141,7 @@ def _torch_grad_reduce_dim(fn):
         @staticmethod
         def backward(ctx, grad_output):
             (mask,) = ctx.saved_tensors
-            grad_data = grad_output.get_mask().expand_as(mask)
+            grad_data = grad_output._masked_data.expand_as(mask)
             return masked_tensor(grad_data, mask)
 
     return MaskedReduceDim.apply
@@ -136,7 +154,7 @@ def _reduce_dim_args(input, dim, keepdim=False, dtype=None):
 def _torch_grad_reduce(fn):
     def grad_reduce(*args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0:
-            return _torch_reduce_all(fn)(args[0])
+            return _torch_grad_reduce_all(fn)(args[0])
         # TODO: autograd.Function doesn't support kwarg
         input, dim, keepdim, dtype = _reduce_dim_args(*args, **kwargs)
         return _torch_grad_reduce_dim(fn)(input, dim, keepdim, dtype)
