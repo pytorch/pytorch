@@ -6,9 +6,9 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-struct ITTThreadLocalState : ProfilerThreadLocalStateBase {
+struct ITTThreadLocalState : ProfilerStateBase {
   explicit ITTThreadLocalState(const ProfilerConfig& config)
-      : ProfilerThreadLocalStateBase(config) {
+      : ProfilerStateBase(config) {
     // Only `report_input_shapes` makes sense in this context.
     TORCH_CHECK(!config.profile_memory);
     TORCH_CHECK(!config.with_stack);
@@ -25,7 +25,7 @@ struct ITTThreadLocalState : ProfilerThreadLocalStateBase {
       override {}
 
   static ITTThreadLocalState* getTLS() {
-    auto tls = ProfilerThreadLocalStateBase::getTLS();
+    auto tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::ITT);
     return static_cast<ITTThreadLocalState*>(tls);
