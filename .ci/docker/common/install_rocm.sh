@@ -72,26 +72,42 @@ install_centos() {
   yum update -y
   yum install -y kmod
   yum install -y wget
-  yum install -y openblas-devel
+  
+  if [[ $OS_VERSION == 9 ]]; then 
+      dnf install -y openblas-serial
+      dnf install -y dkms kernel-headers kernel-devel
+  else
+      yum install -y openblas-devel
+      yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
+  fi
 
   yum install -y epel-release
-  yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
 
-  # Add amdgpu repository
-  local amdgpu_baseurl
-  if [[ $OS_VERSION == 9 ]]; then
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.0/main/x86_64"
-  else
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 4.5) ]]; then
+      # Add amdgpu repository
+      local amdgpu_baseurl
+      if [[ $OS_VERSION == 9 ]]; then
+          amdgpu_baseurl="https://repo.radeon.com/amdgpu/${AMDGPU_VERSIONS[$ROCM_VERSION]}/rhel/9.1/main/x86_64"
+      else
+        if [[ $(ver $ROCM_VERSION) -ge $(ver 5.3) ]]; then
+          amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
+        else
+          amdgpu_baseurl="https://repo.radeon.com/amdgpu/${AMDGPU_VERSIONS[$ROCM_VERSION]}/rhel/7.9/main/x86_64"
+        fi
+      fi
+      echo "[AMDGPU]" > /etc/yum.repos.d/amdgpu.repo
+      echo "name=AMDGPU" >> /etc/yum.repos.d/amdgpu.repo
+      echo "baseurl=${amdgpu_baseurl}" >> /etc/yum.repos.d/amdgpu.repo
+      echo "enabled=1" >> /etc/yum.repos.d/amdgpu.repo
+      echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
+      echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
   fi
-  echo "[AMDGPU]" > /etc/yum.repos.d/amdgpu.repo
-  echo "name=AMDGPU" >> /etc/yum.repos.d/amdgpu.repo
-  echo "baseurl=${amdgpu_baseurl}" >> /etc/yum.repos.d/amdgpu.repo
-  echo "enabled=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
 
-  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}"
+  if [[ $OS_VERSION == 9 ]]; then
+      local rocm_baseurl="invalid-url"
+  else
+      local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}/main"
+  fi
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
   echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
@@ -99,9 +115,13 @@ install_centos() {
   echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
 
-  yum update -y
-
-  yum install -y \
+  if [[ $OS_VERSION == 9 ]]; then
+      yum update -y --nogpgcheck
+      dnf --enablerepo=crb install -y perl-File-BaseDir
+      yum install -y --nogpgcheck rocm-ml-sdk rocm-developer-tools
+  else
+      yum update -y
+      yum install -y \
                    rocm-dev \
                    rocm-utils \
                    rocm-libs \
@@ -131,6 +151,8 @@ install_centos() {
   rm -rf /var/lib/yum/yumdb
   rm -rf /var/lib/yum/history
 }
+
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
 
 # Install Python packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
