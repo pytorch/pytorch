@@ -6013,7 +6013,7 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     )
 
     for a, b, is_tensor_supported in cases:
-       # skip unsupported cases
+        # skip unsupported cases
         if kwargs.get("tensor_arg") and not is_tensor_supported:
             continue
 
@@ -6114,9 +6114,9 @@ def error_inputs_view_reshape(op, device, **kwargs):
         if b == (5, -1, -1):
             error_regex = "only one dimension can be inferred"
         elif a == (0, 5):
-            error_regex = ("cannot reshape tensor of 0 elements into shape "
-                           "\[0, -1\] because the unspecified dimension size "
-                           "-1 can be any value and is ambiguous")
+            error_regex = (r"cannot reshape tensor of 0 elements into shape "
+                           r"\[0, -1\] because the unspecified dimension size "
+                           r"-1 can be any value and is ambiguous")
         else:
             # to avoid having issues with a regex
             shape = ', '.join(map(str, b))
