@@ -87,7 +87,7 @@ class TestTransformers(NNTestCase):
             model(src, src_mask=src_mask)
 
     @parametrize("device", device_list)
-    @parametrize("use_torchscript", [True, False])
+    @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor):
         """
