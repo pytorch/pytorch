@@ -10,13 +10,15 @@ import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
+from torch.ao.quantization.backend_config import get_native_backend_config
+
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, check_min_max_valid
 
 from .utils import (
     get_new_attr_name_with_prefix,
     maybe_get_next_module,
-    WEIGHT_INDEX_DICT,
+    node_arg_is_weight,
 )
 
 CUSTOM_MODULE_SUPP_LIST: List[Any] = []
@@ -314,9 +316,11 @@ def get_op_node_and_weight_eq_obs(
 def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
     """ Gets the weight equalization observer node if it exists.
     """
-    assert(op_node.op == 'call_function' and op_node.target in WEIGHT_INDEX_DICT)
-    for i, node_arg in enumerate(op_node.args):
-        if i in WEIGHT_INDEX_DICT[op_node.target]:  # type: ignore[index]
+    assert(op_node.op == 'call_function')
+    # TODO: Pass in backend_config into this function and parent functions.
+    backend_config = get_native_backend_config()
+    for node_arg in op_node.args:
+        if node_arg_is_weight(op_node, node_arg, backend_config):
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg
@@ -814,9 +818,6 @@ def get_equalization_qconfig_dict(
 
     # Constructs an equalization_qconfig_dict that specifies to only equalize
     # the layers with the highest quantization errors
-    module_to_qconfig_list = list(
-        map(lambda item: (item[0], default_equalization_qconfig), layers_to_equalize)
-    )
-
+    module_to_qconfig_list = [(item[0], default_equalization_qconfig) for item in layers_to_equalize]
     equalization_qconfig_dict = {"module_name": module_to_qconfig_list}
     return equalization_qconfig_dict
