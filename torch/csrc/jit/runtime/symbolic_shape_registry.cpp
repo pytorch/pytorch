@@ -72,6 +72,9 @@ static const OperatorMap<std::string>& conditionally_defined_ops() {
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     cached_schema_to_graph;
 
+std::unordered_map<const FunctionSchema*, BoundedShapeGraphs>
+    cached_bounded_schema_to_graph;
+
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 
@@ -228,13 +231,48 @@ void transformShapeFunction(
   if (schema_string->returns().size() > 1) {
     TORCH_INTERNAL_ASSERT(
         graph->outputs().size() == 1 &&
-        graph->outputs().at(0)->node()->kind() == prim::TupleConstruct);
+        graph->outputs().at(0)->type()->cast<TupleType>());
     auto tuple_node = graph->outputs().at(0)->node();
+    WithInsertPoint guard(graph->return_node());
+    auto tuple_unpack_values = createTupleUnpack(tuple_node->output());
     graph->eraseOutput(0);
-    for (Value* v : tuple_node->inputs()) {
+    for (Value* v : tuple_unpack_values) {
       graph->registerOutput(v);
     }
+    GRAPH_DUMP("After Output Tuple Unpacking", graph);
   }
+}
+
+std::shared_ptr<Graph> genShapeComputeFn(
+    const FunctionSchema* schema_string,
+    const std::string& shape_compute_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  std::shared_ptr<Graph> graph;
+  GRAPH_DEBUG(
+      "Registering schema: ",
+      *schema_string,
+      " with shape compute func: ",
+      shape_compute_function_name);
+  if (reused_functions.count(shape_compute_function_name)) {
+    GRAPH_DEBUG("Registering reused schema");
+    graph = reused_functions[shape_compute_function_name];
+  } else {
+    Function& shape_compute_function =
+        module.get_function(shape_compute_function_name);
+    graph = toGraphFunction(shape_compute_function).graph();
+
+    transformShapeFunction(schema_string, graph);
+    // NB: we lint the shape functions registered in source
+    // in a test file
+    // LintShapeComputeGraph(schema_string, graph);
+
+    reused_functions[shape_compute_function_name] = graph;
+  }
+  // allow extra unused arguments to map multiple functions to e.g. unary
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs().size() <= schema_string->arguments().size());
+  return graph;
 }
 
 void registerSchema(
@@ -242,29 +280,23 @@ void registerSchema(
     const std::string& shape_compute_function_name,
     std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
     const CompilationUnit& module) {
-  if (reused_functions.count(shape_compute_function_name)) {
-    auto graph = reused_functions[shape_compute_function_name];
-
-    // allow extra unused arguments to map multiple functions to e.g. unary
-    TORCH_INTERNAL_ASSERT(
-        graph->inputs().size() <= schema_string->arguments().size());
-
-    cached_schema_to_graph[schema_string] = graph;
-    return;
-  }
-
-  Function& shape_compute_function =
-      module.get_function(shape_compute_function_name);
-  std::shared_ptr<Graph> graph =
-      toGraphFunction(shape_compute_function).graph();
-
-  transformShapeFunction(schema_string, graph);
-  // NB: we lint the shape functions registered in source
-  // in a test file
-  // LintShapeComputeGraph(schema_string, graph);
+  auto graph = genShapeComputeFn(
+      schema_string, shape_compute_function_name, reused_functions, module);
 
   cached_schema_to_graph[schema_string] = graph;
-  reused_functions[shape_compute_function_name] = graph;
+}
+
+void registerBoundedSchema(
+    const FunctionSchema* schema_string,
+    const std::string& lower_bound_function_name,
+    const std::string& upper_bound_function_name,
+    std::unordered_map<std::string, std::shared_ptr<Graph>>& reused_functions,
+    const CompilationUnit& module) {
+  auto lower_graph = genShapeComputeFn(
+      schema_string, lower_bound_function_name, reused_functions, module);
+  auto upper_graph = genShapeComputeFn(
+      schema_string, upper_bound_function_name, reused_functions, module);
+  cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
 }
 
 void loadModule(const CompilationUnit& module) {
@@ -304,23 +336,45 @@ void loadModule(const CompilationUnit& module) {
       }
     }
   }
+
+  // Now register the bounded schemas
+  for (const auto& pair : GetBoundedShapeMappings().getAllKeysAndValues()) {
+    const FunctionSchema* schema_string = &pair.first->schema();
+    const std::string& lower_bound_function_name = pair.second.first;
+    const std::string& upper_bound_function_name = pair.second.second;
+
+    registerBoundedSchema(
+        schema_string,
+        lower_bound_function_name,
+        upper_bound_function_name,
+        reused_functions,
+        module);
+  }
 }
 
 void loadFunctions() {
-  auto shape_compute_functions =
-      GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
+  try {
+    auto shape_compute_functions =
+        GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
-  auto src = std::make_shared<Source>(shape_compute_functions);
-  std::stringstream ss;
-  std::vector<at::IValue> constantTable;
-  auto resolver = std::make_shared<SourceImporterImpl>(
-      compilation_unit,
-      &constantTable,
-      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
-      1);
-  compilation_unit->define(
-      c10::nullopt, shape_compute_functions, resolver, nullptr);
-  loadModule(*compilation_unit);
+    auto src = std::make_shared<Source>(shape_compute_functions);
+    std::stringstream ss;
+    std::vector<at::IValue> constantTable;
+    auto resolver = std::make_shared<SourceImporterImpl>(
+        compilation_unit,
+        &constantTable,
+        [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+        1);
+    compilation_unit->define(
+        c10::nullopt, shape_compute_functions, resolver, nullptr);
+    loadModule(*compilation_unit);
+  } catch (...) {
+    // Reset the cache and compilation unit so that we don't get weird errors
+    // in later tests when one of the shape functions is invalid.
+    compilation_unit = std::make_shared<CompilationUnit>();
+    cached_schema_to_graph.clear();
+    throw;
+  }
 }
 } // anonymous namespace
 
@@ -337,6 +391,21 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     return cache_it->second;
   }
   GRAPH_DEBUG("Could not find schema: ", schema);
+
+  return c10::nullopt;
+}
+
+TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+    const FunctionSchema& schema) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_bounded_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  GRAPH_DEBUG("Trying to find schema in bounded graphs: ", schema);
+  auto cache_it = cached_bounded_schema_to_graph.find(&schema);
+  if (cache_it != cached_bounded_schema_to_graph.end()) {
+    return cache_it->second;
+  }
 
   return c10::nullopt;
 }

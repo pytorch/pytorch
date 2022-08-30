@@ -14,12 +14,12 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 
 #include <ATen/cudnn/Types.h>
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/ArrayRef.h>
 #include <cudnn_frontend.h>
 
-struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
+struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
       at::Tensor orig_weight,
       c10::optional<at::Tensor> bias,
@@ -77,7 +77,7 @@ struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
 };
 
 template <int kSpatialDim = 2>
-struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
+struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
       at::Tensor orig_weight,
       c10::optional<at::Tensor> bias,
@@ -87,8 +87,9 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      c10::QScheme q_scheme)
-      : orig_weight_(std::move(orig_weight)),
+      c10::QScheme q_scheme,
+      int64_t output_channels)
+      : maybe_padded_weight_(std::move(orig_weight)),
         bias_(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
@@ -96,7 +97,8 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
-        q_scheme_(q_scheme) {}
+        q_scheme_(q_scheme),
+        num_unpadded_output_channels_(output_channels) {} // output channels needs to be stored when we have to pad this dimension
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -159,7 +161,11 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   }
 
  private:
-  at::Tensor orig_weight_;
+  // cudnn v8.4.0 expects conv2d's int8 weight tensor's input and output channels to be a multiple of 4. if it is not
+  // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding, hence the naming
+  // convention "maybe"_padded_weight.
+  // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end and rename this to orig_weight_
+  at::Tensor maybe_padded_weight_;
   c10::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
@@ -168,6 +174,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   int64_t groups_;
   bool transpose_;
   c10::QScheme q_scheme_;
+  int64_t num_unpadded_output_channels_;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
@@ -184,6 +191,17 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
 
 namespace cudnn_utils {
 namespace {
+
+// TODO: we can remove this function when cuDNN enables pass by value support for
+// pointwise multiplication operations. the only reason why we need this right now is
+// we use broadcasting scalar multiplication in conv, linear, and add ops, and cuDNN requires
+// the scalar to be a scalar tensor with the same number of dimensions (num_dim) as the tensor we're multiplying to
+at::Tensor getRequantMultiplierTensor(double requant_multiplier, uint8_t num_dim) {
+  at::SmallVector<int64_t, 4> requantize_multiplier_tensor_size(num_dim, 1);
+  at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat));
+  requantize_multiplier_tensor.fill_(requant_multiplier);
+  return requantize_multiplier_tensor;
+}
 
 uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
@@ -310,7 +328,6 @@ cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_
   }
 
   {
-    auto total_engines = opGraph.getEngineCount();
     // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
     auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
     // std::cout << engine.describe() << std::endl;

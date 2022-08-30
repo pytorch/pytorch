@@ -5,7 +5,7 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" &&  -z "${IS_GHA:-}" ]]; then
+  if [[ "$OSTYPE" == "msys" &&  -z "${GITHUB_ACTIONS:-}" ]]; then
     GIT_DIR="${workdir}/p/.git"
   else
     GIT_DIR="${workdir}/pytorch/.git"
@@ -23,50 +23,12 @@ tagged_version() {
   fi
 }
 
-# These are only relevant for CircleCI
-# TODO: Remove these later once migrated fully to GHA
-if [[ -z ${IS_GHA:-} ]]; then
-  # We need to write an envfile to persist these variables to following
-  # steps, but the location of the envfile depends on the circleci executor
-  if [[ "$(uname)" == Darwin ]]; then
-    # macos executor (builds and tests)
-    workdir="/Users/distiller/project"
-  elif [[ "$OSTYPE" == "msys" ]]; then
-    # windows executor (builds and tests)
-    workdir="/c/w"
-  elif [[ -d "/home/circleci/project" ]]; then
-    # machine executor (binary tests)
-    workdir="/home/circleci/project"
-  else
-    # docker executor (binary builds)
-    workdir="/"
-  fi
-  envfile="$workdir/env"
-  touch "$envfile"
-  chmod +x "$envfile"
-
-  # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
-  configs=($BUILD_ENVIRONMENT)
-  export PACKAGE_TYPE="${configs[0]}"
-  export DESIRED_PYTHON="${configs[1]}"
-  export DESIRED_CUDA="${configs[2]}"
-  if [[ "${OSTYPE}" == "msys" ]]; then
-    export DESIRED_DEVTOOLSET=""
-    export LIBTORCH_CONFIG="${configs[3]:-}"
-    if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
-      export DEBUG=1
-    fi
-  else
-    export DESIRED_DEVTOOLSET="${configs[3]:-}"
-  fi
+envfile=${BINARY_ENV_FILE:-/tmp/env}
+if [[ -n "${PYTORCH_ROOT}"  ]]; then
+  workdir=$(dirname "${PYTORCH_ROOT}")
 else
-  envfile=${BINARY_ENV_FILE:-/tmp/env}
-  if [[ -n "${PYTORCH_ROOT}"  ]]; then
-    workdir=$(dirname "${PYTORCH_ROOT}")
-  else
-    # docker executor (binary builds)
-    workdir="/"
-  fi
+  # docker executor (binary builds)
+  workdir="/"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
@@ -97,7 +59,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.12.0.dev$DATE"
+BASE_BUILD_VERSION="1.13.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -164,7 +126,7 @@ else
 fi
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.12.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.13.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -200,7 +162,7 @@ if [[ "$(uname)" != Darwin ]]; then
 EOL
 fi
 
-if [[ -z "${IS_GHA:-}" ]]; then
+if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
   cat >>"$envfile" <<EOL
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"

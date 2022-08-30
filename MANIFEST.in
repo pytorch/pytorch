@@ -4,8 +4,10 @@ include CITATION
 include LICENSE
 include NOTICE
 include .gitmodules
+include build_variables.bzl
 include mypy.ini
 include requirements.txt
+include ufunc_defs.bzl
 include version.txt
 recursive-include android *.*
 recursive-include aten *.*

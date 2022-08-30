@@ -10,7 +10,7 @@ from itertools import permutations, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, slowTest)
+    (TestCase, run_tests, skipIfTorchDynamo, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -119,6 +119,13 @@ class TestSortAndSelect(TestCase):
             # Test that we still have proper sorting with duplicate keys
             self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
+            # Test argument sorting with and without stable
+            x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 3)
+            self.assertEqual(torch.argsort(x, stable=True), torch.sort(x, stable=True).indices)
+            self.assertEqual(torch.argsort(x, stable=False), torch.sort(x, stable=False).indices)
+            self.assertEqual(torch.argsort(x), torch.sort(x).indices)
+
+
             # Test sorting with NaNs
             x = torch.rand(4, SIZE, device=device)
             x[1][2] = float('NaN')
@@ -129,6 +136,22 @@ class TestSortAndSelect(TestCase):
             torch.sort(x, out=(res2val, res2ind), descending=True)
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
+
+    @onlyCUDA
+    def test_sort_large_slice(self, device):
+        # tests direct cub path
+        x = torch.randn(4, 1024000, device=device)
+        res1val, res1ind = torch.sort(x, stable=True)
+        torch.cuda.synchronize()
+        # assertIsOrdered is too slow, so just compare to cpu
+        res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
+        self.assertEqual(res1val, res1val_cpu.cuda())
+        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        res1val, res1ind = torch.sort(x, descending=True, stable=True)
+        torch.cuda.synchronize()
+        res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
+        self.assertEqual(res1val, res1val_cpu.cuda())
+        self.assertEqual(res1ind, res1ind_cpu.cuda())
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
@@ -334,6 +357,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/982")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)

@@ -25,7 +25,7 @@ MIOPENWrapper::PerGPUMIOPENStates& MIOPENWrapper::miopen_states()
     // New it (never delete) to avoid calling the destructors on process
     // exit and racing against the CUDA shutdown sequence.
     static auto* p = new MIOPENWrapper::PerGPUMIOPENStates();
-    CHECK_NOTNULL(p);
+    TORCH_CHECK_NOTNULL(p);
     return *p;
 }
 

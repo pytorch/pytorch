@@ -129,15 +129,15 @@ void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  if (! (t1->is_cuda()) || ! (t2->is_cuda())) {
+  if (t1->is_cpu() || t2->is_cpu()) {
     std::ostringstream oss;
-    if (! t1->is_cuda()) {
+    if (t1->is_cpu()) {
       oss << "Tensor for " << t1 << " is on CPU, ";
     }
-    if (! t2->is_cuda()) {
+    if (t2->is_cpu()) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
-    oss << "but expected " << ((!(t1->is_cuda() || t2->is_cuda())) ? "them" : "it")
+    oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
         << " to be on GPU (while checking arguments for " << c << ")";
     AT_ERROR(oss.str());
   }

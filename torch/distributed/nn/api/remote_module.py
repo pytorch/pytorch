@@ -9,6 +9,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -64,11 +65,13 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_forward_pre_hooks",
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
     "forward",
 )
+
 
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
@@ -191,6 +194,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -361,12 +365,12 @@ class _RemoteModule(nn.Module):
     def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_forward_hook.__name__)
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):
+    def state_dict(self, *args, **kwargs):
         _raise_not_supported(self.state_dict.__name__)
 
     def load_state_dict(
         self,
-        state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+        state_dict: Mapping[str, Any],
         strict: bool = True,
     ):
         _raise_not_supported(self.load_state_dict.__name__)
@@ -497,6 +501,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -618,6 +623,7 @@ class RemoteModule(_RemoteModule):
     Example::
         Run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc

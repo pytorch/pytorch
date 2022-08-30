@@ -11,136 +11,117 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-//
-// This struct defines caches of descriptor pools, and descriptor sets allocated
-// from those pools, intended to minimize redundant object reconstructions or
-// accelerate unavoidable memory allocations, both at the cost of extra memory
-// consumption.
-//
-// A descriptor set is logically an array of descriptors, each of which
-// references a resource (i.e. buffers and images), in turn telling the core
-// executing the shader, where in GPU, or GPU-accessible system, memory the said
-// resource resides.
-//
-// To accelerate creation of the descriptor sets, modern graphics APIs allocate
-// them from a pool, more elaborately referred to as descriptor pools, which do
-// need to be purged frequently _after_ none of the descriptors the pools contain
-// is in use by the GPU.  Care must be taken that descriptors are not freed while
-// they are in use by the pipeline, which considering the asynchronous nature of
-// CPU-GPU interactions, can be anytime after the command is issued until it is
-// fully executed by the GPU.
-//
-// As you can imagine, it is possible to have multiple descriptor pools, each of
-// which is configured to house different types of descriptor sets with different
-// allocation strategies. These descriptor pools themselves are fairly stable
-// objects in that they theymself should not be created and destroyed frequently.
-// That is the reason why we store them in a cache, which according to our usage
-// of the term 'cache' in this implementatoin, is reserved for objects that are
-// created infrequently and stabilize to a manageable number quickly over the
-// lifetime of the program.
-//
-// Descriptor sets though, on the other hand, are allocated from pools which
-// indeed does mean that the pools must be purged on a regular basis or else
-// they will run out of free items.  Again, this is in line with our usage of
-// the term 'pool' in this implementation which we use to refer to a container
-// of objects that is allocated out of and is required to be frequently purged.
-//
-// It is important to point out that for performance reasons, we intentionally
-// do not free the descriptor sets individually, and instead opt to purge the
-// pool in its totality, even though Vulkan supports the former usage pattern
-// as well.  This behavior is by design.
-//
+class DescriptorSet final {
+ public:
+  explicit DescriptorSet(
+      const VkDevice,
+      const VkDescriptorSet,
+      const ShaderLayout::Signature&);
 
-struct Descriptor final {
-  //
-  // Set
-  //
+  DescriptorSet(const DescriptorSet&) = delete;
+  DescriptorSet& operator=(const DescriptorSet&) = delete;
 
-  class Set final {
-   public:
-    Set(
-        VkDevice device,
-        VkDescriptorSet descriptor_set,
-        const Shader::Layout::Signature& shader_layout_signature);
-    Set(const Set&) = delete;
-    Set& operator=(const Set&) = delete;
-    Set(Set&&);
-    Set& operator=(Set&&);
-    ~Set() = default;
+  DescriptorSet(DescriptorSet&&) noexcept;
+  DescriptorSet& operator=(DescriptorSet&&) noexcept;
 
-    Set& bind(uint32_t binding, const Resource::Buffer::Object& buffer);
-    Set& bind(uint32_t binding, const Resource::Image::Object& image);
+  ~DescriptorSet() = default;
 
-    VkDescriptorSet handle() const;
+  struct ResourceBinding final {
+    uint32_t binding_idx;
+    VkDescriptorType descriptor_type;
+    bool is_image;
 
-   private:
-    void invalidate();
-
-   private:
-    struct Item final {
-      uint32_t binding;
-      VkDescriptorType type;
-
-      union {
-        VkDescriptorBufferInfo buffer;
-        VkDescriptorImageInfo image;
-      } info;
-    };
-
-    void update(const Item& item);
-
-   private:
-    VkDevice device_;
-    VkDescriptorSet descriptor_set_;
-    Shader::Layout::Signature shader_layout_signature_;
-
-    struct {
-      c10::SmallVector<Item, 6u> items;
-      mutable bool dirty;
-    } bindings_;
+    union {
+      VkDescriptorBufferInfo buffer_info;
+      VkDescriptorImageInfo image_info;
+    } resource_info;
   };
 
-  //
-  // Pool
-  //
+ private:
+  VkDevice device_;
+  VkDescriptorSet handle_;
+  ShaderLayout::Signature shader_layout_signature_;
+  c10::SmallVector<ResourceBinding, 6u> bindings_;
 
-  class Pool final {
-   public:
-    explicit Pool(const GPU& gpu);
-    Pool(const Pool&) = delete;
-    Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&);
-    Pool& operator=(Pool&&);
-    ~Pool();
+ public:
+  DescriptorSet& bind(const uint32_t, const VulkanBuffer&);
+  DescriptorSet& bind(const uint32_t, const VulkanImage&);
 
-    Set allocate(const Shader::Layout::Object& shader_layout);
-    void purge();
+  VkDescriptorSet get_bind_handle() const;
 
-   private:
-    void invalidate();
+ private:
+  void add_binding(const ResourceBinding& resource);
+};
 
-   private:
-    struct Configuration final {
-      static constexpr uint32_t kQuantum = 16u;
-      static constexpr uint32_t kReserve = 64u;
-    };
+class DescriptorSetPile final {
+ public:
+  DescriptorSetPile(
+      const uint32_t,
+      const VkDescriptorSetLayout,
+      const VkDevice,
+      const VkDescriptorPool);
 
-    VkDevice device_;
-    Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
+  DescriptorSetPile(const DescriptorSetPile&) = delete;
+  DescriptorSetPile& operator=(const DescriptorSetPile&) = delete;
 
-    struct {
-      struct Layout final {
-        std::vector<VkDescriptorSet> pool;
-        size_t in_use;
-      };
+  DescriptorSetPile(DescriptorSetPile&&) = default;
+  DescriptorSetPile& operator=(DescriptorSetPile&&) = default;
 
-      ska::flat_hash_map<VkDescriptorSetLayout, Layout> layouts;
-    } set_;
-  } pool /* [thread_count] */;
+  ~DescriptorSetPile() = default;
 
-  explicit Descriptor(const GPU& gpu)
-    : pool(gpu) {
-  }
+ private:
+  uint32_t pile_size_;
+  VkDescriptorSetLayout set_layout_;
+  VkDevice device_;
+  VkDescriptorPool pool_;
+  std::vector<VkDescriptorSet> descriptors_;
+  size_t in_use_;
+
+ public:
+  VkDescriptorSet get_descriptor_set();
+
+ private:
+  void allocate_new_batch();
+};
+
+struct DescriptorPoolConfig final {
+  // Overall Pool capacity
+  uint32_t descriptorPoolMaxSets;
+  // DescriptorCounts by type
+  uint32_t descriptorUniformBufferCount;
+  uint32_t descriptorStorageBufferCount;
+  uint32_t descriptorCombinedSamplerCount;
+  uint32_t descriptorStorageImageCount;
+  // Pile size for pre-allocating descriptor sets
+  uint32_t descriptorPileSizes;
+};
+
+class DescriptorPool final {
+ public:
+  explicit DescriptorPool(const VkDevice, const DescriptorPoolConfig&);
+
+  DescriptorPool(const DescriptorPool&) = delete;
+  DescriptorPool& operator=(const DescriptorPool&) = delete;
+
+  DescriptorPool(DescriptorPool&&) = delete;
+  DescriptorPool& operator=(DescriptorPool&&) = delete;
+
+  ~DescriptorPool();
+
+ private:
+  VkDevice device_;
+  VkDescriptorPool pool_;
+  DescriptorPoolConfig config_;
+  // New Descriptors
+  std::mutex mutex_;
+  ska::flat_hash_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
+
+ public:
+  DescriptorSet get_descriptor_set(
+      const VkDescriptorSetLayout handle,
+      const ShaderLayout::Signature& signature);
+
+  void flush();
 };
 
 } // namespace api
