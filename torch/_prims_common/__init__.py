@@ -43,8 +43,11 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex], Type[torch.SymIntNode], Type[torch.SymFloatNode]]
-NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
+NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
@@ -1069,9 +1072,12 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
-def number_type(x: NumberType) -> Type:
+# TODO: when NumberType contains the sym types, can simplify this
+def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
     if isinstance(x, torch.SymIntNode):
         return int
+    elif isinstance(x, torch.SymFloatNode):
+        return float
     else:
         return type(x)
 

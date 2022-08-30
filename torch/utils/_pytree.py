@@ -198,7 +198,7 @@ Fn2 = Callable[[Union[T, S]], R]
 Fn = Callable[[T], R]
 FnAny = Callable[[Any], R]
 
-MapOnlyFn = Callable[T, Callable[[Any], Any]]
+MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 
 # These specializations help with type inference on the lambda passed to this
 # function
@@ -208,6 +208,11 @@ def map_only(ty: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
 
 @overload
 def map_only(ty: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+# This specialization is needed for the implementations below that call
+@overload
+def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     ...
 
 def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
@@ -247,7 +252,7 @@ def tree_map_only(ty: Type[T], fn: Fn[T, Any], pytree: PyTree) -> PyTree:
 def tree_map_only(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree:
     ...
 
-def tree_map_only(ty: TypeAny, pred: FnAny, pytree: PyTree) -> PyTree:
+def tree_map_only(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
 
 def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
