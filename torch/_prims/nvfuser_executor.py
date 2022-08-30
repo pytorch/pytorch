@@ -57,6 +57,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
+        if node.op == "call_function" and "getitem" in node.name:
+            continue
         if (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is None
@@ -77,6 +79,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         class FusionInterpreter(torch.fx.Interpreter):
             def call_function(self, target, args, kwargs):
+                # This handles tuple unpacking
+                if "getitem" in str(target):
+                    assert isinstance(args[0], tuple)
+                    return target(*args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
                 target = target.impl_nvfuser
                 args = (fd,) + args
@@ -132,6 +138,7 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
+            or "getitem" in node.name  # getitem is a special case
         )
 
 
