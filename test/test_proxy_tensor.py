@@ -766,6 +766,14 @@ def forward(self, a_1):
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     return empty""")
 
+    @unittest.expectedFailure
+    def test_symint_to_tensor(self):
+        def f(a):
+            return a / a.shape[0]
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        # self.assertExpectedInline(r, """""")
+
     def test_cat(self):
         def f(a, b):
             val = torch.mul(a, b)

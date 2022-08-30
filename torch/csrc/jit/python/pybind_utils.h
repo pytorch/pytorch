@@ -706,6 +706,10 @@ inline py::object toPyObject(IValue ivalue) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      auto py_tensor = py::cast(tensor);
+      if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
+        return py_tensor.attr("_wrapped_number");
+      }
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:

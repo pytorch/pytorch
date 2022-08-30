@@ -1046,6 +1046,12 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
+def number_type(x: Union[Number, torch.SymIntNode]) -> Type:
+    if isinstance(x, torch.SymIntNode):
+        return int
+    else:
+        return type(x)
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1141,7 +1147,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike)):
+        if not isinstance(x, (Number, TensorLike, torch.SymIntNode)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1149,8 +1155,8 @@ def elementwise_dtypes(
             )
             raise ValueError(msg)
 
-        if isinstance(x, Number):
-            highest_type = get_higher_type(highest_type, type(x))
+        if isinstance(x, (Number, torch.SymIntNode)):
+            highest_type = get_higher_type(highest_type, number_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
