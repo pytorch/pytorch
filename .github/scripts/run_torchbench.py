@@ -134,6 +134,7 @@ def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, h
                "--head", head_sha,
                "--userbenchmark", userbenchmark,
                "--output-dir", output_dir]
+    print(f"Running torchbench userbenchmark command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
 if __name__ == "__main__":
