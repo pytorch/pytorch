@@ -2438,6 +2438,7 @@ def _repeat_if_defined(a: Optional[Tensor], sizes: int):
     return a
 
 
+# CompositeImplicitAutograd - don't register decomp
 def instance_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -2513,24 +2514,16 @@ def _normalize(
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
-    unbiased_var, mean = torch.var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    unbiased_var, mean = torch.var_mean(
+        a_acc, dim=norm_dims, unbiased=False, keepdim=True
+    )
     rstd = torch.rsqrt(unbiased_var + eps)
     out = (a - mean) * rstd
     return out, mean, rstd, unbiased_var
 
 
-# squeeze backwards from ndims-1 to 0
-def _squeeze_multiple(a: Tensor, dims: List[int]) -> Tensor:
-    wrapped_dims = utils.canonicalize_dims(a.ndim, dims)
-    assert isinstance(wrapped_dims, tuple)
-    for idx in range(a.ndim - 1, -1, -1):
-        if idx in wrapped_dims:
-            a = a.squeeze(idx)
-    return a
-
-
 # unsqueeze forwards from 0 to ndims-1
-def _unsqueeze_multiple(x: Tensor, dims: List[int]):
+def _unsqueeze_multiple(x: TensorLikeType, dims: List[int]) -> TensorLikeType:
     for dim in dims:
         x = x.unsqueeze(dim)
     return x
@@ -2593,33 +2586,36 @@ def native_batch_norm(
 
     if training:
         out, mean, rstd, unbiased_var = _normalize(input, reduction_dims, eps)
-        save_mean = _squeeze_multiple(mean, reduction_dims)
-        save_rstd = _squeeze_multiple(rstd, reduction_dims)
+        save_mean = prims.squeeze(mean, reduction_dims)
+        save_rstd = prims.squeeze(rstd, reduction_dims)
 
         # update running_mean and running_var
         if running_mean is not None:
             copy_to(running_mean, _momentum_update(running_mean, save_mean, momentum))
 
         if running_var is not None:
-            squeeze_var = _squeeze_multiple(unbiased_var, reduction_dims)
+            squeeze_var = prims.squeeze(unbiased_var, reduction_dims)
             copy_to(running_var, _momentum_update(running_var, squeeze_var, momentum))
     else:
         assert running_mean is not None and running_var is not None
-        mean = _unsqueeze_multiple(running_mean, reduction_dims)
-        var = _unsqueeze_multiple(running_var, reduction_dims)
+
+        compute_dtype = utils.get_computation_dtype(input.dtype)
+        mean = _unsqueeze_multiple(
+            prims.convert_element_type(running_mean, compute_dtype), reduction_dims
+        )
+        var = _unsqueeze_multiple(
+            prims.convert_element_type(running_var, compute_dtype), reduction_dims
+        )
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        squeeze_rstd = _squeeze_multiple(rstd, reduction_dims)
-        compute_dtype, _ = utils.elementwise_dtypes(
-            input, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-        )
         if input.device.type == "cuda":
             save_mean = prims.convert_element_type(running_mean, compute_dtype)
+            squeeze_rstd = prims.squeeze(rstd, reduction_dims)
             save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
         else:
-            save_mean = torch.empty_like(running_mean, dtype=compute_dtype)
-            save_rstd = torch.empty_like(squeeze_rstd, dtype=compute_dtype)
+            save_mean = torch.empty([0], device=running_mean.device)
+            save_rstd = torch.empty([0], device=rstd.device)
 
     if weight is None and bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
@@ -2631,6 +2627,7 @@ def native_batch_norm(
         unsqueeze_weight = _unsqueeze_multiple(weight, reduction_dims)
         unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
         out = out * unsqueeze_weight + unsqueeze_bias
+
     out = prims.convert_element_type(out, input.dtype)
     if input.device.type == "cpu":
         save_mean = prims.convert_element_type(save_mean, input.dtype)
@@ -2684,8 +2681,8 @@ def native_group_norm(
         mean = prims.convert_element_type(mean, input.dtype)
         rstd = prims.convert_element_type(rstd, input.dtype)
 
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
+    mean = prims.squeeze(mean, reduction_dims)
+    rstd = prims.squeeze(rstd, reduction_dims)
 
     return (out, mean, rstd)
 
