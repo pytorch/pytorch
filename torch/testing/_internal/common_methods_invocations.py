@@ -3871,7 +3871,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
     memory_formats = [torch.preserve_format, torch.channels_last]
 
     # to.device overload
-    for device, nb, p, mem_f in product(devices, [True, False], [True, False], memory_formats):
+    for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
             "non_blocking": nb,
             "copy": cp,
@@ -3880,7 +3880,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64,), kwargs=kwargs)
 
     # to.dtype overload
-    for nb, p, mem_f in product([True, False], [True, False], memory_formats):
+    for nb, cp, mem_f in product([True, False], [True, False], memory_formats):
         kwargs = {
             "non_blocking": nb,
             "copy": cp,
@@ -3889,7 +3889,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64,), kwargs=kwargs)
 
     # to.other overload
-    for device, nb, p, mem_f in product(devices, [True, False], [True, False], memory_formats):
+    for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
             "non_blocking": nb,
             "copy": cp,
