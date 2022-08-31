@@ -2343,7 +2343,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_rank_membership(self):
         self._test_rank_membership(backend="gloo")
 
-
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
     def test_collectives(self):

@@ -5,21 +5,8 @@
 
 namespace c10d {
 namespace {
-c10::intrusive_ptr<Work> broadcast_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t root_tensor,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  return process_group->broadcast(
-      tensor_vec,
-      BroadcastOptions{
-          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
-}
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
-allreduce_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
@@ -34,9 +21,8 @@ allreduce_(
   // Return input tensors as output tensors to make inplace allreduce look like
   // a functional API, so that make_fx can correctly build the dependencies in
   // the graph later.
-  return std::
-      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-          std::move(tensor_vec), work);
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(tensor_vec), work);
 }
 
 c10::intrusive_ptr<Work> allgather_(
@@ -126,16 +112,6 @@ c10::intrusive_ptr<Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> send(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t dstRank,
-    int64_t tag) {
-  auto tensor_vec = tensors.vec();
-  return process_group->send(
-      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
-}
-
 c10::intrusive_ptr<Work> recv_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -152,22 +128,15 @@ TORCH_LIBRARY(c10d, m) {
   m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
   m.class_<Work>("Work")
       .def(torch::init<>())
-      .def("wait", [](const c10::intrusive_ptr<Work>& self) {
-        self->wait();
-      });
-  // It's important to register the op to the CompositeExplicitAutograd key to
-  // enable
+      .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
+  // It's important to register the op to the CompositeExplicitAutograd key
+  // instead of the CompositeImplicitAutograd key to enable
   // __torch_dispatch__.
-  m.def(
-      "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
-  m.def(
-      "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int srcRank, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
-  m.def(
-      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
+      "allreduce_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
   m.def(
       "allgather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
@@ -175,16 +144,19 @@ TORCH_LIBRARY(c10d, m) {
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
-      "gather_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> __torch__.torch.classes.c10d.Work");
+      "reduce_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
+  m.def(
+      "gather_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
   m.def(
       "scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, scatter_));
   m.def(
-      "alltoall_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
-  m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
+  m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
+  m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
 
@@ -217,15 +189,14 @@ c10::intrusive_ptr<Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts) {
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("c10d::allreduce_", "")
-                       .typed<std::tuple<
-                           std::vector<at::Tensor>,
-                           c10::intrusive_ptr<Work>>(
-                           at::TensorList,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           int64_t,
-                           int64_t)>();
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("c10d::allreduce_", "")
+          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+              at::TensorList,
+              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+              int64_t,
+              int64_t)>();
 
   return std::get<1>(op.call(
       tensors,
