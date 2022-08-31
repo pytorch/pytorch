@@ -11,6 +11,7 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 
+#include <iostream>
 namespace at {
 namespace native {
 
@@ -701,7 +702,7 @@ Tensor clone_nested(
     //       but it is more conservative.
     //       This is something we could revisit once we land a more
     //       efficient implementation of nested_size_tensor_ and nested_stride_tensor.
-    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), offsets);
+    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
   }
   // actually, memory format is contiguous and self is noncontiguous
   else if (memory_format == c10::MemoryFormat::Contiguous) {
@@ -1238,8 +1239,7 @@ Tensor slice_nested(
   auto new_sizes = (dim > 0) ? sizes.clone() : sizes.slice(0, start_val, end_val).clone();
   auto new_strides = (dim > 0) ? strides.clone() : strides.slice(0, start_val, end_val).clone();
   auto new_offsets = (dim > 0) ? std::vector<int64_t>(offsets) :
-      std::vector<int64_t>(offsets.begin() + start_val, offsets.begin() + end_val);
-
+      std::vector<int64_t>(offsets.begin() + start_val, offsets.begin() + end_val + 1);
   if (dim > 0) {
     // account for the implicit batch dim
     --dim;
