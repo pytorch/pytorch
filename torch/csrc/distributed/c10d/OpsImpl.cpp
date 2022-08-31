@@ -1,4 +1,5 @@
-#include <torch/csrc/distributed/c10d/OpsImpl.hpp>
+#include <c10/util/intrusive_ptr.h>
+#include <c10d/ProcessGroup.hpp>
 #include <torch/library.h>
 
 namespace c10d {
