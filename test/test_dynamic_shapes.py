@@ -4,7 +4,7 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 import unittest
 import torch
 import operator
@@ -54,7 +54,7 @@ def cat_meta(tensors, dim=0):
     return tensors[0].new_empty(new_shape)
 
 
-@register_meta([aten.narrow_copy.SymInt])
+@register_meta([aten.narrow_copy.default])
 def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
     shape = []
     for i, x in enumerate(a.shape):
@@ -65,7 +65,7 @@ def narrow_copy_symint_meta(a, dim, start, length, **kwargs):
     return a.new_empty(tuple(shape))
 
 
-@register_meta([aten.expand.SymInt])
+@register_meta([aten.expand.default])
 def expand_symint_meta(a, size, implicit=False):
     return a.new_empty(size)
 
@@ -137,6 +137,7 @@ def create_symbolic_tensor(name, arg, shape_env):
 CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
+@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
     @skipIfNoSympy
@@ -293,11 +294,11 @@ class TestPySymInt(TestCase):
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.shape[0])
+        torch.ops.aten.narrow_copy.default(x, 0, 0, x.shape[0])
 
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
-        torch.ops.aten.expand.SymInt(x, [x.shape[0], x.shape[1], x.shape[2]])
+        torch.ops.aten.expand.default(x, [x.shape[0], x.shape[1], x.shape[2]])
 
     def test_fx_trace_intlist(self):
         class CustomModule(torch.nn.Module):
