@@ -1149,7 +1149,7 @@ class TestFSDPOptimState(FSDPTest):
             return self.assertWarnsRegex(
                 expected_warning=UserWarning, expected_regex=warning_regex
             )
-        
+
         # Sharded optim state dict
         with get_warning_context():
             fsdp_osd = FSDP.sharded_optim_state_dict(wrapped_model, wrapped_optim, optim_input=wrapped_optim_input)
