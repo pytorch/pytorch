@@ -59,7 +59,7 @@ inline void setStrided_symint(
   self_->set_storage_offset(storage_offset);
 
   /* size and stride */
-  self_->set_sym_sizes_and_strides(size, stride);
+  self_->set_sizes_and_strides(size, stride);
 }
 
 } // anonymous namespace
