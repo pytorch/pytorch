@@ -327,7 +327,7 @@ class TestPrims(TestCase):
 
         for node in gm.graph.nodes:
             if node.op == "call_function":
-                self.assertTrue(node.name == "add_default")
+                self.assertTrue(node.name == "add")
                 self.assertTrue(node.target == torch.ops.nvprims.add.default)
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
