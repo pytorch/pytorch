@@ -34,10 +34,11 @@ ao/ @vkuzo
 ao/quantization/ @jerryzh168
 ao/sparisty/ @z-a-f @hdcharles
 ao/ns/ @vkuzo
-ATen/native/quantized @vkuzo
-ATen/native/quantized/cpu @vkuzo
-ATen/native/quantized/cuda @vkuzo
-ATen/native/quantized/cudnn @vkuzo
+ATen/native/quantized @vkuzo @jerryzh168
+ATen/native/quantized/cpu @vkuzo @jerryzh168
+ATen/native/quantized/cuda @vkuzo @jerryzh168
+ATen/native/quantized/cudnn @vkuzo @jerryzh168
+ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
