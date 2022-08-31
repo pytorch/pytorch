@@ -764,6 +764,47 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
+def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm = None):
+    check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor");
+    check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor");
+
+    batch1_sizes = batch1.size();
+    batch2_sizes = batch2.size();
+
+    bs = batch1_sizes[0];
+    contraction_size = batch1_sizes[2];
+    res_rows = batch1_sizes[1];
+    res_cols = batch2_sizes[2];
+    output_size = (bs, res_rows, res_cols)
+
+    check(batch2_sizes[0] == bs and batch2_sizes[1] == contraction_size,
+        lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}, {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].");
+
+    # TODO: handle out
+
+    output = batch2.new_empty(output_size)
+
+    if not is_bmm and self_baddbmm is not None:
+        check(self.dim() == 3, lambda: "self must be a 3D tensor")
+        check(self.size() == output_size, lambda: "Expected an input tensor shape with shape {output_size} but got shape: {self.size()}")
+
+    return output
+
+
+@register_meta(aten.bmm.default, register_dispatcher=False)
+def meta_bmm(self, mat2):
+    return common_meta_baddbmm_bmm(self, mat2, True)
+
+
+"""
+@register_meta(aten.baddbmm.default, register_dispatcher=False)
+def meta_baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    # I think I translated this wrong
+    self = self.expand(batch1.size(0), batch1.size(1), batch1.size(2))
+    return common_meta_baddbmm_bmm(batch1, batch2, False, self)
+"""
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
