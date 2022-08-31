@@ -1353,7 +1353,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This is NOT computed in bytes.
    */
   TENSORIMPL_MAYBE_VIRTUAL int64_t storage_offset() const {
+    TORCH_CHECK(!has_symbolic_sizes_strides());
     return storage_offset_;
+  }
+
+  c10::SymInt sym_storage_offset() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_storage_offset_custom();
+    }
+    return sym_storage_offset_default();
+  }
+
+  inline c10::SymInt sym_storage_offset_default() const {
+    return c10::SymInt{storage_offset_};
+  }
+
+  virtual c10::SymInt sym_storage_offset_custom() const {
+    if (C10_UNLIKELY(is_python_dispatch())) {
+      return load_pyobj_interpreter()->sym_storage_offset(this);
+    }
+    return sym_storage_offset_default();
   }
 
  protected:
