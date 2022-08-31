@@ -16,13 +16,10 @@
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/array.h>
-#include <nvfuser_resources/array_rocm.h>
 #include <nvfuser_resources/bf16_support.h>
-#include <nvfuser_resources/bf16_support_rocm.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
-#include <nvfuser_resources/block_sync_default_rocm.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
@@ -39,8 +36,14 @@
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
-#include <nvfuser_resources/warp_rocm.h>
 #include <nvfuser_resources/welford.h>
+
+#ifdef USE_ROCM
+#include <nvfuser_resources/array_rocm.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
+#include <nvfuser_resources/warp_rocm.h>
+#endif
 
 #ifndef USE_ROCM
 #include <cuda_occupancy.h>
