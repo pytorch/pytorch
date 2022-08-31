@@ -14034,12 +14034,6 @@ op_db: List[OpInfo] = [
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-               # RuntimeError: Batching rule not implemented for aten::concatenate
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
-                            'test_op_has_batch_rule'),
-               # RuntimeError: Batching rule not implemented for aten::concatenate
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo',
-                            'test_vmap_exhaustive'),
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
     OpInfo('unbind',
@@ -16815,7 +16809,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # FIXME: AssertionError: RuntimeError not raised
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(

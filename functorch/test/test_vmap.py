@@ -3290,6 +3290,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('complex'),
+        xfail('concatenate'),
         xfail('copysign'),
         xfail('eig'),
         xfail('histogram'),
