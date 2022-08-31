@@ -348,6 +348,7 @@ class TestOperators(TestCase):
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
+        xfail('nn.functional.rrelu'),
 
         # BUG: silent incorrectness: runs and produces numerical differences
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac

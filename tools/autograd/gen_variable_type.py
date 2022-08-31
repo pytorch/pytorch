@@ -1680,9 +1680,7 @@ def emit_body(
             )
         cond = get_any_has_fw_grad_cond(derivative=None)
         return (
-            FW_DERIVATIVE_FORBID_TEMPLATE.substitute(
-                cond=cond, name=name, msg=msg
-            )
+            FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name, msg=msg)
             if cond != ""
             else ""
         )
