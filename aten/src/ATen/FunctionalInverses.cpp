@@ -137,12 +137,8 @@ Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tenso
     return base.diagonal_scatter(mutated_view, offset, dim1, dim2);
 }
 
-Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, base.sizes(),/*always_return_non_view=*/!reapply_views);
-}
-
-Tensor FunctionalInverses::expand_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, c10::asIntArrayRefSlow(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
+Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, bool implicit) {
+    return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
 }
 
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
@@ -291,21 +287,14 @@ Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Ten
     return base.select_scatter(mutated_view, dim, mutated_view_idx);
 }
 
-Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size) {
-    if (reapply_views) {
-      return mutated_view.view(base.sizes());
-    } else {
-      return at::view_copy(mutated_view, base.sizes());
-    }
-}
-
-Tensor FunctionalInverses::view_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size) {
+Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size) {
     if (reapply_views) {
       return mutated_view.view_symint(base.sym_sizes());
     } else {
       return at::view_copy_symint(mutated_view, base.sym_sizes());
     }
 }
+
 
 Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::ScalarType dtype) {
     if (reapply_views) {

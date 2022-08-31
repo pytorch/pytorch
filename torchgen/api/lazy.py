@@ -37,6 +37,14 @@ from torchgen.model import (
 _valueT = None
 
 
+# A ValueT is an IR type which represents the computation of a Tensor.  In other
+# words, a PyTorch user will do operations on lazy tensors, and each output lazy
+# tensor internally tracks a ValueT representing the IR node that would have
+# actually produced the value of this tensor for real.
+#
+# This is configurable because different lazy tensor backends (LTC vs XLA) will
+# have different IR representations.  (Though, arguably, after unification they
+# shouldn't!)
 def getValueT() -> BaseCppType:
     global _valueT
     if not _valueT:
@@ -113,12 +121,27 @@ def process_ir_type(
         elif str(typ.elem) == "Tensor":
             # this is a TensorList which comes in from GetTensorList as a Value
             return BaseCType(tensorListValueT)
+        elif typ.elem == BaseType(BaseTy.SymInt):
+            # TODO: return a value type.  The problem here is analogous to
+            # the problem with tensorListValueT: if you have SymInt[] you
+            # cannot conveniently save the list of Value directly, as nodes
+            # expect to save values as a vector for ALL arguments.  So you
+            # need a separate IR node that represents all of the size nodes
+            # assembled into a list.  I'm not an LTC dev so I don't want to
+            # figure it out right now.  Y'all figure it out...
+            return VectorCType(BaseCType(longT))
+
         else:
             return VectorCType(process_ir_type(typ.elem, properties))
     else:
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
 
+# TODO: Determining this based off of CType is bad; this should be computed
+# from Type directly; then the same logic as process_ir_type can be used
+#
+# Invariant: passed typ should be an *owning* CType (e.g., we will report
+# that ArrayRef<Value> is NOT a value type)
 def isValueType(typ: CType, properties: "Optional[LazyIrProperties]" = None) -> bool:
     """
     Given a type, determine if it is a Value-like type.  This is equivalent to
@@ -133,6 +156,9 @@ def isValueType(typ: CType, properties: "Optional[LazyIrProperties]" = None) -> 
             or (typ.type == scalarT and not treat_scalars_as_constants)
             or typ.type == SymIntT
         )
+    elif typ == VectorCType(BaseCType(SymIntT)):
+        # TODO: report True for this
+        return False
     elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
         return isValueType(typ.elem, properties)
     return False
@@ -157,6 +183,7 @@ def isWrappedScalarType(typ: Type) -> bool:
     return False
 
 
+# TODO: dedupe with Type.is_generator_like
 def isGeneratorType(typ: Type) -> bool:
     if isinstance(typ, BaseType):
         return typ.name == BaseTy.Generator
@@ -165,12 +192,15 @@ def isGeneratorType(typ: Type) -> bool:
     return False
 
 
+# This class caches a few derived properties computed from an Argument
+# and LazyIrProperties
 class LazyArgument:
     name: str
     orig_type: Type
     lazy_type_: Optional[CType]
     is_wrapped_scalar: bool
     is_generator: bool
+    # TODO: this is lies, it is false for symint list
     is_symint_or_list: bool
 
     # true if this argument is or contains a lazy IR value
@@ -192,7 +222,11 @@ class LazyArgument:
         else:
             self.lazy_type_ = process_ir_type(arg.type, properties)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
-        self.is_symint_or_list = isSymIntType(arg.type)
+        self.is_symint_or_list = (
+            isSymIntType(arg.type)
+            # TODO: lists of symints are not currently treated as value types
+            # or (isinstance(arg.type, ListType) and isSymIntType(arg.type.elem))
+        )
 
         self.is_lazy_value = not self.is_generator and isValueType(
             self.lazy_type, properties
@@ -268,6 +302,8 @@ class LazyIrProperties:
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
 # but carries type information from a native FunctionSchema modified for use with IR nodes,
 # and preserving original argument names.
+#
+# TODO: This is not idiomatic with how other torchgen APIs transform on schema.
 class LazyIrSchema:
     # The name of the operator this function schema describes.
     name: "OperatorName"
