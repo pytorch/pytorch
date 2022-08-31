@@ -1051,7 +1051,6 @@ class DistributedTest:
                         self.assertEqual(param.data, tensor)
 
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_periodic_model_averager_param_group(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
@@ -2919,7 +2918,6 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_scatter_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -2943,7 +2941,6 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
@@ -2956,7 +2953,6 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_scatter_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
@@ -2969,14 +2965,12 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_small_worldsize
         def test_scatter_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_scatter_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_scatter_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_scatter_helper(group, group_id, rank)
@@ -3010,7 +3004,6 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_gather_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -3034,7 +3027,6 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_gather_helper(group, group_id, rank)
@@ -3047,14 +3039,12 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_small_worldsize
         def test_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_gather_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_gather_helper(group, group_id, rank)
@@ -3626,7 +3616,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4355,7 +4344,6 @@ class DistributedTest:
             BACKEND == "nccl",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])
@@ -4383,7 +4371,6 @@ class DistributedTest:
             BACKEND == "nccl",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
         def test_ddp_hook_with_optimizer_parity_adam(self, optimize_subset):
@@ -4404,7 +4391,6 @@ class DistributedTest:
             BACKEND == "nccl",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
         def test_ddp_hook_with_optimizer_parity_sgd(self, optimize_subset):
@@ -9037,7 +9023,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):
 
