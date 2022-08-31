@@ -11622,6 +11622,11 @@ op_db: List[OpInfo] = [
                 "TestProxyTensorOpInfo",
                 "test_make_fx_symbolic_exhaustive",
             ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNormalizeOperators",
+                "test_normalize_operator_exhaustive",
+            ),
         ),
     ),
     OpInfo('topk',
