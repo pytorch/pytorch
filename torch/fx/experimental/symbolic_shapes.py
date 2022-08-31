@@ -85,10 +85,13 @@ def handle_symbolic_op(func, args, kwargs):
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
     if func == torch.ops.aten.sym_numel.default:
-        res = 1
-        for s in args[0].shape:
-            res = res * s
-        return res
+        # TODO: this cache can become stale
+        if not hasattr(args[0], "_cached_numel"):
+            res = 1
+            for s in args[0].shape:
+                res = res * s
+            args[0]._cached_numel = res
+        return args[0]._cached_numel
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
