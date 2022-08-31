@@ -28,6 +28,10 @@ COMMON_COPTS = [
 ] + if_cuda([
     "-DUSE_CUDA",
     "-DUSE_CUDNN",
+    # TODO: This should be passed only when building for CUDA-11.5 or newer
+    # use cub in a safe manner, see:
+    # https://github.com/pytorch/pytorch/pull/55292
+    "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
 ])
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
