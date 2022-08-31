@@ -404,7 +404,7 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         with in_kernel_invocation_manager(self.fake_mode):
             self_repr = super().__repr__()
-        return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
+        return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern

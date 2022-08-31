@@ -126,8 +126,9 @@ using c10::Argument;
 using c10::FunctionSchema;
 using c10::SchemaArgType;
 using c10::SchemaArgument;
-using c10::SymIntNode;
+using c10::SymFloat;
 using c10::SymFloatNode;
+using c10::SymIntNode;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using torch::utils::SchemaInfo;
@@ -1391,7 +1392,8 @@ void initJITBindings(PyObject* module) {
                 TORCH_INTERNAL_ASSERT(psn);
                 return psn->sym_float();
               })
-          .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+          .def("__str__", [](c10::SymIntNode a) { return a->str(); })
+          .def("__repr__", [](c10::SymIntNode a) { return a->str(); });
 
   py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
       .def_static(
