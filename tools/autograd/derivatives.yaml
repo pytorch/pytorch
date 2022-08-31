@@ -2984,28 +2984,28 @@
   x: non_differentiable
 
 - name: special_cos_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("cos_pi")
 
 - name: special_cosh_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("cosh_pi")
 
 - name: special_sin_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("sin_pi")
 
 - name: special_sinc_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("sinc_pi")
 
 - name: special_sinh_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("sinh_pi")
 
 - name: special_sinhc(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("sinhc")
 
 - name: special_sinhc_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("sinhc_pi")
 
 - name: special_tan_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("tan_pi")
 
 - name: special_tanh_pi(Tensor z) -> Tensor
-  z: non_differentiable
+  z: not_implemented("tanh_pi")
