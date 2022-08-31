@@ -480,6 +480,27 @@ class TestFSDPMisc(FSDPTest):
         with fsdp.summon_full_params(fsdp):
             _assert_module_states(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
 
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_direct_nesting(self):
+        """Tests that nesting FSDP instances directly without an intermediate
+        module."""
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        model = MyModel().cuda()
+        # Directly nest FSDP instances, which means the outer directly wraps
+        # the inner and does not manage any parameters
+        fsdp_model = FSDP(FSDP(model))
+        inp = torch.randn(3, 10).cuda()
+        loss = fsdp_model(inp).sum()
+        loss.backward() 
+
 
 instantiate_parametrized_tests(TestFSDPMisc)
 

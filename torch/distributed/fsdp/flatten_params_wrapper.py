@@ -16,6 +16,7 @@ from .flat_param import FlatParamHandle
 
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
+FLAT_PARAM_HANDLE = "_flat_param_handle"
 
 __all__ = ["FlattenParamsWrapper"]
 
@@ -98,6 +99,7 @@ class FlattenParamsWrapper(nn.Module):
         self.flat_param = self._flat_param_handle.flat_param
         assert getattr(self, FPW_MODULE) is self._fpw_module
         assert getattr(self, FLAT_PARAM) is self.flat_param
+        assert getattr(self, FLAT_PARAM_HANDLE) is self._flat_param_handle
 
     @property
     def has_params(self) -> bool:
@@ -140,6 +142,11 @@ class FlattenParamsWrapper(nn.Module):
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes of this wrapper to the wrapped module."""
+        # The `FlatParamHandle`'s existence represents if *this* FPW instance
+        # has any parameters, so we should not forward the attribute lookup to
+        # nested modules, which also be FPW instances.
+        if name == FLAT_PARAM_HANDLE:
+            return super().__getattr__(name)
         try:
             return super().__getattr__(name)  # defer to `nn.Module`'s logic
         except AttributeError:
