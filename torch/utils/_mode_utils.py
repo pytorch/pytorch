@@ -1,4 +1,3 @@
-import functools
 import torch
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
@@ -12,17 +11,8 @@ T = TypeVar('T')
 # Specifically, it has the helper functions for enable_ and push_X_mode and the
 # ModeInfo class, which is extended by each where they are different
 
-def _wrap_init(f):
-    @functools.wraps(f)
-    def wrapped(self, *args, **kwargs):
-        if 'inner' in kwargs:
-            self.inner = kwargs['inner']
-            del kwargs['inner']
-        return f(self, *args, **kwargs)
-    return wrapped
 
-
-# in order to dedupe the logic between python mode and torch_function mode, this
+# in order to dedupe the logic between TorchDispatchMode and TorchFunctionMode, this
 # is a container to hold all the differences between the modes. Then functions like
 # _enable_mode are able to use this container to call functions or get correctly
 # formatted names
@@ -63,7 +53,7 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
         return
     if old is not None and not ignore_preexisting and old is not replace:
         if isinstance(mode, mode_info.mode_class):
-            help_text = f'Use push_{mode_info.mode_name}_mode instead.'
+            help_text = 'Use `with Mode():` instead.'
         else:
             help_text = (
                 'If you intended to completely override the preexisting mode, '
@@ -75,7 +65,7 @@ def _enable_mode(mode: T, mode_info: _ModeInfo, *, replace=None, ignore_preexist
             f'Attempted to enable_{mode_info.mode_name}_mode, but there is already an '
             f'active mode {old}.  {help_text}'
         )
-    # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
+    # NB: we don't require TorchFunctionMode/TorchDispatchMode since this is intended to also
     # let you directly pass a Tensor subclass type to "mode-ify" it.
     if mode is not None:
         required_fn = "__" + mode_info.mode_name + "__"
