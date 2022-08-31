@@ -10,6 +10,25 @@
 namespace at { namespace functorch {
 
 template <typename A, A a, typename C>
+struct NewBlahBatchRuleHelperSymInt;
+
+template <typename F, F Func, typename A, typename B, typename... T>
+struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& tensor,
+      optional<int64_t> batch_dim,
+      SymIntArrayRef shape,
+      T... extra_args) {
+    const auto bdim_size = tensor.sym_size(batch_dim.value());
+    c10::SmallVector<c10::SymInt> new_shape;
+    new_shape.reserve(shape.size() + 1);
+    new_shape.emplace_back(bdim_size);
+    new_shape.insert(new_shape.end(), shape.begin(), shape.end());
+    return std::make_tuple(Func(tensor, new_shape, std::forward<T>(extra_args)...), 0);
+  }
+};
+
+template <typename A, A a, typename C>
 struct NewBlahBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename B, typename... T>
@@ -33,6 +52,12 @@ struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
 // It is important that this macro is not passed a function pointer!!
 #define NEW_BLAH_BATCH_RULE(fn) SINGLE_ARG(\
     NewBlahBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
+
+#define NEW_BLAH_BATCH_RULE_SYMINT(fn) SINGLE_ARG(\
+    NewBlahBatchRuleHelperSymInt<\
       decltype(&fn),\
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
@@ -82,17 +107,6 @@ bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
   return true;
 }
 
-Tensor new_empty_symint_decomp(
-    const Tensor& self,
-    SymIntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt
-    ) {
-  return self.new_empty(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt);
-}
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("_has_same_storage_numel", _has_same_storage_numel_batch_rule);
   VMAP_SUPPORT(ones_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(ones_like)));
@@ -101,8 +115,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(randn_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(randn_like)));
   VMAP_SUPPORT(rand_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(rand_like)));
   VMAP_SUPPORT(full_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(full_like)));
-  VMAP_SUPPORT(new_empty, NEW_BLAH_BATCH_RULE(ATEN_FN(new_empty)));
-  m.impl("new_empty.SymInt", new_empty_symint_decomp);
+  VMAP_SUPPORT(new_empty, NEW_BLAH_BATCH_RULE_SYMINT(ATEN_FN(new_empty)));
   VMAP_SUPPORT(new_zeros, NEW_BLAH_BATCH_RULE(ATEN_FN(new_zeros)));
   VMAP_SUPPORT(new_ones, NEW_BLAH_BATCH_RULE(ATEN_FN(new_ones)));
   VMAP_SUPPORT(new_full, NEW_BLAH_BATCH_RULE(ATEN_FN(new_full)));

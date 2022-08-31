@@ -298,7 +298,6 @@ class TestNestedTensorDeviceType(TestCase):
                 torch.nested_tensor(ts2, device=device, dtype=dtype))
 
     @dtypes(*floating_types_and_half())
-    @dtypesIfCUDA(torch.float64)
     def test_detach(self, device, dtype):
         a = torch.randn(2, 4, device=device, dtype=dtype, requires_grad=False)
         b = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=False)
