@@ -733,6 +733,7 @@ class FullyShardedDataParallel(nn.Module):
         # since for mixed precision, buffers are restored to their original
         # dtype for model checkpointing
         self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+        self._debug_level = dist.get_debug_level()
 
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
