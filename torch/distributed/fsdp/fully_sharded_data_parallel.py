@@ -1343,7 +1343,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.cuda.stream(self._streams["mixed_precision_params"]):
             for p in self.params:
                 assert p._mp_shard is not None
-                _alloc_storage(data=p._mp_shard, size=p._local_shard.size())
+                _alloc_storage(p._mp_shard, size=p._local_shard.size())
                 # Cast is done by copy
                 p._mp_shard.copy_(
                     # no-op if not CPU offloading, otherwise nonblocking because
