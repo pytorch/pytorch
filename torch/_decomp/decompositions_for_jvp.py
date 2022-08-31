@@ -1,13 +1,31 @@
-import torch
-from torch import Tensor
-import torch._decomp
 import inspect
-from typing import Callable, Dict, Tuple, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
+
+import torch
+import torch._decomp
+from torch import Tensor
 
 decomposition_table = torch._decomp.decomposition_table
 decomposition_table_for_jvp: Dict[torch._ops.OpOverload, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
 aten = torch.ops.aten
+
+# NOTE: [forward-mode AD decompositions hack]
+#
+# The mechanism is in VariableType,
+#   IF any inputs have forward grad
+#      AND there is no forward AD formula implemented
+#      AND the functions is actually differentiable
+#   run the decomposition
+#      See run_jit_decomposition_with_args_for_jvp
+#      We currently use python decompositions that we torchscript.
+#
+# Note that we would be building the backward graph at the decomposed level
+# too, but that is OK, because we would've errored out otherwise anyway.
+#
+# TODO: what if jit decompositions exists, should we just use it?
+#       or do we want to have an explicit white list like functorch had
+#       using special JVP_DECOMP DynamicLayerFront kernel
 
 
 def maybe_register_decomposition(op):
@@ -16,7 +34,9 @@ def maybe_register_decomposition(op):
             return register_decomposition(op)(f)
         except Exception:
             return f
+
     return decorator
+
 
 # Functions where we need a special decomposition for jvp but there's another version that
 # should be used more generally (ex. for jvp we need to recompute the mean and variance for
@@ -77,8 +97,9 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     return min - torch.log1p(z), buffer
 
 
-
-def recompute_mean_var(input: Tensor, rstd: Tensor, inner_dim_indices: List[int], keepdim: bool):
+def recompute_mean_var(
+    input: Tensor, rstd: Tensor, inner_dim_indices: List[int], keepdim: bool
+):
     # for most norm decompositions, it will be the same as the core version except for here.
     # We recompute the mean and variance so that they track gradients through input
 
@@ -174,7 +195,9 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition_for_jvp(aten.native_batch_norm_backward)  # @register_decomposition_for_jvp after in core
+@register_decomposition_for_jvp(
+    aten.native_batch_norm_backward
+)  # @register_decomposition_for_jvp after in core
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -192,11 +215,13 @@ def native_batch_norm_backward(
     assert input_rank >= 2, "rank of the input must be at least 2"
 
     axis = 1
-    num_features = prod(input_shape) / input_shape[axis]
+    num_features = prod(input_shape) / input_shape[axis]  # type: ignore[arg-type]
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert save_mean is not None and save_invstd is not None, "when train=True, save_mean and save_invstd are required"
+        assert (
+            save_mean is not None and save_invstd is not None
+        ), "when train=True, save_mean and save_invstd are required"
 
         reduciton_dims = [0] + list(range(2, input.dim()))
         assert invstd is not None  # for typing
@@ -205,6 +230,8 @@ def native_batch_norm_backward(
         assert running_mean is not None and running_var is not None
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
+
+    assert invstd is not None and mean is not None
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
@@ -236,14 +263,18 @@ def native_batch_norm_backward(
     if output_mask[1]:
         grad_weight = dot_p * invstd
     elif weight is not None:
-        grad_weight = torch.zeros_like(weight)  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros_like(
+            weight
+        )  # should be None but doesn't work with vjp
     else:
         grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
 
     if output_mask[2]:
         grad_bias = grad_output_sum
     else:
-        grad_bias = torch.zeros_like(grad_output_sum)  # should be None but doesn't work with vjp
+        grad_bias = torch.zeros_like(
+            grad_output_sum
+        )  # should be None but doesn't work with vjp
 
     return (grad_input, grad_weight, grad_bias)
 
