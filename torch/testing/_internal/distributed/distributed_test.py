@@ -143,6 +143,7 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
     dist.Backend.MPI,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
@@ -150,6 +151,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
     dist.Backend.NCCL,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported for p2p ops
@@ -157,6 +159,7 @@ SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
     dist.Backend.NCCL,
+    dist.Backend.UCC,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
