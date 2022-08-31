@@ -3160,6 +3160,19 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ), kwargs=kwargs)
 
 
+def error_inputs_conv2d(opinfo, device, **kwargs):
+    msg = "should be the same"
+    weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
+    input = torch.randint(high=10, size=(2, 4, 4), device=device)
+    bias = torch.rand((3,), dtype=torch.float32, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+    weight = torch.rand(size=(3, 2, 3, 3), device=device, dtype=torch.float64)
+    input = torch.rand(size=(2, 4, 4), device=device, dtype=torch.float64)
+    bias = torch.rand((3,), dtype=torch.complex128, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4615,6 +4628,10 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
         SampleInput(tensor_nd(), kwargs=dict(dim=(1,), correction=S // 2)),
         SampleInput(tensor_nd(), kwargs=dict(dim=None, correction=0, keepdim=True)),
+
+        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+        SampleInput(tensor_nd(), args=(True,)),
+        SampleInput(tensor_nd(), args=(False,)),
     ]
 
 
@@ -7108,28 +7125,26 @@ def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
-    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # kl_div works with inputs in [0, 1] (aka the pdf of a probability measure)
+    # Then log [0, 1] = (-inf, 0], so this is the log space
+    make_arg = partial(make_tensor, low=0., device=device, dtype=dtype, requires_grad=requires_grad)
 
-    shapes_and_reduction = [
-        ((2,), "mean"),
-        ((2, 3), "mean"),
-        ((2, 3, 4), "mean"),
-        ((2,), "none"),
-        ((2,), "batchmean"),
-        ((2,), "sum"),
-    ]
+    def make_log(shape):
+        out = torch.nn.functional.log_softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
 
-    sample_inputs = []
-    for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
-        # input should be log-probability, i.e. lie in (-inf, 0]
-        input = make(shape, low=None, high=0)
-        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
-        # i.e. lie in (-inf, 0]
-        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
-        sample_inputs.append(
-            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-        )
-    return sample_inputs
+    def make_prob(shape):
+        out = torch.nn.functional.softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
+
+    shapes = ((2,), (2, 3))
+    reductions = ("none", "mean", "batchmean", "sum")
+    for shape, reduction, log_target in product(shapes, reductions, (True, False)):
+        input = make_log(shape)
+        target = make_log(shape) if log_target else make_prob(shape)
+        yield SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8694,8 +8709,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            ),
            supports_out=False),
     UnaryUfuncInfo('cos',
@@ -8773,12 +8786,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Float did not match double
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Jacobian mismatch
@@ -9370,25 +9377,6 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
-    OpInfo('inverse',
-           op=torch.inverse,
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', '.test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', '.test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-           )),
     OpInfo('isin',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
@@ -10514,6 +10502,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
+           error_inputs_func=error_inputs_conv2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -13316,9 +13305,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # 76571
+               # 76571 - CUDA gets expectedFailure, but this test passes for ROCm
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
-                            dtypes=(torch.float16, torch.float32, torch.float64)),
+                            dtypes=(torch.float16, torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -13330,9 +13319,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # 76571
+               # 76571 - CUDA gets expectedFailure, but this test passes for ROCm
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
-                            dtypes=(torch.float16, torch.float32, torch.float64)),
+                            dtypes=(torch.float16, torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -15643,10 +15632,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
-        dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        dtypesIfCUDA=floating_types_and(
-            torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
-        ),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -16879,7 +16866,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -16915,7 +16902,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.view",
@@ -16996,6 +16983,17 @@ python_ref_db = [
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "ops.nvprims.var_mean",
+        torch_opinfo_name="var_mean",
+        validate_view_consistency=False,
+        # Complex types are currently disabled
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
     ),
     #
     # Linear Algebra Operators
@@ -17256,16 +17254,14 @@ def _compare_trilu_indices(
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
     else:
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
+                 .tril(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+                 .triu(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 

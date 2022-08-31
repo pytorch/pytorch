@@ -114,6 +114,9 @@ namespace detail {
  *    they have been registered as fallthrough.  The set of excluded backends
  *    varies from operator, as some operators may have overridden the
  *    fallthrough with custom behavior.
+ *
+ *   Note - this should maintain identical impl to the py dispatcher key extraction logic
+ *   at pytorch/torch/dispatcher.py
  */
 struct TORCH_API DispatchKeyExtractor final {
 public:
