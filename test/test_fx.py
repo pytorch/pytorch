@@ -237,6 +237,41 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_same_graph_with_different_placeholder_order(self):
+        def create_graph_with_early_placeholer_nodes():
+            # placeholders happen in the beginning of the graph.
+            fx_graph = torch.fx.Graph()
+            a = fx_graph.placeholder("a")
+            c = fx_graph.placeholder("view")
+            b = fx_graph.call_function(torch.ops.aten.view, (a, [4, 1]))
+            d = fx_graph.call_function(torch.ops.aten.view, (c, [4, 1]))
+            e = fx_graph.call_function(torch.ops.aten.div.Tensor, (b, 8.0))
+            f = fx_graph.call_function(torch.ops.aten.add.Tensor, (d, e))
+            fx_graph.output(f)
+            return fx_graph
+
+        def create_graph_with_later_placeholder_nodes():
+            # The placeholder of "view" happens after a node "b" create
+            # output named "view".
+            fx_graph = torch.fx.Graph()
+            a = fx_graph.placeholder("a")
+            b = fx_graph.call_function(torch.ops.aten.view, (a, [4, 1]))
+            c = fx_graph.placeholder("view")
+            d = fx_graph.call_function(torch.ops.aten.view, (c, [4, 1]))
+            e = fx_graph.call_function(torch.ops.aten.div.Tensor, (b, 8.0))
+            f = fx_graph.call_function(torch.ops.aten.add.Tensor, (d, e))
+            fx_graph.output(f)
+            return fx_graph
+
+        fx_module_early = torch.fx.GraphModule(torch.nn.Module(), create_graph_with_early_placeholer_nodes())
+        fx_module_later = torch.fx.GraphModule(torch.nn.Module(), create_graph_with_later_placeholder_nodes())
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        z_early = fx_module_early(x, y)
+        z_later = fx_module_later(x, y)
+        self.assertEqual(z_early, z_later)
+
     def test_args_kwargs(self):
         class T(torch.nn.Module):
             def forward(self, *args, **kwargs):
