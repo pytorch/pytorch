@@ -293,7 +293,7 @@ oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_
   return std::make_tuple(at::matrix_exp(self_), 0);
 }
 
- fourOutputs solve_ex_batch_rule(
+fourOutputs solve_ex_batch_rule(
     const Tensor& A, optional<int64_t> A_bdim,
     const Tensor& B, optional<int64_t> B_bdim,
     bool left, bool check_errors) {
@@ -349,6 +349,37 @@ oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
   const auto dim_ = getPhysicalDim(self_, true, dim);
 
   return std::make_tuple(linalg_cross(self_, other_, dim_), 0);
+}
+
+c10::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
+  if (t.dim() == 1 && t.size(0) == 0) {
+    return c10::optional<int64_t>();
+  }
+  return c10::optional<int64_t>(0);
+}
+
+fourOutputs linalg_lstsq_batch_rule(
+    const Tensor& self, c10::optional<int64_t> self_bdim, const Tensor& b, c10::optional<int64_t> b_bdim,
+    c10::optional<double> rcond, c10::optional<c10::string_view> driver) {
+  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
+  TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
+
+  const auto batch_size = get_bdim_size2(self, self_bdim, b, b_bdim);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
+
+  // because of ambiguity with vector case, lstsq can broadcast [1, 2] -> [batch_size, 2] but not [2] -> [batch_size, 2]
+  // so could unsqueeze if there's no bdim or just ensure_has_bdim
+  const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
+  const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
+
+  Tensor res, res_1, res_2, res_3;
+  std::tie(res, res_1, res_2, res_3) = at::linalg_lstsq(self_, b_, rcond, driver);
+
+  // everything but the 0th output are only sometimes computed. When they aren't, they're empty tensors without a bdim
+  const auto res_1_bdim = batch_dim_if_not_empty(res_1);
+  const auto res_2_bdim = batch_dim_if_not_empty(res_2);
+  const auto res_3_bdim = batch_dim_if_not_empty(res_3);
+  return std::make_tuple(res, 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -459,6 +490,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("linear", linear_decomp);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
+  VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
