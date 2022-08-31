@@ -143,6 +143,9 @@ TORCH_LIBRARY(c10d, m) {
       "scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, scatter_));
   m.def(
+      "alltoall_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
+  m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
