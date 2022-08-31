@@ -463,8 +463,23 @@ static inline Tensor handleDimInMultiDimIndexing(
   } else if (index.is_tensor()) {
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
-    if (tensor.dim() == 0) {
+    auto scalar_type = tensor.scalar_type();
+    if (tensor.dim() == 0 && (scalar_type == at::kByte || scalar_type == at::kBool)) {
       result = result.unsqueeze(*dim_ptr);
+        if (scalar_type == at::kBool) {
+          impl::recordTensorIndex(
+              impl::boolToIndexingTensor(
+                  result, tensor.item<bool>() != 0, original_tensor_device),
+              outIndices,
+              dim_ptr);
+        } else {
+          impl::recordTensorIndex(
+              impl::boolToIndexingTensor(
+                  result, tensor.item<uint8_t>() != 0, original_tensor_device),
+              outIndices,
+              dim_ptr);
+        }
+      }
     }
     impl::recordTensorIndex(tensor, outIndices, dim_ptr);
     return result;
