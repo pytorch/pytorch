@@ -650,7 +650,7 @@ class TestOperators(common_utils.TestCase):
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
 
     @unittest.skip("It started failing after #81761")
-        # TODO(#83661): Fix and enable the test
+    # TODO(#83661): Fix and enable the test
     def test_norm_p1(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=1, dim=2), (x))
