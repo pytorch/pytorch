@@ -128,8 +128,11 @@ class FlatParameter(nn.Parameter):
         flattened parameter, or the unsharded flattened parameter.
 
     Attributes:
-        _unsharded_size (torch.Size): Unsharded flattened parameter's size
-            (without padding).
+        _unpadded_unsharded_size (torch.Size): Unsharded flattened parameter's
+            size without padding.
+        _padded_unsharded_size (torch.Size): Unsharded flattened parameter's
+            size with padding. This is only set for sharded strategies since
+            they require padding for the all-gather.
 
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo`.
@@ -215,7 +218,7 @@ class FlatParameter(nn.Parameter):
         self._shapes = tuple(shapes)
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
-        self._unsharded_size = self.size()
+        self._unpadded_unsharded_size = self.size()
 
 
 class FlatParamHandle:
@@ -670,10 +673,9 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         flat_param = self.flat_param
-        padded_unsharded_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_freed(unsharded_flat_param)
-        _alloc_storage(unsharded_flat_param, padded_unsharded_size)
+        _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
@@ -731,7 +733,7 @@ class FlatParamHandle:
         Switches to using the *unpadded* unsharded flattened parameter, which
         is a view into the *padded* unsharded flattened parameter.
         """
-        unsharded_size = self.flat_param._unsharded_size
+        unsharded_size = self.flat_param._unpadded_unsharded_size
         self.flat_param.data = padded_unsharded_flat_param[
             : unsharded_size.numel()
         ].view(unsharded_size)
@@ -763,7 +765,7 @@ class FlatParamHandle:
         )
         flat_param = self.flat_param
         if flat_param.grad is not None and (
-            flat_param.grad.size() != flat_param._unsharded_size
+            flat_param.grad.size() != flat_param._unpadded_unsharded_size
             or flat_param.grad.device != flat_param.device  # grad on CPU
         ):
             self._check_on_compute_device(self.flat_param)
@@ -786,7 +788,7 @@ class FlatParamHandle:
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
             else:
-                padded_unsharded_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
+                padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
                     flat_param.grad.size() == padded_unsharded_size,
                     "Expects `.grad` to be the unsharded gradient in "
@@ -811,8 +813,8 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         p_assert(
-            self.flat_param.size() == self.flat_param._unsharded_size,
-            f"Expects size {self.flat_param._unsharded_size} but got {self.flat_param.size()}",
+            self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+            f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
         )
         self._check_on_compute_device(self.flat_param)
         # Check that the unpadded unsharded flattened parameter is a view into
@@ -833,8 +835,8 @@ class FlatParamHandle:
             yield
         finally:
             p_assert(
-                self.flat_param.size() == self.flat_param._unsharded_size,
-                f"Expects size {self.flat_param._unsharded_size} but got {self.flat_param.size()}",
+                self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+                f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
             )
             padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
             # Copy from CPU to the compute device
@@ -919,8 +921,8 @@ class FlatParamHandle:
         if tensor is None:
             tensor = flat_param
         p_assert(
-            tensor.numel() == flat_param._unsharded_size.numel(),
-            f"Expects {flat_param._unsharded_size.numel()} numel but got "
+            tensor.numel() == flat_param._unpadded_unsharded_size.numel(),
+            f"Expects {flat_param._unpadded_unsharded_size.numel()} numel but got "
             f"{tensor.numel()} numel",
         )
         views = (

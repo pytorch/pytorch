@@ -184,7 +184,7 @@ def _communicate_optim_state(
             dist._all_gather_base(tensor_buffer, value, group=group)
             torch.cuda.synchronize()
             if to_save:
-                unpadded_numel = flat_param._unsharded_size.numel()  # type: ignore[attr-defined]
+                unpadded_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
                 tensor_state[state_name] = tensor_buffer[:unpadded_numel].cpu()
         # Zero-dimension tensor state and non-tensor state: take this rank's
         # value directly
@@ -524,7 +524,7 @@ def _flatten_tensor_optim_state(
         for state_value, shape in zip(pos_dim_tensors, unflat_param_shapes)
     ]
     flat_tensor = torch.cat(tensors)
-    flat_param_shape = flat_param._unsharded_size  # type: ignore[attr-defined]
+    flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, (
         f"tensor optim state: {flat_tensor.shape} "
         f"flattened parameter: {flat_param_shape}"
