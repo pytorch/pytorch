@@ -1807,20 +1807,24 @@ class FullyShardedDataParallel(nn.Module):
                 submodule._state_dict_type = prev_state_dict_type
                 submodule._state_dict_config = prev_state_dict_config
 
+    def _convert_to_wrapped_module_name(self, module_name: str) -> str:
+        module_name = module_name.replace(f"{FPW_MODULE}.", "")
+        module_name = module_name.replace(f"{FPW_MODULE}", "")
+        if module_name:
+            module_name = f"{module_name}."
+        # Activation checkpoint adds a prefix that has to be
+        # removed as well.
+        module_name = module_name.replace(
+            f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
+        )
+        return module_name
+
     @property
     def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
         for param_name, module_name in (
             self._fsdp_wrapped_module.handle.parameter_module_names()
         ):
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
-            # Activation checkpoint adds a prefix that has to be
-            # removed as well.
-            module_name = module_name.replace(
-                f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-            )
+            module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{module_name}{param_name}"
             yield fqn, param_name, module_name
 
@@ -2199,10 +2203,7 @@ class FullyShardedDataParallel(nn.Module):
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
         for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = module_name.replace(f"{FPW_MODULE}.", "")
-            module_name = module_name.replace(f"{FPW_MODULE}", "")
-            if module_name:
-                module_name = f"{module_name}."
+            module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
             param = state_dict.pop(fqn)
 
