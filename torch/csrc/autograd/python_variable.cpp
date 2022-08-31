@@ -244,7 +244,8 @@ void concrete_dispatch_fn(
     torch::jit::Stack* stack);
 bool concrete_is_contiguous_fn(
     const c10::impl::PyInterpreter*,
-    const c10::TensorImpl* self);
+    const c10::TensorImpl* self,
+    c10::MemoryFormat memory_format);
 c10::Device concrete_device_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
@@ -2133,7 +2134,8 @@ py::object torchDispatchFromTensorImpl(
     const c10::TensorImpl* self,
     const char* func_name,
     PyObject* torch_api_function,
-    const char* module_name) {
+    const char* module_name,
+    c10::optional<c10::MemoryFormat> memory_format=c10::nullopt) {
   TORCH_CHECK(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
@@ -2148,8 +2150,12 @@ py::object torchDispatchFromTensorImpl(
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1 + (int)memory_format.has_value()));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+  if (memory_format.has_value()) {
+    auto memory_format_p = py::cast((int64_t)memory_format.value());
+    PyTuple_SET_ITEM(args.ptr(), 1, memory_format_p.ptr());
+  }
 
   py::dict kwargs;
 
@@ -2269,7 +2275,8 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(
 
 bool concrete_is_contiguous_fn(
     const c10::impl::PyInterpreter*,
-    const c10::TensorImpl* self) {
+    const c10::TensorImpl* self,
+    c10::MemoryFormat memory_format) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
@@ -2282,7 +2289,8 @@ bool concrete_is_contiguous_fn(
           .attr("is_contiguous")
           .attr("default")
           .ptr(),
-      "torch.ops.aten");
+      "torch.ops.aten",
+      memory_format);
 
   TORCH_CHECK(
       PyBool_Check(out.ptr()),

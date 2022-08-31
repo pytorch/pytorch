@@ -2,6 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -168,7 +169,7 @@ struct C10_API PyInterpreter {
       const PyInterpreter*,
       const c10::OperatorHandle&,
       torch::jit::Stack* stack);
-  using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
+  using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*, c10::MemoryFormat);
   using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
   using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
   using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
@@ -251,8 +252,8 @@ struct C10_API PyInterpreter {
     return (*dispatch_fn_)(this, op, stack);
   }
 
-  __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
-    return (*is_contiguous_fn_)(this, self);
+  __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self, c10::MemoryFormat memory_format) const {
+    return (*is_contiguous_fn_)(this, self, memory_format);
   }
 
   __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const {

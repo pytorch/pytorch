@@ -307,7 +307,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # which will make it ok to run decompositions before functionalization.
         fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
     else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode="symbolic")(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")

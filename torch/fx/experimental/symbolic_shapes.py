@@ -83,6 +83,8 @@ def handle_symbolic_op(func, args, kwargs):
         return len(args[0].shape)
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
+        print(args)
+        breakpoint()
         return True
 
 def _handle_sym_dispatch(func, args, kwargs):

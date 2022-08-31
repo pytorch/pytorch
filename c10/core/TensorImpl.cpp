@@ -395,7 +395,7 @@ impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (is_python_dispatch()) {
-    return load_pyobj_interpreter()->is_contiguous(this);
+    return load_pyobj_interpreter()->is_contiguous(this, memory_format);
   }
   TORCH_CHECK(
       false,
