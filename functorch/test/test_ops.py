@@ -741,7 +741,6 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('cross'),
         xfail('linalg.pinv'),
         xfail('masked_fill'),
         xfail('copysign'),
@@ -757,7 +756,6 @@ class TestOperators(TestCase):
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
-        xfail('linalg.cross'),
         xfail('nanmean'),
         xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -860,8 +858,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('cross'),
-        xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
@@ -962,6 +958,7 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
+        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),

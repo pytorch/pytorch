@@ -47,9 +47,10 @@ static const char* defineIndexMode(KernelIndexMode index_mode) {
 
 static const char* defineIntegerTypes() {
   return R"(
-typedef unsigned char uint8_t;
 typedef signed char int8_t;
+typedef unsigned char uint8_t;
 typedef short int int16_t;
+typedef unsigned short int uint16_t;
 typedef int int32_t;
 typedef unsigned int uint32_t;
 typedef long long int int64_t;
@@ -74,16 +75,20 @@ static const std::string& defineComplexTypes() {
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_bf16.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
 #endif
+  code += std::string("#pragma clang force_cuda_host_device begin\n");
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
       defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
+#ifdef USE_ROCM
+  code += std::string("#pragma clang force_cuda_host_device end\n");
+#endif
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
@@ -188,7 +193,7 @@ void FusionExecutor::compileFusion(
       options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
   auto properties = at::cuda::getDeviceProperties(options_.device.index());
   configured_device_smem_ = properties->sharedMemPerBlock;
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   device_smem_limit_ = properties->sharedMemPerBlockOptin;
 #else
   // don't know if rocm supports opt-in shared memroy reconfiguration
@@ -259,7 +264,7 @@ void FusionExecutor::compileFusion(
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "failed to assign a fusion_id_ after compilation.");
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   // The driver API call requires an int argument.
   int max_dynamic_smem = 0;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncGetAttribute(
@@ -392,7 +397,11 @@ uint64_t FusionExecutor::computeSharedMemory(
         const uint64_t data_size = dataTypeSize(smem_alloc->buffer()->dtype());
         // Add padding to align dynamic shared memory
         if (align_padding) {
+#ifndef USE_ROCM
           const int align_size = 16; // always align to 16B/128b.
+#else
+          const int align_size = 8; // see codegen.cpp for HIP
+#endif
           total = ceilDiv(total, align_size) * align_size;
         }
         total += inferred_val.value() * data_size;
@@ -646,7 +655,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
       global_buffers.zero_init.push_back(false);
     }
     // Remember the tensor buffer used for storing kernel profile
-    if (isEnabled(EnableOption::KernelProfile) &&
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
         tv == kernel->profile().getBuffer()) {
       global_buffers.profile_buffer = global_buffers.buffers.back();
     }
@@ -842,7 +851,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
 
     if (kernel()->summary().has_cooperative_grid_reduction) {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       int num_blocks_per_SM = -1;
       at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
           &num_blocks_per_SM,
@@ -916,18 +925,14 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel()->summary().is_stochastic) {
+    if (kernel()->summary().max_rng_offsets >= 0) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
       // binded but is not generally how we handle that in scheduler.
       // Refer to `Philox` in generated kernel to understand how the mapping
       // works.
-      rand_offset = 4 *
-          (std::ceil(
-               allocated_outputs[0].numel() /
-               (4.0 * 128 * launch_params_.gdimx())) + // NOLINT
-           1);
+      rand_offset = (kernel()->summary().max_rng_offsets + 1) * 4;
     }
 
     // This is the entry when we have provided `opt_code` but the entry has not
@@ -961,7 +966,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.push(inputs);
     kernel_arguments.push(allocated_outputs);
     kernel_arguments.push(global_buffers.buffers);
-    if (lowered_->kernel()->summary().is_stochastic) {
+    if (lowered_->kernel()->summary().max_rng_offsets >= 0) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
   }
@@ -1013,7 +1018,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (execute_kernel_) {
     if (maybe_available_dynamic_smem_.has_value() &&
         launch_params_.smem() > maybe_available_dynamic_smem_.value()) {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       // Increase limit of dynamic shared memory if needed.
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(
           compiled_kernel_.function,
@@ -1039,7 +1044,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
           kernel_arguments.getBuffer(),
           nullptr));
     } else {
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
       FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchCooperativeKernel");
       AT_CUDA_DRIVER_CHECK(
           at::globalContext().getNVRTC().cuLaunchCooperativeKernel(
@@ -1092,7 +1097,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
   }
 
-  if (isEnabled(EnableOption::KernelProfile)) {
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
     std::cout << kernel()->profile().toString(global_buffers.profile_buffer);
   }
 
