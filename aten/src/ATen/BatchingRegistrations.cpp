@@ -610,9 +610,14 @@ bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& oth
 // >>> z = [x[i].as_strided([1], [1], 1 + x[i].storage_offset() - 1) for i in range(4)]
 Tensor as_strided_batching_rule(
     const Tensor& tensor,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
+    SymIntArrayRef sym_sizes,
+    SymIntArrayRef sym_strides,
+    optional<c10::SymInt> sym_storage_offset) {
+  // TODO: fix me
+  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
+  auto strides = c10::asIntArrayRefSlow(sym_strides);
+  auto storage_offset = sym_storage_offset.has_value() ? c10::make_optional(sym_storage_offset->expect_int()) : c10::nullopt;
+
   auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
   auto physical_sizes = physical_view.getPhysicalShape(sizes);
