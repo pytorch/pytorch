@@ -167,9 +167,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = FakeTensorMode()
-        with mode:
-            pass
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -393,9 +391,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = FakeTensorMode()
-        with mode:
-            pass
+        mode = torch._prims.get_prim_fake_mode()
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1782,7 +1778,7 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode()
+                mode = FakeTensorMode(inner=None)
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
