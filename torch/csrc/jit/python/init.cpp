@@ -161,7 +161,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   }
 
   // TODO: virtualize
-  SymFloat sym_float();
+  c10::SymFloat sym_float();
 
   virtual std::string str() override {
     py::gil_scoped_acquire acquire;
@@ -260,7 +260,7 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
 
-SymFloat PythonSymIntNodeImpl::sym_float() {
+c10::SymFloat PythonSymIntNodeImpl::sym_float() {
   py::gil_scoped_acquire acquire;
   return c10::make_intrusive<PythonSymFloatNodeImpl>(
              getPyObj().attr("__sym_float__")())

@@ -743,13 +743,6 @@ def saved_variables(
     nctypes: List[NamedCType],
     var_names: Tuple[str, ...],
 ) -> Tuple[str, Tuple[SavedAttribute, ...]]:
-    def stride_expr(name: str) -> str:
-        assert var_names == (name,), (
-            'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
-            'that ".strides()" is being called on.'
-        )
-        return f'strides_or_error({name}, "{name}")'
-
     REPLACEMENTS: List[Tuple[str, Dict[str, Any]]] = [
         # replace self.sizes() with self_sizes
         (
@@ -855,15 +848,6 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
-        # replace self.strides() with self_strides
-        (
-            r"{}.strides\(\)",
-            {
-                "suffix": "_strides",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": stride_expr,
-            },
-        ),
         # replace self.layout() with self_layout
         (
             r"{}.layout\(\)",
@@ -882,6 +866,16 @@ def saved_variables(
         ),
     ]
 
+    # Forbid the attributes that would need a replacement
+    # entry but are not used to day and thus can't be tested.
+    # It is perfectly fine to remove these entries as long
+    # as the corresponding entry is added to REPLACEMENTS above
+    # and tested.
+    FORBIDEN = [
+        r"{}.strides\(\)",
+        r"{}.sym_strides\(\)",
+    ]
+
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
@@ -889,7 +883,16 @@ def saved_variables(
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         )
-        # First search the formula for expressions which can be evaluated
+        # First search the formula for forbidden expression and fail
+        # if one is found:
+        for regex in FORBIDEN:
+            if re.search(regex.format(name), formula):
+                raise RuntimeError(f"A new formula was added that uses {regex.format(name)} "
+                                   "This is not allowed right now and the corresponding "
+                                   "replacement entry needs to be added to load_derivatives.py")
+
+
+        # Second search the formula for expressions which can be evaluated
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
 
