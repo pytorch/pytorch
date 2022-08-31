@@ -15,19 +15,35 @@ New operators:
     SequenceMap
 """
 
+from typing import Sequence
+
+from torch import _C
 from torch.onnx import symbolic_helper
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 
-@symbolic_helper.parse_args("v", "is", "v", "v", "f", "i")
-def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+@symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
+def layer_norm(
+    g,
+    input: _C.Value,
+    normalized_shape: Sequence[int],
+    weight: _C.Value,
+    bias: _C.Value,
+    eps: float,
+    cudnn_enable: bool,
+):
+    # normalized_shape: input shape from an expected input of size
+    # axis: The first normalization dimension.
+    # layer_norm normalizes on the last D dimension,
+    # which D is the size of normalized_shape
+    axis = -len(normalized_shape)
     return g.op(
         "LayerNormalization",
         input,
         weight,
         bias,
         epsilon_f=eps,
-        axis_i=len(normalized_shape),
+        axis_i=axis,
     )

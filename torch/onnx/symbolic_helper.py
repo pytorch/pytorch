@@ -274,6 +274,7 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
             "b": bool
             "s": str
             "t": torch.Tensor
+            "none": the variable is unused
     """
 
     def decorator(fn):

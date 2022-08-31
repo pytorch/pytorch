@@ -3674,9 +3674,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Model(), x)
 
     def test_layer_norm(self):
-        model = torch.nn.LayerNorm([10, 10])
-        x = torch.randn(20, 5, 10, 10)
-        self.run_test(model, x)
+        # As layer_norm works on the last D dimension, please keep
+        # this test case at least three dimension to prevent the
+        # situation of axis=2 mapping to the same axis as axis=-2
+        model2 = torch.nn.LayerNorm([10, 10, 10])
+        x2 = torch.randn(20, 5, 10, 10, 10)
+        self.run_test(model2, x2)
 
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
