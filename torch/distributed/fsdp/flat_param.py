@@ -520,6 +520,10 @@ class FlatParamHandle:
             self.flat_param._shard_param_offsets[:],  # type: ignore[attr-defined]
         )
 
+    def _flat_param_to(self, *args, **kwargs):
+        """Wraps an in-place call to ``.to()`` for ``self.flat_param``."""
+        self.flat_param.data = self.flat_param.to(*args, **kwargs)
+
     def _get_modules(self) -> Set[nn.Module]:
         """Returns a :class:`set` of the modules whose parameters are included
         in this handle's flattened parameter."""
