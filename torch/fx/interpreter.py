@@ -126,7 +126,14 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
-            self.env[node] = self.run_node(node)
+            try:
+                self.env[node] = self.run_node(node)
+            except Exception as e:
+                msg = f"While executing {node.format_node()}"
+                msg = '{}: {}'.format(msg, e.args[0]) if e.args else str(msg)
+                msg += f"\n\nOriginal traceback:\n{node.stack_trace}"
+                e.args = (msg,) + e.args[1:]
+                raise
 
             if self.garbage_collect_values:
                 for to_delete in self.user_to_last_uses.get(node, []):
