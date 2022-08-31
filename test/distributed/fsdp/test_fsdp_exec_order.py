@@ -94,6 +94,9 @@ class Model(torch.nn.Module):
 
 
 class TestFSDPExecOrder(FSDPTest):
+    def setUp(self):
+        super().setUp()
+
     @property
     def device(self):
         return torch.device("cuda")
@@ -112,6 +115,7 @@ class TestFSDPExecOrder(FSDPTest):
         dist.set_debug_level(dist.DebugLevel.INFO)
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
+        dist.set_debug_level(dist.DebugLevel.INFO)
         fsdp_model = Model.wrap(sharding_strategy, self.device)
         if self.rank != 0:
             fsdp_model.flip_path()
