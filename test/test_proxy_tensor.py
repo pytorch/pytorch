@@ -1069,7 +1069,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
-    xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
