@@ -314,8 +314,8 @@ class TestGenericProxyTensor(TestCase):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
-    return copy__default
+    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy_
     """)
 
     def test_make_fx_reentrant_dispatch(self):
@@ -589,13 +589,19 @@ def forward(self, x_1):
         )
 
     def test_trace_subclasses(self):
-        def f(x):
+        def f1(x):
             x = UnwrapTensor(x)
             y = x * 2
             return y
 
+        def f2(x):
+            wrapped = UnwrapTensor(x)
+            y = x * wrapped
+            return y
+
         inp = [torch.randn(5)]
-        self._test(f, inp)
+        self._test(f1, inp)
+        self._test(f2, inp)
 
     def test_partial_decomp(self):
         def f(a, b, c):
@@ -771,9 +777,9 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
-    detach_default = torch.ops.aten.detach.default(empty);  empty = None
-    sym_size_2 = torch.ops.aten.sym_size(detach_default, 0)
-    return detach_default""")
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    sym_size_2 = torch.ops.aten.sym_size(detach, 0)
+    return detach""")
 
     def test_cat(self):
         def f(a, b):

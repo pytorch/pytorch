@@ -232,8 +232,8 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     _tensor_constant0 = self._tensor_constant0
-    lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
-    view_copy_default = torch.ops.aten.view_copy.default(lift_fresh, [-1]);  lift_fresh = None
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    view_copy_default = torch.ops.aten.view_copy.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, 1);  view_copy_default = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [3]);  add_tensor = None
     return view_copy_default_1
@@ -246,8 +246,8 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     _tensor_constant0 = self._tensor_constant0
-    lift_fresh = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
-    view_default = torch.ops.aten.view.default(lift_fresh, [-1]);  lift_fresh = None
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    view_default = torch.ops.aten.view.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
     add_tensor = torch.ops.aten.add_.Tensor(view_default, 1)
     view_default_1 = torch.ops.aten.view.default(view_default, [3]);  view_default = None
     return view_default_1
