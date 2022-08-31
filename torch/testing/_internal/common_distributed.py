@@ -81,9 +81,9 @@ class DistTestCases:
     # Sets showing that something is implemented
     backend_feature = {}
     backend_feature["gpu"] = {"nccl", "gloo"}  # TODO(ucc): add sequence number support to ucc and enable it here
-    backend_feature["cuda"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
-    backend_feature["ddp"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
-    backend_feature["subgroup"] = {"nccl", "gloo"}  # TODO(ucc): fix the hanging issue and add ucc here
+    backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
 
 
