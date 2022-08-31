@@ -638,11 +638,11 @@ class FullyShardedDataParallel(nn.Module):
         device_id (Optional[Union[int, torch.device]]): An ``int`` or ``torch.device``
             describing the CUDA device the FSDP module should be moved to determining where
             initialization such as sharding takes place. If this argument is not specified
-            and ``module`` is on CPU, we will move ``module`` to current CUDA device for faster
-            initialization and move ``module`` back to CPU before returning.
-            If specified, resulting FSDP instances will reside on this device.
-            Note that if ``device_id`` is specified but ``module`` is already
-            on a different CUDA device, an error will be thrown. (Default: ``None``)
+            and ``module`` is on CPU, we issue a warning mentioning that this argument can
+            be specified for faster initialization. If specified, resulting FSDP instances
+            will reside on this device, including moving ignored modules' parameters if
+            needed. Note that if ``device_id`` is specified but ``module`` is already on a
+            different CUDA device, an error will be thrown. (Default: ``None``)
 
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
@@ -682,232 +682,103 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fn=param_init_fn,
                 device_id=device_id,
                 sync_module_states=sync_module_states,
+                forward_prefetch=forward_prefetch,
             )
             return
 
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        self._debug_level = dist.get_debug_level()
-        self._handles: List[FlatParamHandle] = []
-        # Validate the ignored modules and derive the ignored parameters/buffers
-        ignored_modules = self._get_ignored_modules(module, ignored_modules)
-        self._ignored_modules = ignored_modules
-        ignored_params, ignored_param_names = \
-            self._get_ignored_params(module, ignored_modules)
-        buffer_names = self._get_buffer_names(module)
-        # Compute the names to ignore for full state dict cloning (i.e. those
-        # of the ignored modules' parameters and of all modules' buffers)
-        self._ignored_param_names = ignored_param_names
-        self._buffer_names = buffer_names
-        # NOTE: Since the names are computed at construction time, if the user
-        # changes them later, then FSDP will not properly ignore them. However,
-        # the `FlatParameter` implementation already relies on this assumption.
-        # We do this at construction time since we want the fully prefixed
-        # parameter names matching the keys in the model state dict (namely,
-        # including the wrapped module's name in the prefix), which may be done
-        # most non-intrusively here before flattening.
 
-        # if auto_wrap_policy is specified, submodules should not be
-        # already wrapped, otherwise we'd attempt to double wrap them resulting
-        # in errors.
+        self._ignored_modules = self._get_ignored_modules(module, ignored_modules)
+        ignored_params, self._ignored_param_names = self._get_ignored_params(
+            module, self._ignored_modules
+        )
+        self._buffer_names = self._get_buffer_names(module)
         if auto_wrap_policy is not None:
-            self._check_wrapped(
-                module,
-                check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
-                err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
-            )
-            if mixed_precision is not None and _contains_batchnorm(module):
-                _override_batchnorm_mixed_precision(module)
-                policy_to_use = functools.partial(
-                    _or_policy,
-                    policies=[_wrap_batchnorm_individually, auto_wrap_policy]
-                )
-                warnings.warn(
-                    "Mixed precision was specified for FSDP module with"
-                    " batchnorm submodules wrapped via ``auto_wrap_policy``."
-                    " BatchNorm units will be wrapped as a separate FSDP unit,"
-                    " with mixed_precision disabled (i.e. set to ``None``)"
-                    " as several BatchNorm kernels would raise errors when"
-                    " operating on reduced precision inputs."
-                )
-            else:
-                policy_to_use = auto_wrap_policy
-            _recursive_wrap(
-                module,
-                auto_wrap_policy=policy_to_use,
-                wrapper_cls=FullyShardedDataParallel,
-                ignored_modules=ignored_modules,
-                ignored_params=ignored_params,
-                # Note that we have the recursive_wrap skip wrapping for
-                # the outermost (this) module otherwise it will result in a
-                # double-wrap causing issues.
-                only_wrap_children=True,
-                # FSDP arguments follow.
-                process_group=process_group,
-                sharding_strategy=sharding_strategy,
-                cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch,
-                mixed_precision=mixed_precision,
-                param_init_fn=param_init_fn,
-                device_id=device_id,
-                sync_module_states=sync_module_states,
-            )
+            auto_wrap_kwargs = {
+                "module": module,
+                "auto_wrap_policy": auto_wrap_policy,
+                "wrapper_cls": FullyShardedDataParallel,
+                "ignored_modules": self._ignored_modules,
+                "ignored_params": ignored_params,
+                "only_wrap_children": True,  # avoid double wrapping the root
+            }
+            fsdp_kwargs = {
+                "process_group": process_group,
+                "sharding_strategy": sharding_strategy,
+                "cpu_offload": cpu_offload,
+                "backward_prefetch": backward_prefetch,
+                "forward_prefetch": forward_prefetch,
+                "mixed_precision": mixed_precision,
+                "param_init_fn": param_init_fn,
+                "device_id": device_id,
+                "sync_module_states": sync_module_states,
+            }
+            self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
-        if device_id is not None:
-            self.device_id = (
-                device_id if isinstance(device_id, torch.device)
-                else torch.device(device_id)
-            )
-            # If user passed in something like torch.device("cuda"),
-            # device index of current device is unclear, make it explicit.
-            if self.device_id == torch.device("cuda"):
-                warnings.warn(
-                    f"Passed in {self.device_id} does not have explicit index, "
-                    f"setting it to current index: {torch.cuda.current_device()}. "
-                    "If this is not correct, please explicitly call torch.cuda.set_device()"
-                    "before FSDP initialization or pass in explicit device index as device_id argument."
-                )
-                self.device_id = torch.device("cuda", torch.cuda.current_device())
-        else:
-            self.device_id = None
-
-
-        is_meta_module = any(p.is_meta for p in module.parameters())
-        is_torchdistX_deferred_init = (
-            not is_meta_module and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
-        )
-
-        def _run_param_init_fn():
-            # Call user-specified initialization function.
-            if not callable(param_init_fn):
-                raise ValueError(
-                    f"Expected {param_init_fn} to be callable, but got {type(param_init_fn)}"
-                )
-            param_init_fn(module)
-
-        if is_meta_module:
-            if param_init_fn is not None:
-                _run_param_init_fn()
-            else:
-                # Call default initialization function that is dependent on
-                # reset_parameters.
-                _default_meta_device_init_fn(module)
-        elif is_torchdistX_deferred_init:
-            assert _TORCHDISTX_AVAIL, "Got torchdistX initialized module but torchdistX lib is not available."
-            if param_init_fn is not None:
-                _run_param_init_fn()
-            else:
-                # Call default torchdistX initialization function. Omit re-initialization of FSDP submodules
-                # which is unnecessary.
-                check_fn = lambda k: not isinstance(k, FullyShardedDataParallel)  # noqa: E731
-                deferred_init.materialize_module(module, check_fn=check_fn)
-
-        # Check that module was placed onto a single device.
-        module_devices = set(
-            p.device for p in module.parameters() if p not in ignored_params and not isinstance(p, FlatParameter)
-        )
-
-        if len(module_devices) > 1:
-            raise RuntimeError(
-                f"FSDP only supports single device modules, but got params on {module_devices}"
-            )
-
-        # Move module appropriately depending on device_id and whether module is on CPU.
-        self._move_module_if_needed(module)
-
-        # device for computation, if module is on GPU, use module.device;
-        # if module is on CPU, use current device;
-        self.compute_device = _get_default_cuda_device(module)
-
-        # if device_id is specified, ensure it is the same
-        assert (
-            self.device_id is None or self.compute_device == self.device_id
-        ), f"Inconsistent compute_device and device_id: {self.compute_device} vs {self.device_id}"
-
-        # Enum to indicate if we're in the forward/backward pass, idle, etc.
         self.training_state = TrainingState_.IDLE
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
-        self.mixed_precision = mixed_precision
-        # Original buffer type (mapping since all buffers may not be of same type). In
-        # the case of mixed precision training, this is used to restore buffers
-        # to their original type (which may not be the same as that of the
-        # parameters in the model) when checkpointing.
-        self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
+        self.mixed_precision = mixed_precision or MixedPrecision()
+        # Save a mapping from fully prefixed buffer name to its original dtype
+        # since for mixed precision, buffers are restored to their original
+        # dtype for model checkpointing
+        self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+        self._debug_level = dist.get_debug_level()
 
-        # Only handle params which are not already sharded. This enables
-        # sharding individual layers of a Module, with an outer wrapper to
-        # shard any leftover parameters.
-        params = [
-            p for p in module.parameters()
-            if p not in ignored_params and not isinstance(p, FlatParameter)
-        ]
-
+        self._check_single_device_module(module, ignored_params)
+        device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
+        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._move_module_to_device(module, ignored_params, device_from_device_id)
+        self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
+        params_to_flatten = list(self._get_orig_params(module, ignored_params))
         if sync_module_states:
-            if params != [] and params[0].device == torch.device("cpu"):
-                raise ValueError(
-                    "Module has CPU parameters, but sync_module_states=True is specified."
-                    "This only works for GPU module, please specify `device_id` argument or move"
-                    " module to GPU before init."
-                )
-            # Collect buffers we have to synchronize, avoiding buffers that have already
-            # been synchronized to avoid redundant synchronization.
-            bufs_to_sync = []
-            for buf in module.buffers():
-                if not getattr(buf, '_fsdp_has_been_sync', False):
-                    buf._fsdp_has_been_sync = True
-                    bufs_to_sync.append(buf.detach())
+            self._sync_module_states(module, params_to_flatten)
 
-            states_to_sync = [param.detach() for param in params]
-            states_to_sync.extend(bufs_to_sync)
-            _sync_params_and_buffers(
-                process_group=self.process_group,
-                module_states=states_to_sync,
-                # Same bucket size as DDP
-                broadcast_bucket_size=_PARAM_BROADCAST_BUCKET_SIZE,
-                src=0,
-            )
-
-        self._fsdp_wrapped_module = FlattenParamsWrapper(module, params)
-        assert getattr(self, FSDP_WRAPPED_MODULE) is self._fsdp_wrapped_module
-        self.params = []
+        self._fsdp_wrapped_module = FlattenParamsWrapper(module, params_to_flatten)
+        self._check_orig_params_flattened(ignored_params)
+        # Invariant: `self.params` contains exactly the `FlatParameter`s of the
+        # handles in `self._handles`
+        self._handles: List[FlatParamHandle] = []
+        self.params: List[FlatParameter] = []
         if self._fsdp_wrapped_module.has_params:
-            self.params.append(self._fsdp_wrapped_module.flat_param)
-            self._register_param_handle(self._fsdp_wrapped_module.handle)
+            handle = self._fsdp_wrapped_module.handle
+            self.params.append(handle.flat_param)
+            self._register_param_handle(handle)
+            self._shard_parameters()
+            if self.cpu_offload.offload_params:
+                with torch.no_grad():
+                    handle._flat_param_to(torch.device("cpu"))
 
-        # Shard module parameters in place
-        self._shard_parameters()
+        self._sync_gradients = True
+        self._communication_hook = self._get_default_comm_hook()
+        self._communication_hook_state = self._get_default_comm_hook_state()
+        self._hook_registered = False
 
-        # Check that the sharding logic was applied to all parameters by
-        # checking that the original module parameters have been replaced by
-        # `Tensor` views and are no longer `nn.Parameter`s
-        for n, p in self.named_parameters():
-            if p not in ignored_params and not isinstance(p, FlatParameter):
-                raise RuntimeError(
-                    f"found unflattened parameter: {n} ; {p.size()} {p.__class__}"
-                )
-        self._reset_lazy_init()
+        # Used to prevent running the pre-backward hook multiple times
+        self._pre_backward_hook_has_run: bool = False
+        self._is_root: Optional[bool] = None  # `None` indicates not yet set
+        # The following attributes are owned by the root FSDP instance and
+        # shared with non-root FSDP instances
+        self._streams: Dict[str, torch.cuda.Stream] = {}
+        self._fsdp_graph_order: List[FullyShardedDataParallel] = []
+        self._my_fsdp_idx_in_graph: Optional[int] = None
+        self._pre_backward_hook_full_params_prefetched: bool = False
+        self._forward_full_params_prefetched: bool = False
+        self._init_reshard_after_forward()
+        self._exec_order_data = _ExecOrderData()
+        # Used for `BACKWARD_POST` prefetching
+        self._need_rebuild_full_params = False
 
-        # Flag indicating if we require gradient reduction in the backward
-        # pass (set to `False` in the `no_sync()` context manager)
-        self._require_backward_grad_sync: bool = True
-
+        # `_state_dict_type` controls the `state_dict()` behavior, which is
+        # implemented using post-save and pre-load hooks
         self._state_dict_type = StateDictType.FULL_STATE_DICT
         self._state_dict_config = FullStateDictConfig()
-
-        # FSDP currently provides three different state_dicts. The actual
-        # state_dict that will be saved/loaded is decided by
-        # self._state_dict_type. And the main logic of each state_dict is
-        # implemented in the hook. Therefore, for each hook (post-save and
-        # pre-load), there is a dispatcher dictionary to dispatch the execution
-        # flow to the correct implementation.
         self._register_state_dict_hook(self._post_state_dict_hook)
         self._post_state_dict_hook_fn = {
             StateDictType.FULL_STATE_DICT: self._full_post_state_dict_hook,
@@ -931,220 +802,43 @@ class FullyShardedDataParallel(nn.Module):
             StateDictType.SHARDED_STATE_DICT: self._sharded_post_load_state_dict_hook,
         }
 
-        # Flag to guard against preparing gradients multiple times per backward pass.
-        self._pre_backward_hook_has_run = False
-        # Used for prefetching all gather full params in post backward hook
-        self._need_rebuild_full_params = False
-
-        # If specified, offload parameter shard to CPU.
-        if self.cpu_offload.offload_params:
-            for p in self.params:
-                self._offload_to_cpu(p)
-
-        # For validating execution order across ranks
-        self._exec_order_data = _ExecOrderData()
-
-        # Setting communication hook to a default:
-        # ``reduce_scatter`` for shareded strategies and
-        # ``all_reduce`` for ``NO_SHARD``
-        self._communication_hook = self._get_default_comm_hook()
-        self._communication_hook_state = self._get_default_comm_hook_state()
-        self._hook_registered = False
-
-    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
-        auto_wrap_policy = kwargs["auto_wrap_policy"]
-        module = kwargs["module"]
-        assert hasattr(auto_wrap_policy, "tracing_config")
-        if not _TORCH_FX_AVAIL:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should be None when torch.fx is not enabled"
-        elif isinstance(
-            auto_wrap_policy.tracing_config,
-            TracingConfig
-        ):
-            tracer = auto_wrap_policy.tracing_config.tracer
-            execution_info = _init_execution_info(module)
-
-            for m in module.modules():
-                assert not isinstance(
-                    m, FullyShardedDataParallel
-                ), "The input module of _patch_tracer should not contain FSDP modules"
-
-            with _patch_tracer(
-                tracer=tracer,
-                root_module=module,
-                execution_info=execution_info,
-            ):
-                try:
-                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
-                except BaseException as e:
-                    raise RuntimeError(
-                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
-                        f" with the error: {e}."
-                    )
-        else:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should either be an instance of TracingConfig or be None"
-        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
-        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
-        self.__init__(*args, **kwargs)
-        self._param_exec_order_policy: bool = True
-        # self._param_exec_order_prep_stage is set to True before we get the execution order
-        self._param_exec_order_prep_stage: bool = True
-        # A list that stores the flatten parameters and its name based on the parameter execution order
-        self._fsdp_params_exec_order: List[FlatParameter] = []
-        if _TORCH_FX_AVAIL and isinstance(
-            auto_wrap_policy.tracing_config,
-            TracingConfig
-        ):
-            # Initialize a dict that maps each module to its parent FSDP wrap
-            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = {}
-            for wrap in self.fsdp_modules(self):
-                module_to_fsdp[wrap.module] = wrap
-            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
-            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
-            # the parameter execution order rather than module_forward_order,
-            # once the non-recursive wrapping policy is fully implemented.
-            for m in execution_info.module_forward_order:
-                if m in module_to_fsdp:
-                    for flat_param in module_to_fsdp[m].params:
-                        self._fsdp_params_exec_order.append(flat_param)
-            self._param_exec_order_prep_stage = False
-
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                # Assignment by reference, so each children FSDP wrap has access to
-                # the _fsdp_params_exec_order of the root module
-                m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                m._param_exec_order_policy = self._param_exec_order_policy
-                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
-
-    def _move_module_if_needed(self, module) -> None:
-        """
-        Moves module if module is on CPU and device_id is specified.
-        If device_id is not specified and module is on CPU, we log a
-        warning to user mentioning to use ``device_id`` argument to speed
-        up initialization performance.
-        """
-        # Move module to device specified. Note that this is done prior to
-        # setting compute_device to ensure that they align.
-        if self.device_id is not None:
-            param = None
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
-
-                if param.device == torch.device("cpu"):
-                    module = module.to(self.device_id)
-            except StopIteration:
-                # this FSDP instance manages no parameters.
-                pass
-
-            # For GPU modules, module device should match device_id.
-            if (
-                param is not None
-                and not isinstance(param, FlatParameter)
-                and param.device != self.device_id
-            ):
-                raise RuntimeError(
-                    f"Module on rank {self.rank} is given device_id argument "
-                    f"{self.device_id}, but is on {param.device}. "
-                    " Either move module before FSDP init or omit device_id argument."
-                )
-        else:
-            # device_id argument is not specified
-            # If module is on CPU, log a warning asking user to use `device_id` for faster
-            # GPU init.
-            try:
-                # Get the next unflat param
-                param_gen = module.parameters()
-                while True:
-                    param = next(param_gen)
-                    if not isinstance(param, FlatParameter):
-                        break
-
-                if param.device == torch.device("cpu"):
-                    warnings.warn(
-                        "Module is put on CPU and will thus have flattening and sharding"
-                        " run on CPU, which is less efficient than on GPU. We recommend passing in "
-                        "`device_id` argument which will enable FSDP to put module on GPU device,"
-                        " module must also be on GPU device to work with `sync_module_states=True` flag"
-                        " which requires GPU communication."
-                    )
-            except StopIteration:
-                # this FSDP instance manages no parameters
-                pass
-
-    def _init_reshard_after_forward(self):
-        if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
-            # Free full params and keep shard only after forward
-            self.reshard_after_forward = True
-        elif self.sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
-            # Keep full params in the GPU memory until backward
-            # computation is done
-            self.reshard_after_forward = False
-        elif self.sharding_strategy == ShardingStrategy.NO_SHARD:
-            # self.reshard_after_forward is not used when NO_SHARD
-            # is set, just setting it as False here
-            self.reshard_after_forward = False
-        else:
-            raise RuntimeError(
-                "sharding_strategy only supports FULL_SHARD, SHARD_GRAD_OP and NO_SHARD right now."
-            )
-
     def _get_ignored_modules(
         self,
-        root_module: torch.nn.Module,
-        _ignored_modules: Any,
-    ) -> Set[torch.nn.Module]:
+        root_module: nn.Module,
+        _ignored_modules: Optional[Iterable[torch.nn.Module]],
+    ) -> Set[nn.Module]:
         """
-        Checks that ``_ignored_modules`` (1) is an iterable of
-        ``torch.nn.Module`` s without any :class:`FullyShardedDataParallel`
-        instances and does not contain the top-level ``module`` itself, and
-        then returns them and their children as a :class:`set`, excluding
-        nested :class:`FullyShardedDataParallel` instances.
-
-        We include the child modules of modules in ``_ignored_modules`` to be
-        more intuitive since ignoring a module should ignore its child modules
-        as well, and we exclude :class:`FullyShardedDataParallel` instances
-        since ``self`` may be the intended root instance that manages them.
+        Checks that ``_ignored_modules`` is an iterable of ``nn.Module`` s
+        without any FSDP instances, and returns the modules contained in their
+        module subtrees as a :class:`set`. Nested FSDP instances are excluded,
+        but their already-computed ignored modules are included.
         """
         if _ignored_modules is None:
             return set()
-        msg_prefix = "`ignored_modules` should be an iterable of " \
-            "`torch.nn.Module`s "
+        msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
         try:
             ignored_root_modules = set(_ignored_modules)
         except TypeError:
             raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}")
         for module in ignored_root_modules:
             if not isinstance(module, torch.nn.Module):
-                raise TypeError(
-                    msg_prefix + f"but got an iterable with {type(module)}"
-                )
+                raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
             if isinstance(module, FullyShardedDataParallel):
-                raise ValueError(
-                    "`ignored_modules` should not include FSDP modules"
-                )
-        # Include child modules and exclude nested FSDP modules
+                raise ValueError("`ignored_modules` should not include FSDP modules")
+        # Include child modules and exclude nested FSDP modules themselves
         ignored_modules = set(
-            child for module in ignored_root_modules
+            child
+            for module in ignored_root_modules
             for child in module.modules()
-            if not isinstance(child, FullyShardedDataParallel) and
-            not isinstance(child, FlattenParamsWrapper)
+            if not isinstance(child, (FullyShardedDataParallel, FlattenParamsWrapper))
         )
         if root_module in ignored_modules:
             warnings.warn(
                 "Trying to ignore the top-level module passed into the FSDP "
                 "constructor itself will result in all parameters being "
-                f"ignored and is not supported: {module}"
+                f"ignored and is not well-supported: {module}"
             )
+        # Include nested FSDP modules' ignored modules
         for submodule in root_module.modules():
             if isinstance(submodule, FullyShardedDataParallel):
                 assert hasattr(submodule, "_ignored_modules")
@@ -1158,60 +852,334 @@ class FullyShardedDataParallel(nn.Module):
     ) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
         """
         Returns the parameters of the modules in ``ignored_modules``,
-        excluding any :class:`FlatParameter` s and their fully prefixed names,
+        excluding any :class:`FlatParameter` s, and their fully prefixed names,
         both as :class:`set` s.
-
-        Args:
-            root_module (torch.nn.Module): Top-level module passed into the
-                FSDP constructor from which to derive the fully prefixed names.
-            ignored_modules (Set[torch.nn.Module]): Modules to ignore.
         """
         ignored_params = set(
-            p for m in ignored_modules for p in m.parameters()
+            p
+            for m in ignored_modules
+            for p in m.parameters()
             if not isinstance(p, FlatParameter)
         )
+        # Conservatively include all shared parameters' names
         param_to_unflat_param_names = _get_param_to_unflat_param_names(
-            root_module, dedup_shared_params=False,
+            root_module,
+            dedup_shared_params=False,
         )
         ignored_param_names = set()
         for param in ignored_params:
             unflat_param_names = param_to_unflat_param_names[param]
             clean_names = []
             for k in unflat_param_names:
+                # Clean any module wrapper prefixes in case of nested wrapping
                 clean_names.append(clean_tensor_name(k))
             ignored_param_names.update(clean_names)
         return ignored_params, ignored_param_names
 
-    def _get_buffer_names(self, root_module: torch.nn.Module) -> Set[str]:
+    def _get_buffer_names(self, root_module: nn.Module) -> Set[str]:
         """
         Returns the fully prefixed names of all buffers in the module hierarchy
         rooted at ``root_module`` as a class:`set`.
-
-        Args:
-            root_module (torch.nn.Module): Top-level module passed into the
-                FSDP constructor from which to derive the fully prefixed names.
         """
-        def module_fn(module, prefix, buffer_names):
+
+        def module_fn(module: nn.Module, prefix: str, buffer_names: Set[str]):
             # For FSDP modules, only add the entry when considering the
             # contained `FlattenParamsWrapper` to avoid duplication
             if not isinstance(module, FullyShardedDataParallel):
                 for buffer_name, _ in module.named_buffers(recurse=False):
+                    # Clean module wrapper prefixes in case of nested wrapping
                     prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
                     buffer_names.add(prefixed_buffer_name)
 
-        def return_fn(buffer_names, *args):
+        def return_fn(buffer_names: Set[str], *args):
             return buffer_names
 
         buffer_names: Set[str] = set()
         return _apply_to_modules(
-            root_module, module_fn, return_fn, buffer_names,
+            root_module,
+            module_fn,
+            return_fn,
+            buffer_names,
         )
 
-    @classmethod
-    def _check_wrapped(cls, begin_module, check_fn, err_fn):
-        for _, mod in begin_module.named_modules():
-            if not check_fn(mod):
-                raise ValueError(err_fn(mod))
+    def _auto_wrap(
+        self,
+        auto_wrap_kwargs: Dict[str, Any],
+        fsdp_kwargs: Dict[str, Any],
+    ) -> None:
+        """
+        Recursively auto wraps the root module given by the key "module" in
+        ``auto_wrap_kwargs`` with the arguments in ``auto_wrap_kwargs`` and
+        ``fsdp_kwargs``.
+
+        Precondition: ``auto_wrap_policy`` contains the arguments expected by
+            ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
+            ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
+        """
+        auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
+        root_module = auto_wrap_kwargs["module"]
+        assert auto_wrap_policy is not None
+        # For auto wrapping, submodules should not already be wrapped with FSDP
+        # since double wrapping is not supported
+        for module_name, module in root_module.named_modules():
+            if isinstance(module, FullyShardedDataParallel):
+                raise ValueError(
+                    f"Expected {module_name} to NOT be FullyShardedDataParallel "
+                    "if using an `auto_wrap_policy`"
+                )
+        mixed_precision = fsdp_kwargs["mixed_precision"]
+        if mixed_precision is not None and _contains_batchnorm(root_module):
+            _override_batchnorm_mixed_precision(root_module)
+            auto_wrap_policy = functools.partial(
+                _or_policy, policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+            )
+            warnings.warn(
+                "Both mixed precision and an `auto_wrap_policy` were specified "
+                "for FSDP, where the wrapped module has batch norm submodules. "
+                "The batch norm submodules will be wrapped as separate FSDP "
+                "instances with mixed precision disabled since some batch norm "
+                "kernels do not support low precision."
+            )
+            auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
+        _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
+
+    def _check_single_device_module(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+    ) -> None:
+        """
+        Raises an error if ``module`` has original parameters on multiple
+        devices, ignoring the parameters in ``ignored_params``. Thus, after
+        this method, the module must be either fully on the CPU or fully on a
+        non-CPU device.
+        """
+        devices = set(
+            param.device for param in self._get_orig_params(module, ignored_params)
+        )
+        if len(devices) > 1:
+            raise RuntimeError(
+                f"FSDP only supports single device modules but got params on {devices}"
+            )
+
+    def _get_device_from_device_id(
+        self,
+        device_id: Optional[Union[int, torch.device]],
+    ) -> Optional[torch.device]:
+        """
+        """
+        if device_id is None:
+            return None
+        device = (
+            device_id
+            if isinstance(device_id, torch.device)
+            else torch.device(device_id)
+        )
+        if device == torch.device("cuda"):
+            warnings.warn(
+                f"FSDP got the argument `device_id` {device_id} on rank "
+                f"{self.rank}, which does not have an explicit index. "
+                f"FSDP will use the current device {torch.cuda.current_device()}. "
+                "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+                "before FSDP initialization or pass in the explicit device "
+                "index as the `device_id` argument."
+            )
+            device = torch.device("cuda", torch.cuda.current_device())
+        return device
+
+    def _materialize_module(
+        self,
+        module: nn.Module,
+        param_init_fn: Optional[Callable[[nn.Module], None]],
+        device_from_device_id: Optional[torch.device],
+    ) -> None:
+        """
+        Materializes the wrapped module ``module`` in place if needed: either
+        if the module has parameters that use meta device or are torchdistX
+        fake tensors.
+
+        This method uses ``param_init_fn`` to materialize the module if the
+        function is not ``None`` and falls back to default behavior otherwise.
+        For meta device, this moves the module to ``device_from_device_id`` if
+        it is not ``None`` or the current device otherwise and calls
+        ``reset_parameters()``, and for torchdistX fake tensors, this calls
+        ``deferred_init.materialize_module()``.
+        """
+        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_torchdistX_deferred_init = (
+            not is_meta_module
+            and _TORCHDISTX_AVAIL
+            and any(fake.is_fake(p) for p in module.parameters())
+        )
+        if (
+            is_meta_module or is_torchdistX_deferred_init
+        ) and param_init_fn is not None:
+            if not callable(param_init_fn):
+                raise ValueError(
+                    f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
+                )
+            param_init_fn(module)
+        elif is_meta_module:
+            # Run default meta device initialization
+            materialization_device = device_from_device_id or torch.cuda.current_device()
+            module.to_empty(device=materialization_device)
+            try:
+                with torch.no_grad():
+                    module.reset_parameters()
+            except BaseException as e:
+                warnings.warn(
+                    "Unable to call `reset_parameters()` for module on meta "
+                    f"device with error {str(e)}. Please ensure your "
+                    "module implements a `reset_parameters()` method."
+                )
+                raise e
+        elif is_torchdistX_deferred_init:
+            # Run default torchdistX initialization
+            deferred_init.materialize_module(
+                module,
+                check_fn=lambda k: not isinstance(k, FullyShardedDataParallel),
+            )
+
+    def _move_module_to_device(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+        device_from_device_id: Optional[torch.device],
+    ):
+        """
+        Moves ``module`` depending on ``device_from_device_id`` and its current
+        device. This includes moving ignored modules' parameters.
+
+        - If ``device_from_device_id`` is not ``None``, then this moves
+        ``module`` to the device.
+        - If ``device_from_device_id`` is ``None``, then this does not move
+        ``module`` but warns the user if it is on CPU.
+
+        Precondition: ``_check_single_device_module()``.
+        """
+        cpu_device = torch.device("cpu")
+        param = next(self._get_orig_params(module, ignored_params), None)
+        if param is None:
+            return  # no original parameters to manage
+        if device_from_device_id is not None:
+            if param.device == cpu_device:
+                # NOTE: This includes moving ignored modules' parameters.
+                module = module.to(device_from_device_id)
+                # TODO: This is a temporary fix to move already- constructed
+                # `FlatParameter`s back to CPU if needed. This is needed to
+                # make CPU offload work with `device_id`.
+                for submodule in module.modules():
+                    if (
+                        isinstance(submodule, FullyShardedDataParallel)
+                        and submodule.cpu_offload.offload_params
+                    ):
+                        with torch.no_grad():
+                            for handle in submodule._handles:
+                                handle._flat_param_to(torch.device("cpu"))
+        elif param.device == cpu_device:
+            warnings.warn(
+                "Module is put on CPU and will thus have flattening and sharding"
+                " run on CPU, which is less efficient than on GPU. We recommend passing in "
+                "`device_id` argument which will enable FSDP to put module on GPU device,"
+                " module must also be on GPU device to work with `sync_module_states=True` flag"
+                " which requires GPU communication."
+            )
+
+    def _get_compute_device(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+        device_from_device_id: Optional[torch.device],
+    ) -> torch.device:
+        """
+        Determines and returns this FSDP instance's compute device. If the
+        module is already on a non-CPU device, then the compute device is that
+        non-CPU device. If the module is on CPU, then the compute device is the
+        current device.
+
+        Since this method should be called after materializing the module, any
+        non-CPU device should not be meta device. For now, the compute device
+        is always a CUDA GPU device with its explicit index.
+
+        Precondition: ``_check_single_device_module()`` and
+        ``_move_module_to_device()``.
+        """
+        # If the module is on GPU already, then that GPU device has priority
+        # over the current device
+        param = next(self._get_orig_params(module, ignored_params), None)
+        if param is not None and param.device.type == "cuda":
+            compute_device = param.device
+        else:
+            compute_device = torch.device("cuda", torch.cuda.current_device())
+        if (
+            device_from_device_id is not None
+            and compute_device != device_from_device_id
+        ):
+            raise ValueError(
+                "Inconsistent compute device and `device_id` on rank "
+                f"{self.rank}: {compute_device} vs {device_from_device_id}"
+            )
+        return compute_device
+
+    def _sync_module_states(
+        self, module: nn.Module, params: List[nn.Parameter]
+    ) -> None:
+        """
+        Synchronizes module states (i.e. parameters ``params`` and all
+        not-yet-synced buffers) by broadcasting from rank 0 to all ranks.
+        Precondition: ``sync_module_states == True`` and ``self.process_group``
+        has been set.
+        """
+        if params and any(param.device == torch.device("cpu") for param in params):
+            raise ValueError(
+                "Module has CPU parameters, but sync_module_states=True is specified."
+                "This only works for GPU module, please specify `device_id` argument or move"
+                " module to GPU before init."
+            )
+        module_states: List[torch.Tensor] = []
+        # TODO (awgu): When exposing the original parameters, we need to also
+        # use this attribute to prevent re-synchronizing parameters.
+        for buffer in module.buffers():
+            # Avoid re-synchronizing buffers in case of nested wrapping
+            if not getattr(buffer, "_fsdp_synced", False):
+                buffer._fsdp_synced = True
+                module_states.append(buffer.detach())
+        module_states.extend(param.detach() for param in params)
+        _sync_params_and_buffers(
+            self.process_group, module_states, _PARAM_BROADCAST_BUCKET_SIZE, src=0,
+        )
+
+    def _get_orig_params(
+        self,
+        module: nn.Module,
+        ignored_params: Set[nn.Parameter],
+    ) -> Iterator[nn.Parameter]:
+        """
+        Returns an iterator over the original parameters in ``module``,
+        ignoring the parameters in ``ignored_params`` and any ``FlatParameter``
+        s (which may be present due to nested FSDP wrapping).
+        """
+        param_gen = module.parameters()
+        try:
+            while True:
+                param = next(param_gen)
+                if param not in ignored_params and not isinstance(param, FlatParameter):
+                    yield param
+        except StopIteration:
+            pass
+
+    def _check_orig_params_flattened(self, ignored_params: Set[nn.Parameter]) -> None:
+        """
+        Checks that all original parameters have been flattened and hence made
+        invisible to ``named_parameters()``. This should be called as a sanity
+        check after flattening the wrapped module's parameters.
+        """
+        for param_name, param in self.named_parameters():
+            if param not in ignored_params and not isinstance(param, FlatParameter):
+                raise RuntimeError(
+                    f"Found an unflattened parameter: {param_name}; "
+                    f"{param.size()} {param.__class__}"
+                )
 
     def _register_param_handle(self, handle: FlatParamHandle) -> None:
         """Registers the parameter handle to this FSDP instance."""
@@ -1230,24 +1198,6 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         assert self._is_root is not None
         return self._is_root
-
-    def _use_param_exec_order_policy(self) -> bool:
-        return (
-            hasattr(self, "_param_exec_order_policy")
-            and self._param_exec_order_policy
-        )
-
-    def _is_param_exec_order_prep_stage(self) -> bool:
-        is_prep_stage = (
-            hasattr(self, "_param_exec_order_prep_stage")
-            and self._param_exec_order_prep_stage
-        )
-        if not is_prep_stage:
-            for p in self.parameters():
-                assert (
-                    not hasattr(p, "_params_exec_order_hook_handle")
-                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
-        return is_prep_stage
 
     @staticmethod
     def fsdp_modules(
@@ -1459,8 +1409,8 @@ class FullyShardedDataParallel(nn.Module):
                     if buf is None:
                         continue
                     buf = buf.to(device=device or self.compute_device)
-                    if name not in self._orig_buffer_dtypes:
-                        self._orig_buffer_dtypes[name] = buf.dtype
+                    if name not in self._buffer_name_to_orig_dtype:
+                        self._buffer_name_to_orig_dtype[name] = buf.dtype
                     # If given, cast buffer to the given dtype. This is used to
                     # suppport mixed precision for buffers
                     # (given by self.mixed_precision.buffer_dtype) and also used
@@ -1559,6 +1509,23 @@ class FullyShardedDataParallel(nn.Module):
         # set 'self.reshard_after_forward' flag based on self.sharding_strategy
         self._init_reshard_after_forward()
 
+    def _init_reshard_after_forward(self):
+        if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+            # Free full params and keep shard only after forward
+            self.reshard_after_forward = True
+        elif self.sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
+            # Keep full params in the GPU memory until backward
+            # computation is done
+            self.reshard_after_forward = False
+        elif self.sharding_strategy == ShardingStrategy.NO_SHARD:
+            # self.reshard_after_forward is not used when NO_SHARD
+            # is set, just setting it as False here
+            self.reshard_after_forward = False
+        else:
+            raise RuntimeError(
+                "sharding_strategy only supports FULL_SHARD, SHARD_GRAD_OP and NO_SHARD right now."
+            )
+
     def _lazy_init(self) -> None:
         """
         Performs initialization lazily, typically right before the first
@@ -1571,6 +1538,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
+        if not torch.cuda.is_available():
+            # Allow the FSDP constructor to run even with CUDA but check this
+            # once we start real execution
+            raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance
         self._is_root = True
         self._assert_state(TrainingState_.IDLE)
@@ -2091,7 +2062,7 @@ class FullyShardedDataParallel(nn.Module):
                     and self._mixed_precision_enabled_for_buffers()
                 ):
                     self._cast_buffers(
-                        dtype=self._orig_buffer_dtypes, recurse=False
+                        dtype=self._buffer_name_to_orig_dtype, recurse=False
                     )
                 state_dict = super().state_dict(*args, **kwargs)
 
@@ -2902,7 +2873,7 @@ class FullyShardedDataParallel(nn.Module):
                 # Wait for all_gather to finish before computation.
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            if not self._require_backward_grad_sync:
+            if not self._sync_gradients:
                 return
 
             # Wait for all work in the current stream to finish, then start the
@@ -3066,7 +3037,7 @@ class FullyShardedDataParallel(nn.Module):
         # may not have been called if gradient was not computed for this param/FSDP
         # module.
 
-        if self._require_backward_grad_sync:
+        if self._sync_gradients:
             torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
             if self.cpu_offload.offload_params:
                 # We need to wait for the non-blocking GPU ->
@@ -3131,7 +3102,7 @@ class FullyShardedDataParallel(nn.Module):
                     # accumulated from prior `no_sync()` iterations, and
                     # `p._saved_grad_shard` remains the sharded gradient from
                     # the last synchronized iteration
-                    if not self._require_backward_grad_sync:
+                    if not self._sync_gradients:
                         continue
                     # Set `p.grad` as needed to ensure optimizer correctness
                     # since optimizers operate on the `grad` attribute
@@ -3493,7 +3464,7 @@ class FullyShardedDataParallel(nn.Module):
             self.sharding_strategy == ShardingStrategy.FULL_SHARD
             # Optimization where we don't reshard if running Zero-2
             # in no_sync().
-            or self._require_backward_grad_sync
+            or self._sync_gradients
         )
 
     @torch.no_grad()
@@ -3583,17 +3554,17 @@ class FullyShardedDataParallel(nn.Module):
         old_flags = []
         for m in self.modules():
             if isinstance(m, FullyShardedDataParallel):
-                old_flags.append((m, m._require_backward_grad_sync))
-                m._require_backward_grad_sync = False
+                old_flags.append((m, m._sync_gradients))
+                m._sync_gradients = False
         try:
             yield
         finally:
             for m, old_flag in old_flags:
-                assert not m._require_backward_grad_sync, (
-                    "`_require_backward_grad_sync` was incorrectly set to "
+                assert not m._sync_gradients, (
+                    "`_sync_gradients` was incorrectly set to "
                     "`True` while in the `no_sync()` context manager"
                 )
-                m._require_backward_grad_sync = old_flag
+                m._sync_gradients = old_flag
 
     @property
     def params_with_grad(self) -> List[Parameter]:
@@ -4137,6 +4108,94 @@ class FullyShardedDataParallel(nn.Module):
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
 
+
+    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
+        auto_wrap_policy = kwargs["auto_wrap_policy"]
+        module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            tracer = auto_wrap_policy.tracing_config.tracer
+            execution_info = _init_execution_info(module)
+
+            for m in module.modules():
+                assert not isinstance(
+                    m, FullyShardedDataParallel
+                ), "The input module of _patch_tracer should not contain FSDP modules"
+
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
+        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
+        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
+        self.__init__(*args, **kwargs)
+        self._param_exec_order_policy: bool = True
+        # self._param_exec_order_prep_stage is set to True before we get the execution order
+        self._param_exec_order_prep_stage: bool = True
+        # A list that stores the flatten parameters and its name based on the parameter execution order
+        self._fsdp_params_exec_order: List[FlatParameter] = []
+        if _TORCH_FX_AVAIL and isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            for wrap in self.fsdp_modules(self):
+                module_to_fsdp[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
+            for m in execution_info.module_forward_order:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
+                        self._fsdp_params_exec_order.append(flat_param)
+            self._param_exec_order_prep_stage = False
+
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                # Assignment by reference, so each children FSDP wrap has access to
+                # the _fsdp_params_exec_order of the root module
+                m._fsdp_params_exec_order = self._fsdp_params_exec_order
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
+
+    def _use_param_exec_order_policy(self) -> bool:
+        return (
+            hasattr(self, "_param_exec_order_policy")
+            and self._param_exec_order_policy
+        )
+
+    def _is_param_exec_order_prep_stage(self) -> bool:
+        is_prep_stage = (
+            hasattr(self, "_param_exec_order_prep_stage")
+            and self._param_exec_order_prep_stage
+        )
+        if not is_prep_stage:
+            for p in self.parameters():
+                assert (
+                    not hasattr(p, "_params_exec_order_hook_handle")
+                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
+        return is_prep_stage
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""
