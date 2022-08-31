@@ -7,7 +7,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
@@ -836,7 +836,7 @@ def _new_process_group_helper(
             import inspect
             if pg_options is None:
                 backend_module = inspect.getmodule(creator_fn)
-                if not 'Options' in dict(inspect.getmembers(backend_module, inspect.isclass)):
+                if 'Options' not in dict(inspect.getmembers(backend_module, inspect.isclass)):
                     logger.warn(f"Process group Options not defined in {backend.upper()} implementation")
 
             if not extended_api:

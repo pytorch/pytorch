@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Store.hpp"
+#include <Store.hpp>
 
 #include <chrono>
 #include <cstdint>
