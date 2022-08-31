@@ -5951,7 +5951,7 @@ class ModuleTest(TestBase):
             ref_input = deepcopy(input)
             ref_module = deepcopy(module)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
-            test_case.assertEqual(out, expected_out.to(torch.double))
+            test_case.assertEqual(out, expected_out, exact_dtype=False)
         if self.check_forward_only:
             return
         self.test_noncontig(test_case, module, input)
