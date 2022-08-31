@@ -37,9 +37,10 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   }
   if (input.dim() == 3 && bias->defined() && input.is_contiguous()) {
     // Also hit the fused path for contiguous 3D input.
-    const auto input_sizes = input.sizes();
-    const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view({input_sizes[0], input_sizes[1], result.size(1)});
+    const auto input_sizes = input.sym_sizes();
+    // TODO: make initializer_list work
+    const auto result = at::addmm(*bias, input.view_symint(std::vector<c10::SymInt>{input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
+    return result.view_symint(std::vector<c10::SymInt>{input_sizes[0], input_sizes[1], result.sym_size(1)});
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
