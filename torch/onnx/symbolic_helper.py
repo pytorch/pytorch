@@ -16,6 +16,7 @@ from torch import _C
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -517,6 +518,7 @@ def is_caffe2_aten_fallback() -> bool:
     )
 
 
+@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -525,6 +527,7 @@ def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     return x_type.dim()
 
 
+@_beartype.beartype
 def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -539,6 +542,7 @@ def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
     return x_type.sizes()
 
 
+@_beartype.beartype
 def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
     sizes = _get_tensor_sizes(x)
     return sizes[dim] if sizes else None
