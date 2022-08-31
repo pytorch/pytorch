@@ -602,7 +602,7 @@ auto ${tmp_var} = ([&]() {
     c10::OperatorName full_name("aten::${op_name}", "${op_overload}");  // Need: name and overload
     const auto& opt_op = c10::Dispatcher::singleton().findSchema(full_name);
     TORCH_CHECK(opt_op.has_value());
-    return impl::run_jit_decomposition_with_args<${returns_and_args}>("${op_name}", *opt_op, ks, ${arg_names});
+    return impl::run_jit_decomposition_with_args_for_jvp<${returns_and_args}>("${op_name}", *opt_op, ks, ${arg_names});
   } else {
     ${guard}
     return ${base_type_call};

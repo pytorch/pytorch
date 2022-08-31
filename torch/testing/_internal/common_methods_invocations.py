@@ -39,6 +39,10 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 
+# Make sure that decompositions used for test_forward_mode_AD and
+# test_fn_fwgrad_bwgrad are registered to the jit
+import torch._decomp.decompositions_for_jvp
+
 import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten

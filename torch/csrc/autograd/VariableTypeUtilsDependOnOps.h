@@ -14,7 +14,7 @@ namespace impl {
 
 // Depends on torch/csrc/jit/ir/ir.h -> aten/src/ATen/core/interned_strings.h
 template <class Return, class... Args>
-Return run_jit_decomposition_with_args(
+Return run_jit_decomposition_with_args_for_jvp(
     c10::string_view name,
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
