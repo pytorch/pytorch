@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/numeric_t.h>
-#include <c10/util/numbers.h>
+#include <c10/util/MathConstants.h>
 
 namespace at {
 namespace native {
@@ -14,7 +14,7 @@ tan_pi(T1 z) {
   using T2 = T1;
   using T3 = numeric_t<T2>;
 
-  return std::tan(c10::numbers::pi_v<T3> * (z - std::floor(z)));
+  return std::tan(c10::pi<T3> * (z - std::floor(z)));
 }
 
 template<typename T1>
@@ -24,7 +24,7 @@ tan_pi(c10::complex<T1> z) {
   using T2 = T1;
   using T3 = numeric_t<T2>;
 
-  return (tan_pi(std::real(z)) + c10::complex<T1>(0, 1) * std::tanh(c10::numbers::pi_v<T3> * std::imag(z))) / (T2(1) - c10::complex<T1>(0, 1) * tan_pi(std::real(z)) * std::tanh(c10::numbers::pi_v<T3> * std::imag(z)));
+  return (tan_pi(std::real(z)) + c10::complex<T1>(0, 1) * std::tanh(c10::pi<T3> * std::imag(z))) / (T2(1) - c10::complex<T1>(0, 1) * tan_pi(std::real(z)) * std::tanh(c10::pi<T3> * std::imag(z)));
 }
 }
 }
