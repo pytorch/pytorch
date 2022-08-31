@@ -3223,7 +3223,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", MinusOne())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3276,7 +3276,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model)
@@ -3314,7 +3314,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "bias", Double())
         parametrize.register_parametrization(model, "bias", MinusOne())
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             5, 5, bias=True, qconfig=torch.ao.quantization.get_default_qconfig()
         )
         parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
@@ -3353,7 +3353,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parametrize.register_parametrization(model, "weight", Double())
         hold_weight = model.weight
 
-        to_model = nn.qat.Linear(
+        to_model = torch.ao.nn.qat.Linear(
             3, 3, qconfig=torch.ao.quantization.get_default_qconfig()
         )
 
@@ -9324,32 +9324,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
             expected = torch.nn.functional.kl_div(input, target)
-            for input_dtype in get_all_math_dtypes(device):
-                if input_dtype.is_complex:
+            real_dtypes = (torch.float32, torch.float64, torch.float16)
+            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                     continue
-                for target_dtype in [torch.float32, torch.float64, torch.float16]:
-                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                        continue
-                    input = input.to(input_dtype)
-                    target = target.to(target_dtype)
-                    result = torch.nn.functional.kl_div(input, target)
-                    self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+                input = input.to(input_dtype)
+                target = target.to(target_dtype)
+                result = torch.nn.functional.kl_div(input, target)
+                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
     def test_kl_div_with_diff_type_log_target(self):
         for device in device_():
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
-            for input_dtype in get_all_math_dtypes(device):
-                if input_dtype.is_complex:
+            real_dtypes = (torch.float32, torch.float64, torch.float16)
+            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                     continue
-                for target_dtype in [torch.float32, torch.float64, torch.float16]:
-                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                        continue
-                    input = input.to(input_dtype)
-                    target = target.to(target_dtype)
-                    result = torch.nn.functional.kl_div(input, target, log_target=True)
-                    self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+                input = input.to(input_dtype)
+                target = target.to(target_dtype)
+                result = torch.nn.functional.kl_div(input, target, log_target=True)
+                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
     def test_kl_div_log_softmax_target(self):
         for device in device_():
@@ -14430,7 +14426,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 0, device=device)
+            inp = torch.randn(2, 1, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14438,7 +14434,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 40, 0, device=device)
+            inp = torch.randn(2, 1, 40, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14446,7 +14442,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            inp = torch.randn(2, 1, 50, 0, 40, device=device, dtype=dtype)
             mod(inp)
 
     def test_group_conv_empty(self, device):
@@ -15803,7 +15799,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
-    def test_softmax_64bit_indexing(self, device, dtype):
+    def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
@@ -15817,6 +15813,22 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    @largeTensorTest("90GB", "cpu")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            self.assertEqual(y[0], y[-1])
+            self.assertEqual(x.grad[0], x.grad[-1])
+
+        run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -15949,6 +15961,7 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         issue_24823_2()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/945")
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
@@ -19268,6 +19281,7 @@ class TestModuleGlobalHooks(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
