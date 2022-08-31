@@ -11,12 +11,14 @@ from torch.ao.ns.fx.utils import (
 )
 from torch.ao.ns.fx.ns_types import (
     NSSingleResultValuesType,
+    NSResultsType,
 )
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import MatchResult
 
+import collections
 import copy
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set, Tuple, Callable, Any
 import operator
 
 SHADOW_NODE_NAME_PREFIX = 'shadow'
@@ -199,16 +201,15 @@ def _get_logger_for_subgraph(
     last_node: Node,
     subgraph_idx: int,
     subgraph_candidate_idx: int,
-    qconfig_str,
+    qconfig_str: str,
+    logger_cls: Callable,
 ) -> torch.nn.Module:
     """
     Given a model and a linear subgraph starting from `first_node` and
     ending with `last_node`, creates a logger for the end of this
     subgraph.
     """
-    # TODO(before land): fix the circular dependency on this
-    from torch.ao.ns._numeric_suite_fx import OutputLogger
-    logger_mod_orig = OutputLogger(
+    logger_mod_orig = logger_cls(
         first_node.name,  # ref_node_name
         last_node.name,  # prev_node_name
         f'subgraph_{subgraph_idx}_{subgraph_candidate_idx}',  # model_name
@@ -229,10 +230,13 @@ def _add_logger_to_subgraph_wrapper(
     subgraph_idx: int,
     subgraph_candidate_idx: int,
     qconfig_str: str,
+    logger_cls: Callable,
+    ref_output_node: Node,
 ) -> None:
     """
     Given a model which consists of a subgraph and nothing else, adds a logger
-    to the end of this model.
+    to the end of this model. The logger takes `ref_output_node` as the reference
+    output, and does the comparison during calibration time.
     """
     first_node, last_node = None, None
     for idx, node in enumerate(model.graph.nodes):  # type: ignore[union-attr, arg-type]
@@ -245,13 +249,33 @@ def _add_logger_to_subgraph_wrapper(
     assert first_node is not None and last_node is not None
     logger_mod = _get_logger_for_subgraph(
         model, first_node, last_node, subgraph_idx,  # type: ignore[arg-type]
-        subgraph_candidate_idx, qconfig_str)
+        subgraph_candidate_idx, qconfig_str, logger_cls)
     attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
     assert not hasattr(model, attr_name)
     setattr(model, attr_name, logger_mod)
+
+    # add a new placeholder to the original subgraph module
+    # to represent the reference input
+    # before:
+    #
+    #   x0 -> mod -> x1
+    #
+    # after:
+    #
+    #   x0 -> mod -> x1
+    #         /
+    #   x0_ref
+
+    # TODO(this PR): verify this name can be used safely
+    ph_name = 'SHADOW_PH_NAME'
+    new_ph = None
+    with model.graph.inserting_before(first_node):
+        new_ph = model.graph.placeholder(ph_name)
+
     with model.graph.inserting_after(last_node):
         new_node = model.graph.call_module(
-            attr_name, args=(last_node,), kwargs={})
+            # attr_name, args=(last_node,), kwargs={})
+            attr_name, args=(last_node, new_ph), kwargs={})
     model.recompile()
 
 def create_submodule_from_subgraph(
@@ -449,3 +473,216 @@ def create_submodule_from_subgraph(
 
     gm.recompile()
     return gm
+
+def group_results_by_subgraph(results: NSResultsType) -> Any:
+    """
+    Creates a comparison of results
+
+    Input:
+
+    {
+      'model': {
+        'node_output': {
+          'subgraph_0_0': [
+            'values': [torch.tensor(...), ...], ...
+            'ref_node_name': ...,
+            'qconfig_str': ...,
+            'comparisons': [], ...
+            'comparison_fn_name': '',
+          ],
+          'subgraph_0_1': [
+            'values': [torch.tensor(...), ...], ...
+            'ref_node_name': ...,
+            'qconfig_str': ...,
+            'comparisons': [torch.tensor(...), ...], ...
+            'comparison_fn_name': '...',
+          ],
+          ...
+        },
+      },
+    }
+
+    Output:
+    {
+      'subgraph_0': {
+        '0': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': None,
+          'comparisons': [torch.tensor(...), ...], ...
+          'comparison_fn_name': '...',
+        },
+        '1': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '...',
+          'comparisons': [torch.tensor(...), ...], ...
+          'comparison_fn_name': '...',
+        },
+      },
+    }
+
+    TODO(future PR): add ref_node_target_type, will be useful
+    """
+
+    subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
+
+    for subgraph_name_with_idx, subgraph_candidate_results in \
+            results['model']['node_output'].items():
+
+        # convert from `subgraph_m_n` to `subgraph_m` and `n`
+        subgraph_str, subgraph_idx, subgraph_candidate_idx = \
+            subgraph_name_with_idx.split('_')
+        subgraph_name = f'{subgraph_str}_{subgraph_idx}'
+
+        subgraph_results = {
+            'ref_node_name': subgraph_candidate_results[0]['ref_node_name'],
+            'values': subgraph_candidate_results[0]['values'],
+            'qconfig_str': subgraph_candidate_results[0]['qconfig_str'],
+            'comparisons': subgraph_candidate_results[0]['comparisons'],
+            'comparison_fn_name': subgraph_candidate_results[0]['comparison_fn_name'],
+        }
+
+        subgraph_name_to_subgraph_results[subgraph_name][subgraph_candidate_idx] = \
+            subgraph_results
+
+    return dict(subgraph_name_to_subgraph_results)
+
+def create_results_comparison(
+    results_grouped,
+) -> Any:
+    """
+    Input:
+
+    {
+      'subgraph_0': {
+        '0': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '',
+          'comparisons': [],
+          'comparison_fn_name': '',
+        },
+        '1': {
+          'ref_node_name': '...',
+          'values': [torch.tensor(...), ...],
+          'qconfig_str': '...',
+          'comparisons': [torch.tensor(...), ...],
+          'comparison_fn_name': 'sqnr',
+        },
+      },
+    }
+
+    Output:
+    {
+      'subgraph_0': {
+        'ref_node_name': '...',
+        'candidates': {
+          '1': {
+            'qconfig_str': ...,
+            'comparison_fn_name': 'sqnr',
+            'cmp_raw': [..., ...],
+            'cmp_mean': ...,
+          },
+          ...,
+        },
+      },
+    }
+    """
+
+    results_comparison = {}
+
+    for subgraph_name, subgraph_results in results_grouped.items():
+
+        candidates = {}
+        for subgraph_inner_name, subgraph_inner_result in subgraph_results.items():
+            # skip comparing baseline to baseline
+            if subgraph_inner_name == '0':
+                continue
+
+            # we expect the comparisons to be precalculated from
+            # calibration, so we just fetch them here
+            cmp_raw = subgraph_inner_result['comparisons']
+            cmp_raw_tensor = torch.stack(cmp_raw)
+
+            candidates[subgraph_inner_name] = {
+                'qconfig_str': subgraph_inner_result['qconfig_str'],
+                'comparison_fn_name': subgraph_inner_result['comparison_fn_name'],
+                'cmp_raw': cmp_raw_tensor,
+                'cmp_mean': torch.mean(cmp_raw_tensor),
+            }
+
+        results_comparison[subgraph_name] = {
+            'ref_node_name': subgraph_results['0']['ref_node_name'],
+            'candidates': candidates,
+        }
+
+    return results_comparison
+
+def print_n_shadows_summary(
+    results_comparison,
+) -> None:
+    """
+    Input:
+
+    {
+      'subgraph_0': {
+        'ref_node_name': 'linear1',
+        'candidates': {
+          '1': {
+            'qconfig_str': ...,
+            'comparison_fn_name': ...,
+            'cmp_raw': [45.0, 55.0],
+            'cmp_mean': 50.0,
+          },
+          ...,
+        },
+      },
+    }
+
+    Prints:
+
+    subgraph_idx | ref_node_name | best_idx | 0    | 1    | ...
+    subgraph_0   | linear1       | 1        | 45.0 | 50.0 | ...
+    """
+
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        print("`print_tabular` relies on the library `tabulate`, "
+              "which could not be found on this machine. Run `pip "
+              "install tabulate` to install the library.")
+
+    results = []
+    for subgraph_name, subgraph_data in results_comparison.items():
+        # print('sd', subgraph_data)
+
+        mean_all_candidates = [
+            candidate['cmp_mean']
+            for candidate_name, candidate in subgraph_data['candidates'].items()
+        ]
+
+        # find top candidate
+        # for now assume high is good and low is bad
+        # TODO(future PR): make this configurable
+        best_val, best_candidate = -10000.0, None
+        for idx, val in enumerate(mean_all_candidates):
+            if val > best_val:
+                best_val = val
+                best_candidate = idx + 1
+
+        data_row = [
+            subgraph_name,
+            subgraph_data['ref_node_name'],
+            best_candidate,
+            *mean_all_candidates,
+        ]
+        results.append(data_row)
+
+    max_candidate_idx_len = -1
+    for data_row in results:
+        max_candidate_idx_len = max(max_candidate_idx_len, len(data_row[1]))
+    candidate_idx_headers = [str(x + 1) for x in range(max_candidate_idx_len)]
+
+    headers = ['subgraph_idx', 'ref_node_name', 'best_idx', *candidate_idx_headers]
+    print(tabulate(results, headers=headers))

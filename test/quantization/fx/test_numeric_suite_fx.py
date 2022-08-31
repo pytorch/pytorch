@@ -77,9 +77,8 @@ from torch.ao.ns._numeric_suite_fx import (
     prepare_n_shadows_model,
     convert_n_shadows_model,
     extract_results_n_shadows_model,
-    group_results_by_subgraph,
-    create_results_comparison,
-    print_n_shadows_summary,
+    OutputComparisonLogger,
+    print_comparisons_n_shadows_model,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
@@ -2093,11 +2092,25 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         msq(*example_input)
 
         results = extract_results_n_shadows_model(msq)
+        print_comparisons_n_shadows_model(results)
 
-        results_grouped = group_results_by_subgraph(results)
-        results_comparison = create_results_comparison(
-            results_grouped, torch.ao.ns.fx.utils.compute_sqnr, 'sqnr')
-        print_n_shadows_summary(results_comparison)
+    def test_linear_mod(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+
+        qconfig_mappings = [
+            QConfigMapping().set_global(torch.quantization.default_qconfig),
+        ]
+        self._test_impl(m, example_input, qconfig_mappings)
 
     def test_linear_relu_mod(self):
         class M(nn.Module):
@@ -2213,6 +2226,49 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                             .set_object_type(F.relu, qconfig),
         ]
         self._test_impl(m, example_input, qconfig_mappings)
+
+    def test_logger_enabled_and_save_activations_flags(self):
+        m = nn.Sequential(nn.Linear(1, 1)).eval()
+        example_input = (torch.randn(1, 1),)
+        qconfig_mappings = [
+            QConfigMapping().set_global(torch.quantization.default_qconfig),
+        ]
+        backend_config = get_native_backend_config()
+
+        msp = prepare_n_shadows_model(
+            m, example_input, qconfig_mappings, backend_config)
+
+        for _ in range(2):
+            msp(*example_input)
+
+        def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
+            for name, mod in model.named_modules():
+                if isinstance(mod, OutputLogger):
+                    self.assertTrue(
+                        len(mod.stats) == exp_count_stats,
+                        f'stats: expected {len(mod.stats)} to equal {exp_count_stats}')
+                    if isinstance(mod, OutputComparisonLogger):
+                        self.assertTrue(
+                            len(mod.comparisons) == exp_count_comparisons,
+                            f'comparisons: expected {len(mod.comparisons)} to equal {exp_count_comparisons}')
+
+        # check behavior with save_activations enabled
+        msq = convert_n_shadows_model(copy.deepcopy(msp))
+        # after prepare calibration but before convert calibration, loggers
+        # should not have anything saved
+        _check_logger_count(msq, 0, 0)
+        msq(*example_input)
+        # loggers should save each item after calibration
+        _check_logger_count(msq, 1, 1)
+
+        # check behavior with save_activations disabled
+        msq = convert_n_shadows_model(copy.deepcopy(msp), save_activations=False)
+        # after prepare calibration but before convert calibration, loggers
+        # should not have anything saved
+        _check_logger_count(msq, 0, 0)
+        msq(*example_input)
+        # stats should be empty, but comparisons should be there
+        _check_logger_count(msq, 0, 1)
 
     @skip_if_no_torchvision
     def test_mobilenet_v2(self):
