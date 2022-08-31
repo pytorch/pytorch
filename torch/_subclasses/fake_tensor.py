@@ -617,7 +617,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            constructors = [aten.empty.memory_format]
+            constructors = [aten.empty.memory_format, aten.as_strided.default]
             if func not in constructors:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
