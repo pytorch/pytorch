@@ -3,8 +3,7 @@
 import torch
 import warnings
 
-from .core import is_masked_tensor
-from .creation import masked_tensor
+from .core import is_masked_tensor, MaskedTensor
 
 __all__ = [
     'MaskedBmm',
@@ -24,7 +23,7 @@ class MaskedBmm(torch.autograd.Function):
         ctx.save_for_backward(attn_mask, k_mask, q, k)
         attn = torch.bmm(q, k)
         return_mask = attn_mask.expand_as(attn.get_data())  # type: ignore[attr-defined]
-        return masked_tensor(attn.get_data() + return_mask, return_mask == 0)  # type: ignore[attr-defined]
+        return MaskedTensor(attn.get_data() + return_mask, return_mask == 0)  # type: ignore[attr-defined]
 
     @staticmethod
     def backward(ctx, grad):
@@ -36,7 +35,7 @@ class MaskedBmm(torch.autograd.Function):
 
         q_trans = q.transpose(1, 2)
         k_grad = torch.bmm(q_trans, grad)
-        k_grad = masked_tensor(k_grad.get_data(), k_mask)  # type: ignore[attr-defined]
+        k_grad = MaskedTensor(k_grad.get_data(), k_mask)  # type: ignore[attr-defined]
 
         return q_grad, k_grad, None
 
@@ -73,7 +72,7 @@ def _torch_matmul(func_name):
                 if not torch.equal(mask0, mask1.transpose(1, 2)):
                     raise ValueError("for torch.bmm, input0_mask must equal input1_mask.transpose(1, 2)")
 
-        return masked_tensor(result_data, result_mask)
+        return MaskedTensor(result_data, result_mask)
 
     return matmul
 
