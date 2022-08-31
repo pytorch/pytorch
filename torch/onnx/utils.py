@@ -1096,7 +1096,7 @@ def _model_to_graph(
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
 
-        output_tensors, out_desc = _C._jit_flatten(tuple(output_wrapped))
+        output_tensors, out_desc = torch.jit._flatten(tuple(output_wrapped))
         # assign_output_shape pass is not compatible with quantized outputs.
         # Quantized outputs are flattened to 3 values in ONNX, while packed as
         # single value in PyTorch.
