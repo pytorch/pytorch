@@ -34,6 +34,8 @@ struct TORCH_CUDA_CU_API FusionCacheEntry {
   //! An index into FusionCache's vector of nvFuser object that holds an
   //! unscheduled Fusion.  The id is only valid if the entry is terminal.
   size_t fusion_id;
+  //! Count of times the Entry is traversed
+  size_t visits;
 };
 
 //! \class FusionCache
@@ -73,6 +75,8 @@ class TORCH_CUDA_CU_API FusionCache {
   //! Creates a child node for the current cache entry and an optional
   //! fusion_id is returned if the new entry is terminal
   c10::optional<size_t> createFusionCacheEntry(RecordFunctor* rec);
+  //! print cache stats
+  void print(std::ostream& os);
   //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
   //! Traverses the cache from the current entry to the child associated

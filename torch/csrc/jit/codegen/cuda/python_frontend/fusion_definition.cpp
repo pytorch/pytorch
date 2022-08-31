@@ -110,7 +110,10 @@ void FusionDefinition::exit() {
 }
 
 void FusionDefinition::print(std::ostream& os) const {
-  os << "\ndef nvfuser_fusion(fd : FusionDefinition) -> None :\n";
+  os << "\nFusion Id: " << fusion_->id() << " (";
+  fusionCachePtr()->print(os);
+  os << ")\n";
+  os << "def nvfuser_fusion(fd : FusionDefinition) -> None :\n";
   os << std::dec;
   for (auto& rec : recording_) {
     os << "    ";

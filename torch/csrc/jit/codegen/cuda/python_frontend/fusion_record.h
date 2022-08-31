@@ -1105,7 +1105,7 @@ struct VarianceOpRecord : RecordFunctor {
   bool keep_dim_;
 };
 
-struct VarianceMeanOpRecord : RecordFunctor {
+/*struct VarianceMeanOpRecord : RecordFunctor {
   VarianceMeanOpRecord(
       std::vector<size_t> _args,
       std::vector<size_t> _outputs,
@@ -1133,7 +1133,7 @@ struct VarianceMeanOpRecord : RecordFunctor {
   int64_t correction_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keepdim_;
-};
+};*/
 
 } // namespace nvfuser
 

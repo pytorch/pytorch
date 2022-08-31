@@ -12,7 +12,8 @@ FusionCacheEntry::FusionCacheEntry(
     size_t _fusion_id)
     : record(rec),
       record_hash_map(),
-      fusion_id(_fusion_id) {}
+      fusion_id(_fusion_id),
+      visits(0) {}
 
 bool FusionCacheEntry::isTerminal() const {
   return (record.get()->recordType() == RecordType::End);
@@ -91,9 +92,15 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
   return result;
 }
 
+void FusionCache::print(std::ostream& os) {
+  os << "Total Fusions: " << fusions_.size() ;
+  os << " Cache Lookups: " << fusion_cache_start_->visits;
+}
+
 void FusionCache::resetFusionCachePtr() {
   fusion_cache_ptr_ = fusion_cache_start_.get();
   TORCH_CHECK(fusionCachePtr()->record->recordType() == RecordType::Start);
+  ++(fusionCachePtr()->visits);
 }
 
 void FusionCache::traverseFusionCache(RecordFunctor* rec) {
@@ -106,6 +113,7 @@ void FusionCache::traverseFusionCache(RecordFunctor* rec) {
       "Cache Entry for Cache Traverse is not found!");
   TORCH_CHECK(cache_entry->second, "Record in Cache Entry is null!");
   fusion_cache_ptr_ = cache_entry->second.get();
+  ++(fusionCachePtr()->visits);
 }
 
 FusionCacheEntry* FusionCache::fusionCachePtr() const {

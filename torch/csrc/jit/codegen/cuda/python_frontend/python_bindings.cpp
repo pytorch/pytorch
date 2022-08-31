@@ -1185,7 +1185,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("keepdim") = false,
       py::return_value_policy::reference);
 
-  nvf_ops.def(
+  /*nvf_ops.def(
       "var_mean",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor* arg,
@@ -1203,7 +1203,7 @@ void initNvFuserPythonBindings(PyObject* module) {
         return std::make_tuple(var, mean);
       },
       py::return_value_policy::reference);
-
+  */
   nvf_ops.def(
       "broadcast_in_dim",
       [](nvfuser::FusionDefinition::Operators& self,
