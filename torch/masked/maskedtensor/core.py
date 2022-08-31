@@ -22,10 +22,10 @@ def is_masked_tensor(a):
     Examples:
 
         >>> # xdoctest: +SKIP
-        >>> from torch.masked.maskedtensor.creation import masked_tensor
+        >>> from torch.masked import MaskedTensor
         >>> data = torch.arange(6).reshape(2,3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
-        >>> mt = masked_tensor(data, mask)
+        >>> mt = MaskedTensor(data, mask)
         >>> is_masked_tensor(mt)
         True
     """
@@ -57,8 +57,8 @@ def _tensors_match(a, b, exact=True):
 
 def _masks_match(a, b):
     if is_masked_tensor(a) and is_masked_tensor(b):
-        mask_a = a._masked_mask
-        mask_b = b._masked_mask
+        mask_a = a.get_mask()
+        mask_b = b.get_mask()
         return _tensors_match(mask_a, mask_b, exact=True)
     return True
 
@@ -142,7 +142,7 @@ def _get_data(a):
 
 def _maybe_get_mask(a):
     if is_masked_tensor(a):
-        return a._masked_mask
+        return a.get_mask()
     return None
 
 
@@ -276,7 +276,6 @@ class MaskedTensor(torch.Tensor):
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
         if data.requires_grad:
-            print ("UserWarning")
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                           "To avoid this, you can use data.clone().detach()", UserWarning)
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
@@ -294,12 +293,12 @@ class MaskedTensor(torch.Tensor):
                 data = _sparse_csr_where(mask, data, torch.tensor(0))
 
         # Have to pick awkward names to not conflict with existing fields such as data
-        self._masked_data = data
-        self._masked_mask = mask
+        self._masked_data = data.clone()
+        self._masked_mask = mask.clone()
 
     def _validate_members(self):
-        data = self._masked_data
-        mask = self._masked_mask
+        data = self.get_data()
+        mask = self.get_mask()
         if type(data) != type(mask):
             raise TypeError(f"data and mask must have the same type. Got {type(data)} and {type(mask)}")
         if data.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
@@ -351,7 +350,6 @@ class MaskedTensor(torch.Tensor):
         result = Constructor.apply(data, mask)
         if data.requires_grad:
             result.requires_grad_(True)
-            # result.retain_grad()
         return result
 
     def _set_data_mask(self, data, mask):
@@ -591,6 +589,9 @@ class MaskedTensor(torch.Tensor):
             new_mask = func(*new_args, **kwargs).bool()
 
             return MaskedTensor(new_data, new_mask)
+        if func is torch.ops.aten.is_same_size:
+            _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2)
+            return data.is_same_size(_get_data(args[1]))
         msg = (
             f"{func.__name__} is not implemented in __torch_dispatch__ for MaskedTensor.\n"
             "If you would like this operator to be supported, please file an issue for a feature request at "
