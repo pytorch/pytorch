@@ -445,6 +445,8 @@ class FakeTensor(torch.Tensor):
             return None
         elif func == torch.ops.aten.sym_stride.default:
             return None
+        elif func == torch.ops.aten.sym_storage_offset.default:
+            return None
         elif func == torch.ops.aten.size.default:
             return None
         elif func == torch.ops.aten.stride.default:

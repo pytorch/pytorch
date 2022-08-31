@@ -185,7 +185,7 @@ def proxy_call(proxy_mode, func_overload, args, kwargs=None):
     # Some of these are not "real" aten ops and will fail if we
     # call _dispatch_has_kernel_for_dispatch_key on them.
     # This list is probably incomplete
-    if func_overload not in [torch.ops.aten.size.default]:
+    if func_overload not in [torch.ops.aten.size.default, torch.ops.aten.sym_storage_offset.default]:
         with proxy_mode.restore():
             r = func_overload.decompose(*args, **kwargs)
             if r is not NotImplemented:

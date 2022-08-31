@@ -69,7 +69,8 @@ def create_contiguous(shape):
 
 def is_symbolic_op(func):
     return func in [aten.sym_size.default, aten.dim.default,
-                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default
+                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default,
+                    aten.sym_storage_offset.default
                     ]
 
 def handle_symbolic_op(func, args, kwargs):
