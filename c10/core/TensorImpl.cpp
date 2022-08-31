@@ -213,12 +213,12 @@ void TensorImpl::HandleResize() {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
     reset_tensor =
-        storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
+        storage_.nbytes() < (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize();
   } else {
     reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize() ||
+            (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize() ||
         !FLAGS_caffe2_keep_on_shrink ||
-        storage_.nbytes() - (storage_offset_ + numel_) * data_type_.itemsize() >
+        storage_.nbytes() - (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize() >
             static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
   }
 

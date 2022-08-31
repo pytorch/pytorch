@@ -1285,7 +1285,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return storage_.unsafe_data<T>() + storage_offset_.as_int_unchecked();
   }
 
   /**
@@ -1314,7 +1314,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
-        data_type_.itemsize() * storage_offset_);
+        data_type_.itemsize() * storage_offset_.as_int_unchecked());
   }
 
   /**
@@ -1323,7 +1323,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* unsafe_data() const {
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return storage_.unsafe_data<T>() + storage_offset_.as_int_unchecked();
   }
 
   /**
@@ -1353,8 +1353,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This is NOT computed in bytes.
    */
   TENSORIMPL_MAYBE_VIRTUAL int64_t storage_offset() const {
-    TORCH_CHECK(!has_symbolic_sizes_strides());
-    return storage_offset_;
+    return storage_offset_.expect_int();
   }
 
   c10::SymInt sym_storage_offset() const {
@@ -1367,7 +1366,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline c10::SymInt sym_storage_offset_default() const {
-    return c10::SymInt{storage_offset_};
+    return storage_offset_;
   }
 
   virtual c10::SymInt sym_storage_offset_custom() const {
@@ -1454,7 +1453,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         allow_tensor_metadata_change(),
         "set_storage_offset ",
         err_msg_tensor_metadata_change_not_allowed);
-    storage_offset_ = storage_offset;
+    storage_offset_ = c10::SymInt(storage_offset);
+  }
+
+  void set_storage_offset(c10::SymInt storage_offset) {
+    TORCH_CHECK(
+        allow_tensor_metadata_change(),
+        "set_storage_offset ",
+        err_msg_tensor_metadata_change_not_allowed);
+    storage_offset_ = std::move(storage_offset);
   }
 
   /**
@@ -1984,7 +1991,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
           static_cast<char*>(storage_.data()) +
-          storage_offset_ * meta.itemsize());
+          storage_offset_.as_int_unchecked() * meta.itemsize());
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
@@ -1998,7 +2005,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           (meta.placementNew() == nullptr && !had_special_dtor &&
            (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
-            storage_offset_ == 0); // because we just reallocated
+            storage_offset_.as_int_unchecked() == 0); // because we just reallocated
         return storage_.data();
       }
       const Allocator* allocator = storage_.allocator();
@@ -2026,7 +2033,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       }
       storage_.set_nbytes(numel_ * data_type_.itemsize());
       TORCH_INTERNAL_ASSERT(
-          storage_offset_ == 0); // because we just reallocated
+          storage_offset_.as_int_unchecked() == 0); // because we just reallocated
       device_opt_ = storage_.device();
       return storage_.data();
     }
@@ -2041,7 +2048,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* mutable_data() {
     if (storage_initialized() && data_type_.Match<T>()) {
-      return static_cast<T*>(storage_.data()) + storage_offset_;
+      return static_cast<T*>(storage_.data()) + storage_offset_.as_int_unchecked();
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
@@ -2518,7 +2525,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
-  int64_t storage_offset_ = 0;
+  c10::SymInt storage_offset_ = 0;
   // If sizes and strides are empty, the numel is 1!!  However, most of the
   // time, we will immediately set sizes to {0} and reset numel to 0.
   // (Can't do that in the default initializers, because there's no way to
