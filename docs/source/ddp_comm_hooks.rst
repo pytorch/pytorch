@@ -20,7 +20,7 @@ the hook before the training loop as below.
 What Does a Communication Hook Operate On?
 ------------------------------------------
 
-Communication hook provides a flexible way to allreduce gradients.
+A communication hook provides a flexible way to allreduce gradients.
 Therefore, it mainly operates on the gradients on each replica before allreduce,
 which are bucketized to increase the overlap between communication and computation.
 Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradient tensors to be allreduced.
@@ -46,7 +46,7 @@ The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 .. autofunction:: fp16_compress_hook
 .. autofunction:: bf16_compress_hook
 
-Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
+Additionally, a communication hook wrapper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
 which can be combined with other communication hooks.
 
 .. autofunction:: fp16_compress_wrapper

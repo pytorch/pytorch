@@ -1,28 +1,28 @@
+from typing import Optional, Union
+
 import torch
 
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+import torch._refs as refs
+from torch._decomp import register_decomposition
+from torch._prims_common import (
     check,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    NumberType,
     ShapeType,
     TensorLike,
     TensorLikeType,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._refs as refs
-from torch._decomp import register_decomposition
-from torch._prims.wrappers import (
+from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
 from torch._refs import (
-    _make_elementwise_unary_reference,
     _make_elementwise_binary_reference,
+    _make_elementwise_unary_reference,
 )
-
-from typing import Optional, Union
 
 __all__ = [
     "celu",
@@ -35,12 +35,17 @@ __all__ = [
     "margin_ranking_loss",
     "mish",
     "mse_loss",
+    "prelu",
     "relu",
+    "relu6",
     "selu",
     "softplus",
     "softshrink",
     "tanhshrink",
     "threshold",
+    "glu",
+    "pairwise_distance",
+    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -272,7 +277,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(abs(a) > abs(lambd), a, 0)
+    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(torch.ops.aten.softshrink)
@@ -282,6 +287,10 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
+    check(
+        lambd >= 0,
+        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+    )
     ge_mask = a > lambd
     le_mask = a < -lambd
     zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
@@ -502,6 +511,7 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+@register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -538,3 +548,67 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     )
 
     return refs.where(a > 0, a, a * weight)
+
+
+@register_decomposition(torch.ops.aten.relu6)
+def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.relu6
+    """
+    if inplace:
+        raise NotImplementedError
+
+    # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
+    # It may be better to use clamp here, but we use hardtanh to replicate
+    # the behavior of the existing implementation
+    return refs.nn.functional.hardtanh(a, 0, 6)
+
+
+@register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)
+
+
+@register_decomposition(torch.ops.aten.pairwise_distance)
+@out_wrapper()
+def pairwise_distance(
+    x1: TensorLikeType,
+    x2: TensorLikeType,
+    p: NumberType = 2.0,
+    eps: NumberType = 1e-6,
+    keepdim=False,
+) -> TensorLikeType:
+    return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
+
+
+@register_decomposition(torch.ops.aten.pdist)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
+    check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
+    check(p >= 0, lambda: "pdist only supports non-negative p values")
+    # For p == 2 we can use an efficient implementation, but other values of p
+    # require creating a much bigger tensor for an intermediate step
+    if p == 2:
+        aTa = torch.mm(a, a.T)
+        aTa_diag = torch.diag(aTa)
+        t = torch.sqrt(torch.clamp(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa, min=0))
+    else:
+        t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
+    i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
+    return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])

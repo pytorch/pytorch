@@ -1,16 +1,43 @@
+from typing import List, Optional, Union
+
 import torch
+import torch._prims_common as utils
 from torch import Tensor
-from torch._prims import utils
-from torch._prims.utils import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
+from torch._prims_common import (
     check,
+    corresponding_complex_dtype,
+    corresponding_real_dtype,
     elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-from torch._prims.wrappers import out_wrapper
 
-from typing import List, Optional
+from torch._prims_common.wrappers import out_wrapper
+from torch._refs import _broadcast_shapes
+from torch.utils._pytree import tree_map
 
-meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+aten = torch.ops.aten
+
+_meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
+
+meta_table = {}
+
+
+def register_meta(op, register_dispatcher=True):
+    def wrapper(f):
+        def add_func(op):
+            meta_table[op] = f
+            if register_dispatcher:
+                name = (
+                    op.__name__
+                    if op._overloadname != "default"
+                    else op.overloadpacket.__name__
+                )
+                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+        tree_map(add_func, op)
+        return f
+
+    return wrapper
 
 
 def toRealValueType(dtype):
@@ -22,13 +49,13 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
-@torch.library.impl(meta_lib, "_fft_c2c")
+@register_meta(aten._fft_c2c.default)
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
     return self.new_empty(self.size())
 
 
-@torch.library.impl(meta_lib, "_fft_r2c")
+@register_meta(aten._fft_r2c.default)
 def meta_fft_r2c(self, dim, normalization, onesided):
     assert self.dtype.is_floating_point
     output_sizes = list(self.size())
@@ -43,8 +70,13 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     )
 
 
-@torch.library.impl(meta_lib, "_fft_c2r.out")
-@torch.library.impl(meta_lib, "_fft_c2r")
+@register_meta(aten.randperm.generator_out)
+def meta_randperm(n, *, generator=None, out):
+    assert out.ndim == 1 and out.size(0) == n
+    return out
+
+
+@register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
     assert self.dtype.is_complex
@@ -53,13 +85,8 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@torch.library.impl(meta_lib, "conj_physical.out")
-def meta_conj_physical_out(self, out):
-    return torch._resize_output_(out, self.size(), self.device)
-
-
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
-@torch.library.impl(meta_lib, "index_select")
+@register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
     result_size = list(self.size())
     if self.dim() > 0:
@@ -67,31 +94,29 @@ def meta_index_select(self, dim, index):
     return self.new_empty(result_size)
 
 
-@torch.library.impl(meta_lib, "index_select.out")
+@register_meta(aten.index_select.out)
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@torch.library.impl(meta_lib, "max")
+@register_meta([aten.max.default, aten.min.default])
 def meta_max(self):
     return self.new_empty(())
 
 
-@torch.library.impl(meta_lib, "min")
-def meta_min(self):
-    return self.new_empty(())
-
-
-@torch.library.impl(meta_lib, "angle")
+@register_meta(aten.angle.default)
 def meta_angle(self):
-    _, result_dtype = elementwise_dtypes(
-        self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    )
+    if self.is_complex():
+        result_dtype = corresponding_real_dtype(self.dtype)
+    else:
+        _, result_dtype = elementwise_dtypes(
+            self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
     return self.new_empty(self.size(), dtype=result_dtype)
 
 
-@torch.library.impl(meta_lib, "angle.out")
+@register_meta(aten.angle.out)
 def meta_angle_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.angle(self))
@@ -113,9 +138,7 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-# Keeping this meta impl around, but we don't want to register it directly to the meta key
-# because `aten::linalg_eigh` is composite.
-# `_linalg_eigh` is implemented internally as a structured kernel, so we have meta support.
+# @register_meta(aten.linalg_eigh.default)
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
@@ -127,7 +150,7 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
-@torch.library.impl(meta_lib, "reflection_pad2d")
+@register_meta(aten.reflection_pad2d.default)
 def meta_pad2d(self, padding):
     valid_dims = self.size(1) != 0 and self.size(2) != 0
     check(
@@ -152,12 +175,16 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@torch.library.impl(meta_lib, "dot")
-def meta_dot(self, tensor):
+def dot_check(self, other):
     check(
-        self.dim() == 1 and tensor.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors",
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
     )
+
+
+@register_meta(aten.dot.default)
+def meta_dot(self, tensor):
+    dot_check(self, tensor)
     return self.new_empty(())
 
 
@@ -168,32 +195,167 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@torch.library.impl(meta_lib, "var_mean.correction")
-def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
-    dim = utils.reduction_dims(self.shape, dim)
-    output_shape = _compute_reduction_shape(self, dim, keepdim)
-    result1 = self.new_empty(output_shape, dtype=toRealValueType(self.dtype))
-    result2 = self.new_empty(output_shape)
-    return result1, result2
-
-
-@torch.library.impl(meta_lib, "inverse")
-def meta_inverse(self):
-    # Bug: https://github.com/pytorch/pytorch/issues/77498
-    if self.numel() == 0:
-        return torch.empty_like(self)
-    r = self.new_empty(self.shape)
-    r.transpose_(-2, -1)
-    return r
-
-
-@torch.library.impl(meta_lib, "bernoulli.out")
+@register_meta(aten.bernoulli.out)
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
     return out
 
 
-@torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
+@register_meta(aten._to_copy.default, False)
+def _to_copy(
+    self: torch.Tensor,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    dtype = self.dtype if dtype is None else dtype
+    device = self.device if device is None else device
+    layout = self.layout if layout is None else layout
+    assert pin_memory is None
+    assert memory_format is None
+    return self.new_empty(self.shape, dtype=dtype, device=device, pin_memory=pin_memory)
+
+
+@register_meta(aten.convolution.default)
+def meta_conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    is_transposed: bool,
+    output_padding: List[int],
+    groups: int,
+):
+    def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
+        """
+        Formula to apply to calculate the length of some dimension of the output
+
+        See: https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
+
+        Args:
+            ln: length of the dimension
+            p: padding in that dim
+            d: dilation in that dim
+            k: kernel size in that dim
+            s: stride in that dim
+        Returns:
+            The output length
+        """
+        return (ln + 2 * p - d * (k - 1) - 1) // s + 1
+
+    def _formula_transposed(ln: int, p: int, d: int, k: int, s: int, op: int) -> int:
+        """
+        Formula to apply to calculate the length of some dimension of the output
+        if transposed convolution is used.
+        See: https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
+
+        Args:
+            ln: length of the dimension
+            p: padding in that dim
+            d: dilation in that dim
+            k: kernel size in that dim
+            s: stride in that dim
+            op: output padding in that dim
+
+        Returns:
+            The output length
+        """
+        return (ln - 1) * s - 2 * p + d * (k - 1) + op + 1
+
+    def calc_conv_nd_return_shape(
+        dims: torch.Size,
+        kernel_size: torch.Size,
+        stride: Union[List[int], int],
+        padding: Union[List[int], int],
+        dilation: Union[List[int], int],
+        output_padding: Optional[Union[List[int], int]] = None,
+    ):
+        ret_shape = []
+        if isinstance(stride, int):
+            stride = [stride] * len(dims)
+        elif len(stride) == 1:
+            stride = [stride[0]] * len(dims)
+
+        if isinstance(padding, int):
+            padding = [padding] * len(dims)
+        elif len(padding) == 1:
+            padding = [padding[0]] * len(dims)
+
+        if isinstance(dilation, int):
+            dilation = [dilation] * len(dims)
+        elif len(dilation) == 1:
+            dilation = [dilation[0]] * len(dims)
+
+        output_padding_list: Optional[List[int]] = None
+        if output_padding:
+            if isinstance(output_padding, int):
+                output_padding_list = [output_padding] * len(dims)
+            elif len(output_padding) == 1:
+                output_padding_list = [output_padding[0]] * len(dims)
+            else:
+                output_padding_list = output_padding
+
+        for i in range(len(dims)):
+            # If output_padding is present, we are dealing with a transposed convolution
+            if output_padding_list:
+                ret_shape.append(
+                    _formula_transposed(
+                        dims[i],
+                        padding[i],
+                        dilation[i],
+                        kernel_size[i],
+                        stride[i],
+                        output_padding_list[i],
+                    )
+                )
+            else:
+                ret_shape.append(
+                    _formula(
+                        dims[i], padding[i], dilation[i], kernel_size[i], stride[i]
+                    )
+                )
+        return ret_shape
+
+    def pick_memory_format():
+        if input_tensor.is_contiguous(memory_format=torch.channels_last):
+            return torch.channels_last
+        elif input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return torch.contiguous_format
+        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+            return torch.preserve_format
+
+    kernel_size = weight.shape[2:]
+    dims = input_tensor.shape[2:]
+    if is_transposed:
+        out_channels = groups * weight.shape[1]
+
+        shape_out = calc_conv_nd_return_shape(
+            dims,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            output_padding,
+        )
+
+    else:
+        out_channels = weight.shape[0]
+        if weight.shape[1] != input_tensor.shape[1] / groups:
+            raise RuntimeError("Invalid channel dimensions")
+        shape_out = calc_conv_nd_return_shape(
+            dims, kernel_size, stride, padding, dilation
+        )
+    out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
+    mem_fmt = pick_memory_format()
+    out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
+    return out
+
+
+@register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
         self.ndim == 3 or self.ndim == 4,
@@ -202,7 +364,7 @@ def meta_adaptive_avg_pool2d(self, output_size):
     return self.new_empty(self.shape[:-2] + tuple(output_size))
 
 
-@torch.library.impl(meta_lib, "_adaptive_avg_pool3d")
+@register_meta(aten._adaptive_avg_pool3d.default)
 def meta_adaptive_avg_pool3d(self, output_size):
     check(
         self.ndim == 4 or self.ndim == 5,
@@ -211,17 +373,44 @@ def meta_adaptive_avg_pool3d(self, output_size):
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 
-@torch.library.impl(meta_lib, "repeat_interleave.Tensor")
+@register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
         raise RuntimeError("cannot repeat_interleave a meta tensor without output_size")
     return repeats.new_empty(output_size)
 
 
+@register_meta([aten.complex.default, aten.complex.out])
+@out_wrapper()
+def meta_complex(real, imag):
+    assert real.dtype.is_floating_point
+    assert imag.dtype.is_floating_point
+    out_shape = _broadcast_shapes(real.shape, imag.shape)
+    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+@register_meta(aten.vdot.default)
+def vdot(self, other):
+    if not self.is_complex:
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    dot_check(self, other)
+    return self.new_empty(())
+
+
 # Leaving this function around because a python implementation
 # of indexing shape inference is useful,
 # but not registering it to the dispatcher because we already
 # get shape inference through structured kernels
+@register_meta(aten.index.Tensor, register_dispatcher=False)
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -323,8 +512,7 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
-@torch.library.impl(meta_lib, "addbmm")
-@torch.library.impl(meta_lib, "addbmm.out")
+@register_meta([aten.addbmm.default, aten.addbmm.out])
 @out_wrapper()
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
@@ -350,7 +538,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@torch.library.impl(meta_lib, "_cdist_forward")
+@register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
     check(
         x1.dim() >= 2,
@@ -386,7 +574,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
-@torch.library.impl(meta_lib, "_embedding_bag")
+@register_meta(aten._embedding_bag.default)
 def meta_embedding_bag(
     weight,
     indices,
@@ -479,8 +667,7 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@torch.library.impl(meta_lib, "diag")
-@torch.library.impl(meta_lib, "diag.out")
+@register_meta([aten.diag.default, aten.diag.out])
 @out_wrapper()
 def meta_diag(self, dim=0):
     check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
@@ -496,7 +683,7 @@ def meta_diag(self, dim=0):
     return self.new_empty((sz,))
 
 
-@torch.library.impl(meta_lib, "_embedding_bag_forward_only")
+@register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
         weight, indices, offsets, *args
@@ -519,8 +706,7 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
     return input.dtype
 
 
-@torch.library.impl(meta_lib, "nansum")
-@torch.library.impl(meta_lib, "nansum.out")
+@register_meta([aten.nansum.default, aten.nansum.out])
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
@@ -529,7 +715,7 @@ def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     return input.new_empty(output_shape, dtype=output_dtype)
 
 
-@torch.library.impl(meta_lib, "nanmedian")
+@register_meta(aten.nanmedian.default)
 def meta_nanmedian(input):
     output_shape = utils.compute_reduction_output_shape(
         input.shape, tuple(range(input.dim()))
@@ -537,28 +723,18 @@ def meta_nanmedian(input):
     return input.new_empty(output_shape)
 
 
-@torch.library.impl(meta_lib, "nanmedian.dim_values")
-@torch.library.impl(meta_lib, "nanmedian.dim")
+@register_meta([aten.nanmedian.dim, aten.nanmedian.dim_values])
 @out_wrapper("values", "indices")
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
-    return input.new_empty(output_shape), input.new_empty(
-        output_shape, dtype=torch.long
+    return (
+        input.new_empty(output_shape),
+        input.new_empty(output_shape, dtype=torch.long),
     )
 
 
-@torch.library.impl(meta_lib, "nan_to_num")
-def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
-    return self.new_empty(self.shape)
-
-
-@torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
-def meta_remainder_scalar(scalar, other):
-    return other % scalar
-
-
-@torch.library.impl(meta_lib, "logical_not_")
+@register_meta(aten.logical_not_.default)
 def meta_logical_not_(self):
     return self
 

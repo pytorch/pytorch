@@ -1,4 +1,24 @@
 {
+  "being_migrated": {
+    "torch.nn.qat": "torch.ao.nn.qat",
+    "torch.nn.qat.dynamic": "torch.ao.nn.qat.dynamic",
+    "torch.nn.qat.dynamic.modules": "torch.ao.nn.qat.dynamic.modules",
+    "torch.nn.qat.dynamic.modules.linear": "torch.ao.nn.qat.dynamic.modules.linear",
+    "torch.nn.qat.modules": "torch.ao.nn.qat.modules",
+    "torch.nn.qat.modules.conv": "torch.ao.nn.qat.modules.conv",
+    "torch.nn.qat.modules.embedding_ops": "torch.ao.nn.qat.modules.embedding_ops",
+    "torch.nn.qat.modules.linear": "torch.ao.nn.qat.modules.linear",
+    "torch.nn.quantized.functional": "torch.ao.nn.quantized.functional",
+    "torch.nn.quantized": "torch.ao.nn.quantized",
+    "torch.nn.quantized.modules": "torch.ao.nn.quantized.modules",
+    "torch.nn.quantized.dynamic": "torch.ao.nn.quantized.dynamic",
+    "torch.nn.quantized.dynamic.modules": "torch.ao.nn.quantized.dynamic.modules",
+    "torch.nn.quantized.dynamic.modules.rnn": "torch.ao.nn.quantized.dynamic.modules.rnn",
+    "torch.nn.quantizable": "torch.ao.nn.quantizable",
+    "torch.nn.quantizable.modules": "torch.ao.nn.quantizable.modules",
+    "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
+    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
+  },
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -1148,6 +1168,7 @@
     "tensorinv",
     "tensorsolve",
     "vander",
+    "vecdot",
     "vector_norm"
   ],
   "torch.multiprocessing": [
@@ -1367,8 +1388,7 @@
     "TorchFunctionModeMeta",
     "enable_torch_function_mode",
     "get_default_nowrap_functions",
-    "has_torch_function",
-    "push_torch_function_mode"
+    "has_torch_function"
   ],
   "torch.package.analyze.is_from_package": [
     "Any",
@@ -1851,7 +1871,7 @@
     "QUInt4x2Storage",
     "QUInt8Storage",
     "Storage",
-    "_TypedStorage",
+    "TypedStorage",
     "_adaptive_avg_pool2d",
     "_adaptive_avg_pool3d",
     "_add_batch_dim",
@@ -1998,7 +2018,6 @@
     "_is_functional_tensor",
     "_is_zerotensor",
     "_linalg_check_errors",
-    "_linalg_inv_out_helper_",
     "_linalg_qr_helper",
     "_linalg_svd",
     "_linalg_solve_ex",

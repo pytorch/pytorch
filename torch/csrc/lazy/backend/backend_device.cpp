@@ -10,9 +10,9 @@
 namespace torch {
 namespace lazy {
 
-// TODO(alanwaketan): Use the backend API to get the default device type.
-// In the future, we should also get the default device ordinal.
-BackendDevice::BackendDevice() : type_(std::make_shared<BackendDeviceType>()) {}
+BackendDevice::BackendDevice()
+    : type_(getBackend()->GetDefaultDeviceType()),
+      ordinal_(getBackend()->GetDefaultDeviceOrdinal()) {}
 
 BackendDevice::BackendDevice(
     std::shared_ptr<BackendDeviceType>&& type,
@@ -41,11 +41,11 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
   return os;
 }
 
-// TODO(whc) refactor this: we need to support non-zero default ordinal for
-// torch/XLA.
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
-  int64_t ordinal = device.has_index() ? device.index() : 0;
+  int64_t ordinal = device.has_index()
+      ? device.index()
+      : getBackend()->GetDefaultDeviceOrdinal();
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 

@@ -1,35 +1,39 @@
-from abc import ABC
 import itertools
+from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union, Tuple
-from torchgen.context import method_with_native_function
-from torchgen.model import (
-    FunctionSchema,
-    Argument,
-    BackendIndex,
-    NativeFunction,
-    NativeFunctionsGroup,
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import torchgen.api.dispatcher as dispatcher
+from torchgen.api.lazy import (
+    getValueT,
+    isValueType,
+    LazyArgument,
+    LazyIrProperties,
+    LazyIrSchema,
+    tensorListValueT,
 )
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
+    deviceT,
     DispatcherSignature,
+    kernel_signature,
     OptionalCType,
     VectorCType,
-    kernel_signature,
-    deviceT,
 )
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.translate import translate
-from torchgen.api.lazy import (
-    LazyIrProperties,
-    LazyIrSchema,
-    LazyArgument,
-    getValueT,
-    isValueType,
-    tensorListValueT,
-)
+from torchgen.context import method_with_native_function
 from torchgen.dest.lazy_ts_lowering import ts_lowering_body
+from torchgen.model import (
+    Argument,
+    BackendIndex,
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
+    NativeFunction,
+    NativeFunctionsGroup,
+)
 
 
 def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
@@ -39,6 +43,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
     a lazy Node constructor.
     """
 
+    # TODO: Matching on CType seems wrong; should be matching on Type
     if isValueType(arg.lazy_type):
         if isinstance(arg.lazy_type, BaseCType):
             if arg.is_wrapped_scalar:
@@ -47,10 +52,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 return f"lazy_{arg.name}_tensorlist"
             elif arg.is_symint_or_list:
                 cpp_type = arg.lazy_type.cpp_type()
-                return (
-                    f"{cpp_type}(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>"
-                    f"({arg.name}.toSymbolicIntNode())->node_, 0)"
-                )
+                return f"GetSymIntValue({arg.name})"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -65,7 +67,15 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})"
             )
     else:
-        if isinstance(arg.lazy_type, VectorCType) and isinstance(
+        # NB: this is here because right now we aren't treating SymInt[] as a
+        # value type; when we do this needs to move above
+        # NB: we cannot test arg.lazy_type as we've already specified it is an
+        # int64_t and so we cannot distinguish between SymInt and int64_t
+        if isinstance(arg.orig_type, ListType) and arg.orig_type.elem == BaseType(
+            BaseTy.SymInt
+        ):
+            return f"GetSymIntArrayRefValue({arg.name})"
+        elif isinstance(arg.lazy_type, VectorCType) and isinstance(
             arg.lazy_type.elem, BaseCType
         ):
             return f"std::vector<{arg.lazy_type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
@@ -395,13 +405,14 @@ class GenLazyNativeFuncDefinition:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} = {arg.name} ?
-                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})):
+                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->
+                    GetIrValueForScalarFromCodegen(*{arg.name}, *common_device)):
                 c10::nullopt;"""
                     )
                 else:
                     lazy_tensor_decls.append(
-                        f"""auto node_{arg.name} =
-                torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});"""
+                        f"""auto node_{arg.name} = torch::lazy::LazyGraphExecutor::Get()->
+                            GetIrValueForScalarFromCodegen({arg.name}, *common_device);"""
                     )
             elif arg.is_symint_or_list:
                 continue  # values are extracted in isValueType
@@ -501,9 +512,13 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "compositeexplicitautogradnonfunctional"
             else:
                 dispatch_ns = "meta"
+            aten_name = schema.aten_name
+            # TODO: this is trolling
+            if func.func.has_symint():
+                aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}
-        auto out_meta = at::{dispatch_ns}::{schema.aten_name}({', '.join(meta_call_args)});
+        auto out_meta = at::{dispatch_ns}::{aten_name}({', '.join(meta_call_args)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
@@ -589,7 +604,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         {self.lazy_tensor_decls(func, schema)}
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
-    }};\n
+    }}\n
     """
         ]
 

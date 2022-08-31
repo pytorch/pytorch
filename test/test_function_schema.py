@@ -186,5 +186,11 @@ class TestFunctionSchema(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"schemas with vararg \(...\) can't have default value args"):
             schema = parse_schema("any.foo(int arg1, int arg2=0, ...)")
 
+    def test_tensor_list_alias_annotation_properly_parsed(self):
+        schema_str = 'foo(Tensor self, *, Tensor(a!)[] out) -> ()'
+        schema = parse_schema(schema_str)
+        self.assertTrue(schema.arguments[-1].alias_info.is_write)
+        self.assertEqual(str(schema), schema_str)
+
 if __name__ == '__main__':
     run_tests()

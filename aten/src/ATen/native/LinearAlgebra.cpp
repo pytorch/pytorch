@@ -1108,24 +1108,26 @@ Tensor math_addr(const Tensor& self,
                  const Scalar& beta, const Scalar& alpha) {
   // when beta==0, values in self should be ignored,
   // nans and infs in self should not propagate.
+  Tensor out;
   if (beta.toComplexDouble() == 0.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return at::outer(vec1, vec2);
+      out = at::outer(vec1, vec2);
+    } else {
+      out = alpha * at::outer(vec1, vec2);
     }
-    return alpha * at::outer(vec1, vec2);
-  }
-
-  if (beta.toComplexDouble() == 1.0) {
+  } else if (beta.toComplexDouble() == 1.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return self + at::outer(vec1, vec2);
+      out = self + at::outer(vec1, vec2);
+    } else {
+      out = self + alpha * at::outer(vec1, vec2);
     }
-    return self + alpha * at::outer(vec1, vec2);
+  } else if (alpha.toComplexDouble() == 1.0) {
+    out = beta * self + at::outer(vec1, vec2);
+  } else {
+    out = beta * self + alpha * at::outer(vec1, vec2);
   }
-
-  if (alpha.toComplexDouble() == 1.0) {
-    return beta * self + at::outer(vec1, vec2);
-  }
-  return beta * self + alpha * at::outer(vec1, vec2);
+  auto result_type = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  return out.to(c10::TensorOptions().dtype(result_type));
 }
 
 Tensor& math_addr_out(const Tensor& self,
@@ -1250,11 +1252,6 @@ static void addmm_impl_cpu_(
 
   if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
-  }
-
-  if (use_mkldnn_bf16_matmul(m1, m2, result)){
-    mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
-    return;
   }
 
   bool transpose_c = false;
@@ -1765,7 +1762,8 @@ Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
@@ -1885,8 +1883,8 @@ Tensor _matmul_impl(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::Tensor unused;
-  auto result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  at::Tensor result, unused;
+  result = at::native::_matmul_impl(unused, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -2024,6 +2022,19 @@ inline Tensor _blob_to_Tensor(
   return _move_memory_if_cuda_input(tensor, in);
 }
 
+template <typename scalar_t>
+inline Tensor _linear_combination(
+    const Tensor& t,
+    std::initializer_list<scalar_t> blob) {
+  // _blob_to_Tensor converts blob to a 2D tensor for _compute_linear_combination.
+  // If this tensor is of shape (1, *), the result of _compute_linear_combination
+  // is going to be of shape (1, *t.shape) so we squeeze(0) so that
+  // for any t with t.dim() >= 1: t.dim() == _compute_linear_combination(t, ...).dim().
+  return at::native::_compute_linear_combination(
+      t, _blob_to_Tensor<scalar_t>(blob, t))
+    .squeeze(0);
+}
+
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -2055,15 +2066,15 @@ Tensor compute_T4(const Tensor& A) {
     // contains A^2
     As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 3),
-      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+      {1 / 2.0, 1 / 6.0, 1 / 24.0}
     )
   );
 
   // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
-  return at::native::_compute_linear_combination(
-    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, 0.0, 1.0}
   );
 }
 
@@ -2090,10 +2101,10 @@ Tensor compute_T8(const Tensor& A) {
     view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       // extract {A, A^2} from As
       As.narrow(0, 1, 2),
-      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+      {x1, x2}
     )
   );
 
@@ -2103,20 +2114,19 @@ Tensor compute_T8(const Tensor& A) {
   _matmul_impl(
     view_out,
     // x3 * A2 + A4
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 2, 2),
-      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+      {x3, 1.0}
     ),
-    at::native::_compute_linear_combination(
+    _linear_combination<scalar_t>(
       As.narrow(0, 0, 4),
-      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+      {x4, x5, x6, x7}
     )
   );
 
   // return I + A + y2 * A2 + A8;
-  return at::native::_compute_linear_combination(
-    As,
-    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  return _linear_combination<scalar_t>(
+    As, {1.0, 1.0, y2, 0.0, 1.0}
   );
 }
 
@@ -2486,14 +2496,17 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-void _linalg_matrix_norm_checks(const Tensor& A, IntArrayRef dim, optional<ScalarType> opt_dtype) {
-  at::native::checkFloatingOrComplex(A, "linalg.matrix_norm");
-  TORCH_CHECK(A.dim() >= 2,
-              "linalg.matrix_norm: input tensor must be a matrix or a batch of matrices");
+void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
+  // A
+  at::native::checkIsMatrix(A, "linalg.matrix_norm");
+  at::native::checkFloatingOrComplex(A, "linalg.matrix_norm", /*low_precision*/low_precision);
 
   // dim
-  TORCH_CHECK(dim.size() == 2, "linalg.matrix_norm: dim must be a 2-tuple of ints");
-  TORCH_CHECK(dim[0] != dim[1], "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
+  TORCH_CHECK(dim.size() == 2, "linalg.matrix_norm: dim must be a 2-tuple. Got ", dim);
+  // wrap first to identify weird scenarios like A.ndim = 2, dim = (1, -1)
+  // dim is modified in place while wrapping it
+  maybe_wrap_dims(dim, A.dim());
+  TORCH_CHECK(dim[0] != dim[1], "linalg.matrix_norm: dims must be different. Got (", dim[0], ", ", dim[1], ")");
 
   // dtype
   at::detail::check_linalg_norm_dtype(opt_dtype, A.scalar_type(), "linalg.matrix_norm");
@@ -2505,14 +2518,14 @@ Tensor linalg_matrix_norm(
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
-  _linalg_matrix_norm_checks(A, dim, opt_dtype);
-
+  // Check ord first as it will be used in the dtype check of A
   auto ord = scalar_ord.toDouble();
   auto abs_ord = std::abs(ord);
   TORCH_CHECK(abs_ord == 2. || abs_ord == 1. || abs_ord == INFINITY, "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, A.dim());
+  // Check A, dim, and dtype
+  _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/abs_ord != 2.);
 
   auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
   if (abs_ord == 2.) {
@@ -2565,16 +2578,18 @@ Tensor linalg_matrix_norm(
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
-  _linalg_matrix_norm_checks(A, dim, opt_dtype);
+  // Check ord first as it will be used in the dtype check of A
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
-  auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+  auto dim_ = dim.vec();
+  // Check A, dim, and dtype
+  _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/ord != "nuc");
 
   if (ord == "fro") {
-    return at::linalg_vector_norm(A_, 2, dim, keepdim);
+    return at::linalg_vector_norm(A, 2, dim_, keepdim, opt_dtype);
   } else {  // nuc
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, A_.dim());
+    auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+
     // Move dims to the end
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A_.dim());
     auto result = at::linalg_svdvals(A_.permute(permutation)).sum(-1, keepdim);

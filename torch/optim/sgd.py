@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required
+from .optimizer import Optimizer, required, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
@@ -55,6 +55,7 @@ class SGD(Optimizer):
             is used (default: None)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
@@ -90,7 +91,8 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None):
+                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None,
+                 differentiable=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -100,7 +102,8 @@ class SGD(Optimizer):
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        maximize=maximize, foreach=foreach)
+                        maximize=maximize, foreach=foreach,
+                        differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -111,13 +114,14 @@ class SGD(Optimizer):
             group.setdefault('nesterov', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
+            group.setdefault('differentiable', False)
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -219,8 +223,8 @@ def _single_tensor_sgd(params: List[Tensor],
                        has_sparse_grad: bool):
 
     for i, param in enumerate(params):
+        d_p = d_p_list[i] if not maximize else -d_p_list[i]
 
-        d_p = d_p_list[i]
         if weight_decay != 0:
             d_p = d_p.add(param, alpha=weight_decay)
 
@@ -238,8 +242,7 @@ def _single_tensor_sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        alpha = lr if maximize else -lr
-        param.add_(d_p, alpha=alpha)
+        param.add_(d_p, alpha=-lr)
 
 
 def _multi_tensor_sgd(params: List[Tensor],
@@ -259,6 +262,9 @@ def _multi_tensor_sgd(params: List[Tensor],
 
     if has_sparse_grad is None:
         has_sparse_grad = any(grad.is_sparse for grad in grads)
+
+    if maximize:
+        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
@@ -293,10 +299,9 @@ def _multi_tensor_sgd(params: List[Tensor],
         else:
             grads = bufs
 
-    alpha = lr if maximize else -lr
     if not has_sparse_grad:
-        torch._foreach_add_(params, grads, alpha=alpha)
+        torch._foreach_add_(params, grads, alpha=-lr)
     else:
         # foreach APIs dont support sparse
         for i in range(len(params)):
-            params[i].add_(grads[i], alpha=alpha)
+            params[i].add_(grads[i], alpha=-lr)

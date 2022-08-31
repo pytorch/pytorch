@@ -19,7 +19,6 @@ from typing import (
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
-from ._symbolic_trace import TracingConfig
 
 
 __all__ = [
@@ -113,7 +112,7 @@ def transformer_auto_wrap_policy(
 
        transformer_layer_cls (int):
            Submodules with one of the `transformer_layer_cls` names
-           will be wrapped as seperated FSDP units
+           will be wrapped as separated FSDP units
     """
     if recurse:
         # always recurse
@@ -319,9 +318,12 @@ class ParamExecOrderWrapPolicy:
             within each transformer layer.
 
         tracing_config (Optional[TracingConfig]):
-            The configuration used to perform symbolic tracing at FSDP constructor to get the module and
-            parameter execution order. If set as None, then symbolic tracing is not enabled, and one forward
-            as well as backward iteration are needed to get the parameter execution order.
+            The configuration used to perform symbolic tracing at FSDP
+            constructor to get the module and parameter execution order. The
+            type of ``tracing_config`` needs to be either ``None`` or
+            ``TracingConfig``. If set as ``None``, then symbolic tracing is not
+            enabled, and one forward as well as backward iteration are needed to
+            get the parameter execution order.
 
     ..warning :: Note that not all modules can be successfully traced when
     ``tracing_config`` is not None and symbolic tracing is enabled. The two
@@ -332,7 +334,7 @@ class ParamExecOrderWrapPolicy:
     users can set ``tracing_config = None`` to disable symbolic tracing.
     """
     init_policy: Callable = always_wrap_policy
-    tracing_config: Optional[TracingConfig] = None
+    tracing_config: Any = None
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:

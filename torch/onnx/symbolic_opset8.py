@@ -33,8 +33,7 @@ Updated operators:
 import warnings
 
 import torch
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 
 block_listed_operators = [
     "nonzero",
@@ -68,7 +67,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         output_size = symbolic_helper._maybe_get_const(output_size, "is")
         if symbolic_helper._is_value(output_size):
             return symbolic_helper._unimplemented(
@@ -199,15 +198,28 @@ def prelu(g, self, weight):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
-    if symbolic_helper._try_get_scalar_type(self):
-        old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
-        return _cast_to_type(
-            g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type
+    scalar_type = symbolic_helper._try_get_scalar_type(self, other)
+    if scalar_type is None:
+        raise errors.SymbolicValueError(
+            "mm can only operate on tensors with known types", self
         )
-    else:
-        return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
+    zero_constant = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
+        ),
+    )
+
+    if symbolic_helper._try_get_scalar_type(self):
+        old_type, self, other, zero_constant = _try_cast_integer_to_float(
+            g, self, other, zero_constant
+        )
+        return _cast_to_type(
+            g,
+            g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0),
+            old_type,
+        )
+    return g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0)
 
 
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
@@ -265,25 +277,25 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
-def _constant_fill(g, sizes, dtype, const_value):
+def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    if not symbolic_helper.scalar_type_to_pytorch_type[dtype].is_floating_point:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.cast_pytorch_to_onnx["Float"],
+            dtype_i=_type_utils.JitScalarType.FLOAT.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )
-        return symbolic_helper._cast_func_template(
-            symbolic_helper.scalar_type_to_onnx[dtype], g, result, None
-        )
+        return g.op("Cast", result, to_i=scalar_type.onnx_type())
     else:
         return g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=scalar_type.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )
