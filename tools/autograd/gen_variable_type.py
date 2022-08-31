@@ -1669,11 +1669,19 @@ def emit_body(
 
             return any_has_fw_grad
 
-    def emit_forbid_fw_derivatives_for_out_fn() -> str:
+    def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
+        if is_out_fn:
+            msg = "because it is an out= function"
+        else:
+            msg = (
+                "because it has not been implemented yet.\\nPlease file an issue "
+                "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+                "so that we can prioritize its implementation."
+            )
         cond = get_any_has_fw_grad_cond(derivative=None)
         return (
             FW_DERIVATIVE_FORBID_TEMPLATE.substitute(
-                cond=cond, name=name, msg="because it is an out= function"
+                cond=cond, name=name, msg=msg
             )
             if cond != ""
             else ""
@@ -1700,10 +1708,13 @@ def emit_body(
         body.extend(emit_check_if_in_complex_autograd_allowlist())
 
     if is_out_fn:
-        body.append(emit_forbid_fw_derivatives_for_out_fn())
+        body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_derivative and not len(fw_derivatives) == 0:
-            body.extend(emit_fw_derivatives())
+        if requires_derivative and not try_jit_decomposition:
+            if len(fw_derivatives) > 0:
+                body.extend(emit_fw_derivatives())
+            else:
+                body.append(emit_forbid_fw_derivatives())
 
     if requires_derivative:
         # Save only after the forward AD has been set up
