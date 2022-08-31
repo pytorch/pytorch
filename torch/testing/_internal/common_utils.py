@@ -2276,7 +2276,7 @@ class TestCase(expecttest.TestCase):
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
-            x = x.detach().clone()
+            x = x.detach().clone()._coalesced_(False)
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):

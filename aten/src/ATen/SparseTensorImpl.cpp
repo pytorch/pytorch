@@ -109,7 +109,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = false;
+  coalesced_ = nnz() < 2;
 }
 
 

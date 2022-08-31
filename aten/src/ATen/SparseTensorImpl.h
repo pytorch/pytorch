@@ -275,6 +275,9 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     AT_ASSERT(new_nnz <= nnz());
     indices_ = indices_.narrow(1, 0, new_nnz);
     values_ = values_.narrow(0, 0, new_nnz);
+    if (new_nnz < 2) {
+      coalesced_ = true;
+    }
   }
 
   // Takes indices and values and directly puts them into the sparse tensor, no
