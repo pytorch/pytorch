@@ -64,18 +64,22 @@ class C10_API SymInt {
   }
 
   SymInt& operator=(const SymInt& s) {
-    if (s.is_symbolic()) {
-      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
-    } else {
-      data_ = s.data_;
+    if (this != &s) {
+      if (s.is_symbolic()) {
+        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+      } else {
+        data_ = s.data_;
+      }
     }
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
-    release_(); // release the current SymIntNode if any
-    data_ = s.data_;
-    if (s.is_symbolic())
-      s.data_ = 0;
+    if (this != &s) {
+      release_(); // release the current SymIntNode if any
+      data_ = s.data_;
+      if (s.is_symbolic())
+        s.data_ = 0;
+    };
     return *this;
   }
 

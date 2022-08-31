@@ -26,6 +26,22 @@ TEST(SymIntTest, AddNode) {
   EXPECT_TRUE(i.is_symbolic());
 }
 
+TEST(SymIntTest, SelfAssignment) {
+  auto n = c10::make_intrusive<SymIntNodeImpl>();
+  auto i = n->toSymInt();
+  EXPECT_TRUE(i.is_symbolic());
+
+  SymInt copy = i;
+  EXPECT_TRUE(copy.is_symbolic());
+  copy = copy;
+  EXPECT_TRUE(copy.is_symbolic());
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-move"
+  copy = std::move(copy);
+#pragma GCC diagnostic pop
+  EXPECT_TRUE(copy.is_symbolic());
+}
+
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
