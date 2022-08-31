@@ -30,6 +30,14 @@ except ImportError:
         return x
 
 
+try:
+    from torchdynamo.utils import dynamo_timed
+except ImportError:
+
+    def dynamo_timed(x):
+        return x
+
+
 pytree._register_pytree_node(
     immutable_collections.immutable_list,
     lambda x: (list(x), None),
@@ -369,6 +377,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     return CompiledFunction.apply
 
 
+@dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
 ):
