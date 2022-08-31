@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
@@ -55,29 +56,6 @@ class DomainMap : public pointwise_utils::DomainMap {
     FusionGuard fg(fusion);
     DomainMap domain_map(fusion);
     return domain_map.findReferenceTensorView() != nullptr;
-  }
-
-  // Determine if output TensorView is a valid reference tensor for this fusion.
-  // The reference tensor must map to all the iterDomains in each input.
-  bool isValidReference(TensorView* output_tv) const {
-    if (output_tv->isFusionInput()) {
-      return false;
-    }
-    for (auto input_tv :
-         ir_utils::filterByType<TensorView>(fusion_->inputs())) {
-      if (input_tv->uses().empty()) {
-        continue;
-      }
-
-      if (fusion_->getOutputAlias(output_tv) == input_tv) {
-        continue;
-      }
-
-      if (!areAllInputIdsMappedToOutput(input_tv, output_tv)) {
-        return false;
-      }
-    }
-    return true;
   }
 
  private:
@@ -149,7 +127,7 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
         "Error inferring size for pointwise scheduler: ",
         ref_root[ref_i]->extent()->toInlineString());
     elem_counts[ref_i] = inferred_val.value();
-    n_elems *= inferred_val.value();
+    n_elems *= elem_counts[ref_i];
   }
 
   // If zero dimensional or zero size, return default parameters
@@ -204,7 +182,8 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
   }
 
   // If we use RNG don't unroll so we can do correctness testing
-  if (fusion->isStochastic() && isDisabled(DisableOption::UnrollWithRng)) {
+  if (fusion->isStochastic() &&
+      isOptionDisabled(DisableOption::UnrollWithRng)) {
     max_unroll_factor = 1;
   }
 

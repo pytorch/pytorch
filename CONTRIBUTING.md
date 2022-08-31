@@ -456,11 +456,13 @@ for formatting docstrings. Each line inside a docstrings block must be limited t
 
 In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
 
-* The: "`Callable`", "`Any`", "`Iterable`", and "`Iterator`" types should have their first letter capitalized.
+* The "`Callable`", "`Any`", "`Iterable`", "`Iterator`", "`Generator`" types should have their first letter capitalized.
+
+* The "`list`" and "`tuple`" types should be completely lowercase.
 
 * Types should not be made plural. For example: `tuple of int` should be used instead of `tuple of ints`.
 
-* The only acceptable deliminator words for types are `or` and `of`. No other non-type words should be used other than `optional`.
+* The only acceptable delimiter words for types are `or` and `of`. No other non-type words should be used other than `optional`.
 
 * The word `optional` should only be used after the types, and it is only used if the user does not have to specify a value for the variable. Default values are listed after the variable description. Example:
 
@@ -468,12 +470,12 @@ In addition to the standard Google Style docstring formatting rules, the followi
     my_var (int, optional): Variable description. Default: 1
     ```
 
-* Basic Python types should match their type name so that [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
+* Basic Python types should match their type name so that the [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
     * Use `str` instead of `string`.
     * Use `bool` instead of `boolean`.
     * Use `dict` instead of `dictionary`.
 
-* Square brackets should be used for the dictionary type. For example.
+* Square brackets should be used for the dictionary type. For example:
 
     ```
     my_var (dict[str, int]): Variable description.

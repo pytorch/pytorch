@@ -124,6 +124,11 @@ IntArrayRef BatchedTensorImpl::strides_custom() const {
   return strides_default();
 }
 
+SymIntArrayRef BatchedTensorImpl::sym_strides_custom() const {
+  return sym_strides_default();
+}
+
+
 // TODO: implement proper contiguity on batched tensor, then put
 // sizes_strides_policy back to Default
 bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
