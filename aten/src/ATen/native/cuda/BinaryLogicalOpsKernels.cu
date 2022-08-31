@@ -92,7 +92,7 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
     static const auto logical_xor_string = jiterator_stringify(
         template <typename T>
         bool logical_xor_kernel(T a, T b) {
-          return (a.real() || a.imag()) != (b.real() || b.imag());
+          return bool(a) != bool(b);
         }
     );
     AT_DISPATCH_COMPLEX_TYPES(dtype, "logical_xor_cuda", [&]() {
