@@ -5,7 +5,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import (
-    _get_global_rank,
     _OverlapStatus,
 )
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -85,7 +84,7 @@ def _broadcast_bucket(
             overlap_info.broadcast_handles.append(
                 dist.broadcast(
                     bucket_assignments[bucket_index].tensor,
-                    src=_get_global_rank(zero.process_group, assigned_rank),
+                    src=dist.get_global_rank(zero.process_group, assigned_rank),
                     group=zero.process_group,
                     async_op=True,
                 )
