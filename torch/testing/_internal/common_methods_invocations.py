@@ -8066,7 +8066,6 @@ op_db: List[OpInfo] = [
                # Lazy tensor failures
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
-               # We don't have an op for aten::arange but it isn't a special case.
                # Argument types: bool, bool, bool, int, int, Device, boo
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
@@ -8077,54 +8076,6 @@ op_db: List[OpInfo] = [
                #   return (%25)
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            )),
-    # OpInfo('uniform',
-    #        op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
-    #        dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-    #        supports_out=False,
-    #        supports_autograd=False,
-    #        is_factory_function=False,
-    #        sample_inputs_func=sample_inputs_uniform,
-    #        error_inputs_func=error_inputs_uniform,
-    #        skips=(
-    #             # https://github.com/pytorch/pytorch/issues/81774
-    #             DecorateInfo(
-    #                 unittest.expectedFailure,
-    #                 'TestNormalizeOperators',
-    #                 'test_normalize_operator_exhaustive',
-    #             ),
-    #             # Tests that assume input is a tensor or sequence of tensors
-    #             DecorateInfo(
-    #                 unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'
-    #             ),
-    #             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-    #             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-    #             DecorateInfo(
-    #                 unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'
-    #             ),
-    #             # Lazy tensor failures
-    #             DecorateInfo(
-    #                 unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'
-    #             ),
-    #             # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
-    #             # We don't have an op for aten::arange but it isn't a special case.
-    #             # Argument types: bool, bool, bool, int, int, Device, boo
-    #             DecorateInfo(
-    #                 unittest.expectedFailure,
-    #                 'TestCudaFuserOpInfo',
-    #                 'test_nvfuser_correctness',
-    #             ),
-    #             DecorateInfo(
-    #                 unittest.expectedFailure,
-    #                 'TestCudaFuserOpInfo',
-    #                 'test_nvfuser_extremal_values',
-    #             ),
-    #             DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
-    #             # Captured graph does not contain aten::arange (succeeds on complex!)
-    #             # g: graph():
-    #             #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-    #             #   return (%25)
-    #             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-    #       )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
