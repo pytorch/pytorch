@@ -622,6 +622,19 @@ def forward(self, x_1):
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
 
+    def test_decomp_of_capture(self):
+        val = torch.randn(5)
+
+        def f(x):
+            return x.t() + val.t()
+
+        def nop(x):
+            return x.cos()
+
+        traced = make_fx(f, decomposition_table={torch.ops.aten.t.default: nop})(torch.randn(5))
+        self.assertEqual(len([n for n in traced.graph.nodes if n.target == torch.ops.aten.t.default]), 0)
+
+
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_amp_cache(self):
         layer = torch.nn.Conv2d(3, 3, 3).cuda()
