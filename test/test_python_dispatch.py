@@ -7,7 +7,7 @@ from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS, skipIfCrossRef
 from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
@@ -1823,6 +1823,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+    @skipIfCrossRef
     def test_trace_offset(self):
         class MockDispatchMode(TorchDispatchMode):
             def __init__(self, traceback):
@@ -1833,16 +1834,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         # If this test stops working because of a change in Python dispatch,
         # please make sure to change the constant itself.
-        expected_offset = _PYTHON_DISPATCH_TRACE_OFFSET
+        expected_offset = _PYTHON_DISPATCH_TRACE_OFFSET - 1
         tb = []
         with MockDispatchMode(tb) as dispatch:
             # Tests if the line calling the kernel launch is at the expected offset
             # in the stack trace using the fact that the unique variable name will
             # appear in it.
             _long_and_unique_launch_name_ = torch.rand(3)
-            self.assertNotIn(
+            self.assertIn(
                 "_long_and_unique_launch_name_",
-                "".join(dispatch.traceback[expected_offset :])
+                dispatch.traceback[expected_offset]
             )
 
 
