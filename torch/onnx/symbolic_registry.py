@@ -6,7 +6,6 @@ from typing import Any, Callable, Dict, Tuple, Union
 
 from torch import _C
 from torch.onnx import _constants, errors
-from torch.onnx._internal import _beartype
 
 __all__ = [
     "get_op_supported_version",
@@ -39,7 +38,6 @@ _registry: Dict[
 _symbolic_versions: Dict[Union[int, str], Any] = {}
 
 
-@_beartype.beartype
 def _import_symbolic_opsets():
     for opset_version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
@@ -49,7 +47,6 @@ def _import_symbolic_opsets():
         _symbolic_versions[opset_version] = module
 
 
-@_beartype.beartype
 def register_version(domain: str, version: int):
     if not is_registered_version(domain, version):
         global _registry
@@ -57,14 +54,12 @@ def register_version(domain: str, version: int):
     register_ops_in_version(domain, version)
 
 
-@_beartype.beartype
 def register_ops_helper(domain: str, version: int, iter_version: int):
     for domain, op_name, op_func in get_ops_in_version(iter_version):
         if not is_registered_op(op_name, domain, version):
             register_op(op_name, op_func, domain, version)
 
 
-@_beartype.beartype
 def register_ops_in_version(domain: str, version: int):
     """Iterates through the symbolic functions of the specified opset version, and the
     previous opset versions for operators supported in previous versions.
@@ -95,7 +90,6 @@ def register_ops_in_version(domain: str, version: int):
     register_ops_helper(domain, version, 9)
 
 
-@_beartype.beartype
 def get_ops_in_version(version: int):
     if not _symbolic_versions:
         _import_symbolic_opsets()
@@ -120,13 +114,11 @@ def get_ops_in_version(version: int):
     return domain_opname_ops
 
 
-@_beartype.beartype
 def is_registered_version(domain: str, version: int):
     global _registry
     return (domain, version) in _registry
 
 
-@_beartype.beartype
 def register_op(opname, op, domain, version):
     if domain is None or version is None:
         warnings.warn(
@@ -138,7 +130,6 @@ def register_op(opname, op, domain, version):
     _registry[(domain, version)][opname] = op
 
 
-@_beartype.beartype
 def is_registered_op(opname: str, domain: str, version: int):
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
@@ -146,7 +137,6 @@ def is_registered_op(opname: str, domain: str, version: int):
     return (domain, version) in _registry and opname in _registry[(domain, version)]
 
 
-@_beartype.beartype
 def unregister_op(opname: str, domain: str, version: int):
     global _registry
     if is_registered_op(opname, domain, version):
@@ -157,7 +147,6 @@ def unregister_op(opname: str, domain: str, version: int):
         warnings.warn("The opname " + opname + " is not registered.")
 
 
-@_beartype.beartype
 def get_op_supported_version(opname: str, domain: str, version: int):
     iter_version = version
     while iter_version <= _constants.onnx_main_opset:
@@ -168,7 +157,6 @@ def get_op_supported_version(opname: str, domain: str, version: int):
     return None
 
 
-@_beartype.beartype
 def get_registered_op(opname: str, domain: str, version: int) -> _SymbolicFunction:
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
