@@ -2338,15 +2338,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
 
-class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
-    @requires_gloo()
-    def test_broadcast(self):
-        self._test_broadcast(backend="gloo")
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_gloo_rank_membership(self):
         self._test_rank_membership(backend="gloo")
 
+class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_gloo()
+    def test_collectives(self):
+        self._test_collectives(backend="gloo")
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
@@ -2364,7 +2364,6 @@ class CompilerTest(test_c10d_common.CompilerTest):
     @skip_if_lt_x_gpu(2)
     def test_work_wait_gpu(self):
         self._test_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
 
 if __name__ == "__main__":
     assert (
