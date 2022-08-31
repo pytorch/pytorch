@@ -701,34 +701,40 @@ class FreeEvent(NamedTuple):
 
 
 class FreeEventQueue:
-    """This tracks all pending frees corresponding to in-flight all-gathers."""
+    """
+    This tracks all pending frees corresponding to in-flight all-gathers. The
+    queueing pattern is iterative enqueues followed by a flush, and the current
+    heuristic for the flush is based on the number of inflight all-gathers.
+    """
+
     def __init__(self) -> None:
-        self._queue: Deque[FreeEvent] = collections.deque()
-        self.queue_size: int = 0  # maintain to avoid iterating over the queue
+        self._queue: Deque[torch.cuda.Event] = collections.deque()
+        self._max_num_inflight_all_gathers = 5  # empirically chosen default
 
-    def enqueue(self, cuda_event: torch.cuda.Event, size: int) -> None:
+    def enqueue(self, free_event: torch.cuda.Event) -> None:
         """Enqueues a free event."""
-        self._queue.append(FreeEvent(cuda_event, size))
-        self.queue_size += size
+        self._queue.append(free_event)
 
-    def dequeue(self) -> Optional[torch.cuda.Event]:
+    def flush_if_needed(self) -> List[torch.cuda.Event]:
+        """
+        If the queue should be flushed (based on an internal criteria), then
+        this returns a non-empty :class:`list` of free events. Otherwise, this
+        returns an empty :class:`list`.
+        """
+        events: List[torch.cuda.Event] = []
+        if len(self._queue) >= self._max_num_inflight_all_gathers:
+            while self._queue:
+                event = self._dequeue()
+                assert event is not None
+                events.append(event)
+        return events
+
+    def _dequeue(self) -> Optional[torch.cuda.Event]:
         """Dequeues a free event if possible."""
         if self._queue:
             event = self._queue.popleft()
-            self.queue_size -= event.size
-            assert self.queue_size >= 0, (
-                f"Queue is corrupted: `self.queue_size`: {self.queue_size}"
-            )
             return event
         return None
-
-    def check_integrity(self):
-        """Checks that ``self.queue_size`` matches the real queue size."""
-        queue_size = sum(event.size for event in self._queue)
-        assert queue_size == self.queue_size, (
-            f"Queue is corrupted: `self.queue_size`: {self.queue_size} "
-            f"actual queue size: {queue_size}"
-        )
 
 
 # TODO (awgu): Refactor this later
@@ -1025,10 +1031,6 @@ class FullyShardedDataParallel(nn.Module):
         self._materialize_module(module, param_init_fn, device_from_device_id)
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
-        self._max_inflight_all_gather_size = (
-            torch.cuda.get_device_properties(self.compute_device).total_memory
-            * 0.005  # empirically chosen, e.g. 200 MB limit for 40 GB GPU
-        )  # should always be non-negative
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
         if sync_module_states:
             self._sync_module_states(module, params_to_flatten)
@@ -1511,19 +1513,10 @@ class FullyShardedDataParallel(nn.Module):
         unsharded flattened parameter on the compute device.
         """
         if self.limit_all_gathers:
-            queue = self._free_event_queue
-            events: List[FreeEvent] = []
-            if queue.queue_size > self._max_inflight_all_gather_size:
-                # Upon reaching the limit, flush the queue
-                while queue.queue_size > 0:
-                    event = queue.dequeue()
-                    if event is None:
-                        queue.check_integrity()
-                        assert 0, "Queue integrity check should have failed"
-                    events.append(event)
-            # As a minor optimization, only synchronize the latest event
+            events = self._free_event_queue.flush_if_needed()
             if events:
-                events[-1].cuda_event.synchronize()
+                # As a minor optimization, only synchronize the latest event
+                events[-1].synchronize()
         for handle in handles:
             if handle.needs_pre_unshard():
                 with torch.cuda.stream(self._streams["pre_all_gather"]):
@@ -1559,11 +1552,7 @@ class FullyShardedDataParallel(nn.Module):
             if self.limit_all_gathers and free_unsharded_flat_param:
                 free_event = torch.cuda.Event()
                 free_event.record()
-                size_in_bytes = (
-                    handle.flat_param._unpadded_unsharded_size.numel()
-                    * handle.flat_param.element_size()  # full precision
-                )
-                self._free_event_queue.enqueue(free_event, size_in_bytes)
+                self._free_event_queue.enqueue(free_event)
             handle.post_reshard()
         # Since we prefetch entire handles keys at a time, conservatively mark
         # the entire key as no longer prefetched once we free at least one
@@ -2244,7 +2233,7 @@ class FullyShardedDataParallel(nn.Module):
         flat_param = getattr(self._fsdp_wrapped_module, FLAT_PARAM, None)
         assert flat_param is not None
         # Construct a ShardedTensor from the flat_param.
-        full_numel = flat_param._unpadded_unsharded_size.numel()
+        full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
         shard_offset = flat_param.numel() * self.rank
         valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
         if valid_data_size > 0 and flat_param._shard_numel_padded > 0:
