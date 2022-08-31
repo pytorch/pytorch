@@ -284,7 +284,7 @@ class StateDictType(Enum):
     currently processing (returning or loading).
     The default value is FULL_STATE_DICT to comply the PyTorch convention.
     ..note::
-        FSDP currently supports two types of ``state_dict``:
+        FSDP currently supports three types of ``state_dict``:
             1. ``state_dict/load_state_dict`: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
                same as using DDP.
@@ -2852,10 +2852,7 @@ class FullyShardedDataParallel(nn.Module):
                     "FSDP only works with gradients that don't require gradients"
                 )
 
-            if (
-                self._sync_gradients
-                or self.sharding_strategy == ShardingStrategy.FULL_SHARD
-            ):
+            if self._should_free_full_params():
                 self._free_full_params(cast(List[FlatParameter], [param]))
 
             if self._mixed_precision_enabled_for_params():
@@ -2966,7 +2963,7 @@ class FullyShardedDataParallel(nn.Module):
                     assert (
                         self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
                     ), "Currently the way for _is_sharded to be False is \
-                        world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                        world_size == 1 or sharding_strategy is set to be NO_SHARD"
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
                         self._communication_hook(self._communication_hook_state, param.grad)
 
@@ -3038,14 +3035,10 @@ class FullyShardedDataParallel(nn.Module):
     def _wait_for_post_backward(self) -> None:
         """Wait for post-backward to finish. Only called on root instance."""
         assert self._is_root, "_wait_for_post_backward can only be called on root."
-        # Check if the root module has params and if any of them has
-        # the `requires_grad` field set. If `requires_grad=False` for
-        # all the params, the post_backward hook will not fire and the
-        # state will remain in `TrainingState_.BACKWARD_PRE`.
-        if any([p.requires_grad for p in self.params]):
-            self._assert_state(TrainingState_.BACKWARD_POST)
-        else:
-            self._assert_state(TrainingState_.BACKWARD_PRE)
+        # Root's training state might be backward_pre or backward_post depending on
+        # if root parameter's post backward hook was called. The post-backward hook
+        # may not have been called if gradient was not computed for this param/FSDP
+        # module.
 
         if self._sync_gradients:
             torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
@@ -3060,8 +3053,43 @@ class FullyShardedDataParallel(nn.Module):
         # A backward pass is done, clean up below.
         self._exec_order_data.reset()
 
+        def _catch_all_reshard(fsdp_module: FullyShardedDataParallel) -> None:
+            """
+            Reshards full parameters that may have not been resharded in
+            post_backward_hook. This can happen when an FSDP module's output
+            is used in forward so its pre-backward fires unsharding the param,
+            but post-backward does not fire since the output was not ultimately
+            used in loss computation so FSDP parameter did not get a gradient.
+            """
+            # Note that we wrap resharding logic in a try-catch as a defensive
+            # approach, as if an error is thrown, we are in the backwards pass,
+            # and autograd would not print out much useful info about the actual
+            # error hit.
+            try:
+                for p in fsdp_module.params:
+                    # Parameter is already resharded if the param in use points
+                    # to the local shard.
+                    if p.data.data_ptr() == p._local_shard.data_ptr():
+                        continue
+
+                    if fsdp_module._should_free_full_params():
+                        fsdp_module._free_full_params(cast(List[FlatParameter], [p]))
+
+                    if fsdp_module._mixed_precision_enabled_for_params():
+                        fsdp_module._free_mp_shard(cast(List[FlatParameter], [p]))
+
+                    fsdp_module._use_param_local_shard(cast(List[FlatParameter], [p]))
+            except Exception as e:
+                p_assert(
+                    False,
+                    f"Got exception while resharding module {fsdp_module}: {str(e)}",
+                    raise_assertion_error=False
+                )
+                raise e
+
         def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
             """Helper used below on all fsdp modules."""
+
             for p in fsdp_module.params:
                 if p.requires_grad:
                     if hasattr(p, "_shard_bwd_hook"):
@@ -3094,7 +3122,11 @@ class FullyShardedDataParallel(nn.Module):
                             f"Device mismatch: p={p.device} "  # type: ignore[attr-defined]
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
-                        p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
+                        # Check if post-backward was called for this param (FSDP unit).
+                        # TODO: This logic will have to be revisited when non-recursive wrapping
+                        # lands. If it was not called, there is no new gradient to accumulate
+                        if p._post_backward_called:
+                            p.grad = p._saved_grad_shard
                     else:
                         p_assert(
                             not p._is_sharded or not p._post_backward_called,
@@ -3114,6 +3146,7 @@ class FullyShardedDataParallel(nn.Module):
         # Update root and nested FSDP's hooks and flags.
         for m in self.fsdp_modules(self):  # includes self
             _finalize_params(m)
+            _catch_all_reshard(m)
             m._pre_backward_hook_has_run = False
             m.training_state = TrainingState_.IDLE
 
@@ -3320,7 +3353,12 @@ class FullyShardedDataParallel(nn.Module):
         if not eod.is_first_iter:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
-            if eod.warn_status == _ExecOrderWarnStatus.WARNED:
+            # and if TORCH_DISTRIBUTED_DEBUG >= INFO.
+            allowed_debug_levels = [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]
+            if (
+                eod.warn_status == _ExecOrderWarnStatus.WARNED
+                or self._debug_level not in allowed_debug_levels
+            ):
                 return
             # However, we may issue multiple warnings on the first deviating
             # iteration to help debugging, where either:
@@ -3423,6 +3461,14 @@ class FullyShardedDataParallel(nn.Module):
                     if not offloaded:
                         p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
                 p.grad = None
+
+    def _should_free_full_params(self):
+        return (
+            self.sharding_strategy == ShardingStrategy.FULL_SHARD
+            # Optimization where we don't reshard if running Zero-2
+            # in no_sync().
+            or self._sync_gradients
+        )
 
     @torch.no_grad()
     def _free_full_params(self, params: Optional[List[FlatParameter]] = None) -> None:
@@ -3664,15 +3710,15 @@ class FullyShardedDataParallel(nn.Module):
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
-        The API is similar to :meth:``full_optim_state_dict`` but this API
-        chunks all non-zero-dimension states to ShardedTensor to save memory.
-        This API should only be used when the model state_dict is derived with
-        the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
+        The API is similar to :meth:`full_optim_state_dict` but this API chunks
+        all non-zero-dimension states to :class:`ShardedTensor` to save memory.
+        This API should only be used when the model ``state_dict`` is derived
+        with the context manager ``with state_dict_type(SHARDED_STATE_DICT):``.
 
-        For the detail usages, refer to the :meth:``full_optim_state_dict`` doc.
+        For the detailed usage, refer to :meth:`full_optim_state_dict`.
 
-        .. warning:: The returned state dict contains ShardedTensor and cannot be
-            directly used by the regular ``optim.load_state_dict``.
+        .. warning:: The returned state dict contains ``ShardedTensor`` and
+            cannot be directly used by the regular ``optim.load_state_dict``.
         """
 
         # TODO: The ultimate goal of the optimizer state APIs should be the same
@@ -3770,10 +3816,10 @@ class FullyShardedDataParallel(nn.Module):
         ] = None,
     ) -> Dict[str, Any]:
         """
-        The API is similar to :meth:``shard_full_optim_state_dict``. The only
+        The API is similar to :meth:`shard_full_optim_state_dict`. The only
         difference is that the input ``sharded_optim_state_dict`` should be
-        returned from :meth:`sharded_optim_state_dict`. Therefore, there will be
-        allgather calls on each rank to gather ShardedTensor.
+        returned from :meth:`sharded_optim_state_dict`. Therefore, there will
+        be all-gather calls on each rank to gather ``ShardedTensor`` s.
 
         Args:
             sharded_optim_state_dict (Dict[str, Any]): Optimizer state dict
@@ -3785,7 +3831,7 @@ class FullyShardedDataParallel(nn.Module):
                 Refer to :meth:``shard_full_optim_state_dict``.
 
         Returns:
-            Refer to :meth:``shard_full_optim_state_dict``.
+            Refer to :meth:`shard_full_optim_state_dict`.
         """
 
         # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
