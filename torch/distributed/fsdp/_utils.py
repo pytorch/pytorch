@@ -124,10 +124,11 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     return not already_freed
 
 
-def p_assert(cond: Any, s: Any) -> None:
+def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
-        raise AssertionError
+        if raise_assertion_error:
+            raise AssertionError

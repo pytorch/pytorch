@@ -261,8 +261,8 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ops.quantized.relu6,
-                    torch.nn.quantized.ReLU6(inplace=False),
-                    torch.nn.quantized.ReLU6(inplace=True)
+                    torch.ao.nn.quantized.ReLU6(inplace=False),
+                    torch.ao.nn.quantized.ReLU6(inplace=True)
                 ],
                 'reference_fn': torch.nn.functional.relu6
             }
@@ -3463,7 +3463,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_conv1d(self):
-        q_mod = torch.nn.quantized.Conv1d
+        q_mod = torch.ao.nn.quantized.Conv1d
         dq_op = torch.ops.quantized.conv1d_dynamic
         dim = 3
         dtype = torch.quint8
@@ -3472,7 +3472,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_conv2d(self):
-        q_mod = torch.nn.quantized.Conv2d
+        q_mod = torch.ao.nn.quantized.Conv2d
         dq_op = torch.ops.quantized.conv2d_dynamic
         dim = 4
         dtype = torch.quint8
@@ -3481,7 +3481,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_conv3d(self):
-        q_mod = torch.nn.quantized.Conv3d
+        q_mod = torch.ao.nn.quantized.Conv3d
         dq_op = torch.ops.quantized.conv3d_dynamic
         dim = 5
         dtype = torch.quint8
@@ -3490,7 +3490,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_convtranspose1d(self):
-        q_mod = torch.nn.quantized.ConvTranspose1d
+        q_mod = torch.ao.nn.quantized.ConvTranspose1d
         dq_op = torch.ops.quantized.conv_transpose1d_dynamic
         dim = 3
         dtype = torch.quint8
@@ -3499,7 +3499,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_convtranspose2d(self):
-        q_mod = torch.nn.quantized.ConvTranspose2d
+        q_mod = torch.ao.nn.quantized.ConvTranspose2d
         dq_op = torch.ops.quantized.conv_transpose2d_dynamic
         dim = 4
         dtype = torch.quint8
@@ -3508,7 +3508,7 @@ class TestDynamicQuantizedOps(TestCase):
 
     @override_qengines
     def test_dynamic_convtranspose3d(self):
-        q_mod = torch.nn.quantized.ConvTranspose3d
+        q_mod = torch.ao.nn.quantized.ConvTranspose3d
         dq_op = torch.ops.quantized.conv_transpose3d_dynamic
         dim = 5
         dtype = torch.quint8
@@ -4814,12 +4814,12 @@ class TestQuantizedConv(TestCase):
                 use_channelwise=False, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
             # check that this doesn't error
-            test_conv = torch.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
+            test_conv = torch.ao.nn.quantized.ConvTranspose1d(input_channels, output_channels, 1)
             test_conv.scale = Y_scale
             test_conv(X_q)
 
             # Test the module implementation
-            qconv_op = torch.nn.quantized.ConvTranspose1d(
+            qconv_op = torch.ao.nn.quantized.ConvTranspose1d(
                 in_channels=input_channels,
                 out_channels=output_channels,
                 kernel_size=kernels,
@@ -4940,12 +4940,12 @@ class TestQuantizedConv(TestCase):
                 use_channelwise=False, use_transpose=True, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
             # check that this doesn't error
-            test_conv = torch.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
+            test_conv = torch.ao.nn.quantized.ConvTranspose2d(input_channels, output_channels, 1)
             test_conv.scale = Y_scale
             test_conv(X_q)
 
             # Test the module implementation
-            qconv_op = torch.nn.quantized.ConvTranspose2d(
+            qconv_op = torch.ao.nn.quantized.ConvTranspose2d(
                 in_channels=input_channels,
                 out_channels=output_channels,
                 kernel_size=kernels,
@@ -5067,12 +5067,12 @@ class TestQuantizedConv(TestCase):
             use_channelwise=False, use_transpose=True)
 
         # check that this doesn't error
-        test_conv = torch.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
+        test_conv = torch.ao.nn.quantized.ConvTranspose3d(input_channels, output_channels, 1)
         test_conv.scale = Y_scale
         test_conv(X_q)
 
         # Test the module implementation
-        qconv_op = torch.nn.quantized.ConvTranspose3d(
+        qconv_op = torch.ao.nn.quantized.ConvTranspose3d(
             in_channels=input_channels,
             out_channels=output_channels,
             kernel_size=kernels,

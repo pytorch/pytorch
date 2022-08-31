@@ -55,5 +55,9 @@ TORCH_API script::Module Finalize(
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 
+TORCH_API Module FinalizeOnDevicePTQ(
+    Module& module,
+    QuantType quant_type,
+    const std::string& method_name);
 } // namespace jit
 } // namespace torch
