@@ -13734,3 +13734,16 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
+
+- func: special_harmonic_number(Tensor n) -> Tensor
+  python_module: special
+  structured_delegate: special_harmonic_number.out
+  variants: function
+
+- func: special_harmonic_number.out(Tensor n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_harmonic_number_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function

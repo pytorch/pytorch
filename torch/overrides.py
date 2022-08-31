@@ -1016,6 +1016,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.gammainc: lambda input, other, out=None: -1,
         torch.special.gammaincc: lambda input, other, out=None: -1,
         torch.special.gammaln: lambda input: -1,
+        torch.special.harmonic_number: lambda n: -1,
         torch.special.hermite_polynomial_h: lambda input, n, out=None: -1,
         torch.special.hermite_polynomial_he: lambda input, n, out=None: -1,
         torch.special.i0: lambda input: -1,

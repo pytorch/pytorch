@@ -377,6 +377,69 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const auto harmonic_number_string = jiterator_stringify(
+  template<typename T1>
+  T1
+  harmonic_number(unsigned int n) {
+    constexpr unsigned long long A[29] = {
+        0x00000000000001ULL, 0x00000000000003ULL, 0x0000000000000bULL,
+        0x00000000000019ULL, 0x00000000000089ULL, 0x00000000000031ULL,
+        0x0000000000016bULL, 0x000000000002f9ULL, 0x00000000001bd9ULL,
+        0x00000000001cd5ULL, 0x000000000146ffULL, 0x00000000015005ULL,
+        0x00000000117c89ULL, 0x0000000011e115ULL, 0x00000000123eedULL,
+        0x00000000252dcfULL, 0x00000002830a0fULL, 0x00000000d9cefdULL,
+        0x0000001068ae37ULL, 0x0000000353f9ffULL, 0x000000011fc045ULL,
+        0x000000012356cdULL, 0x0000001a7bbc1bULL, 0x0000005056256bULL,
+        0x000007edb041e3ULL, 0x0000080225603bULL, 0x000048c49cbe63ULL,
+        0x0000496f941767ULL, 0x00086456d4631bULL
+    };
+
+    constexpr unsigned long long B[29] = {
+        0x00000000000001ULL, 0x00000000000002ULL, 0x00000000000006ULL,
+        0x0000000000000cULL, 0x0000000000003cULL, 0x00000000000014ULL,
+        0x0000000000008cULL, 0x00000000000118ULL, 0x000000000009d8ULL,
+        0x000000000009d8ULL, 0x00000000006c48ULL, 0x00000000006c48ULL,
+        0x00000000057fa8ULL, 0x00000000057fa8ULL, 0x00000000057fa8ULL,
+        0x000000000aff50ULL, 0x00000000baf450ULL, 0x000000003e5170ULL,
+        0x00000004a00b50ULL, 0x00000000eccf10ULL, 0x000000004eefb0ULL,
+        0x000000004eefb0ULL, 0x000000071788d0ULL, 0x00000015469a70ULL,
+        0x00000213e514f0ULL, 0x00000213e514f0ULL, 0x000012b30dbc70ULL,
+        0x000012b30dbc70ULL, 0x00021e488e58b0ULL
+    };
+
+    if (n <= 29) {
+      return T1(A[n - 1]) / T1(B[n - 1]);
+    } else {
+      const auto a = T1(A[28]);
+      const auto b = T1(B[28]);
+
+      auto p = a / b;
+
+      for (unsigned int j = 30; j <= n; j++) {
+        p = p + (T1(1) / T1(j));
+      }
+
+      return p;
+    }
+  }
+); // harmonic_number_string
+
+const char harmonic_number_name[] = "harmonic_number";
+
+void special_harmonic_number_cuda_kernel(TensorIteratorBase &iterator) {
+#if AT_USE_JITERATOR()
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "harmonic_number_cuda_kernel", [&]() {
+    jitted_gpu_kernel<harmonic_number_name, scalar_t, scalar_t, 1>(iterator, harmonic_number_string);
+  });
+#else
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "harmonic_number_cuda_kernel", [&]() {
+    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t n) -> scalar_t {
+      return at::native::special_functions::harmonic_number<scalar_t>(static_cast<unsigned int>(n));
+    });
+  });
+#endif
+} // void special_harmonic_number_cuda_kernel(TensorIteratorBase &iterator)
+
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
@@ -393,6 +456,7 @@ REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_harmonic_number_stub, &special_harmonic_number_cuda_kernel);
 
 } // namespace native
 } // namespace at

@@ -59,6 +59,7 @@ __all__ = [
     'xlog1py',
     'xlogy',
     'zeta',
+    'harmonic_number'
 ]
 
 Tensor = torch.Tensor
@@ -1277,6 +1278,20 @@ Spherical Bessel function of the first kind of order :math:`0`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+harmonic_number = _add_docstr(_special.special_harmonic_number,
+                              r"""
+harmonic_number(n, *, out=None) -> Tensor
+
+:math:`n^{\textup{th}}` harmonic number.
+
+""" + r"""
+Args:
+    n (Tensor): input tensor.
 
 Keyword args:
     {out}
