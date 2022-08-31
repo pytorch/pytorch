@@ -499,7 +499,7 @@ class TestFSDPMisc(FSDPTest):
         fsdp_model = FSDP(FSDP(model))
         inp = torch.randn(3, 10).cuda()
         loss = fsdp_model(inp).sum()
-        loss.backward() 
+        loss.backward()
 
 
 instantiate_parametrized_tests(TestFSDPMisc)
