@@ -13278,14 +13278,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # RuntimeError: The following operation failed in the TorchScript interpreter.
-               # Traceback of TorchScript (most recent call last):
-               #   File "<string>", line 3, in forward
-               # def the_method(i0, i1: List[torch.Tensor], i2):
-               #     return torch.index_put(i0, i1, i2, accumulate=False)
-               #            ~~~~~~~~~~~~~~~ <--- HERE
-               # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
