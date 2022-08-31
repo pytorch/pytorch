@@ -11,10 +11,10 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._decomp import register_decomposition
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.nn.utils import stateless
-from torch._decomp import register_decomposition
 
 from functorch import make_fx
 from functorch._C import CompileCache

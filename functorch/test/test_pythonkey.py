@@ -24,10 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions,
+    nop, num_of_recompilations, default_partition, default_decompositions,
     memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
+from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
 from functorch_additional_op_db import additional_op_db
