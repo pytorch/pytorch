@@ -168,6 +168,7 @@ __all__ = [
     "instance_norm",
     "is_floating_point",
     "isnan",
+    "is_pinned",
     "item",
     "kl_div",
     "layer_norm",
