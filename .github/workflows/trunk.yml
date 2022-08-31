@@ -96,12 +96,6 @@ jobs:
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-    secrets:
-      SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-      SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-      ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
-      ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-bionic-py3_7-clang9-slow-build:
     name: linux-bionic-py3.7-clang9-slow

@@ -1484,9 +1484,9 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
     cases = [
-        ([3], 3, dict()),
-        ([10], 3, dict()),
-        ([3, 10], 3, dict()),
+        ([3], 3, {}),
+        ([10], 3, {}),
+        ([3, 10], 3, {}),
         ([3], 3, dict(replacement=False)),
         ([3], 3, dict(replacement=True)),
         ([3, 4], 4, dict(replacement=True)),
@@ -2886,6 +2886,76 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+def error_inputs_max_pool1d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for input tensor
+    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input
+    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
+                     error_regex='Expected 2D or 3D input tensor, but got')
+
+    # error inputs for empty input with stride=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
+                     error_regex='stride must be greater than zero, but got 0')
+
+    # error inputs for empty input with dilation=0
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                     error_regex='dilation must be greater than zero, but got 0')
+
+    # error inputs for invalied output size
+    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                     error_regex='Invalid computed output size: -4')
+
+    # error inputs when kernel_size=0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
+                     error_regex='kernel_size must be greater than zero')
+
+    # error inputs for strides > 0
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
+                     error_regex='stride must be greater than zero')
+
+def error_inputs_max_pool2d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
+def error_inputs_max_pool3d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+                     error_regex='pad should be at most half of kernel size')
+
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2901,6 +2971,71 @@ def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
 
     for input_shape, kwargs in cases:
         yield SampleInput(make_arg(input_shape), kwargs=kwargs)
+
+
+def complex_conv(fn, input_size, weight, grad_output, stride, padding, dilation, groups):
+    # conv(W, x, b) = conv(Wr, xr, br) - conv(Wi, xi, 0) + i(conv(Wi, xr, bi) + conv(Wr, xi, 0))
+    # a = conv(Wr, xr, br),
+    # b = conv(Wi, xi, 0),
+    # c = conv(Wr + Wi, xr + xi, br + bi)
+    # conv(W, x, b) = a - b + i(c - a - b)
+
+    grad_output_ = torch.view_as_real(grad_output)
+    grad_output_r = grad_output_[..., 0]
+    grad_output_i = grad_output_[..., 1]
+
+    weight_ = torch.view_as_real(weight)
+    weight_r = weight_[..., 0]
+    weight_i = weight_[..., 1]
+
+    a = fn(input_size, weight_r, grad_output_r, stride, padding, dilation, groups)
+    b = fn(input_size, weight_i, grad_output_i, stride, padding, dilation, groups)
+    c = fn(input_size, weight_r + weight_i, grad_output_r + grad_output_i, stride, padding, dilation, groups)
+
+    return (a - b) + 1j * (c - a - b)
+
+
+def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
+                       output_padding=0, dilation=1, groups=1,
+                       fn=None):
+    # Derivative of `conv` is `conv_transpose`.
+    # To verify the correctness of `conv_transpose`,
+    # we rely `torch.nn.grad` implementation (which is tested in test_nn.py)
+    # for floating dtypes.
+
+    assert fn is not None
+
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
+
+    # Input for `ref` is ndarray.
+    input, weight = torch.from_numpy(input), torch.from_numpy(weight)
+
+    is_batched = len(input.shape) == batched_dim_map[fn]
+    if not is_batched:
+        input = input.unsqueeze(0)
+
+    if bias is not None:
+        bias = torch.from_numpy(bias).unsqueeze(1)
+
+    grad_output = input
+    # Get the input shape for grad_fn.
+    conv_transpose_output = fn(grad_output.to('meta'), weight.to('meta'), None,
+                               stride=stride, padding=padding, output_padding=output_padding,
+                               groups=groups, dilation=dilation)
+    input_size = conv_transpose_output.shape
+
+    grad_fn = grad_fn_map[fn]
+    if weight.dtype.is_complex:
+        out = complex_conv(grad_fn, input_size, weight, grad_output, stride, padding, dilation, groups)
+    else:  # Floating
+        out = grad_fn(input_size, weight, grad_output, stride, padding, dilation, groups)
+
+    if bias is not None:
+        out = out + bias
+
+    return out.squeeze(0) if not is_batched else out
+
 
 def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3023,6 +3158,19 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
+
+
+def error_inputs_conv2d(opinfo, device, **kwargs):
+    msg = "should be the same"
+    weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
+    input = torch.randint(high=10, size=(2, 4, 4), device=device)
+    bias = torch.rand((3,), dtype=torch.float32, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+
+    weight = torch.rand(size=(3, 2, 3, 3), device=device, dtype=torch.float64)
+    input = torch.rand(size=(2, 4, 4), device=device, dtype=torch.float64)
+    bias = torch.rand((3,), dtype=torch.complex128, device=device)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
@@ -3631,7 +3779,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, kwargs
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 9), (3,), dict()),
+        ((2, 3, 9), (3,), {}),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
         ((2, 3, 9), (3,), dict(stride=(1,), padding=(1,), ceil_mode=False, count_include_pad=True)),
@@ -3650,7 +3798,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
     cases: List[Tuple[Tuple[int, ...], Union[int, Tuple[int, ...]], Dict]] = [
-        ((2, 3, 3, 4, 4), (2, 2, 2), dict()),
+        ((2, 3, 3, 4, 4), (2, 2, 2), {}),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
         ((1, 2, 5, 5, 5), (2, 3, 4), dict(stride=(1, 2, 2), padding=(0, 1, 2), ceil_mode=True,
@@ -3668,6 +3816,63 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
 
     for input_shape, kernel_size, kwargs in cases:
         yield SampleInput(make_arg(input_shape), args=(kernel_size,), kwargs=kwargs)
+
+def error_inputs_avg_pool1d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+def error_inputs_avg_pool2d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+    # 2-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
+
+def error_inputs_avg_pool3d(op_info, device, **kwargs):
+    # error inputs when pad is negative
+    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1}),
+                     error_regex='pad must be non-negative')
+
+    # error inputs when pad > kernel_size / 2
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+    # 3-dimensional kernel
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4}),
+                     error_regex='pad should be at most half of kernel size')
+
+    # error inputs for zero divisor
+    x = torch.zeros(3, 3, 3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (2, 2, 2), 'divisor_override': 0}),
+                     error_regex='divisor must be not zero')
+
+    # error inputs for invalid input dimension
+    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 0}),
+                     error_regex='non-empty 4D or 5D')
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
@@ -4423,6 +4628,10 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
         SampleInput(tensor_nd(), kwargs=dict(dim=(1,), correction=S // 2)),
         SampleInput(tensor_nd(), kwargs=dict(dim=None, correction=0, keepdim=True)),
+
+        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+        SampleInput(tensor_nd(), args=(True,)),
+        SampleInput(tensor_nd(), args=(False,)),
     ]
 
 
@@ -4666,6 +4875,8 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(detach(x), args=(lb, ub)),
         SampleInput(detach(x), args=(detach(lb[0]), detach(ub[0]))),
         SampleInput(detach(x), args=(detach(lb[:, :1]),)),
+        SampleInput(detach(x), args=(None, ub)),
+        SampleInput(detach(x), args=(lb, None)),
     ]
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
@@ -4878,7 +5089,7 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     shapes2d = ((L, M),)
     shapes3d = ((L, M, S),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 > dim2 is allowed
@@ -4913,7 +5124,7 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
     shapes2d = ((M, L),)
     shapes3d = ((M, S, L),)
 
-    kwargs1d = dict()
+    kwargs1d = {}
 
     kwargs2d = (
         # dim1 == dim2 is not allowed
@@ -4999,10 +5210,10 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
     reductions = ("mean", "sum", "none")
 
     input_shape_and_kwargs: List[Tuple[Tuple[int, ...], Dict[str, Any]]] = [
-        (shape, dict()),
-        ((*shape, 1), dict()),
-        ((*shape, 1, 2), dict()),
-        ((*shape, 1, 2, 3), dict()),
+        (shape, {}),
+        ((*shape, 1), {}),
+        ((*shape, 1, 2), {}),
+        ((*shape, 1, 2, 3), {}),
         *[(shape, dict(reduction=reduction)) for reduction in reductions],
         *[
             (
@@ -6914,28 +7125,26 @@ def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
-    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # kl_div works with inputs in [0, 1] (aka the pdf of a probability measure)
+    # Then log [0, 1] = (-inf, 0], so this is the log space
+    make_arg = partial(make_tensor, low=0., device=device, dtype=dtype, requires_grad=requires_grad)
 
-    shapes_and_reduction = [
-        ((2,), "mean"),
-        ((2, 3), "mean"),
-        ((2, 3, 4), "mean"),
-        ((2,), "none"),
-        ((2,), "batchmean"),
-        ((2,), "sum"),
-    ]
+    def make_log(shape):
+        out = torch.nn.functional.log_softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
 
-    sample_inputs = []
-    for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
-        # input should be log-probability, i.e. lie in (-inf, 0]
-        input = make(shape, low=None, high=0)
-        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
-        # i.e. lie in (-inf, 0]
-        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
-        sample_inputs.append(
-            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
-        )
-    return sample_inputs
+    def make_prob(shape):
+        out = torch.nn.functional.softmax(make_arg(shape), -1)
+        out.requires_grad_(requires_grad)
+        return out
+
+    shapes = ((2,), (2, 3))
+    reductions = ("none", "mean", "batchmean", "sum")
+    for shape, reduction, log_target in product(shapes, reductions, (True, False)):
+        input = make_log(shape)
+        target = make_log(shape) if log_target else make_prob(shape)
+        yield SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
 
 def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8500,8 +8709,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            ),
            supports_out=False),
     UnaryUfuncInfo('cos',
@@ -8579,12 +8786,6 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Float did not match double
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                # Jacobian mismatch
@@ -9176,25 +9377,6 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
-    OpInfo('inverse',
-           op=torch.inverse,
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', '.test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', '.test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-           )),
     OpInfo('isin',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.half),
@@ -10133,6 +10315,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_avg_pool1d,
            sample_inputs_func=sample_inputs_avgpool1d),
     OpInfo('nn.functional.avg_pool3d',
            aten_name='avg_pool3d',
@@ -10142,6 +10325,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_avg_pool3d,
            sample_inputs_func=sample_inputs_avgpool3d,
            skips=(
                # AssertionError: Tensor-likes are not close!
@@ -10179,23 +10363,41 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose1d),
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[
+           decorators=(
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestCommon', 'test_complex_half_reference_testing')
+           ),
            skips=(
+               # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.complex64,)),
+               # RuntimeError: UNSUPPORTED DTYPE: complex
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.float,)),
+               # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.int64,)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose2d',
@@ -10300,6 +10502,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
+           error_inputs_func=error_inputs_conv2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -10712,6 +10915,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
@@ -10778,6 +10982,7 @@ op_db: List[OpInfo] = [
                # to actually allocate memory
                DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
            ),
+           error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
@@ -10793,6 +10998,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -10809,6 +11015,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_max_pool3d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_unpool1d',
            aten_name='max_unpool1d',
@@ -13071,14 +13278,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # RuntimeError: The following operation failed in the TorchScript interpreter.
-               # Traceback of TorchScript (most recent call last):
-               #   File "<string>", line 3, in forward
-               # def the_method(i0, i1: List[torch.Tensor], i2):
-               #     return torch.index_put(i0, i1, i2, accumulate=False)
-               #            ~~~~~~~~~~~~~~~ <--- HERE
-               # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -13098,9 +13297,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # 76571
+               # 76571 - CUDA gets expectedFailure, but this test passes for ROCm
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
-                            dtypes=(torch.float16, torch.float32, torch.float64)),
+                            dtypes=(torch.float16, torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -13112,9 +13311,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # 76571
+               # 76571 - CUDA gets expectedFailure, but this test passes for ROCm
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
-                            dtypes=(torch.float16, torch.float32, torch.float64)),
+                            dtypes=(torch.float16, torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -15425,10 +15624,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
-        dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        dtypesIfCUDA=floating_types_and(
-            torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
-        ),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -16661,7 +16858,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -16697,7 +16894,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.view",
@@ -16778,6 +16975,17 @@ python_ref_db = [
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "ops.nvprims.var_mean",
+        torch_opinfo_name="var_mean",
+        validate_view_consistency=False,
+        # Complex types are currently disabled
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
     ),
     #
     # Linear Algebra Operators
@@ -17038,16 +17246,14 @@ def _compare_trilu_indices(
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
     else:
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
+                 .tril(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
+        self.assertEqual(
             torch.ones(row, col, device='cpu')
-                 .triu(offset).nonzero().to(dtype).transpose(0, 1),
+                 .triu(offset).nonzero().to(dtype=dtype).transpose(0, 1),
             torch.triu_indices(row, col, offset, dtype=dtype, device=device))
 
 
