@@ -415,14 +415,21 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
-  // Call the fp16 gemm interface
-  fbgemm::cblas_gemm_compute(
-      fbgemm::matrix_op_t::NoTranspose,
-      M,
-      input_ptr,
-      packed_weight_fp16,
-      0.0f,
-      output.data_ptr<float>());
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (const auto task_id : c10::irange(begin, end)) {
+      // Call the fp16 gemm interface
+      fbgemm::cblas_gemm_compute(
+          /*transa=*/fbgemm::matrix_op_t::NoTranspose,
+          /*m=*/static_cast<int>(M),
+          /*A=*/input_ptr,
+          /*Bp=*/packed_weight_fp16,
+          /*beta=*/0.0f,
+          /*C=*/output.data_ptr<float>(),
+          /*thread_id=*/static_cast<int>(task_id),
+          /*num_threads=*/num_tasks);
+    }
+  });
 
   // Add bias term
   if (bias_.has_value()) {
