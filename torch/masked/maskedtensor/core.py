@@ -297,7 +297,7 @@ class MaskedTensor(torch.Tensor):
         self._masked_mask = mask.clone()
 
     def _validate_members(self):
-        data = self.get_data()
+        data = self._masked_data
         mask = self.get_mask()
         if type(data) != type(mask):
             raise TypeError(f"data and mask must have the same type. Got {type(data)} and {type(mask)}")
@@ -348,8 +348,6 @@ class MaskedTensor(torch.Tensor):
                 return grad_output, None
 
         result = Constructor.apply(data, mask)
-        if data.requires_grad:
-            result.requires_grad_(True)
         return result
 
     def _set_data_mask(self, data, mask):
@@ -471,23 +469,16 @@ class MaskedTensor(torch.Tensor):
         if func is torch.ops.aten.new_empty_strided:
             _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3)
             if tuple(args[1]) != tuple(data.size()):
-                raise ValueError(f"__torch_dispatch__, {func.name}: args[1] expected to be the same as data.size()")
+                raise ValueError(f"__torch_dispatch__, {func}: args[1] expected to be the same as data.size()")
             if tuple(args[2]) != tuple(data.stride()):
-                raise ValueError(f"__torch_dispatch__, {func.name}: args[2] expected to be the same as data.stride()")
+                raise ValueError(f"__torch_dispatch__, {func}: args[2] expected to be the same as data.stride()")
             return MaskedTensor(func(data, args[1], args[2], **kwargs), mask)
         if func is torch.ops.aten._local_scalar_dense:
             if not mask:
-                raise ValueError("__torch_dispatch__, {func.name}: expected a mask tensor")
+                raise ValueError(f"__torch_dispatch__, {func}: expected a mask tensor")
             return func(data)
         if func is torch.ops.aten._to_copy:
             return MaskedTensor(func(data, *args[1:], **kwargs), mask)
-        if func is torch.ops.aten.new_empty_strided:
-            _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3)
-            if tuple(args[1]) != tuple(data.size()):
-                raise ValueError(f"__torch_dispatch__, {func.name}: args[1] expected to be the same as data.size()")
-            if tuple(args[2]) != tuple(data.stride()):
-                raise ValueError(f"__torch_dispatch__, {func.name}: args[2] expected to be the same as data.stride()")
-            return MaskedTensor(func(data, args[1], args[2], **kwargs), mask)
         if func in [torch.ops.aten.detach, torch.ops.aten.clone]:
             return MaskedTensor(func(data), mask)
         if func is torch.ops.aten._softmax:
@@ -618,7 +609,9 @@ class MaskedTensor(torch.Tensor):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return grad_output, None
+                if is_masked_tensor(grad_output):
+                    return grad_output
+                return MaskedTensor(grad_output, self.get_mask())
 
         return GetData.apply(self)
 
