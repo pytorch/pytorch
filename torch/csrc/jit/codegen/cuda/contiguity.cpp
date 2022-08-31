@@ -197,6 +197,12 @@ IterDomain* ContigIDs::getCAIndexConcreteId(IterDomain* id) const {
 }
 
 bool ContigIDs::isIndexable(IterDomain* id) const {
+  // If ID is mapped to consumer through persmissive map but not exact map it
+  // will not be mapped through to the exact map through the p2c map. Therefore
+  // reject because it involves broadcast resolution.
+  if (!GpuLower::current()->caMap()->idExistsInMap(getMappedId(id))) {
+    return false;
+  }
   auto c_id = getCAIndexConcreteId(id);
   return concrete_to_ref_.find(c_id) != concrete_to_ref_.end();
 }

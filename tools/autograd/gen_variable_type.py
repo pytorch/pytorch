@@ -809,7 +809,7 @@ def gen_variable_type_func(
     fn: NativeFunctionWithDifferentiabilityInfo,
 ) -> Dict[str, List[str]]:
     f = fn.func
-    result = dict()
+    result = {}
     with native_function_manager(f):
         name = cpp.name(f.func)
         formals = gen_formals(f)

@@ -272,5 +272,8 @@ def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) ->
     if isinstance(obj, ShardedTensor):
         return _find_shard(obj, index).tensor
     if index.offset is not None:
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset")
+        # special case looking up a tensor by origin
+        if isinstance(obj, torch.Tensor) and index.offset == torch.Size([0] * len(obj.size())):
+            return obj
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
     return obj
