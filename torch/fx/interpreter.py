@@ -133,6 +133,8 @@ class Interpreter:
                 msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
                 msg += f"\nOriginal traceback:\n{node.stack_trace}"
                 e.args = (msg,) + e.args[1:]
+                if isinstance(e, KeyError):
+                    raise RuntimeError(*e.args)
                 raise
 
             if self.garbage_collect_values:
