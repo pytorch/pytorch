@@ -2788,7 +2788,6 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 def softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
