@@ -575,7 +575,8 @@ class FakeTensorMode(TorchDispatchMode):
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
-        if has_symbolic_sizes:
+        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
+        if has_symbolic_sizes or True:
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
