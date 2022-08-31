@@ -17,7 +17,7 @@ from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
-_meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
+meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 meta_table = {}
 
@@ -32,7 +32,7 @@ def register_meta(op, register_dispatcher=True):
                     if op._overloadname != "default"
                     else op.overloadpacket.__name__
                 )
-                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+                meta_lib.impl(name, f)
 
         tree_map(add_func, op)
         return f
@@ -195,7 +195,7 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@register_meta(aten.bernoulli.out)
+@torch.library.impl(meta_lib, "bernoulli.out")
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
     return out
@@ -380,7 +380,8 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@register_meta([aten.complex.default, aten.complex.out])
+@torch.library.impl(meta_lib, "complex")
+@torch.library.impl(meta_lib, "complex.out")
 @out_wrapper()
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
@@ -389,7 +390,7 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
-@register_meta(aten.vdot.default)
+@torch.library.impl(meta_lib, "vdot")
 def vdot(self, other):
     if not self.is_complex:
         return torch.dot(self, other)
@@ -538,7 +539,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@register_meta(aten._cdist_forward.default)
+@torch.library.impl(meta_lib, "_cdist_forward")
 def meta_cdist_forward(x1, x2, p, compute_mode):
     check(
         x1.dim() >= 2,
@@ -574,7 +575,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
-@register_meta(aten._embedding_bag.default)
+@torch.library.impl(meta_lib, "_embedding_bag")
 def meta_embedding_bag(
     weight,
     indices,
@@ -683,7 +684,7 @@ def meta_diag(self, dim=0):
     return self.new_empty((sz,))
 
 
-@register_meta(aten._embedding_bag_forward_only.default)
+@torch.library.impl(meta_lib, "_embedding_bag_forward_only")
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
         weight, indices, offsets, *args
@@ -734,7 +735,7 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     )
 
 
-@register_meta(aten.logical_not_.default)
+@torch.library.impl(meta_lib, "logical_not_")
 def meta_logical_not_(self):
     return self
 
