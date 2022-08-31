@@ -1073,12 +1073,12 @@ class TestAutograd(TestCase):
         mm_test_cases = [
             # a requires grad, a is sparse, b requires grad, b is sparse, error message
             (False, True, True, False, None),
-            (False, False, True, True, "The backward pass for this operation requires the 'mat2'"),
-            (False, True, True, True, "The backward pass for this operation requires the 'mat2'"),
-            (True, False, True, True, "The backward pass for this operation requires the 'mat2'"),
-            (True, True, False, False, "The backward pass for this operation requires the 'self'"),
-            (True, True, True, False, "The backward pass for this operation requires the 'self'"),
-            (True, True, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (False, False, True, True, "Could not run 'aten::sparse_dim' with arguments from the 'CPU' backend."),
+            (False, True, True, True, "Could not run 'aten::sum.dim_IntList' with arguments from the 'SparseCPU' backend."),
+            (True, False, True, True, "Could not run 'aten::sparse_dim' with arguments from the 'CPU' backend."),
+            (True, True, False, False, "Function MmBackward0 returned an invalid gradient at index 0"),
+            (True, True, True, False, "Function MmBackward0 returned an invalid gradient at index 0"),
+            (True, True, True, True, "Could not run 'aten::sum.dim_IntList' with arguments from the 'SparseCPU' backend."),
         ]
         for a_req_grad, a_is_sparse, b_req_grad, b_is_sparse, err_msg in mm_test_cases:
             # We should only be testing cases with sparse inputs, and at least one
@@ -1113,7 +1113,8 @@ class TestAutograd(TestCase):
 
             else:
                 with self.assertRaisesRegex(RuntimeError, err_msg):
-                    a.mm(b)
+                    r = a.mm(b)
+                    r.sum().backward()
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
