@@ -68,6 +68,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 f"Node {node} with target {node.target} does not support nvfuser"
             )
 
+    assert len(nv_args_templates) > 0, "nv_args_templates must be non-empty"
+    call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+    assert len(call_function_nodes) > 0, "Graph must contain at least one call_function node"
+
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
 
