@@ -1010,9 +1010,13 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
 
         @staticmethod
         def backward(ctx, grad_output):
-            (mask,)= ctx.saved_tensors
-            grad_data = grad_output.get_data() if torch.masked.is_masked_tensor(grad_output) else grad_output
-            result = torch.masked.masked_tensor(grad_data, mask)
+            from torch.masked import is_masked_tensor, MaskedTensor
+
+            (mask,) = ctx.saved_tensors
+            grad_data = (
+                grad_output.get_data() if is_masked_tensor(grad_output) else grad_output
+            )
+            result = MaskedTensor.from_values(grad_data, mask)
             return result, None
 
     return Combine.apply(input, mask)

@@ -4,7 +4,7 @@ import warnings
 
 import torch
 
-from .creation import is_masked_tensor, masked_tensor
+from .core import is_masked_tensor, MaskedTensor
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -66,9 +66,9 @@ def _torch_reduce_all(fn):
                 self.get_data().size()
             ).cumprod(0)
 
-            return masked_tensor(torch.sum(idx * stride), torch.any(mask))
+            return MaskedTensor.from_values(torch.sum(idx * stride), torch.any(mask))
 
-        return masked_tensor(masked_fn(data, mask=mask), torch.any(mask))
+        return MaskedTensor.from_values(masked_fn(data, mask=mask), torch.any(mask))
 
     return reduce_all
 
@@ -97,7 +97,7 @@ def _torch_reduce_dim(fn):
             result_data = masked_fn(
                 data, dim=dim, keepdim=keepdim, dtype=dtype, mask=mask
             )
-        return masked_tensor(result_data, _multidim_any(mask, dim, keepdim))
+        return MaskedTensor.from_values(result_data, _multidim_any(mask, dim, keepdim))
 
     return reduce_dim
 
@@ -111,24 +111,6 @@ def _torch_reduce(fn):
     return torch_sum
 
 
-def _torch_grad_reduce_dim(fn):
-    class MaskedReduceDim(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, input, dim, keepdim, dtype):
-            mask = input.get_mask()
-            ctx.mark_non_differentiable(mask)
-            ctx.save_for_backward(mask)
-            return _torch_reduce_dim(fn)(input, dim, keepdim, dtype)
-
-        @staticmethod
-        def backward(ctx, grad_output):
-            (mask,) = ctx.saved_tensors
-            grad_data = grad_output.get_data().expand_as(mask)
-            return masked_tensor(grad_data, mask)
-
-    return MaskedReduceDim.apply
-
-
 def _reduce_dim_args(input, dim, keepdim=False, dtype=None):
     return input, dim, keepdim, dtype
 
@@ -139,7 +121,7 @@ def _torch_grad_reduce(fn):
             return _torch_reduce_all(fn)(args[0])
         # TODO: autograd.Function doesn't support kwarg
         input, dim, keepdim, dtype = _reduce_dim_args(*args, **kwargs)
-        return _torch_grad_reduce_dim(fn)(input, dim, keepdim, dtype)
+        return _torch_reduce_dim(fn)(input, dim, keepdim, dtype)
 
     return grad_reduce
 
