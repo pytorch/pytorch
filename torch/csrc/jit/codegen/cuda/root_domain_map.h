@@ -284,6 +284,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* producer,
       const TensorDomain* consumer) const;
 
+  std::string toString() const;
+
  private:
   //! Returns if key_a and key(td_b, id_b) are mapped to eachother (equivalent),
   //! or are the same key.
@@ -325,8 +327,6 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* consumer,
       const std::unordered_set<IterDomain*>& root_dims_to_map,
       bool producer_to_consumer) const override;
-
-  std::string toString() const;
 
  private:
   //! Disjoint set of all mapped <TD, ID> keys to determine axes equivalency
@@ -452,8 +452,6 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   //! Maps all pending mappings for id of td. When id is a broadcast,
   //! mapping is done separately for each concrete domain.
   void mapAllPendingMappings(const TensorDomain* td, IterDomain* id);
-
-  bool hasMatchingDomains(const std::vector<DomainKey>& unique_domains);
 
   bool safeToMap(const DomainKeySet& domains);
 

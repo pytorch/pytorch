@@ -186,27 +186,39 @@ auto ensureMapping(
   return it;
 }
 
+TensorView* lookUpTv(const TensorDomain* td) {
+  Fusion* fusion = FusionGuard::getCurFusion();
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion->vals())) {
+    if (tv->domain() == td) {
+      return tv;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 std::string DomainKey::toString() const {
   std::stringstream ss;
-  ss << "{";
-  if (td()) {
-    ss << td() << " (root: " << td()->getRootDomain()
-       << ", maybe rfactor: " << td()->getMaybeRFactorDomain() << ")";
-  } else {
-    ss << "null";
-  }
-  ss << ", ";
   if (id()) {
     ss << id();
   } else {
     ss << "null";
   }
   if (concreteId()) {
-    ss << " (" << concreteId() << ")";
+    ss << " (concrete: " << concreteId() << ")";
   }
-  ss << "}";
+  ss << " in ";
+  if (td()) {
+    auto tv = lookUpTv(td());
+    TORCH_INTERNAL_ASSERT(tv != nullptr, "No TV found for ", td()->toString());
+    ss << "T" << tv->name() << "[ " << td()->getRootDomain() << " ]";
+    if (td()->hasRFactor()) {
+      ss << " (Rfactor: [ " << td()->getMaybeRFactorDomain() << " ])";
+    }
+  } else {
+    ss << "null";
+  }
   return ss.str();
 }
 
@@ -825,7 +837,7 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
   const auto& out_root = out_td->getRootDomain();
 
   // Record equalities from output to all the inputs
-  // ignores un-concretizable broadcasts
+  // ignores non-concretizable broadcasts
   for (auto* in_tv : ir_utils::filterByType<TensorView>(e->inputs())) {
     const TensorDomain* in_td = in_tv->domain();
     std::vector<IterDomain*> in_root =
@@ -841,8 +853,9 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
     for (const auto it : c10::irange(in_root.size())) {
       if (e->outputs().size() > 1) {
         TORCH_INTERNAL_ASSERT(
-            e->isA<WelfordOp>() || e->isA<GroupedReductionOp>(),
-            "Multi-output mapping assumes WelforddOp or GroupedReductionOp but, ",
+            e->isA<WelfordOp>() || e->isA<GroupedReductionOp>() ||
+                e->isA<GroupedWelfordOp>(),
+            "Unknown multi-output Expr type ",
             e->getExprType().value(),
             " is found");
         for (auto o : e->outputs()) {
@@ -1019,7 +1032,7 @@ void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
     mapAllPendingMappings(td, id);
   }
 
-  // When tv has a rfactor domain, propagate the domain mappings from
+  // When tv has an rfactor domain, propagate the domain mappings from
   // each of the rfactor axes to the dependent root axes.
   if (td->hasViewLikeRFactor()) {
     std::unordered_set<Val*> root_set(
@@ -1052,32 +1065,6 @@ void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
 }
 
 // Checks whether all consumers of a producer can be joined without
-// introducing unsupported mappings. Specifically, if a domain of a
-// consumer has a mapped iteration domain in another consumer that
-// does not correspond to the same producer iteration domain, mapping
-// the consumer domains would result in the producer iteration domain
-// mapped to two different consumer iteration domains, requiring
-// recomputations.
-bool ComputeAtRootDomainMapBuilder::hasMatchingDomains(
-    const std::vector<DomainKey>& unique_domains) {
-  for (const auto& key : unique_domains) {
-    for (const auto& other_key : unique_domains) {
-      if (key == other_key) {
-        continue;
-      }
-      const auto& other_root = other_key.td()->getRootDomain();
-      if (std::any_of(
-              other_root.begin(), other_root.end(), [&](const IterDomain* id) {
-                return root_map_.canMap(key, other_key.td(), id);
-              })) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-// Checks whether all consumers of a producer can be joined without
 // introducing unsupported mappings, i.e., requiring recomputations.
 bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
   if (domains.size() <= 1) {
@@ -1094,9 +1081,6 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
             })) {
       unique_domains.push_back(domain);
     }
-  }
-  if (hasMatchingDomains(unique_domains)) {
-    return false;
   }
   // Can't map if reduction output domains would be mapped
   if (incompatible_domains_.isReductionOutputMapped(

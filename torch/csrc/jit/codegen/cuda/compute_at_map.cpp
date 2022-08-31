@@ -173,6 +173,82 @@ void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
   }
 }
 
+namespace {
+
+// Returns a pair of mapped IDs
+c10::optional<std::pair<IterDomain*, IterDomain*>> detectMappablePair(
+    const std::vector<IterDomain*>& ids,
+    const IterDomainGraph& id_graph) {
+  for (auto id1 : ids) {
+    for (auto id2 : ids) {
+      if (id1 == id2) {
+        continue;
+      }
+      if (id_graph.permissiveNodes().disjointSetMap().at(id1)->has(id2)) {
+        return std::make_pair(id1, id2);
+      }
+    }
+  }
+
+  return {};
+}
+
+// It is assumed that for any tensor represented by a list of domains,
+// those domains should never be mapped with each other. It may be
+// possible to lift this assumption, but it's unclear if it could
+// matter in practice.
+void failIfSelfMappingExists(Fusion* fusion, const IterDomainGraph& id_graph) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    // For each tensor, make sure root, rfactor and leaf domains
+    // should not include domains that are mapped with another domain
+    // in the same set of domains. This may be overly conservative,
+    // and it maybe enough to check the root domains.
+
+    // Root domains
+    auto self_mappped_root_pair =
+        detectMappablePair(tv->getRootDomain(), id_graph);
+    TORCH_INTERNAL_ASSERT(
+        !self_mappped_root_pair.has_value(),
+        "Unsupported domain mapping detected in ",
+        tv->toString(),
+        ". Root domains, ",
+        self_mappped_root_pair->first->toString(),
+        " and ",
+        self_mappped_root_pair->second->toString(),
+        ", are mapped with each other.");
+
+    // Rfactor domains
+    if (tv->hasRFactor()) {
+      auto self_mappped_rf_pair =
+          detectMappablePair(tv->getRFactorDomain(), id_graph);
+      TORCH_INTERNAL_ASSERT(
+          !self_mappped_rf_pair.has_value(),
+          "Unsupported domain mapping detected in ",
+          tv->toString(),
+          ". RFactor domains, ",
+          self_mappped_rf_pair->first->toString(),
+          " and ",
+          self_mappped_rf_pair->second->toString(),
+          ", are mapped with each other.");
+    }
+
+    // Leaf domains
+    auto self_mappped_leaf_pair =
+        detectMappablePair(tv->domain()->domain(), id_graph);
+    TORCH_INTERNAL_ASSERT(
+        !self_mappped_leaf_pair.has_value(),
+        "Unsupported domain mapping detected in ",
+        tv->toString(),
+        ". Leaf domains, ",
+        self_mappped_leaf_pair->first->toString(),
+        " and ",
+        self_mappped_leaf_pair->second->toString(),
+        ", are mapped with each other.");
+  }
+}
+
+} // namespace
+
 void IterDomainGraph::build(Fusion* fusion) {
   FusionGuard fg(fusion);
 
@@ -515,6 +591,8 @@ void IterDomainGraph::build(Fusion* fusion) {
       }
     }
   }
+
+  failIfSelfMappingExists(fusion, *this);
 }
 
 void IterDomainGraph::initializeId(
