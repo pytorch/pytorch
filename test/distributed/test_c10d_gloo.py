@@ -395,7 +395,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(RuntimeError, "requires non-empty tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([], opts)
 
@@ -660,7 +660,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.sparse_coo_tensor([[0]], [1], size=(2,))
         t3 = torch.sparse_coo_tensor([[0]], [1], size=(4,))
 
-        with self.assertRaisesRegex(RuntimeError, "requires non-empty tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             opts = c10d.AllreduceOptions()
             pg.allreduce([], opts)
 
