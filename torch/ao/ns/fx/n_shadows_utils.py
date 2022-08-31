@@ -15,9 +15,8 @@ from torch.ao.ns.fx.ns_types import (
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import MatchResult
 
-import builtins
 import copy
-from typing import List, Dict, Tuple, Set
+from typing import List, Dict, Set, Tuple
 import operator
 
 SHADOW_NODE_NAME_PREFIX = 'shadow'
@@ -99,7 +98,14 @@ def _get_dedup_subgraphs(
     # instead
     seen_nodes = set()
     subgraphs_dedup = {}
-    for name, cur_match in reversed(matches.items()):  # type: ignore[call-overload]
+
+    # Dict items are not reversible until Python 3.8, so we hack it
+    # to be compatible with previous Python versions
+    matches_items_reversed: List[Tuple[str, MatchResult]] = []
+    for name, cur_match in matches.items():
+        matches_items_reversed.insert(0, (name, cur_match))
+
+    for name, cur_match in matches_items_reversed:  # type: ignore[call-overload]
         was_seen = False
         for node_or_tuple in cur_match[1]:
 

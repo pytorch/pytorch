@@ -138,7 +138,6 @@ from torch.ao.ns.fx.n_shadows_utils import (
     _add_logger_to_subgraph_wrapper,
     SHADOW_WRAPPER_NODE_NAME_PREFIX,
     create_submodule_from_subgraph,
-    BINARY_FUNCTIONS,
 )
 
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
@@ -811,7 +810,7 @@ def prepare_n_shadows_model(
                 example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
             else:
                 print(
-                    'unable to get example input for node ' + \
+                    'unable to get example input for node ' +
                     f'{first_node.format_node()}, skipping')
                 continue
 

@@ -2158,9 +2158,9 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 x = F.linear(x, self.w1[:], self.b1)
                 x = F.relu(x)
                 x = x + x
-                x = torch.cat([x,])
+                x = torch.cat([x])
                 x = torch.cat((x,))
-                x = torch.cat(tensors=[x,])
+                x = torch.cat(tensors=[x])
                 # TODO(future PR): enable layernorm
                 # blocked on FX graph mode quant not inserting observer for
                 # second arg, if the second arg is a module input
@@ -2208,9 +2208,9 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         qconfig = torch.ao.quantization.default_qconfig
 
         qconfig_mappings = [
-            QConfigMapping().set_global(None)\
-                .set_object_type(F.linear, qconfig)\
-                .set_object_type(F.relu, qconfig)
+            QConfigMapping().set_global(None)
+                            .set_object_type(F.linear, qconfig)
+                            .set_object_type(F.relu, qconfig),
         ]
         self._test_impl(m, example_input, qconfig_mappings)
 
