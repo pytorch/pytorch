@@ -182,11 +182,9 @@ def fetch_symint_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
-def proxy_call(proxy_mode, func, args, kwargs=None):
-    if kwargs is None:
-        kwargs = {}
-
+def proxy_call(proxy_mode, func, args, kwargs):
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
 
@@ -413,7 +411,6 @@ def wrap_key(f, tensors, tracer):
 
     return wrapped
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer):
@@ -439,10 +436,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if symbolic_shapes.is_symbolic_op(func):
             with self.restore():
                 return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-
-        # We don't want to convert torch.tensor constants into tracing objects.
-        if func == aten.lift.default:
-            return args[0]
 
         if func in [prim.device.default]:
             return func(*args, **kwargs)
