@@ -7,7 +7,6 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
-from torch.masked import is_masked_tensor, MaskedTensor
 from . import _docs
 
 if TYPE_CHECKING:
@@ -1011,6 +1010,8 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
 
         @staticmethod
         def backward(ctx, grad_output):
+            from torch.masked import is_masked_tensor, MaskedTensor
+
             (mask,) = ctx.saved_tensors
             grad_data = (
                 grad_output.get_data() if is_masked_tensor(grad_output) else grad_output
