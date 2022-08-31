@@ -15,6 +15,9 @@ template<typename T1>
 struct numeric<c10::complex<T1>> {
   using value_type = typename c10::complex<T1>::value_type;
 };
+
+template<typename T1>
+using numeric_t = typename numeric<T1>::value_type;
 }
 }
 }

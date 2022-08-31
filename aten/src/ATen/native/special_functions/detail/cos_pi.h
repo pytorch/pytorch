@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/complex.h>
-#include <ATen/native/special_functions/detail/numeric_t.h>
+#include <ATen/native/special_functions/detail/numeric.h>
 #include <ATen/native/special_functions/detail/sin_pi.h>
 #include <c10/util/complex.h>
 #include <c10/util/MathConstants.h>

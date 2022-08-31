@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/special_functions/detail/sinc_pi.h>
-#include <ATen/native/special_functions/detail/promote_t.h>
+#include <ATen/native/special_functions/detail/promote.h>
 #include <c10/macros/Macros.h>
 
 namespace at {

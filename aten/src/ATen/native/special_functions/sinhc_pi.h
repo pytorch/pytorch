@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/native/special_functions/detail/promote_t.h>
+#include <ATen/native/special_functions/detail/promote.h>
 #include <ATen/native/special_functions/detail/sinhc_pi.h>
 #include <c10/macros/Macros.h>
 
