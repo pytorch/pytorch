@@ -1,12 +1,11 @@
-import io
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Union, Optional, Sequence, Any
+from typing import Dict, List, Union, Optional, Sequence, Any
+from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
 import torch
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
 @dataclass
 class ChunkStorageMetadata:
@@ -36,34 +35,6 @@ class Metadata:
     state_dict_metadata: Dict[str, STORAGE_TYPES]
     planner_data: Any = None
     storage_data: Any = None
-
-@dataclass
-class BytesWriteRequest:
-    bytes: io.BytesIO
-    storage_key: str
-
-
-@dataclass
-class BytesReadRequest:
-    bytes: io.BytesIO
-    storage_key: str
-    fqn: str
-
-
-@dataclass
-class TensorWriteRequest:
-    tensor: torch.Tensor
-    storage_key: str
-
-
-@dataclass
-class TensorReadRequest:
-    tensor: torch.Tensor
-    storage_key: str
-    # offset and length w.r.t. to the storage identified by ``storage_key``
-    offsets: Tuple[int, ...]
-    lengths: Tuple[int, ...]
-
 
 @dataclass(frozen=True)
 class MetadataIndex:

@@ -1092,6 +1092,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "attn_mask was not None"
         elif query.is_nested and key_padding_mask is not None:
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
+        elif self.num_heads % 2 == 1:
+            why_not_fast_path = "num_heads is odd"
 
         if not why_not_fast_path:
             tensor_args = (
@@ -1321,7 +1323,7 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1448,7 +1450,7 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
