@@ -451,6 +451,8 @@ class FakeTensor(torch.Tensor):
             return None
         elif func == torch.ops.aten.stride.default:
             return None
+        elif func == torch.ops.aten.is_contiguous.default:
+            return True  # hack
 
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
