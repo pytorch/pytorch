@@ -143,8 +143,8 @@ class FlattenParamsWrapper(nn.Module):
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes of this wrapper to the wrapped module."""
         # The `FlatParamHandle`'s existence represents if *this* FPW instance
-        # has any parameters, so we should not forward the attribute lookup to
-        # nested modules, which also be FPW instances.
+        # manages any parameters, so we should not forward the attribute lookup
+        # to nested modules, which also could be FPW instances.
         if name == FLAT_PARAM_HANDLE:
             return super().__getattr__(name)
         try:
