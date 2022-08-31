@@ -608,11 +608,11 @@ def im2col(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    assert input.dim() == 4, "only 4D input supported"
-    assert len(kernel_size) == 2, "only 2D kernel supported"
-    assert len(dilation) == 2, "only 2D dilation supported"
-    assert len(padding) == 2, "only 2D padding supported"
-    assert len(stride) == 2, "only 2D stride supported"
+    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
+    utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
 
     batch_dim = input.size(0)
     channel_dim = input.size(1)
