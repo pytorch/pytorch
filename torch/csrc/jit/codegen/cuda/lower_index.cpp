@@ -92,10 +92,36 @@ void IndexLowering::handle(const kir::ForLoop* for_loop) {
   active_scope_ = prev_scope;
 }
 
+// TODO: use a separate IR node to represent rand like
+void IndexLowering::lowerRandLike(const UnaryOp* uop) {
+  // Write random tensor indices into the consumer
+  //  tensor index if the output is a tensor.
+  auto out_tv = dynamic_cast<TensorView*>(uop->out());
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr, "rand scalar not yet supported");
+
+  // TODO: using in as a placeholder for the random tensor index
+  //  would need to keep this space on the new rand op when separating
+  //  randlike from the unary op.
+  auto in = SimplifyingIrBuilder::create<kir::TensorIndex>(
+      out_tv, Index::getRandomTensorStridedIndices(out_tv, for_loops_));
+
+  // TensorIndex for writing randlike output.
+  const auto out = lowerDstIndex(uop->out());
+
+  pushBack(IrBuilder::create<UnaryOp>(
+      UnaryOpType::RandLike, out, in, uop->getRNGOffset()));
+  GpuLower::current()->propagateExprInfo(uop, back());
+}
+
 void IndexLowering::handle(const UnaryOp* uop) {
+  if (uop->getUnaryOpType() == UnaryOpType::RandLike) {
+    lowerRandLike(uop);
+    return;
+  }
   const auto in = lowerSrcIndex(uop->in(), uop->out());
   const auto out = lowerDstIndex(uop->out());
-  pushBack(IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, in));
+  pushBack(IrBuilder::create<UnaryOp>(
+      uop->getUnaryOpType(), out, in, uop->getRNGOffset()));
   GpuLower::current()->propagateExprInfo(uop, back());
 }
 
