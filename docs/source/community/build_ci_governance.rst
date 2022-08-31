@@ -17,4 +17,4 @@ support. Decision criteria for approving the PR:
 * PR has the correct label (`module: ci`)
 * There are no objections from the current maintainers
 * There are at least three net *thumbs up* from current maintainers
-  (or all maintainers vote *thumbs up* when the module has less than 3 maintainers).
+  | (or all maintainers vote *thumbs up* when the module has less than 3 maintainers).
