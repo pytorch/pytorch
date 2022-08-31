@@ -436,11 +436,12 @@ class TestBinary(TestCase):
             )
 
 class TestReductions(TestCase):
-    def test_not_implemented(self):
+    def test_max_not_implemented(self):
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = MaskedTensor(d, m)
-        self.assertRaises(TypeError, lambda: mt.max())
+        with self.assertRaisesRegex(TypeError, "no implementation found for 'torch.ops.aten.max'"):
+            mt.max()
 
     def test_sum(self):
         d = torch.tensor([[0, 1, 2, 6], [3, 4, 5.0, 7]])
@@ -475,6 +476,56 @@ class TestReductions(TestCase):
             mt.mean(dim=0),
         )
 
+    """
+        The following block of tests "test_mean_grad_case_1[a through e] are used to test the functionality of
+        the two different ways of constructing MaskedTensors:
+            MaskedTensor(data, mask, requires_grad=True/False) -- NO differentiable constructor and always a leaf
+            MaskedTensor.from_values(data, mask) -- differentiable constructor
+
+        Like torch.tensor(data), MaskedTensor(data, mask) will provide a UserWarning if data.requires_grad=True
+        MaskedTensor.from_values does not take in requires_grad -- it just takes on the requires_grad from data
+
+        Therefore, there are 6 cases to test and we use `mean` as a proxy to test the different combinations
+
+        Assuming mt.mean().backward() is run after each constructor:
+
+        Case 1a:
+            values.requires_grad = True
+            mt = MaskedTensor(values, mask, requires_grad=True)
+        yields
+            - Provide a UserWarning because values.requires_grad=True
+            - values.grad = None
+            - mt.grad is a MaskedTensor with the correct gradient
+
+        Case 1b:
+            values.requires_grad = False
+            mt = MaskedTensor(values, mask, requires_grad=True)
+        yields
+            - values.grad = None
+            - mt.grad is a MaskedTensor with the correct gradient
+
+        Case 2a/2b:
+            values.requires_grad = True/False
+            mt = MaskedTensor(values, mask, requires_grad=False)
+
+            will both yield a RuntimeError of "element 0 of tensors does not require grad and does not have a grad_fn"
+            as expected. When values.requires_grad=True, we will also get a UserWarning
+
+        Case 3a:
+            values.requires_grad = True
+            mt = MaskedTensor.from_values(values, mask)
+        yields
+            - values.grad is a MaskedTensor with the correct gradient
+            - mt.grad is None and gives a UserWarning that
+              "The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad"
+
+        Case 3b:
+            values.requires_grad = False
+            mt = MaskedTensor.from_values(values, mask)
+
+            will yield a RuntimeError of "element 0 of tensors does not require grad and does not have a grad_fn"
+            as expected.
+    """
     def test_mean_grad_case_1a(self):
         """ values.requires_grad = True
             mt = MaskedTensor(values, mask, requires_grad=True)
@@ -639,10 +690,12 @@ class TestReductions(TestCase):
             mt.all(dim=0),
         )
 
-    def test_all_grad(self):
+    def test_grad_dtype(self):
         d = torch.tensor([[True, True, False], [False, True, True]])
         m = torch.tensor([[True, False, False], [False, True, False]])
-        self.assertRaises(RuntimeError, lambda: MaskedTensor(d, m, requires_grad=True))
+        msg = "Only Tensors of floating point and complex dtype can require gradients"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            MaskedTensor(d, m, requires_grad=True)
 
 class TestMatMul(TestCase):
     def test_bmm(self):
