@@ -197,7 +197,6 @@ supported:
   - pixel_unshuffle
   - select_backward
   - _trilinear
-  - linalg_inv_ex
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
 autograd:
