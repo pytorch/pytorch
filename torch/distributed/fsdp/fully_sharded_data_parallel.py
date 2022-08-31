@@ -694,12 +694,6 @@ class _ExecOrderData:
                 self.warn_status = _ExecOrderWarnStatus.WARNED
 
 
-class FreeEvent(NamedTuple):
-    """This tracks the free corresponding to an all-gather."""
-    cuda_event: torch.cuda.Event
-    size: int  # size in bytes being freed
-
-
 class FreeEventQueue:
     """
     This tracks all pending frees corresponding to in-flight all-gathers. The
@@ -709,7 +703,7 @@ class FreeEventQueue:
 
     def __init__(self) -> None:
         self._queue: Deque[torch.cuda.Event] = collections.deque()
-        self._max_num_inflight_all_gathers = 5  # empirically chosen default
+        self._max_num_inflight_all_gathers = 2  # empirically chosen default
 
     def enqueue(self, free_event: torch.cuda.Event) -> None:
         """Enqueues a free event."""
@@ -942,8 +936,8 @@ class FullyShardedDataParallel(nn.Module):
             thread to schedule all-gathers without any extra synchronization.
             If ``True``, then FSDP explicitly synchronizes the CPU thread to
             prevent too many in-flight all-gathers. This ``bool`` only affects
-            the sharded strategies that schedule all-gathers.
-            TODO (awgu): Explain the implications on GPU memory.
+            the sharded strategies that schedule all-gathers. Enabling this can
+            help lower the number of CUDA malloc retries.
     """
     def __init__(
         self,
