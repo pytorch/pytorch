@@ -199,27 +199,6 @@ __all__ = [
 ]
 
 
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
-
-
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
@@ -260,44 +239,13 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    if isinstance(tensorlike, FakeTensor):
-        mode = tensorlike.fake_mode
+    # SymInt doesnt support empty_strided yet
+    if any(
+        isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
+    ):
+        return torch.empty(shape, dtype=dtype, device=device)
     else:
-        mode = get_prim_fake_mode()
-
-    if device.type == "meta":
-        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-    else:
-        # SymInt doesnt support empty_strided yet
-        if any(
-            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
-        ):
-            meta_t = torch.empty(shape, dtype=dtype, device="meta")
-        else:
-            meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-        return FakeTensor(mode, meta_t, device)
-
-
-#
-# Common datastructures and helpers
-#
-def _wrap_tensor_meta(f):
-    def wrap(t):
-        if (
-            isinstance(t, torch.Tensor)
-            and not isinstance(t, FakeTensor)
-            and not t.device.type == "meta"
-        ):
-            return FakeTensor.from_tensor(t, get_prim_fake_mode())
-        else:
-            return t
-
-    def wrapper(*args, **kwargs):
-        wrapped_args = tree_map(wrap, args)
-        wrapped_kwargs = tree_map(wrap, kwargs)
-        return f(*wrapped_args, **wrapped_kwargs)
-
-    return wrapper
+        return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
 def _make_prim(
@@ -329,18 +277,16 @@ def _make_prim(
     def _autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
 
-    _meta_impl = _wrap_tensor_meta(meta)
-
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
-            return _meta_impl(*args, **kwargs)
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
     prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, _meta_impl)
+    prim_meta_impl.impl(name, meta)
 
     _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
@@ -356,7 +302,7 @@ def _make_prim(
 
         p.schema = schema
         p.prim_impl = _prim_impl
-        p.prim_meta_impl = _wrap_tensor_meta(meta)
+        p.prim_meta_impl = meta
 
     return _prim
 
@@ -1781,12 +1727,16 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     shape = tensors[0].shape
     concat_length = 0
-    for tensor in tensors:
+    for tensor_idx, tensor in enumerate(tensors):
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            else:
-                assert length == common_length
+            elif length != common_length:
+                raise RuntimeError(
+                    f"Sizes of tensors must match except in dimension {dim}. "
+                    "Expected {common_length} but got {length} for tensor number "
+                    "{tensor_idx} in the list"
+                )
 
     new_shape = list(tensors[0].shape).copy()
     new_shape[dim] = concat_length
