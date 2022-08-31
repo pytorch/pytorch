@@ -409,6 +409,25 @@ void initJITBindings(PyObject* module) {
           py::arg("inplace"),
           py::arg("quant_type_int") = 1)
       .def(
+          "_jit_pass_insert_observer_method_for_ondevice_ptq",
+          [](Module& module,
+             const std::string& method_name,
+             const py::dict& qconfig_dict,
+             bool inplace,
+             int quant_type_int) {
+            auto dict = py::cast<std::unordered_map<
+                std::string,
+                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertObserversForOnDevicePTQ(
+                module, method_name, dict, inplace, quant_type);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("qconfig_dict"),
+          py::arg("inplace"),
+          py::arg("quant_type_int") = 1)
+      .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
              const std::string& method_name,
@@ -417,6 +436,22 @@ void initJITBindings(PyObject* module) {
              int quant_type_int) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("inplace"),
+          py::arg("debug"),
+          py::arg("quant_type_int") = 1)
+      .def(
+          "_jit_pass_insert_quant_dequant_for_ondevice_ptq",
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool debug,
+             int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertQuantDeQuantOnDevicePTQ(
                 module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
@@ -486,6 +521,17 @@ void initJITBindings(PyObject* module) {
              const std::vector<std::string>& preserved_attrs) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return Finalize(module, quant_type, preserved_attrs);
+          },
+          py::arg("module"),
+          py::arg("quant_type_int") = 1,
+          py::arg("preserved_attrs") = std::vector<std::string>())
+      .def(
+          "_jit_pass_quant_finalize_for_ondevice_ptq",
+          [](Module& module,
+             int quant_type_int,
+             const std::string& method_name) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return FinalizeOnDevicePTQ(module, quant_type, method_name);
           },
           py::arg("module"),
           py::arg("quant_type_int") = 1,
@@ -1292,7 +1338,8 @@ void initJITBindings(PyObject* module) {
           })
       .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
       .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
-      .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+      .def("__str__", [](c10::SymIntNode a) { return a->str(); })
+      .def("__repr__", [](c10::SymIntNode a) { return a->str(); });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
