@@ -21,23 +21,29 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
   if (processGroupFailureReason != c10::nullopt) {
     return (*processGroupFailureReason).c_str();
   }
+  std::string interpret = nullptr;
   std::string err = std::string(ncclGetLastError(NULL));
   switch (error) {
     case ncclUnhandledCudaError:
-      return std::string("ncclUnhandledCudaError: Call to CUDA function failed. Last error: " + err).c_str();
-    case ncclSystemError:
-      return std::string("ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
-        "It can be also caused by unexpected exit of a remote peer. Last error: " + err).c_str();
-    case ncclInternalError:
-      return std::string("ncclInternalError: Internal check failed. Last error: " + err).c_str();
-    case ncclInvalidArgument:
-      return std::string("ncclInvalidArgument: Invalid value for an argument. Last error: " + err).c_str();
-    case ncclInvalidUsage:
-      return std::string("ncclInvalidUsage: This usually reflects invalid usage of NCCL library. Last error: " + err).c_str();
-    default:
+      interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
       break;
+    case ncclSystemError:
+      interpret = "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer.";
+      break;
+    case ncclInternalError:
+      interpret = "ncclInternalError: Internal check failed.";
+      break;
+    case ncclInvalidArgument:
+      interpret = "ncclInvalidArgument: Invalid value for an argument.";
+      break;
+    case ncclInvalidUsage:
+      interpret = "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
+      break;
+    default:
+      interpret = "Unknown NCCL error!";
   }
-  return std::string("Unknown NCCL error: " + err).c_str();
+  return (interpret + "\nLast error:\n" + err).c_str();
 }
 } // namespace
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()

@@ -34,6 +34,7 @@ STATE_DICT_TYPE = Dict[str, Any]
 class Metadata:
     # Keys are the same from the `state_dict` used.
     state_dict_metadata: Dict[str, STORAGE_TYPES]
+    planner_data: Any = None
     storage_data: Any = None
 
 @dataclass

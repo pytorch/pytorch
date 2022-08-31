@@ -63,6 +63,54 @@ def forward(self, x_1):
     return view_default
     """)
 
+    def test_reinplace_different_metadata(self):
+        def f(a_):
+            a = a_.clone()
+            b = a + 1
+            # Naively, we shouldn't try to inplace the .ge() call,
+            # because that would require resizing "b" (from a float to a bool tensor).
+            c = torch.ge(b, a)
+            return c
+        inpt = torch.ones(4)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        # The .ge() should not be reinplaced.
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    add_tensor = torch.ops.aten.add.Tensor(clone_default, 1)
+    ge_tensor = torch.ops.aten.ge.Tensor(add_tensor, clone_default);  add_tensor = clone_default = None
+    return ge_tensor
+    """)
+
+    def test_reinplace_overlapping_memory(self):
+        def f(a_):
+            a = a_.clone()
+            b = a.expand(4, 4)
+            # Can't reinplace because b has overlapping memory.
+            c = b.add(1)
+            return c
+        inpt = torch.ones(1)
+        f2 = reinplace(make_fx(f)(inpt), inpt)
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, a__1):
+    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
+    expand_default = torch.ops.aten.expand.default(clone_default, [4, 4]);  clone_default = None
+    add_tensor = torch.ops.aten.add.Tensor(expand_default, 1);  expand_default = None
+    return add_tensor
+    """)
+
     # This test won't actually run in CI, because it requires functionalize() from functorch.
     # I'm planning on testing more comprehensively with torchbench models,
     # but we can make this testing better once functorch moves into pytorch/pytorch.
@@ -211,8 +259,9 @@ def forward(self, a__1):
     select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
     add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
     as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 1);  clone_default = None
-    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 0);  as_strided_default = add_tensor = None
-    return select_scatter_default
+    select_int_2 = torch.ops.aten.select.int(as_strided_default, 0, 0)
+    copy__default = torch.ops.aten.copy_.default(select_int_2, add_tensor);  select_int_2 = add_tensor = None
+    return as_strided_default
     """)  # noqa: B950
 
     def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
@@ -243,9 +292,64 @@ def forward(self, a__1):
     select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
     add_tensor = torch.ops.aten.add.Tensor(select_int_1, 1);  select_int_1 = None
     as_strided_default = torch.ops.aten.as_strided.default(clone_default, [4], [4], 0);  clone_default = None
-    select_scatter_default = torch.ops.aten.select_scatter.default(as_strided_default, add_tensor, 0, 1);  as_strided_default = add_tensor = None
-    return select_scatter_default
+    select_int_2 = torch.ops.aten.select.int(as_strided_default, 0, 1)
+    copy__default = torch.ops.aten.copy_.default(select_int_2, add_tensor);  select_int_2 = add_tensor = None
+    return as_strided_default
     """)  # noqa: B950
+
+
+    def test_out_node_updated(self):
+        def f():
+            x = torch.zeros(2, 2)
+            y = x.diagonal()
+            y_updated = y.add(1)
+            z = torch.diagonal_scatter(x, y_updated)
+            # reinplace needs to know to replace output [z] with [x]
+            return [z]
+
+        if not HAS_FUNCTIONALIZATION:
+            return
+        f2 = reinplace(make_fx(functionalize(f))())
+        expected_out = f()
+        actual_out = f2()
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self):
+    zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
+    diagonal_default = torch.ops.aten.diagonal.default(zeros)
+    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, 1);  diagonal_default = None
+    return [zeros]
+    """)
+
+    def test_reinplace_index_mutation(self):
+        def f():
+            a = torch.zeros(4, 4, 4)
+            a[:, 2:] = torch.ones(4, 2, 4)
+            return a
+
+        if not HAS_FUNCTIONALIZATION:
+            return
+        f2 = reinplace(make_fx(functionalize(f))())
+        expected_out = f()
+        actual_out = f2()
+        self.assertEqual(actual_out, expected_out)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self):
+    zeros = torch.ops.aten.zeros.default([4, 4, 4], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
+    slice_tensor = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_tensor_1 = torch.ops.aten.slice.Tensor(slice_tensor, 1, 2, 9223372036854775807);  slice_tensor = None
+    slice_tensor_2 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 1, 2, 9223372036854775807);  slice_tensor_2 = None
+    copy__default = torch.ops.aten.copy_.default(slice_tensor_3, ones);  slice_tensor_3 = ones = None
+    return zeros
+    """)
 
 if __name__ == '__main__':
     run_tests()
