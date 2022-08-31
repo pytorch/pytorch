@@ -420,27 +420,27 @@ void GroupNormKernelImpl(
   }
 }
 
-template <typename T>
+template <typename T, typename PT>
 void ComputeInternalGradients(
     int64_t N,
     int64_t C,
     int64_t HxW,
     const T* dY,
     const T* X,
-    T* ds,
-    T* db) {
+    PT* ds,
+    PT* db) {
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec::Vectorized<T>::size();
     const int64_t inner_size = HxW / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> ds_arr;
+    std::array<PT, K> ds_arr;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> db_arr;
+    std::array<PT, K> db_arr;
     for (const auto i : c10::irange(start, end)) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;
-      vec::Vectorized<T> ds_vec(0);
-      vec::Vectorized<T> db_vec(0);
+      vec::Vectorized<PT> ds_vec(0);
+      vec::Vectorized<PT> db_vec(0);
       for (int64_t j = 0; j < inner_size; j += K) {
         const vec::Vectorized<T> dy_vec = vec::Vectorized<T>::loadu(dY_ptr + j);
         const vec::Vectorized<T> x_vec = vec::Vectorized<T>::loadu(X_ptr + j);
@@ -449,8 +449,8 @@ void ComputeInternalGradients(
       }
       ds_vec.store(ds_arr.data());
       db_vec.store(db_arr.data());
-      T ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
-      T db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
+      PT ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
+      PT db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
       for (const auto j : c10::irange(inner_size, HxW)) {
         ds_val += dY_ptr[j] * X_ptr[j];
         db_val += dY_ptr[j];
@@ -461,7 +461,54 @@ void ComputeInternalGradients(
   });
 }
 
-template <typename T>
+template <>
+void ComputeInternalGradients(
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    const BFloat16* dY,
+    const BFloat16* X,
+    float* ds,
+    float* db) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
+    constexpr int64_t K = bVec::size();
+    const int64_t inner_size = HxW / K * K;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<float, K/2> ds_arr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<float, K/2> db_arr;
+    for (const auto i : c10::irange(start, end)) {
+      const BFloat16* dY_ptr = dY + i * HxW;
+      const BFloat16* X_ptr = X + i * HxW;
+      fVec ds_vec(0);
+      fVec db_vec(0);
+      for (int64_t j = 0; j < inner_size; j += K) {
+        const bVec dy_bvec = bVec::loadu(dY_ptr + j);
+        const bVec x_bvec = bVec::loadu(X_ptr + j);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        ds_vec = ds_vec + dy_fvec0 * x_fvec0;
+        ds_vec = ds_vec + dy_fvec1 * x_fvec1;
+        db_vec = db_vec + dy_fvec0 + dy_fvec1;
+      }
+      ds_vec.store(ds_arr.data());
+      db_vec.store(db_arr.data());
+      float ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), float(0));
+      float db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), float(0));
+      for (const auto j : c10::irange(inner_size, HxW)) {
+        ds_val += float(dY_ptr[j]) * float(X_ptr[j]);
+        db_val += float(dY_ptr[j]);
+      }
+      ds[i] = ds_val;
+      db[i] = db_val;
+    }
+  });
+}
+
+template <typename T, typename PT>
 void GroupNormInputBackward(
     int64_t N,
     int64_t C,
@@ -469,11 +516,11 @@ void GroupNormInputBackward(
     int64_t group,
     const T* dY,
     const T* X,
-    const T* mean,
-    const T* rstd,
-    const T* gamma,
-    const T* ds,
-    const T* db,
+    const PT* mean,
+    const PT* rstd,
+    const PT* gamma,
+    const PT* ds,
+    const PT* db,
     T* dX) {
   const int64_t G = group;
   const int64_t D = C / G;
@@ -525,6 +572,84 @@ void GroupNormInputBackward(
   });
 }
 
+template <>
+void GroupNormInputBackward(
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    const BFloat16* dY,
+    const BFloat16* X,
+    const float* mean,
+    const float* rstd,
+    const float* gamma,
+    const float* ds,
+    const float* db,
+    BFloat16* dX) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  const int64_t G = group;
+  const int64_t D = C / G;
+  const float s = float(1) / static_cast<float>(D * HxW);
+  const bool gamma_null = (gamma == nullptr);
+  at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
+    constexpr int64_t K = bVec::size();
+    const int64_t d = D / K * K;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<float, K/2> ds_arr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<float, K/2> db_arr;
+    for (const auto i : c10::irange(start, end)) {
+      const int64_t g = i % G;
+      const float* ds_ptr = ds + i * D;
+      const float* db_ptr = db + i * D;
+      vec::Vectorized<float> ds_vec(0);
+      vec::Vectorized<float> db_vec(0);
+      for (int64_t j = 0; j < d; j += K) {
+        const fVec gamma_vec0 = gamma_null
+            ? fVec(1)
+            : fVec::loadu(gamma + g * D + j);
+        const fVec gamma_vec1 = gamma_null
+            ? fVec(1)
+            : fVec::loadu(gamma + g * D + j + K);
+
+        bVec ds_bvec = bVec::loadu(ds_ptr + j);
+        bVec db_bvec = bVec::loadu(db_ptr + j);
+        fVec ds_fvec0, ds_fvec1, db_fvec0, db_fvec1;
+        std::tie(ds_fvec0, ds_fvec1) = convert_bfloat16_float(ds_bvec);
+        std::tie(db_fvec0, db_fvec1) = convert_bfloat16_float(db_bvec);
+        ds_vec = ds_vec + ds_fvec0 * gamma_vec0;
+        ds_vec = ds_vec + ds_fvec1 * gamma_vec1;
+        db_vec = db_vec + db_fvec0 * gamma_vec0;
+        db_vec = db_vec + db_fvec1 * gamma_vec1;
+
+      }
+      ds_vec.store(ds_arr.data());
+      db_vec.store(db_arr.data());
+      float ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), float(0));
+      float db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), float(0));
+      for (const auto j : c10::irange(d, D)) {
+        const float gamma_v = gamma_null ? float(1) : gamma[g * D + j];
+        ds_val += float(ds_ptr[j]) * float(gamma_v);
+        db_val += float(db_ptr[j]) * float(gamma_v);
+      }
+      const float c2 =
+          (db_val * mean[i] - ds_val) * rstd[i] * rstd[i] * rstd[i] * s;
+      const float c3 = -c2 * mean[i] - db_val * rstd[i] * s;
+      for (const auto j : c10::irange(D)) {
+        const int64_t c = g * D + j;
+        const BFloat16* dY_ptr = dY + (i * D + j) * HxW;
+        const BFloat16* X_ptr = X + (i * D + j) * HxW;
+        BFloat16* dX_ptr = dX + (i * D + j) * HxW;
+        const float c1 = rstd[i] * (gamma_null ? float(1) : gamma[c]);
+        for (const auto k : c10::irange(HxW)) {
+          dX_ptr[k] = c1 * float(dY_ptr[k]) + c2 * float(X_ptr[k]) + c3;
+        }
+      }
+    }
+  });
+}
+
 template <typename T>
 void GammaBackward(
     int64_t N,
@@ -568,7 +693,7 @@ void BetaBackward(int64_t N, int64_t C, const T* db, T* dbeta) {
   });
 }
 
-template <typename T>
+template <typename T, typename PT>
 void GroupNormBackwardKernelImplInternal(
     const Tensor& dY,
     const Tensor& X,
@@ -590,21 +715,19 @@ void GroupNormBackwardKernelImplInternal(
 
   const T* dY_data = dY.data_ptr<T>();
   const T* X_data = X.data_ptr<T>();
-  const T* mean_data = mean.data_ptr<T>();
-  const T* rstd_data = rstd.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  const PT* mean_data = mean.data_ptr<PT>();
+  const PT* rstd_data = rstd.data_ptr<PT>();
+  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
   T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
-  T* dgamma_data = dgamma.defined() ? dgamma.data_ptr<T>() : nullptr;
-  T* dbeta_data = dbeta.defined() ? dbeta.data_ptr<T>() : nullptr;
-  Tensor ds = at::empty({N, C}, X.options());
-  Tensor db = at::empty({N, C}, X.options());
-  T* ds_data = ds.data_ptr<T>();
-  T* db_data = db.data_ptr<T>();
-
-  ComputeInternalGradients<T>(N, C, HxW, dY_data, X_data, ds_data, db_data);
-
+  PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
+  PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
+  Tensor ds = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<PT>::value));
+  Tensor db = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<PT>::value));
+  PT* ds_data = ds.data_ptr<PT>();
+  PT* db_data = db.data_ptr<PT>();
+  ComputeInternalGradients<T, PT>(N, C, HxW, dY_data, X_data, ds_data, db_data);
   if (dX_data != nullptr) {
-    GroupNormInputBackward<T>(
+    GroupNormInputBackward<T, PT>(
         N,
         C,
         HxW,
@@ -617,13 +740,16 @@ void GroupNormBackwardKernelImplInternal(
         ds_data,
         db_data,
         dX_data);
+
   }
   if (dgamma_data != nullptr) {
-    GammaBackward<T>(
+    GammaBackward<PT>(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
+
   }
   if (dbeta_data != nullptr) {
-    BetaBackward<T>(N, C, db_data, dbeta_data);
+    BetaBackward<PT>(N, C, db_data, dbeta_data);
+
   }
 }
 
@@ -640,10 +766,16 @@ void GroupNormBackwardKernelImpl(
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
+  const bool mixed_type = is_mixed_type(dY, gamma);
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
-        GroupNormBackwardKernelImplInternal<scalar_t>(
+      if(mixed_type) {
+        GroupNormBackwardKernelImplInternal<BFloat16, float>(
             dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+      } else {
+        GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
+            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+      }
       });
 }
 
