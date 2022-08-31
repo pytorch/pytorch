@@ -204,15 +204,27 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::list,
     aten_list,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        const auto str = p_node->Input(0).toStringRef();
-        c10::List<std::string> chars;
-        chars.reserve(str.size());
-        for (auto c : str) {
-          chars.emplace_back(1, c);
-        }
-        p_node->Output(0) = std::move(chars);
-      };
+      if (n->matches(torch::schema("aten::list(str t) -> str[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto str = p_node->Input(0).toStringRef();
+          c10::List<std::string> chars;
+          chars.reserve(str.size());
+          for (auto c : str) {
+            chars.emplace_back(1, c);
+          }
+          p_node->Output(0) = std::move(chars);
+        };
+      }
+
+      if (n->matches(torch::schema("aten::list.t(t[] l) -> t[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto input = p_node->Input(0).toList();
+          p_node->Output(0) = input.copy();
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -257,19 +269,41 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    aten::index_put,
-    aten_index_put,
-    [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        const auto& self = p_node->Input(0).toTensor();
-        const auto& indices = p_node->Input(1).toOptionalTensorList();
-        const auto& values = p_node->Input(2).toTensor();
-        const auto accumulate = p_node->Input(3).toBool();
-        p_node->Output(0) =
-            at::native::index_put(self, indices, values, accumulate);
-      };
-    });
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::index_put, aten_index_put, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& indices = p_node->Input(1).toOptionalTensorList();
+      const auto& values = p_node->Input(2).toTensor();
+      const auto accumulate = p_node->Input(3).toBool();
+      p_node->Output(0) =
+          at::native::index_put(self, indices, values, accumulate);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto indices = p_node->Input(1).toTensorList();
+
+      c10::List<c10::optional<at::Tensor>> opt_list_indices;
+      opt_list_indices.reserve(indices.size());
+      for (const auto& ten : indices) {
+        opt_list_indices.push_back(ten);
+      }
+
+      const auto& values = p_node->Input(2).toTensor();
+      const auto accumulate = p_node->Input(3).toBool();
+      p_node->Output(0) =
+          at::native::index_put(self, opt_list_indices, values, accumulate);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::item,

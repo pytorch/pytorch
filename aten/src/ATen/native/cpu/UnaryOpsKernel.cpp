@@ -13,6 +13,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
@@ -203,13 +204,18 @@ static void angle_kernel(TensorIteratorBase& iter) {
 
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cpu", [&]() {
-        cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-            [=](Vectorized<scalar_t> a) { return a.conj(); });
-      });
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cpu",
+    AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
+      // conj is a no-op for non-complex types
+      direct_copy_kernel(iter);
+    })
+    AT_DISPATCH_CASE_COMPLEX_TYPES_AND(kComplexHalf, [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.conj(); });
+    })
+  );
 }
 
 static void bitwise_not_kernel(TensorIteratorBase& iter) {
