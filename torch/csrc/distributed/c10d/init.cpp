@@ -557,7 +557,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
-  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "Kind")
+  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::RedOpType::PRODUCT)
