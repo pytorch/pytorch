@@ -48,6 +48,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (const value_type& __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(const value_type& __re) {__re_ += __re; return *this;}
@@ -106,6 +110,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (float __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(float __re) {__re_ += __re; return *this;}
@@ -162,6 +170,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (double __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(double __re) {__re_ += __re; return *this;}
@@ -208,11 +220,6 @@ inline
 constexpr
 complex<double>::complex(const complex<float>& __c)
     : __re_(__c.real()), __im_(__c.imag()) {}
-
-
-explicit constexpr operator bool() const {
-    return real() || imag();
-}
 
 
 // 26.3.6 operators:
@@ -487,7 +494,7 @@ inline constexpr
 bool
 operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
-    return __x && __y;
+    return bool(__x) && bool(__y);
 }
 
 template<class _Tp>
@@ -495,7 +502,7 @@ inline constexpr
 bool
 operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
-    return __x || __y;
+    return bool(__x) || bool(__y);
 }
 
 // 26.3.7 values:
