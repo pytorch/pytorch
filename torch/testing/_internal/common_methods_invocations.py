@@ -6023,10 +6023,6 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(make_arg(a), args=(b,))
 
-        if kwargs.get("transpose_samples", False) and len(a) >= 2:
-            transposed = make_arg(a).transpose(0, 1).detach().requires_grad_(requires_grad)
-            yield SampleInput(transposed, args=(b,))
-
 def reference_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_view_reshape(op, device, dtype, requires_grad, **kwargs)
 
@@ -13147,7 +13143,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('reshape',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=True),
+           sample_inputs_func=sample_inputs_view_reshape,
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=True),
            error_inputs_func=error_inputs_view_reshape,
            supports_out=False,
@@ -13157,7 +13153,7 @@ op_db: List[OpInfo] = [
     OpInfo('reshape_as',
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=True, tensor_arg=True),
+           sample_inputs_func=partial(sample_inputs_view_reshape, tensor_arg=True),
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=True, tensor_arg=True),
            error_inputs_func=partial(error_inputs_view_reshape, tensor_arg=True),
            supports_out=False,
@@ -13173,7 +13169,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=False),
+           sample_inputs_func=sample_inputs_view_reshape,
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=False),
            error_inputs_func=error_inputs_view_reshape,
            skips=(
@@ -13185,7 +13181,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_view_reshape, transpose_samples=False, tensor_arg=True),
+           sample_inputs_func=partial(sample_inputs_view_reshape, tensor_arg=True),
            reference_inputs_func=partial(reference_inputs_view_reshape, transpose_samples=False, tensor_arg=True),
            error_inputs_func=partial(error_inputs_view_reshape, tensor_arg=True),
            skips=(
