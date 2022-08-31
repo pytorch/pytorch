@@ -130,8 +130,8 @@ class Interpreter:
                 self.env[node] = self.run_node(node)
             except Exception as e:
                 msg = f"While executing {node.format_node()}"
-                msg = '{}: {}'.format(msg, e.args[0]) if e.args else str(msg)
-                msg += f"\n\nOriginal traceback:\n{node.stack_trace}"
+                msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
+                msg += f"\nOriginal traceback:\n{node.stack_trace}"
                 e.args = (msg,) + e.args[1:]
                 raise
 
