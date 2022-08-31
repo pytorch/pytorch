@@ -79,6 +79,8 @@ def handle_symbolic_op(func, args, kwargs):
         return None
     if func == torch.ops.aten.sym_stride.default:
         return None
+    if func == torch.ops.aten.sym_storage_offset.default:
+        return 0  # TODO: this is wrong
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
     if func == torch.ops.aten.sym_numel.default:
