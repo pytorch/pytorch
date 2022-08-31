@@ -6415,14 +6415,16 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        test_case.assertEqual(cpu_output, gpu_output, atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
+        test_case.assertEqual(cpu_output, gpu_output, 
+                atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
         gpu_gradInput = test_case._backward_criterion(
             gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
+        test_case.assertEqual(cpu_gradInput, gpu_gradInput, 
+                atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
     def _get_target(self):
         return self._get_arg('target', False)
