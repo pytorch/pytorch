@@ -809,15 +809,14 @@ def forward(self, a_1):
 
     def test_symbolic_meta(self):
         def f(a, b):
-            c = torch.cat([a, b])
-            d = torch.empty(a.shape[0] + b.shape[0])
-            return c, d
+            d = a.new_empty(a.shape[0] + b.shape[0])
+            return d
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
-        meta_c = _get_node(fx_g, lambda x: x.target == aten.cat.default)
+        meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_d.meta['sym_size'].expr == meta_d.meta['sym_size'].expr)
+        self.assertTrue(meta_c.meta['fake_result'].shape[0].get_pyobj() == meta_d.meta['sym_size'].expr)
 
 
 make_fx_failures = {
