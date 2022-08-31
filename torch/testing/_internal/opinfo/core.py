@@ -1,3 +1,4 @@
+import collections
 import collections.abc
 import math
 import operator
@@ -259,6 +260,9 @@ class SampleInput(object):
             return t
 
         return self.transform(to_noncontiguous)
+
+
+NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
 
 
 class ErrorInput(object):

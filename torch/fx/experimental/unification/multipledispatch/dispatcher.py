@@ -333,7 +333,7 @@ class Dispatcher(object):
         self.name = d['name']
         self.funcs = d['funcs']
         self._ordering = ordering(self.funcs)
-        self._cache = dict()
+        self._cache = {}
 
     @property
     def __doc__(self):

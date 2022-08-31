@@ -6,10 +6,10 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.quantized._reference as nnqr
-from torch.nn.quantized.modules.utils import WeightedQuantizedModule
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized._reference as nnqr
+from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from .graph_module import QuantizedGraphModule
 from .utils import (
     collect_producer_nodes,
@@ -331,9 +331,9 @@ def fold_weight(
     graph module with the traced nodes and run the graph module to pack the
     weight. then replace the original chain of ops with the packed weight.
     """
-    packed_weights = dict()
+    packed_weights = {}
     # map from folded node name to the prepacked weight name
-    folded_nodes = dict()
+    folded_nodes = {}
     # get packed weights
     for node in quantized.graph.nodes:
         if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:

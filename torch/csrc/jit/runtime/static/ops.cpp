@@ -39,6 +39,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <ATen/CompositeExplicitAutogradFunctions.h>
+
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
@@ -75,7 +77,7 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
     return;
   }
 
-  Tensor xtensor = at::native::expand(self, padded_size);
+  Tensor xtensor = at::compositeexplicitautograd::expand(self, padded_size);
   Tensor urtensor = at::native::alias(result);
   for (const auto i : c10::irange(xtensor.dim())) {
     // can't unfold with step 0, so make sure step is at least 1
@@ -2526,12 +2528,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
     const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
     const auto layout = p_node->Input(2).toOptional<c10::Layout>();
     if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
-      p_node->Output(0) = at::native::zeros(size, dtype, layout);
+      p_node->Output(0) = at::compositeexplicitautograd::zeros(
+          size, dtype, layout, c10::nullopt, c10::nullopt);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::zeros_out(size, out_t);
+    at::compositeexplicitautograd::zeros_out(out_t, size);
   };
 });
 
