@@ -236,7 +236,7 @@ class C10_API SizesAndStrides {
     return sizes_data()[idx];
   }
 
-  SymInt size_at_unchecked(size_t idx) const noexcept {
+  const SymInt& size_at_unchecked(size_t idx) const noexcept {
     return sizes_data()[idx];
   }
 
@@ -255,7 +255,7 @@ class C10_API SizesAndStrides {
     return strides_data()[idx];
   }
 
-  SymInt stride_at_unchecked(size_t idx) const noexcept {
+  const SymInt& stride_at_unchecked(size_t idx) const noexcept {
     return strides_data()[idx];
   }
 
