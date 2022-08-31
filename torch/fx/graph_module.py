@@ -377,7 +377,7 @@ class GraphModule(torch.nn.Module):
         self._tracer_extras = {}
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
-       
+
         # Dictionary to store metadata
         self.meta : Dict[str, Any] = {}
 
