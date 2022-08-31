@@ -26,7 +26,6 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
-// TODO(crcrpar): Make `ReduceOp` compatible with TorchScript Compiler.
 struct TORCH_API ReduceOp : torch::CustomClassHolder {
   enum RedOpType : uint8_t {
     SUM = 0,
