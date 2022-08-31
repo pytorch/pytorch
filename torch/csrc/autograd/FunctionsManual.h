@@ -835,6 +835,12 @@ Tensor linalg_det_backward(
     const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots);
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
