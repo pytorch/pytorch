@@ -19,7 +19,8 @@ static Tensor compute_columns2d(
     const Tensor& input,
     IntArrayRef padding,
     IntArrayRef stride,
-    IntArrayRef kernel_size) {
+    IntArrayRef kernel_size,
+    bool is_channels_last) {
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
   const int64_t pad_height = padding[0];
@@ -32,8 +33,6 @@ static Tensor compute_columns2d(
   const int64_t input_width = input.size(3);
   const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
   const int64_t output_width =  (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
-
-  bool is_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
 
   Tensor columns;
   if ((kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
@@ -504,7 +503,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
       true);
 
   auto grad_output = grad_output_.contiguous(memory_format);
-  Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
+  Tensor finput = compute_columns2d(input, padding, stride, kernel_size, use_channels_last);
 
   const int64_t batch_size = input.size(0);
 
@@ -571,7 +570,7 @@ Tensor& slow_conv2d_forward_out_cpu(
   const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
   const int64_t output_width = (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
 
-  Tensor finput = compute_columns2d(input, padding, stride, kernel_size);
+  Tensor finput = compute_columns2d(input, padding, stride, kernel_size, use_channels_last);
   output.resize_({batch_size, n_output_plane, output_height, output_width}, memory_format);
   if (bias.defined()) {
     output.copy_(bias.reshape({-1, 1, 1}));

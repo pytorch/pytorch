@@ -80,18 +80,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
       return static_cast<c10::complex<double>>(c_obj);
     }
-    case TypeKind::SymIntType:
-      return torch::is_symint_node(obj)
-          ? obj.cast<c10::SymbolicIntNode*>()->toSymInt()
-          : c10::SymInt{py::cast<int64_t>(obj)};
     case TypeKind::IntType:
-    // NB: Typically, these switches are completely dead, because
-    // Argument::type() will always report IntType for these types.
-    // So this is a bit overly permissive: we'll accept a dtype
-    // passed to an int argument, for example.
-    case TypeKind::LayoutType:
-    case TypeKind::ScalarTypeType:
-    case TypeKind::MemoryFormatType:
+      // TODO: Properly fake this type
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      // For backwards compatibility
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -107,6 +102,35 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (THPMemoryFormat_Check(obj.ptr())) {
         auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
         return static_cast<int8_t>(memory_format->memory_format);
+      }
+      return py::cast<int64_t>(obj);
+    case TypeKind::LayoutType: {
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::ScalarTypeType: {
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::MemoryFormatType: {
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::SymIntType:
+      if (torch::is_symint_node(obj.ptr())) {
+        return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -194,9 +218,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::List<c10::SymInt> symints;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            auto si = torch::is_symint_node(elm)
-                ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
-                : c10::SymInt{py::cast<int64_t>(elm)};
+            auto si = py::cast<c10::SymInt>(elm);
             symints.push_back(si);
           }
           return symints;
@@ -246,7 +268,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType(), N);
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
@@ -391,9 +413,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       throw py::cast_error(
           c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
     }
+    case TypeKind::GeneratorType:
+      return py::cast<at::Generator>(obj);
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
-    case TypeKind::GeneratorType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::AnyListType:

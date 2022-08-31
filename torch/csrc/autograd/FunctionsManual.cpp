@@ -497,6 +497,14 @@ Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
   }
 }
 
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
+  // masked_select does not work well with functorch, as its shape is
+  // data-dependent
+  return areAnyTensorSubclassLike({grad, mask})
+      ? at::where(mask, grad, 0).sum()
+      : grad.masked_select(mask).sum();
+}
+
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, out);
@@ -595,10 +603,25 @@ Tensor sum_backward(
   return grad.expand(sizes);
 }
 
+Tensor sum_backward(
+    const Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+    // we are only using `keepdim=true` path for SymInts for now
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Only the keepdim=true path is implemented to support symints in autograd");
+  } else {
+    return grad.expand_symint(sizes);
+  }
+}
+
 Tensor nansum_backward(
     const Tensor& grad,
     const Tensor& self,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim) {
   return sum_backward(grad, self.sizes(), dims, keepdim) *
       self.isnan().logical_not();
@@ -607,11 +630,12 @@ Tensor nansum_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim) {
-  auto n = dim.size() == 0 ? numel : _safe_size(shape, dim);
-  return sum_backward(grad, shape, dim, keepdim) / n;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
+  return sum_backward(grad, shape, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -667,6 +691,10 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
+        .view_as(input);
+  }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return grad * (result / input).conj();
@@ -691,6 +719,9 @@ Tensor prod_backward(
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
+  }
+  if (input.is_meta()) {
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 
   Tensor zero_mask = (input == 0);
@@ -1288,25 +1319,19 @@ Tensor sparse_sparse_matmul_backward(
 Tensor renorm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Scalar& p_s,
+    const Scalar& p,
     int64_t dim,
     const Scalar& maxnorm) {
-  auto self_sizes = self.sizes();
-  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
-  at::DimVector reduce_dims(self_sizes.size());
+  auto n = self.dim();
+  dim = c10::maybe_wrap_dim(dim, n);
+  auto reduce_dims = at::DimVector(n);
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
-  auto dtype = self.scalar_type();
-  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
-  const auto p = p_s.toDouble();
 
-  Tensor norm;
-  if (acc_type != dtype) {
-    norm = at::linalg_vector_norm(
-        self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
-  } else {
-    norm = at::linalg_vector_norm(self, p, reduce_dims, /*keepdim=*/true);
-  }
+  auto acc_type =
+      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto norm = at::linalg_vector_norm(
+      self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
   const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
@@ -1875,59 +1900,6 @@ Tensor infinitely_differentiable_logit_backward(
         at::empty({}, self.options())
             .fill_(std::numeric_limits<double>::quiet_NaN()));
   }
-}
-
-Tensor kl_div_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  auto result =
-      kl_div_backward(grad, input, target, at::Reduction::None, log_target);
-  if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
-  }
-  return result;
-}
-
-// Compute derivatives for targets.
-Tensor kl_div_target_backward(
-    Tensor grad_output,
-    Tensor self,
-    Tensor target,
-    int64_t reduction,
-    bool log_target) {
-  Tensor grad_target;
-  if (!log_target) {
-    if (!areAnyTensorSubclassLike({self, target}) &&
-        !grad_output._is_zerotensor()) {
-      grad_target = grad_output.mul(target.log().add_(1).sub_(self))
-                        .masked_fill_(target == 0, 0.);
-    } else {
-      grad_target = grad_output.mul(target.log().add(1).sub(self))
-                        .masked_fill(target == 0, 0.);
-    }
-  } else {
-    if (!areAnyTensorSubclassLike({self, target})) {
-      grad_target =
-          grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
-    } else {
-      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
-    }
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
-    } else {
-      grad_target.div(target.numel());
-    }
-  }
-
-  return grad_target;
 }
 
 Tensor binary_cross_entropy_target_backward(
@@ -3499,15 +3471,15 @@ Tensor eig_backward(
   // complex components of eigenvalues, while torch.linalg.eig will most likely
   // always return complex eigenvalues.
   if (!self.is_complex()) {
-    auto is_imag_eigvals_zero = false;
+    Tensor is_imag_eigvals_zero;
     // path for torch.eig with always a "real" 2D tensor of eigenvalues
     if (!D.is_complex()) {
       // narrow extracts the column corresponding to the imaginary part
-      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min();
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D) == 0.0).min();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for
@@ -3517,7 +3489,7 @@ Tensor eig_backward(
     }
     // No support for complex eigenvalues for real inputs yet.
     TORCH_CHECK(
-        is_imag_eigvals_zero,
+        at::is_scalar_tensor_true(is_imag_eigvals_zero),
         "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
   } else {
     // torch.eig returns 2d tensors for eigenvalues,
@@ -4025,10 +3997,22 @@ Tensor differential_analytic_matrix_function(
   meta_grad_sizes[A.dim() - 1] *= 2;
 
   auto n = A.size(-1);
-  auto meta_grad = at::zeros(meta_grad_sizes, grad.options());
-  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  Tensor meta_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as both `A` and `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({A, grad})) {
+    meta_grad = at::cat(
+        {at::cat({A, grad}, -1), at::cat({at::zeros_like(A), A}, -1)}, -2);
+  } else {
+    meta_grad = at::zeros(meta_grad_sizes, grad.options());
+    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
+    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
+    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+  }
 
   return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
 }
@@ -4043,6 +4027,60 @@ Tensor linalg_matrix_exp_differential(
       self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
 }
 
+template <typename F1, typename F2, typename... Ts>
+Tensor masked_fmap(
+    const Tensor& mask,
+    const F1& f1,
+    const F2& f2,
+    const Tensor& t,
+    const Ts&... ts) {
+  // This function takes two functions f1 and f2 and a (variadic) list of
+  // tensors, and creates a new tensor of the same shape as the first element of
+  // the list of tensors by applying the function f1 to the tensors for which
+  // the mask is true and f2 to the tensors for which the mask is false This
+  // function is used when we have a formula that works for, say, all
+  // non-singular inputs and another one for when the inputs are singular. See
+  // for example det_backward
+
+  // Precondition for the n == 0 case to make sense
+  TORCH_INTERNAL_ASSERT(t.numel() != 0);
+  auto t_masked = t.index({mask});
+  auto n = t_masked.numel();
+  if (n == t.numel()) {
+    return f1(t, ts...);
+  } else if (n == 0) {
+    return f2(t, ts...);
+  } else {
+    // Equivalent to
+    // ret = torch.empty_like(t)
+    // ret[mask] = f1(t1[mask], ..., tn[mask])
+    // ret[~mask] = f2(t1[~mask], ..., tn[~mask])
+    auto not_mask = mask.logical_not();
+    return at::empty_like(t)
+        .index_put_({mask}, f1(t_masked, ts.index({mask})...))
+        .index_put_(
+            {not_mask}, f2(t.index({not_mask}), ts.index({not_mask})...));
+  }
+}
+
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T) {
+  // (d det)_A(E) = tr(A^{-1}E)*det
+  // We use that the determinant is C^1 to approximate the gradient of singular
+  // inputs Since we never differentiate over forward AD, we don't need to deal
+  // with further gradients, as we do in grad_backward
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+  auto LU_ =
+      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+  auto AinvE =
+      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  return AinvE.diagonal(0, -2, -1).sum(-1) * det;
+}
+
 Tensor linalg_det_backward(
     const Tensor& grad,
     const Tensor& det,
@@ -4050,7 +4088,8 @@ Tensor linalg_det_backward(
     const Tensor& LU,
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
-  if (!grad.defined()) {
+  // A.numel() == 0 necessary for the singular case
+  if (!grad.defined() || A.numel() == 0) {
     return {};
   }
 
@@ -4059,45 +4098,55 @@ Tensor linalg_det_backward(
   auto d_diag = grad * det.conj();
   // Optimisation, Make it F-transposed as it's what lu_solve expects
   auto d = at::diag_embed(d_diag.unsqueeze(-1).expand_as(pivots)).mT();
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
 
+  // Optimisation if we are not going to compute higher-order gradients
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
-    // is invertible det is C^1, so if it's not invertible, we can wiggle the LU
-    // decomposition a bit and use the resulting matrix as a decent
-    // approximation
-    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    // is invertible det is C^1, so if it's not invertible, we can apply a
+    // perturbation to the LU decomposition and use the resulting matrix as a
+    // non-singular approximation
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     auto use_A_T = A.is_contiguous() && !A.is_complex();
     return at::linalg_lu_solve(
         LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
-    // If we want to compute further gradients, we need to recompute the LU
-    // decomposition so that autograd computes the correct gradients wrt to A
-    // (cf. solve_backward)
+    // If we want to compute higher-order gradients, we need to recompute the
+    // LU decomposition so that autograd computes the correct gradients wrt
+    // to A (cf. solve_backward)
+    auto non_singular =
+        [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
+          return at::linalg_solve(A.mH(), d);
+        };
 
-    // TODO When the user wants higher derivatives, the trick above just does
-    // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
-    // and then if any determinant is zero, use an SVD decomposition to compute
-    // the derivative in those inputs (not all inputs). The derivative may be
-    // then computed explicitly by noting that the gradient of the derivative of
-    // the determinant is given in terms of the adjugate of a matrix. Then, the
-    // adjugate of a singular matrix may be computed as per
-    // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
-    // The code may be implemented as follows:
-    //
-    // Tensor U, S, Vh;
-    // std::tie(U, S, Vh) = at::linalg_svd(A);
-    // auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
-    // auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
-    // return (U * D.unsqueeze(-2)).matmul(Vh);
-    //
-    // The issue with this code is that the derivative given by autograd of
-    // prod_safe_zeros_backward is not the second derivative of the product.
-    // It is not clear to me how to implement the second derivative of the
-    // product efficently. Note that this is also currently a problem when we
-    // compute higher derivatives of `x.prod()` and `x` has more than one zero.
-    return at::linalg_solve(A.mH(), d);
+    // The derivative may be then computed explicitly by noting that the
+    // gradient of the derivative of the determinant is given in terms of the
+    // adjugate of a matrix. The adjugate of a singular matrix may be computed
+    // as per https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
+    auto singular = [](const Tensor& A,
+                       const Tensor& /*d*/,
+                       const Tensor& grad) {
+      Tensor U, S, Vh;
+      std::tie(U, S, Vh) = at::linalg_svd(A);
+      auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
+      auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
+      return (U * D.unsqueeze(-2)).matmul(Vh);
+    };
+
+    // We could use the singular formula for all inputs but we try to filter out
+    // some inputs via the masking, as computing an SVD is about 100 times
+    // slower than computing an lu_solve on GPU
+    // For tensor subclasses, we can't call masked_fmap as it calls
+    // index({mask}) which needs to call item to compute the number of elements
+    // in the result.
+
+    if (areAnyTensorSubclassLike({A, d, grad})) {
+      return singular(A, d, grad);
+    } else {
+      return masked_fmap(
+          det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    }
   }
 }
 
@@ -6593,6 +6642,21 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   }
 
   return std::make_tuple(grad_self, grad_src);
+}
+
+Tensor take_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& indices) {
+  Tensor grad_self = at::zeros_like(self);
+  // For Composite Compliance,
+  // if `grad` and `indices` are CCT but `self` is not
+  // then we use the out-of-place variant of `put`.
+  if (!isTensorSubclassLike(self) &&
+      areAnyTensorSubclassLike({grad, indices})) {
+    return grad_self.put(indices, grad, true);
+  }
+  return grad_self.put_(indices, grad, true);
 }
 
 } // namespace details

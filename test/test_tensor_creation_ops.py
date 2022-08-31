@@ -1246,15 +1246,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(b.triu(2), output)
         self.assertRaises(RuntimeError, lambda: b.triu_(2))
 
-    @onlyCPU
-    def test_triu_tril_indices_bfloat16(self, device):
-        op_funcs = [torch.tril_indices, torch.triu_indices]
-        for op_fun in op_funcs:
-            out = op_fun(4, 3, 1, dtype=torch.bfloat16)
-            out2 = op_fun(4, 3, 1, dtype=torch.float)
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
-
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_stack(self, device):
@@ -2675,6 +2666,17 @@ class TestTensorCreation(TestCase):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             for strides in [(12, 4, 1), (2, 4, 6), (0, 0, 0)]:
                 _test(shape, strides, torch.float)
+
+        # Make sure sizes and strides have the same length
+        # https://github.com/pytorch/pytorch/issues/82416
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"dimensionality of sizes \(1\) must match dimensionality of strides \(0\)"):
+            dtype = torch.float64
+            x = torch.tensor(-4.8270, dtype=dtype, device=device)
+            size = (2,)
+            stride = ()
+            x.new_empty_strided(size, stride, dtype=dtype, device=device)
 
     def test_strided_mismatched_stride_shape(self, device):
         for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:

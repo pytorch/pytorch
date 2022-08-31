@@ -19,16 +19,17 @@ import zipfile
 from typing import (
     Any,
     Callable,
+    cast,
     Collection,
     Dict,
     List,
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 import torch
@@ -46,6 +47,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_registry,
 )
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 __all__ = [
     "is_in_onnx_export",
@@ -182,6 +184,7 @@ def exporter_context(model, mode, verbose):
         yield (mode_ctx, apex_ctx, log_ctx)
 
 
+@_beartype.beartype
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
@@ -343,7 +346,7 @@ def export(
 
                 Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 13): The version of the
+        opset_version (int, default 14): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 16.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
@@ -547,6 +550,7 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
+    _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -967,11 +971,19 @@ _qtype_vtype_map = {
 }
 
 
-def unpack_quantized_tensor(value):
+def unpack_quantized_tensor(value, cast_onnx_accepted=True):
     if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
         q_value_dequantize = value.dequantize()
-        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
-        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_scale = (
+            torch.tensor(value.q_scale(), dtype=torch.double)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_scale(), dtype=torch.float32)
+        )
+        q_zero_point = (
+            torch.tensor(value.q_zero_point(), dtype=torch.int64)
+            if cast_onnx_accepted
+            else torch.tensor(value.q_zero_point(), dtype=_qtype_vtype_map[value.dtype])
+        )
         q_value = q_value_dequantize / q_scale + q_zero_point
         q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
         return q_value, q_scale, q_zero_point
@@ -990,28 +1002,6 @@ def _pre_trace_quant_model(model, args):
     ) or any(getattr(arg, "is_quantized", False) for arg in args):
         return torch.jit.trace(model, args)
     return model
-
-
-def _assign_onnx_node_name(graph, node_names):
-    """Takes in ONNX graph, and mapping from _C.Node to node name in exported ONNX ModelProto.
-
-    Returns:
-        graph (_C.Graph): A TorchScript IR Graph with ONNX nodes, where each _C.Node gets its name
-        in exported ONNX ModelProto assigned as attribute ``onnx_name``.
-    """
-
-    def n_fn(n, b_fn, node_names):
-        for b in n.blocks():
-            b_fn(b, node_names)
-        if n in node_names:
-            n.s_("onnx_name", node_names[n])
-
-    def b_fn(b, node_names):
-        for n in b.nodes():
-            n_fn(n, b_fn, node_names)
-
-    b_fn(graph, node_names)
-    return graph
 
 
 def _model_to_graph(
@@ -1175,7 +1165,6 @@ def export_to_pretty_string(
     symbolic_helper._set_opset_version(opset_version)
     symbolic_helper._set_operator_export_type(operator_export_type)
 
-    symbolic_helper._set_onnx_shape_inference(True)
     with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(
             keep_initializers_as_inputs, operator_export_type, opset_version
@@ -1251,12 +1240,10 @@ def unconvertible_ops(
     return graph, unsupported_ops
 
 
-def _setup_trace_module_map(model, export_modules_as_functions):
-    def __setup_trace_module_map():
-        trace_module_map = {_m: torch.typename(type(_m)) for _m in model.modules()}
-        torch.jit._trace._trace_module_map = trace_module_map
-        return trace_module_map
-
+def _setup_trace_module_map(
+    model: Union[torch.nn.Module, torch.jit.ScriptModule],
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]],
+) -> Set[str]:
     def __register_attribute_hook():
         attr_name = "_onnx_attrs"
 
@@ -1280,13 +1267,35 @@ def _setup_trace_module_map(model, export_modules_as_functions):
             m.register_forward_hook(_track_module_attributes_forward_hook)
             m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
+    def _unqualified_variable_name(qualified_name: str) -> str:
+        """
+        Parse qualified variable name and return the unqualified version.
+
+        Pure numeric atoms are considered inadequate, so this function will look past them,
+        and start from the first non-numeric atom.
+
+        Example:
+            >>> _unqualified_variable_name('__main__.Foo.bar')
+            'bar'
+            >>> _unqualified_variable_name('__main__.Foo.bar.0')
+            'bar.0'
+        """
+        name_atoms = qualified_name.split(".")
+        for i, atom in reversed(list(enumerate(name_atoms))):
+            if not atom.isnumeric():
+                return ".".join(name_atoms[i:])
+        return qualified_name
+
+    trace_module_map = {
+        _m: torch._C._jit_onnx_create_full_scope_name(
+            torch.typename(type(_m)), _unqualified_variable_name(_n)
+        )
+        for _n, _m in model.named_modules()
+    }
+    torch.jit._trace._trace_module_map = trace_module_map
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
-        trace_module_map = __setup_trace_module_map()
-        export_modules_as_functions = {v for k, v in trace_module_map.items()}
-    elif (
-        isinstance(export_modules_as_functions, set)
-        and len(export_modules_as_functions) > 0
-    ):
+        module_typenames = {torch.typename(type(module)) for module in trace_module_map}
+    elif isinstance(export_modules_as_functions, set) and export_modules_as_functions:
 
         def _find_typename(v):
             if isinstance(v, type):
@@ -1298,16 +1307,14 @@ def _setup_trace_module_map(model, export_modules_as_functions):
                     "Got `%s`." % (type(v).__name__)
                 )
 
-        trace_module_map = __setup_trace_module_map()
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
-        export_modules_as_functions = module_typenames
     else:
-        export_modules_as_functions = None
+        module_typenames = set()
 
-    if export_modules_as_functions:
+    if module_typenames:
         __register_attribute_hook()
 
-    return export_modules_as_functions
+    return module_typenames
 
 
 def _reset_trace_module_map():
@@ -1369,9 +1376,12 @@ def _export(
                 "This is because `opset_version` < 15 implies IR version < 8, which means "
                 "no local function support. "
             )
-        export_modules_as_functions = _setup_trace_module_map(
-            model, export_modules_as_functions
-        )
+
+        module_typenames_to_export_as_functions: Set[str] = set()
+        if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
+            module_typenames_to_export_as_functions = _setup_trace_module_map(
+                model, export_modules_as_functions
+            )
 
         if not operator_export_type:
             if _C_onnx._CAFFE2_ATEN_FALLBACK:
@@ -1430,14 +1440,17 @@ def _export(
 
             _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions:
+            if module_typenames_to_export_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = _C._jit_pass_onnx_function_extraction(
-                    graph, export_modules_as_functions, list(params_dict.keys())
+                    graph,
+                    module_typenames_to_export_as_functions,
+                    list(params_dict.keys()),
                 )
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
+            _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
                     proto,
@@ -1477,9 +1490,7 @@ def _export(
                     node_attr_to_name,
                 )
             if verbose:
-                torch.onnx.log(
-                    "Exported graph: ", _assign_onnx_node_name(graph, node_names)
-                )
+                torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -1702,30 +1713,30 @@ def _run_symbolic_function(
     """
 
     opset_version = GLOBALS.export_onnx_opset_version
-    symbolic_helper.is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
 
     # See Note [Export inplace]
-    # TODO(ezyang): I think this is not necessary anymore
-    if n.kind().endswith("_"):
-        ns_op_name = n.kind()[:-1]
+    node_kind = n.kind()
+    if node_kind.endswith("_"):
+        # Treat relu_ -> relu; add_ -> add etc.
+        ns_op_name = node_kind[:-1]
     else:
-        ns_op_name = n.kind()
-    ns, op_name = ns_op_name.split("::")
+        ns_op_name = node_kind
+
+    namespace, op_name = ns_op_name.split("::")
 
     try:
         symbolic_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        if ns == "aten":
+        if namespace == "aten":
             domain = ""
-        elif ns == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
+        elif namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
             domain = "caffe2"
         else:
-            domain = ns
+            domain = namespace
 
         if symbolic_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(
@@ -1733,7 +1744,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
                 ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1742,13 +1753,21 @@ def _run_symbolic_function(
             if op_name == "PythonOp":
                 inputs = (n, *inputs)
             return symbolic_fn(g, *inputs, **attrs)
-        elif ns == "onnx":
+        elif namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
-        elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+        elif _should_aten_fallback(
+            namespace, op_name, opset_version, operator_export_type
+        ):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
@@ -1772,7 +1791,10 @@ def _run_symbolic_function(
             and not symbolic_helper.is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            attrs = {
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
+            }
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )

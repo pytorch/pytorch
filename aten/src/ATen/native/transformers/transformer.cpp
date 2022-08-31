@@ -92,7 +92,8 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_bias_1,
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask) {
+    const c10::optional<Tensor>& mask,
+    const c10::optional<int64_t> mask_type) {
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
@@ -101,12 +102,15 @@ Tensor transformer_encoder_layer_forward(
         : src.clone();
     }
   }
-  TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();
-  auto x = std::get<0>(native_multi_head_attention(
-      src,
-      src,
-      src,
+  Tensor x = src;
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+  x = std::get<0>(native_multi_head_attention(
+      x,
+      x,
+      x,
       embed_dim,
       num_heads,
       qkv_weight,
@@ -114,11 +118,19 @@ Tensor transformer_encoder_layer_forward(
       proj_weight,
       proj_bias,
       mask,
-      false /* need_weights */));
+      false /* need_weights */,
+      true /* average_attn_weights */,
+      mask_type));
   add_in_place(x, src, use_nested_tensor);
-  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
 
   auto pre_ffn_res = x;
+
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
   x = ffn(
       x,
       ffn_weight_1,
@@ -128,7 +140,9 @@ Tensor transformer_encoder_layer_forward(
       use_gelu,
       /* add_norm* */ false);
   add_in_place(x, pre_ffn_res, use_nested_tensor);
-  x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
   return x;
 }
 

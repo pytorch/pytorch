@@ -13,17 +13,21 @@ jobs:
   do_update_viablestrict:
     runs-on: ubuntu-20.04
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-
       - name: Checkout repo
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
 
       - name: Install Python Packages
         run: |
@@ -35,7 +39,7 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          output=$(python3 .github/scripts/print_latest_commits.py)
+          output=$(python3 .github/scripts/fetch_latest_green_commit.py)
           echo "::set-output name=latest_viable_sha::$output"
         id: get-latest-commit
 
