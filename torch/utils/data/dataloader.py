@@ -14,6 +14,7 @@ import threading
 import time
 import warnings
 
+from datetime import timedelta
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
@@ -145,7 +146,7 @@ class DataLoader(Generic[T_co]):
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
-        collate_fn (callable, optional): merges a list of samples to form a
+        collate_fn (Callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
@@ -158,7 +159,7 @@ class DataLoader(Generic[T_co]):
             will be smaller. (default: ``False``)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: ``0``)
-        worker_init_fn (callable, optional): If not ``None``, this will be called on each
+        worker_init_fn (Callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
@@ -578,19 +579,31 @@ class DataLoader(Generic[T_co]):
                     # Use 'add' instead of 'get' since for some store implementations 'add'
                     # doesn't work well with 'get'.
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    start = time.time()
                     while _shared_seed_recv_cnt < ws:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the signal from the distribtued store on "
+                                               "Rank 0 that all other Ranks have received the shared seed. "
+                                               f"(world_size={ws}, received={_shared_seed_recv_cnt}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
                     # Reset after all distributed processes have received the shared seed
                     store.set(_utils.DATAPIPE_SHARED_SEED, "")
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
                     assert _shared_seed_recv_cnt == 0
                 else:
                     _shared_seed_str = ""
-                    store.wait([_utils.DATAPIPE_SHARED_SEED], _utils.MP_STATUS_CHECK_INTERVAL)
+                    start = time.time()
                     while len(_shared_seed_str) == 0:
                         time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
                         _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
+                        if timedelta(seconds=(time.time() - start)) > \
+                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
+                            raise RuntimeError("Timed out receiving the shared seed from the distribtued store "
+                                               f"on Rank {rank}. (world_size={ws}, "
+                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
                     logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
                     _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
                     # Exit only when all ranks received seed, otherwise we are at risk that current rank
@@ -1417,8 +1430,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # Called when shutting down this `_MultiProcessingDataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
-        python_exit_status = _utils.python_exit_status
-        if python_exit_status is True or python_exit_status is None:
+        if _utils is None or _utils.python_exit_status is True or _utils.python_exit_status is None:
             # See (2) of the note. If Python is shutting down, do no-op.
             return
         # Normal exit when last reference is gone / iterator is depleted.

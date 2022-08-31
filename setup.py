@@ -52,6 +52,8 @@
 #
 #   USE_STATIC_MKL
 #     Prefer to link with MKL statically - Unix only
+#   USE_ITT=0
+#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -294,7 +296,6 @@ if IS_WINDOWS:
         sysconfig.get_config_var("prefix"),
         sysconfig.get_config_var("VERSION"))
     # Fix virtualenv builds
-    # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
             sys.base_prefix,
@@ -436,11 +437,6 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
-# the list of runtime dependencies required by this built package
-install_requires = [
-    'typing_extensions',
-]
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -540,6 +536,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+
+        if cmake_cache_vars['USE_ITT']:
+            report('-- Using ITT')
+        else:
+            report('-- Not using ITT')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -657,20 +658,29 @@ class concat_license_files():
     is a single license file in the sdist and wheels with all of the necessary
     licensing info.
     """
-    def __init__(self):
+    def __init__(self, include_files=False):
         self.f1 = 'LICENSE'
         self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+        self.include_files = include_files
 
     def __enter__(self):
         """Concatenate files"""
+
+        old_path = sys.path
+        sys.path.append(third_party_path)
+        try:
+            from build_bundled import create_bundled
+        finally:
+            sys.path = old_path
+
         with open(self.f1, 'r') as f1:
             self.bsd_text = f1.read()
 
         with open(self.f1, 'a') as f1:
-            with open(self.f2, 'r') as f2:
-                self.bundled_text = f2.read()
-                f1.write('\n\n')
-                f1.write(self.bundled_text)
+            f1.write('\n\n')
+            create_bundled(os.path.relpath(third_party_path), f1,
+                           include_files=self.include_files)
+
 
     def __exit__(self, exception_type, exception_value, traceback):
         """Restore content of f1"""
@@ -690,7 +700,7 @@ else:
     class wheel_concatenate(bdist_wheel):
         """ check submodules on sdist to prevent incomplete tarballs """
         def run(self):
-            with concat_license_files():
+            with concat_license_files(include_files=True):
                 super().run()
 
 
@@ -929,10 +939,18 @@ def print_box(msg):
         print('|{}{}|'.format(l, ' ' * (size - len(l))))
     print('-' * (size + 2))
 
-if __name__ == '__main__':
-    # Parse the command line and check the arguments
-    # before we proceed with building deps and setup
+
+def main():
+    # the list of runtime dependencies required by this built package
+    install_requires = [
+        'typing_extensions',
+    ]
+
+    # Parse the command line and check the arguments before we proceed with
+    # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
+    dist.script_name = os.path.basename(sys.argv[0])
+    dist.script_args = sys.argv[1:]
     try:
         dist.parse_command_line()
     except setuptools.distutils.errors.DistutilsArgError as e:
@@ -952,6 +970,167 @@ if __name__ == '__main__':
         long_description = f.read()
 
     version_range_max = max(sys.version_info[1], 9) + 1
+    torch_package_data = [
+        'py.typed',
+        'bin/*',
+        'test/*',
+        '_C/*.pyi',
+        '_C_flatbuffer/*.pyi',
+        'cuda/*.pyi',
+        'optim/*.pyi',
+        'autograd/*.pyi',
+        'utils/data/*.pyi',
+        'nn/*.pyi',
+        'nn/modules/*.pyi',
+        'nn/parallel/*.pyi',
+        'utils/data/*.pyi',
+        'lib/*.so*',
+        'lib/*.dylib*',
+        'lib/*.dll',
+        'lib/*.lib',
+        'lib/*.pdb',
+        'lib/torch_shm_manager',
+        'lib/*.h',
+        'include/ATen/*.h',
+        'include/ATen/cpu/*.h',
+        'include/ATen/cpu/vec/vec256/*.h',
+        'include/ATen/cpu/vec/vec512/*.h',
+        'include/ATen/cpu/vec/*.h',
+        'include/ATen/core/*.h',
+        'include/ATen/cuda/*.cuh',
+        'include/ATen/cuda/*.h',
+        'include/ATen/cuda/detail/*.cuh',
+        'include/ATen/cuda/detail/*.h',
+        'include/ATen/cudnn/*.h',
+        'include/ATen/ops/*.h',
+        'include/ATen/hip/*.cuh',
+        'include/ATen/hip/*.h',
+        'include/ATen/hip/detail/*.cuh',
+        'include/ATen/hip/detail/*.h',
+        'include/ATen/hip/impl/*.h',
+        'include/ATen/detail/*.h',
+        'include/ATen/native/*.h',
+        'include/ATen/native/cpu/*.h',
+        'include/ATen/native/cuda/*.h',
+        'include/ATen/native/cuda/*.cuh',
+        'include/ATen/native/hip/*.h',
+        'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/quantized/*.h',
+        'include/ATen/native/quantized/cpu/*.h',
+        'include/ATen/quantized/*.h',
+        'include/caffe2/utils/*.h',
+        'include/caffe2/utils/**/*.h',
+        'include/c10/*.h',
+        'include/c10/macros/*.h',
+        'include/c10/core/*.h',
+        'include/ATen/core/boxing/*.h',
+        'include/ATen/core/boxing/impl/*.h',
+        'include/ATen/core/dispatch/*.h',
+        'include/ATen/core/op_registration/*.h',
+        'include/c10/core/impl/*.h',
+        'include/c10/util/*.h',
+        'include/c10/cuda/*.h',
+        'include/c10/cuda/impl/*.h',
+        'include/c10/hip/*.h',
+        'include/c10/hip/impl/*.h',
+        'include/c10d/*.h',
+        'include/c10d/*.hpp',
+        'include/caffe2/**/*.h',
+        'include/torch/*.h',
+        'include/torch/csrc/*.h',
+        'include/torch/csrc/api/include/torch/*.h',
+        'include/torch/csrc/api/include/torch/data/*.h',
+        'include/torch/csrc/api/include/torch/data/dataloader/*.h',
+        'include/torch/csrc/api/include/torch/data/datasets/*.h',
+        'include/torch/csrc/api/include/torch/data/detail/*.h',
+        'include/torch/csrc/api/include/torch/data/samplers/*.h',
+        'include/torch/csrc/api/include/torch/data/transforms/*.h',
+        'include/torch/csrc/api/include/torch/detail/*.h',
+        'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+        'include/torch/csrc/api/include/torch/nn/*.h',
+        'include/torch/csrc/api/include/torch/nn/functional/*.h',
+        'include/torch/csrc/api/include/torch/nn/options/*.h',
+        'include/torch/csrc/api/include/torch/nn/modules/*.h',
+        'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
+        'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+        'include/torch/csrc/api/include/torch/nn/utils/*.h',
+        'include/torch/csrc/api/include/torch/optim/*.h',
+        'include/torch/csrc/api/include/torch/optim/schedulers/*.h',
+        'include/torch/csrc/api/include/torch/serialize/*.h',
+        'include/torch/csrc/autograd/*.h',
+        'include/torch/csrc/autograd/functions/*.h',
+        'include/torch/csrc/autograd/generated/*.h',
+        'include/torch/csrc/autograd/utils/*.h',
+        'include/torch/csrc/cuda/*.h',
+        'include/torch/csrc/deploy/*.h',
+        'include/torch/csrc/deploy/interpreter/*.h',
+        'include/torch/csrc/deploy/interpreter/*.hpp',
+        'include/torch/csrc/distributed/c10d/exception.h',
+        'include/torch/csrc/distributed/rpc/*.h',
+        'include/torch/csrc/jit/*.h',
+        'include/torch/csrc/jit/backends/*.h',
+        'include/torch/csrc/jit/generated/*.h',
+        'include/torch/csrc/jit/passes/*.h',
+        'include/torch/csrc/jit/passes/quantization/*.h',
+        'include/torch/csrc/jit/passes/utils/*.h',
+        'include/torch/csrc/jit/runtime/*.h',
+        'include/torch/csrc/jit/ir/*.h',
+        'include/torch/csrc/jit/frontend/*.h',
+        'include/torch/csrc/jit/api/*.h',
+        'include/torch/csrc/jit/serialization/*.h',
+        'include/torch/csrc/jit/python/*.h',
+        'include/torch/csrc/jit/mobile/*.h',
+        'include/torch/csrc/jit/testing/*.h',
+        'include/torch/csrc/jit/tensorexpr/*.h',
+        'include/torch/csrc/jit/tensorexpr/operators/*.h',
+        'include/torch/csrc/jit/codegen/cuda/*.h',
+        'include/torch/csrc/jit/codegen/cuda/ops/*.h',
+        'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
+        'include/torch/csrc/onnx/*.h',
+        'include/torch/csrc/profiler/*.h',
+        'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/utils/*.h',
+        'include/torch/csrc/tensor/*.h',
+        'include/torch/csrc/lazy/backend/*.h',
+        'include/torch/csrc/lazy/core/*.h',
+        'include/torch/csrc/lazy/core/internal_ops/*.h',
+        'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/ts_backend/*.h',
+        'include/pybind11/*.h',
+        'include/pybind11/detail/*.h',
+        'include/TH/*.h*',
+        'include/TH/generic/*.h*',
+        'include/THC/*.cuh',
+        'include/THC/*.h*',
+        'include/THC/generic/*.h',
+        'include/THH/*.cuh',
+        'include/THH/*.h*',
+        'include/THH/generic/*.h',
+        'share/cmake/ATen/*.cmake',
+        'share/cmake/Caffe2/*.cmake',
+        'share/cmake/Caffe2/public/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
+        'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
+        'share/cmake/Gloo/*.cmake',
+        'share/cmake/Tensorpipe/*.cmake',
+        'share/cmake/Torch/*.cmake',
+        'utils/benchmark/utils/*.cpp',
+        'utils/benchmark/utils/valgrind_wrapper/*.cpp',
+        'utils/benchmark/utils/valgrind_wrapper/*.h',
+        'utils/model_dump/skeleton.html',
+        'utils/model_dump/code.js',
+        'utils/model_dump/*.mjs',
+    ]
+    torchgen_package_data = [
+        # Recursive glob doesn't work in setup.py,
+        # https://github.com/pypa/setuptools/issues/1806
+        # To make this robust we should replace it with some code that
+        # returns a list of everything under packaged/
+        'packaged/ATen/*',
+        'packaged/ATen/native/*',
+        'packaged/ATen/templates/*',
+    ]
     setup(
         name=package_name,
         version=version,
@@ -965,163 +1144,8 @@ if __name__ == '__main__':
         entry_points=entry_points,
         install_requires=install_requires,
         package_data={
-            'torch': [
-                'py.typed',
-                'bin/*',
-                'test/*',
-                '_C/*.pyi',
-                '_C_flatbuffer/*.pyi',
-                'cuda/*.pyi',
-                'optim/*.pyi',
-                'autograd/*.pyi',
-                'utils/data/*.pyi',
-                'nn/*.pyi',
-                'nn/modules/*.pyi',
-                'nn/parallel/*.pyi',
-                'utils/data/*.pyi',
-                'lib/*.so*',
-                'lib/*.dylib*',
-                'lib/*.dll',
-                'lib/*.lib',
-                'lib/*.pdb',
-                'lib/torch_shm_manager',
-                'lib/*.h',
-                'include/ATen/*.h',
-                'include/ATen/cpu/*.h',
-                'include/ATen/cpu/vec/vec256/*.h',
-                'include/ATen/cpu/vec/vec512/*.h',
-                'include/ATen/cpu/vec/*.h',
-                'include/ATen/core/*.h',
-                'include/ATen/cuda/*.cuh',
-                'include/ATen/cuda/*.h',
-                'include/ATen/cuda/detail/*.cuh',
-                'include/ATen/cuda/detail/*.h',
-                'include/ATen/cudnn/*.h',
-                'include/ATen/ops/*.h',
-                'include/ATen/hip/*.cuh',
-                'include/ATen/hip/*.h',
-                'include/ATen/hip/detail/*.cuh',
-                'include/ATen/hip/detail/*.h',
-                'include/ATen/hip/impl/*.h',
-                'include/ATen/detail/*.h',
-                'include/ATen/native/*.h',
-                'include/ATen/native/cpu/*.h',
-                'include/ATen/native/cuda/*.h',
-                'include/ATen/native/cuda/*.cuh',
-                'include/ATen/native/hip/*.h',
-                'include/ATen/native/hip/*.cuh',
-                'include/ATen/native/quantized/*.h',
-                'include/ATen/native/quantized/cpu/*.h',
-                'include/ATen/quantized/*.h',
-                'include/caffe2/utils/*.h',
-                'include/caffe2/utils/**/*.h',
-                'include/c10/*.h',
-                'include/c10/macros/*.h',
-                'include/c10/core/*.h',
-                'include/ATen/core/boxing/*.h',
-                'include/ATen/core/boxing/impl/*.h',
-                'include/ATen/core/dispatch/*.h',
-                'include/ATen/core/op_registration/*.h',
-                'include/c10/core/impl/*.h',
-                'include/c10/util/*.h',
-                'include/c10/cuda/*.h',
-                'include/c10/cuda/impl/*.h',
-                'include/c10/hip/*.h',
-                'include/c10/hip/impl/*.h',
-                'include/c10d/*.h',
-                'include/c10d/*.hpp',
-                'include/caffe2/**/*.h',
-                'include/torch/*.h',
-                'include/torch/csrc/*.h',
-                'include/torch/csrc/api/include/torch/*.h',
-                'include/torch/csrc/api/include/torch/data/*.h',
-                'include/torch/csrc/api/include/torch/data/dataloader/*.h',
-                'include/torch/csrc/api/include/torch/data/datasets/*.h',
-                'include/torch/csrc/api/include/torch/data/detail/*.h',
-                'include/torch/csrc/api/include/torch/data/samplers/*.h',
-                'include/torch/csrc/api/include/torch/data/transforms/*.h',
-                'include/torch/csrc/api/include/torch/detail/*.h',
-                'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
-                'include/torch/csrc/api/include/torch/nn/*.h',
-                'include/torch/csrc/api/include/torch/nn/functional/*.h',
-                'include/torch/csrc/api/include/torch/nn/options/*.h',
-                'include/torch/csrc/api/include/torch/nn/modules/*.h',
-                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
-                'include/torch/csrc/api/include/torch/nn/parallel/*.h',
-                'include/torch/csrc/api/include/torch/nn/utils/*.h',
-                'include/torch/csrc/api/include/torch/optim/*.h',
-                'include/torch/csrc/api/include/torch/optim/schedulers/*.h',
-                'include/torch/csrc/api/include/torch/serialize/*.h',
-                'include/torch/csrc/autograd/*.h',
-                'include/torch/csrc/autograd/functions/*.h',
-                'include/torch/csrc/autograd/generated/*.h',
-                'include/torch/csrc/autograd/utils/*.h',
-                'include/torch/csrc/cuda/*.h',
-                'include/torch/csrc/deploy/*.h',
-                'include/torch/csrc/deploy/interpreter/*.h',
-                'include/torch/csrc/deploy/interpreter/*.hpp',
-                'include/torch/csrc/distributed/c10d/exception.h',
-                'include/torch/csrc/jit/*.h',
-                'include/torch/csrc/jit/backends/*.h',
-                'include/torch/csrc/jit/generated/*.h',
-                'include/torch/csrc/jit/passes/*.h',
-                'include/torch/csrc/jit/passes/quantization/*.h',
-                'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/runtime/*.h',
-                'include/torch/csrc/jit/ir/*.h',
-                'include/torch/csrc/jit/frontend/*.h',
-                'include/torch/csrc/jit/api/*.h',
-                'include/torch/csrc/jit/serialization/*.h',
-                'include/torch/csrc/jit/python/*.h',
-                'include/torch/csrc/jit/mobile/*.h',
-                'include/torch/csrc/jit/testing/*.h',
-                'include/torch/csrc/jit/tensorexpr/*.h',
-                'include/torch/csrc/jit/tensorexpr/operators/*.h',
-                'include/torch/csrc/jit/codegen/cuda/*.h',
-                'include/torch/csrc/jit/codegen/cuda/ops/*.h',
-                'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
-                'include/torch/csrc/onnx/*.h',
-                'include/torch/csrc/profiler/*.h',
-                'include/torch/csrc/utils/*.h',
-                'include/torch/csrc/tensor/*.h',
-                'include/torch/csrc/lazy/backend/*.h',
-                'include/torch/csrc/lazy/core/*.h',
-                'include/torch/csrc/lazy/core/ops/*.h',
-                'include/pybind11/*.h',
-                'include/pybind11/detail/*.h',
-                'include/TH/*.h*',
-                'include/TH/generic/*.h*',
-                'include/THC/*.cuh',
-                'include/THC/*.h*',
-                'include/THC/generic/*.h',
-                'include/THH/*.cuh',
-                'include/THH/*.h*',
-                'include/THH/generic/*.h',
-                'share/cmake/ATen/*.cmake',
-                'share/cmake/Caffe2/*.cmake',
-                'share/cmake/Caffe2/public/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
-                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
-                'share/cmake/Gloo/*.cmake',
-                'share/cmake/Tensorpipe/*.cmake',
-                'share/cmake/Torch/*.cmake',
-                'utils/benchmark/utils/*.cpp',
-                'utils/benchmark/utils/valgrind_wrapper/*.cpp',
-                'utils/benchmark/utils/valgrind_wrapper/*.h',
-                'utils/model_dump/skeleton.html',
-                'utils/model_dump/code.js',
-                'utils/model_dump/*.mjs',
-            ],
-            'torchgen': [
-                # Recursive glob doesn't work in setup.py,
-                # https://github.com/pypa/setuptools/issues/1806
-                # To make this robust we should replace it with some code that
-                # returns a list of everything under packaged/
-                'packaged/ATen/*',
-                'packaged/ATen/native/*',
-                'packaged/ATen/templates/*',
-            ],
+            'torch': torch_package_data,
+            'torchgen': torchgen_package_data,
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
             ],
@@ -1148,7 +1172,11 @@ if __name__ == '__main__':
             'Programming Language :: Python :: 3',
         ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
-        keywords='pytorch machine learning',
+        keywords='pytorch, machine learning',
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
+
+
+if __name__ == '__main__':
+    main()

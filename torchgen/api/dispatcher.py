@@ -1,3 +1,9 @@
+import itertools
+from typing import List, Sequence, Union
+
+from torchgen.api import cpp
+
+from torchgen.api.types import ArgName, Binding, CType, NamedCType
 from torchgen.model import (
     Argument,
     FunctionSchema,
@@ -6,13 +12,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-
-from torchgen.api.types import ArgName, Binding, NamedCType, CType
-from torchgen.api import cpp
-from torchgen.utils import concatMap, assert_never
-
-import itertools
-from typing import Sequence, List, Union
+from torchgen.utils import assert_never, concatMap
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -45,6 +45,7 @@ def argumenttype_type(
         t,
         mutable=mutable,
         binds=binds,
+        symint=True,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
 
@@ -62,7 +63,7 @@ def argument_type(
 
 def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
-    return cpp.returns_type(rs)
+    return cpp.returns_type(rs, symint=True)
 
 
 def jit_arguments(func: FunctionSchema) -> List[Argument]:

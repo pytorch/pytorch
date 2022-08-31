@@ -183,14 +183,13 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
-bool isReductionOp(const Expr* expr) {
-  // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
-}
-
-bool isReductionTvOp(const Expr* expr) {
-  return isTvOp(expr) && isReductionOp(expr);
+TensorView* getTvInput(const Expr* expr) {
+  for (auto inp : expr->inputs()) {
+    if (auto tv = getTv(inp)) {
+      return tv;
+    }
+  }
+  return nullptr;
 }
 
 bool isScalarOp(const Expr* expr) {
@@ -409,6 +408,31 @@ std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
 }
 
+IterDomain* caMapExactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
+
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {
@@ -458,7 +482,7 @@ BasicAllocInfo getAllocInformation(
 
     // Allocation of a double buffered tensor is placed outside its
     // double buffer axis.
-    if (tv->isDoubleBuffered() &&
+    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
         tv->axis(info.alloc_pos) ==
             gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
       outer_alloc_found = true;
@@ -542,7 +566,8 @@ class ReplaceExprInput : private kir::ExprMutator {
       auto replacement = IrBuilder::create<UnaryOp>(
           node->getUnaryOpType(),
           node->out(),
-          replaced_inputs.value().at(node->in()));
+          replaced_inputs.value().at(node->in()),
+          node->getRNGOffset());
       registerReplaceWithPredicate(node, replacement);
     }
   }

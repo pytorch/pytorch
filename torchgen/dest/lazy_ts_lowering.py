@@ -42,7 +42,7 @@ def ts_lowering_body(schema: LazyIrSchema) -> str:
     {emplace_arguments_str}
     {emplace_kwarguments}
     torch::lazy::TSOpVector {schema.aten_name}_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-    CHECK_EQ({schema.aten_name}_out.size(), {len(schema.returns)});
+    TORCH_CHECK_EQ({schema.aten_name}_out.size(), {len(schema.returns)});
 
     return {schema.aten_name}_out;
 """

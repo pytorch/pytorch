@@ -167,6 +167,10 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    UseVariadicOp(
+        graph,
+        fromQualString("torcharrow::inference_wrapper_run_flat"),
+        fromQualString("torcharrow::variadic_inference_wrapper_run_flat"));
     // These fused ops only have out variants - we can't do the fusion when
     // out variants are disabled.
     FuseSignLog1P(graph);
@@ -194,6 +198,7 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
+  UseInPlaceGetRealInputsFromOptionalInputsV2(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1919,7 +1924,7 @@ ProcessedFunction::ProcessedFunction(
         stack.emplace_back(static_cast<int>(size));
       }
       node_op(stack);
-      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      TORCH_DCHECK_EQ(stack.size(), pnode->num_outputs());
       for (const auto i : c10::irange(pnode->num_outputs())) {
         pnode->Output(i) = std::move(stack[i]);
       }

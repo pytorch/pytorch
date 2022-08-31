@@ -1,6 +1,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -180,6 +181,8 @@ struct Block {
   int event_count; // number of outstanding CUDA events
   int gc_count; // counter for prioritizing older / less useful blocks for
                 // garbage collection
+  std::unique_ptr<History> history;
+  History* history_last;
 
   Block(
       int device,
@@ -278,6 +281,18 @@ struct AllocParams {
   StatTypes stat_types = {false};
   cudaError_t err;
 };
+
+int trimHistoryBefore(Block* block, void* point) {
+  int n = 0;
+  while (block->history && block->history->addr < point) {
+    block->history = std::move(block->history->next);
+    ++n;
+  }
+  if (!block->history) {
+    block->history_last = nullptr;
+  }
+  return n;
+}
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
 // very expensive (at least on certain device/driver combinations). Thus, we a)
@@ -534,18 +549,30 @@ class DeviceCachingAllocator {
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
+  std::atomic<CreateContextFn> context_recorder_;
 
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
         small_blocks(BlockComparator, /*is_small=*/true) {
     stats.max_split_size = CachingAllocatorConfig::max_split_size();
+    context_recorder_.store(nullptr);
+  }
+
+  void setContextRecorder(CreateContextFn c) {
+    context_recorder_.store(c);
   }
 
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(int device, size_t size, cudaStream_t stream) {
+  Block* malloc(int device, size_t orig_size, cudaStream_t stream) {
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have...
+    CreateContextFn context_recorder = context_recorder_.load();
+    std::unique_ptr<Context> context =
+        context_recorder ? context_recorder() : nullptr;
+
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
     if (C10_LIKELY(captures_underway == 0)) {
@@ -562,7 +589,7 @@ class DeviceCachingAllocator {
       process_events();
     }
 
-    size = round_size(size);
+    size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
@@ -611,6 +638,13 @@ class DeviceCachingAllocator {
 
       stats.num_ooms += 1;
 
+      c10::reportOutOfMemoryToProfiler(
+          size,
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -630,7 +664,7 @@ class DeviceCachingAllocator {
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
       TORCH_CHECK_WITH(
-          CUDAOutOfMemoryError,
+          OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
@@ -678,6 +712,10 @@ class DeviceCachingAllocator {
       bool inserted = pool.blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
+      if (context) {
+        trimHistoryBefore(remaining, (char*)block->ptr + size);
+      }
+
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
@@ -690,6 +728,7 @@ class DeviceCachingAllocator {
           update_stat(stats.inactive_split[stat_type], 1);
         });
       }
+
     } else if (already_split) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
@@ -699,6 +738,17 @@ class DeviceCachingAllocator {
     }
 
     block->allocated = true;
+    if (context) {
+      trimHistoryBefore(block, (char*)block->ptr + size);
+      block->history = std::make_unique<History>(History{
+          block->ptr,
+          orig_size,
+          std::move(context),
+          std::move(block->history)});
+      if (!block->history_last) {
+        block->history_last = block->history.get();
+      }
+    }
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
@@ -887,6 +937,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<int64_t>(head_block->ptr);
+      segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
 
       const Block* block = head_block;
@@ -906,7 +957,7 @@ class DeviceCachingAllocator {
         if (block_info.active) {
           segment_info.active_size += block_info.size;
         }
-
+        block_info.history = block->history.get();
         block = block->next;
       }
     }
@@ -1100,19 +1151,35 @@ class DeviceCachingAllocator {
 
     AT_ASSERT(dst->is_split() && src->is_split());
 
-    if (dst->prev == src) {
+    if (dst->prev == src) { // [src dst]
       dst->ptr = src->ptr;
       dst->prev = src->prev;
       if (dst->prev) {
         dst->prev->next = dst;
       }
-    } else {
+      if (!dst->history) {
+        dst->history = std::move(src->history);
+        dst->history_last = src->history_last;
+      } else if (src->history) {
+        src->history_last->next = std::move(dst->history);
+        dst->history = std::move(src->history);
+      }
+      src->history_last = nullptr;
+    } else { // [dest src]
       dst->next = src->next;
       if (dst->next) {
         dst->next->prev = dst;
       }
-    }
 
+      if (!dst->history) {
+        dst->history = std::move(src->history);
+        dst->history_last = src->history_last;
+      } else if (src->history) {
+        dst->history_last->next = std::move(src->history);
+        dst->history_last = src->history_last;
+      }
+      src->history_last = nullptr;
+    }
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
     auto erased = pool.blocks.erase(src);
@@ -1338,7 +1405,14 @@ class DeviceCachingAllocator {
         std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
-    Block key = p.search_key;
+
+    // because of std::unique_ptr, block cannot be trivially copied
+    Block key(
+        p.search_key.device,
+        p.search_key.stream,
+        p.search_key.size,
+        p.search_key.pool,
+        p.search_key.ptr);
     key.size = (key.size < CachingAllocatorConfig::max_split_size())
         ? CachingAllocatorConfig::max_split_size()
         : key.size;
@@ -1607,6 +1681,10 @@ class THCCachingAllocator {
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(*devPtr));
+    }
   }
 
   void free(void* ptr) {
@@ -1616,6 +1694,11 @@ class THCCachingAllocator {
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
+    }
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      interp->trace_gpu_memory_deallocation(
+          reinterpret_cast<uintptr_t>(block->ptr));
     }
     device_allocator[block->device]->free(block);
   }
@@ -1637,6 +1720,12 @@ class THCCachingAllocator {
       C10_CUDA_CHECK(cudaSetDevice(device));
     }
     device_allocator[device]->setMemoryFraction(fraction);
+  }
+
+  void setContextRecorder(CreateContextFn recorder) {
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    device_allocator[device]->setContextRecorder(std::move(recorder));
   }
 
   void emptyCache() {
@@ -1696,6 +1785,10 @@ bool forceUncachedAllocator() {
 }
 
 static void uncached_delete(void* ptr) {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    interp->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
+  }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
@@ -1706,7 +1799,7 @@ struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
-        CUDAOutOfMemoryError,
+        OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
@@ -1716,6 +1809,10 @@ struct CudaCachingAllocator : public Allocator {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
       C10_CUDA_CHECK(cudaMalloc(&r, size));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        interp->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(r));
+      }
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
@@ -1745,6 +1842,10 @@ void init(int device_count) {
 
 void setMemoryFraction(double fraction, int device) {
   caching_allocator.setMemoryFraction(fraction, device);
+}
+
+void setContextRecorder(CreateContextFn recorder) {
+  caching_allocator.setContextRecorder(std::move(recorder));
 }
 
 void emptyCache(void) {

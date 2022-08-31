@@ -1,15 +1,22 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
+from warnings import warn
 
 import torch
+import torch.overrides
+from torch._prims_common import getnvFuserDtype, Number
 
 from torch.fx import GraphModule
-from torch._prims.utils import getnvFuserDtype, Number
-import torch.overrides
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+    from torch._C._nvfuser import (  # type: ignore[import]
+        DataType,
+        Fusion,
+        FusionDefinition,
+    )
 else:
     DataType = None
 
@@ -45,18 +52,20 @@ def to_nvfuser_template_args(args):
 
 
 # MyPy bug: https://github.com/python/mypy/issues/5107
-@lru_cache()  # type: ignore[arg-type]
+@lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
+        if node.op == "call_function" and "getitem" in node.name:
+            continue
         if (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is None
         ):
             raise ValueError(
                 "All call_function nodes in the graph must support nvfuser. "
-                f"Node {node} does not support nvfuser"
+                f"Node {node} with target {node.target} does not support nvfuser"
             )
 
     fusion = Fusion()
@@ -69,7 +78,24 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         class FusionInterpreter(torch.fx.Interpreter):
+            def run_node(self, node):
+                # Squeeze requires original shape of args[0]
+                if node.target in [
+                    torch.ops.nvprims.squeeze,
+                    torch.ops.nvprims.squeeze.default,
+                ]:
+                    original_shape = list(node.args[0].meta["tensor_meta"].shape)
+                    assert len(node.args) == 2
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    args = [args[0], original_shape, args[1]]
+                    return self.call_function(node.target, args, node.kwargs)
+                return super().run_node(node)
+
             def call_function(self, target, args, kwargs):
+                # This handles tuple unpacking
+                if "getitem" in str(target):
+                    assert isinstance(args[0], tuple)
+                    return target(*args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
                 target = target.impl_nvfuser
                 args = (fd,) + args
@@ -78,11 +104,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
-                fd.add_input(x)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
-                fd.add_input(x)
                 return x
             else:
                 return arg
@@ -110,7 +134,8 @@ def nvfuser_execute(gm: GraphModule, *args):
     nv_template_args = to_nvfuser_template_args(flat_args)
     fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
+    # Inputs to fusion.execute correspond to the same template/symbolic inputs
+    # marked with `define_tensor/scalar`
     concrete_fusion_inputs = tuple(
         arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
     )
@@ -119,3 +144,83 @@ def nvfuser_execute(gm: GraphModule, *args):
         fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
         unflatten_spec,  # type: ignore[has-type]
     )
+
+
+class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
+    def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and getattr(node.target, "impl_nvfuser", None) is not None
+            or "getitem" in node.name  # getitem is a special case
+        )
+
+
+class PartitionedInterpreter(torch.fx.Interpreter):
+    def call_module(self, target, args, kwargs):
+        assert isinstance(target, str)
+        assert len(kwargs) == 0
+        submod = self.fetch_attr(target)
+        # CapabilityBasedPartitioner hardcodes the name of the subgraphs with supported_ops as "fused_" + subgraph id
+        if target.startswith("fused_"):
+            return nvfuser_execute(submod, *args)
+        else:
+            return super().call_module(target, args, kwargs)
+
+
+class NvfuserGraphModule(torch.nn.Module):
+    def __init__(self, gm):
+        super().__init__()
+        self.gm = gm
+
+    def __call__(self, *args):
+        return nvfuser_execute(self.gm, *args)
+
+
+# MyPy bug: https://github.com/python/mypy/issues/5107
+@lru_cache()  # type: ignore[arg-type]
+def maybe_partition_graph(gm: GraphModule):
+    supported_ops = NvfuserPrimOperatorSupport()
+    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    # the graph is partitioned only if at least one node is not supported by nvFuser
+    any_unsupported = any(
+        not supported_ops.is_node_supported(None, node) for node in call_function_nodes
+    )
+    if any_unsupported:
+        # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
+        gm = deepcopy(gm)
+        partitioner = CapabilityBasedPartitioner(
+            gm, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        if len(partitions) == 0:
+            warn(
+                "No partition found for the graph. "
+                + "This is likely because the graph is not supported by nvFuser. "
+                + "Please use the eager ATen mode to execute the graph.",
+                category=RuntimeWarning,
+            )
+        partitioned_graph = partitioner.fuse_partitions(partitions)
+
+        # Replacing graph's fused submodules with a wrapper module with
+        # __call__() method that calls nvfuser_execute.
+        # This avoids the need to call the interpreter on the graph
+        for node in partitioned_graph.graph.nodes:
+            # TODO: use a better way to identify fused submodule
+            if node.op == "call_module" and "fused_" in node.name:
+                nvfuser_submodule = getattr(partitioned_graph, node.name)
+                partitioned_graph.delete_submodule(node.target)
+                gm.add_submodule(node.target, NvfuserGraphModule(nvfuser_submodule))
+
+        return partitioned_graph, any_unsupported
+    else:
+        return gm, any_unsupported
+
+
+def nvfuser_execute_partitioned(gm: GraphModule, *args):
+    # When possible it's better to use nvfuser_execute directly
+    # because it avoids PartitionedInterpreter's overhead
+    gm, is_partitioned = maybe_partition_graph(gm)
+    if is_partitioned:
+        return gm(*args)
+    else:
+        return nvfuser_execute(gm, *args)

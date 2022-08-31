@@ -3,6 +3,7 @@ import torch.distributed._shard.sharded_tensor._ops.elementwise_ops
 import torch.distributed._shard.sharded_tensor._ops.math_ops
 import torch.distributed._shard.sharded_tensor._ops.matrix_ops
 import torch.distributed._shard.sharded_tensor._ops.tensor_ops
+import torch.distributed._shard.sharded_tensor._ops.misc_ops
 
 from .binary_cmp import equal, allclose
 from .init import kaiming_uniform_, normal_, uniform_, constant_
