@@ -586,6 +586,21 @@ constexpr c10::complex<T> conj(const c10::complex<T>& z) {
 // There is no c10 version of std::polar, because std::polar always
 // returns std::complex. Use c10::polar instead;
 
+template<typename T>
+C10_HOST_DEVICE
+inline constexpr
+bool
+isnan(const c10::complex<T>& z) {
+  return isnan(real(z)) || isnan(imag(z));
+}
+
+template<typename T>
+C10_HOST_DEVICE
+inline constexpr
+bool
+isinf(const c10::complex<T>& z) {
+  return isinf(real(z)) || isinf(imag(z));
+}
 } // namespace std
 
 namespace c10 {
