@@ -11616,6 +11616,12 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cpu",
             ),
+            # NotImplementedError: Cannot copy out of meta tensor; no data!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMeta",
+                "test_meta",
+            ),
             # https://github.com/pytorch/pytorch/issues/84335
             DecorateInfo(
                 unittest.skip("Skipped!"),
