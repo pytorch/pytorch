@@ -1630,7 +1630,6 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
-   #  @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -1739,7 +1738,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
-   #  @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -4283,7 +4281,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
         self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
-   #  @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4315,8 +4312,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
-
-   #  @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
@@ -16166,7 +16161,7 @@ class TestNNDeviceType(NNTestCase):
     @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("TOOD: debug error")
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=-1, count_expected=1)
