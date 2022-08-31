@@ -1101,10 +1101,8 @@ def find_matching_merge_rule(pr: GitHubPR,
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
                 reject_reason = "\n".join((
-                    f"The following mandatory check(s) failed (Rule `{rule_name}`):"
-                    f"{checks_to_str(failed_checks)}",
-                    "",
-                    f"Debug by [viewing the failures on hud]({hud_link})."
+                    f"The following mandatory check(s) failed (Rule `{rule_name}`):",
+                    *checks_to_markdown_bullets(failed_checks, hud_link),
                 ))
             continue
         elif len(pending_checks) > 0:
@@ -1112,9 +1110,7 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason_score = 20000
                 reject_reason = "\n".join((
                     f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
-                    f"{checks_to_str(pending_checks)}",
-                    "",
-                    f"Dig deeper by [viewing the checks on hud]({hud_link})."
+                    *checks_to_markdown_bullets(pending_checks, hud_link),
                 ))
             continue
 
@@ -1156,6 +1152,10 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
+
+def checks_to_markdown_bullets(checks, link):
+    return [f"- [{c[0]}]({link})" for c in checks]
 
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
