@@ -706,9 +706,7 @@ class TestMatMul(TestCase):
                 [False, True, True],
             ]
         )
-        x_mt = MaskedTensor(
-            x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x))
-        )
+        x_mt = MaskedTensor(x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1)))
         x = x.masked_fill(~x_mt.get_mask(), 0)
         attn_2 = torch.bmm(x, x.transpose(-2, -1))
         attn_3 = torch.bmm(x_mt, x_mt.transpose(-2, -1))
