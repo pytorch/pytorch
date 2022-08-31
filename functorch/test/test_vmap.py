@@ -3834,9 +3834,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
-        # throws in vmap
-        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
-        xfail('linalg.matrix_norm'),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
