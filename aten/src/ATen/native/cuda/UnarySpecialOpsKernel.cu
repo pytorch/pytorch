@@ -381,21 +381,19 @@ const auto cos_pi_string = jiterator_stringify(
   template<typename T1>
   T1 cos_pi(T1 z) {
     return z;
-  } // T1 cos_pi(T1 a)
+  } // T1 cos_pi(T1 z)
 ); // cos_pi_string
 
 const char cos_pi_name[] = "cos_pi";
 
 void special_cos_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "cos_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cos_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<cos_pi_name, scalar_t, scalar_t, 1>(iterator, cos_pi_string);
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cos_pi_cuda_kernel", [&]() {
-    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
-    });
+    return at::native::special_functions::cos_pi(z);
   });
 #endif
 } // void special_cos_pi_cuda_kernel(TensorIteratorBase &iterator)
@@ -411,14 +409,12 @@ const char cosh_pi_name[] = "cosh_pi";
 
 void special_cosh_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "cosh_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cosh_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<cosh_pi_name, scalar_t, scalar_t, 1>(iterator, cosh_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "cosh_pi_cuda_kernel", [&]() {
-    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
-    });
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "cosh_pi_cuda_kernel", [&]() {
+    return at::native::special_functions::cosh_pi(z);
   });
 #endif
 } // void special_cosh_pi_cuda_kernel(TensorIteratorBase &iterator)
@@ -434,13 +430,13 @@ const char sin_pi_name[] = "sin_pi";
 
 void special_sin_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sin_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sin_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<sin_pi_name, scalar_t, scalar_t, 1>(iterator, sin_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sin_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sin_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::sin_pi(z);
     });
   });
 #endif
@@ -457,13 +453,13 @@ const char sinc_pi_name[] = "sinc_pi";
 
 void special_sinc_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinc_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinc_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<sinc_pi_name, scalar_t, scalar_t, 1>(iterator, sinc_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinc_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinc_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::sinc_pi(z);
     });
   });
 #endif
@@ -480,13 +476,13 @@ const char sinh_pi_name[] = "sinh_pi";
 
 void special_sinh_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinh_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinh_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<sinh_pi_name, scalar_t, scalar_t, 1>(iterator, sinh_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinh_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinh_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::sinh_pi(z);
     });
   });
 #endif
@@ -503,13 +499,13 @@ const char sinhc_name[] = "sinhc";
 
 void special_sinhc_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_cuda_kernel", [&]() {
     jitted_gpu_kernel<sinhc_name, scalar_t, scalar_t, 1>(iterator, sinhc_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::sinhc(z);
     });
   });
 #endif
@@ -526,13 +522,13 @@ const char sinhc_pi_name[] = "sinhc_pi";
 
 void special_sinhc_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<sinhc_pi_name, scalar_t, scalar_t, 1>(iterator, sinhc_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "sinhc_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "sinhc_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::sinhc_pi(z);
     });
   });
 #endif
@@ -549,13 +545,13 @@ const char tan_pi_name[] = "tan_pi";
 
 void special_tan_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tan_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tan_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<tan_pi_name, scalar_t, scalar_t, 1>(iterator, tan_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tan_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tan_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::tan_pi(z);
     });
   });
 #endif
@@ -572,13 +568,13 @@ const char tanh_pi_name[] = "tanh_pi";
 
 void special_tanh_pi_cuda_kernel(TensorIteratorBase &iterator) {
 #if AT_USE_JITERATOR()
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tanh_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tanh_pi_cuda_kernel", [&]() {
     jitted_gpu_kernel<tanh_pi_name, scalar_t, scalar_t, 1>(iterator, tanh_pi_string);
   });
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iterator.common_dtype(), "tanh_pi_cuda_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "tanh_pi_cuda_kernel", [&]() {
     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t z) -> scalar_t {
-      return z;
+      return at::native::special_functions::tanh_pi(z);
     });
   });
 #endif
