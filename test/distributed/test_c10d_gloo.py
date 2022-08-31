@@ -2338,6 +2338,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_rank_membership(self):
+        self._test_rank_membership(backend="gloo")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
