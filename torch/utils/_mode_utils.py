@@ -1,4 +1,3 @@
-import functools
 import torch
 from typing import Iterator, TypeVar
 from dataclasses import dataclass
@@ -11,15 +10,6 @@ T = TypeVar('T')
 #
 # Specifically, it has the helper functions for enable_ and push_X_mode and the
 # ModeInfo class, which is extended by each where they are different
-
-def _wrap_init(f):
-    @functools.wraps(f)
-    def wrapped(self, *args, **kwargs):
-        if 'inner' in kwargs:
-            self.inner = kwargs['inner']
-            del kwargs['inner']
-        return f(self, *args, **kwargs)
-    return wrapped
 
 
 # in order to dedupe the logic between TorchDispatchMode and TorchFunctionMode, this

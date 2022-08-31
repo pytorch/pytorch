@@ -919,6 +919,19 @@ void initNvFuserPythonBindings(PyObject* module) {
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
 
   nvf_ops.def(
+      "squeeze",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int64_t>& original_shape,
+         int64_t dim) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::SqueezeOpRecord(
+            {arg->index}, {output->index}, original_shape, dim));
+        return output;
+      },
+      py::return_value_policy::reference);
+
+  nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor* arg,
