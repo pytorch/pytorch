@@ -478,6 +478,28 @@ namespace at {
 namespace native {
 namespace {
 
+// ONEDNN requires symmetric quantization of weight
+// Use this util function to check.
+bool is_weight_symmetric_quant(const at::Tensor& weight, bool transpose) {
+  bool is_symmetric = true;
+  const auto qtype = weight.qscheme();
+  if (qtype == c10::kPerTensorAffine) {
+    is_symmetric &= (weight.q_zero_point() == 0);
+  } else if (qtype == c10::kPerChannelAffine) {
+    TORCH_CHECK(
+        !transpose,
+        "Per Channel Quantization is currently disabled for transposed conv");
+    auto output_channels = weight.size(0);
+    for (int i = 0; i < output_channels; ++i) {
+      auto zp = weight.q_per_channel_zero_points()[i].item<int32_t>();
+      is_symmetric &= (zp == 0);
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
+  }
+  return is_symmetric;
+}
+
 template <int kSpatialDim = 2>
 class QConvPackWeightInt8 final {
  public:
@@ -521,6 +543,22 @@ class QConvPackWeightInt8 final {
       int64_t groups,
       bool transpose) {
     auto& ctx = at::globalContext();
+#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::X86) {
+      bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
+      bool w_sym_quant = is_weight_symmetric_quant(weight, transpose);
+      bool prefer_fbgemm = no_vnni || (groups > 100) || !w_sym_quant;
+      if (ctx.hasFBGEMM() &&
+          ((ctx.hasMKLDNN() && prefer_fbgemm) || !ctx.hasMKLDNN())) {
+        return PackedConvWeight<kSpatialDim>::prepack(
+            weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+      } else if (ctx.hasMKLDNN()) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+            weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+      }
+    }
+#endif
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
@@ -598,6 +636,23 @@ class QConv1dPackWeightInt8 final {
     padding = quant_utils::MakeArgForConv1d(padding, 0);
     output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+
+#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::X86) {
+      bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
+      bool w_sym_quant = is_weight_symmetric_quant(weight, transpose);
+      bool prefer_fbgemm = no_vnni || (groups > 100) || !w_sym_quant;
+      if (ctx.hasFBGEMM() &&
+          ((ctx.hasMKLDNN() && prefer_fbgemm) || !ctx.hasMKLDNN())) {
+        return PackedConvWeight<2>::prepack(
+            weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+      } else if (ctx.hasMKLDNN()) {
+        return PackedConvWeightsOnednn<2>::prepack(
+            weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+      }
+    }
+#endif
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(

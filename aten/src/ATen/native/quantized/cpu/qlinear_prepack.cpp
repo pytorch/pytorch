@@ -287,6 +287,17 @@ class QLinearPackWeightInt8 final {
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
+#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::X86) {
+      // For linear, we always use FBGEMM for X86 backend
+      // as long as it is available
+      if (at::globalContext().hasFBGEMM()) {
+        return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
+      } else if (at::globalContext().hasMKLDNN()) {
+        return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
+      }
+    }
+#endif
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
@@ -316,6 +327,20 @@ class QLinearPackWeightFp16 final {
       at::Tensor weight,
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
+#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::X86) {
+      // For linear, we always use FBGEMM for X86 backend
+      // as long as it is available
+      if (at::globalContext().hasFBGEMM()) {
+        return PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));
+      } else {
+        TORCH_CHECK(
+            false,
+            "quantized::linear_prepack_fp16 is not supported by X86"
+            " since FBGEMM is not available");
+      }
+    }
+#endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
 #ifdef USE_FBGEMM
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0

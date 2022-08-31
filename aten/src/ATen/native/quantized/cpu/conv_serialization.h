@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
+#include <cpuinfo.h>
 
 #include <tuple>
 
@@ -329,6 +330,37 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");
 
   auto& ctx = at::globalContext();
+
+#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+  if (ctx.qEngine() == at::QEngine::X86) {
+    bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
+    bool prefer_fbgemm = no_vnni || groups > 100;
+    if (ctx.hasFBGEMM() &&
+        ((ctx.hasMKLDNN() && prefer_fbgemm) || !ctx.hasMKLDNN())) {
+      return PackedConvWeight<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+    } else if (ctx.hasMKLDNN()) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+    }
+  }
+#endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
