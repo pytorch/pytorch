@@ -709,7 +709,8 @@ def embedding(
     for d in weight.shape[1:]:
         size.append(d)
 
-    return weight.index_select(0, indices.reshape(-1)).view(size)
+    # TODO: make reshape work
+    return weight.index_select(0, indices.view(-1)).view(size)
 
 
 # TODO: Correct the type promotion semantics
