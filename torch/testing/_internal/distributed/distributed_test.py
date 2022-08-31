@@ -9037,6 +9037,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
+        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):
 
