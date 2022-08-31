@@ -29,9 +29,11 @@ except ImportError:
     def disable_torchdynamo(x):
         return x
 
+
 try:
     from torchdynamo.utils import dynamo_timed
 except ImportError:
+
     def dynamo_timed(x):
         return x
 
