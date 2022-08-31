@@ -271,6 +271,7 @@ ALLOW_LIST = [
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
+    ("aten::sym_numel", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
