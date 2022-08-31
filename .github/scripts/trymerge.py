@@ -26,6 +26,7 @@ from typing import (
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from warnings import warn
+from pathlib import Path
 
 from gitutils import (
     GitRepo,
@@ -401,6 +402,8 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
+MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -847,7 +850,7 @@ class GitHubPR:
     def merge_ghstack_into(
         self,
         repo: GitRepo,
-        force: bool,
+        skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
         land_check_commit: Optional[str] = None
     ) -> None:
@@ -874,7 +877,7 @@ class GitHubPR:
                 find_matching_merge_rule(
                     pr,
                     repo,
-                    force=force,
+                    skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=can_skip_internal_checks(self, comment_id),
                     land_check_commit=land_check_commit)
 
@@ -894,7 +897,7 @@ class GitHubPR:
         return msg
 
     def merge_into(self, repo: GitRepo, *,
-                   force: bool = False,
+                   skip_mandatory_checks: bool = False,
                    dry_run: bool = False,
                    comment_id: Optional[int] = None,
                    land_check_commit: Optional[str] = None) -> None:
@@ -902,10 +905,10 @@ class GitHubPR:
         find_matching_merge_rule(
             self,
             repo,
-            force=force,
+            skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             land_check_commit=land_check_commit)
-        self.merge_changes(repo, force, comment_id, land_check_commit=land_check_commit)
+        self.merge_changes(repo, skip_mandatory_checks, comment_id, land_check_commit=land_check_commit)
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
@@ -913,7 +916,7 @@ class GitHubPR:
 
     def merge_changes(self,
                       repo: GitRepo,
-                      force: bool = False,
+                      skip_mandatory_checks: bool = False,
                       comment_id: Optional[int] = None,
                       land_check_commit: Optional[str] = None,
                       branch: Optional[str] = None) -> None:
@@ -927,15 +930,25 @@ class GitHubPR:
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
-            self.merge_ghstack_into(repo, force, comment_id=comment_id, land_check_commit=land_check_commit)
+            self.merge_ghstack_into(
+                repo,
+                skip_mandatory_checks,
+                comment_id=comment_id,
+                land_check_commit=land_check_commit
+            )
 
     def create_land_time_check_branch(self,
                                       repo: GitRepo,
                                       branch: str,
-                                      force: bool = False,
+                                      skip_mandatory_checks: bool = False,
                                       comment_id: Optional[int] = None,) -> str:
         orig_branch = repo.current_branch()
-        self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
+        self.merge_changes(
+            repo,
+            branch=branch,
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
         land_check_branch = f'landchecks/{self.pr_num}'
         try:
             repo._run_git('branch', "-D", land_check_branch)
@@ -965,10 +978,20 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
-def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
-    from pathlib import Path
+def gen_new_issue_link(
+    org: str,
+    project: str,
+    labels: List[str],
+    template: str = "bug-report.yml"
+) -> str:
+    labels_str = ",". join(labels)
+    return (f"https://github.com/{org}/{project}/issues/new?"
+            f"labels={urllib.parse.quote(labels_str)}&"
+            f"template={urllib.parse.quote(template)}")
 
-    repo_relative_rules_path = Path(".github") / "merge_rules.yaml"
+
+def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
@@ -989,15 +1012,25 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
 
 def find_matching_merge_rule(pr: GitHubPR,
                              repo: Optional[GitRepo] = None,
-                             force: bool = False,
+                             skip_mandatory_checks: bool = False,
                              skip_internal_checks: bool = False,
                              land_check_commit: Optional[str] = None,
                              ) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
+    issue_link = gen_new_issue_link(
+        org=pr.org,
+        project=pr.project,
+        labels=["module: ci"],
+    )
+    reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
+
     rules = read_merge_rules(repo, pr.org, pr.project)
-    reject_reason = f"PR {pr.pr_num} does not match merge rules"
+    if not rules:
+        reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
+        raise RuntimeError(reject_reason)
+
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
@@ -1042,7 +1075,7 @@ def find_matching_merge_rule(pr: GitHubPR,
             continue
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-        required_checks = filter(lambda x: force is False or "CLA Check" in x, mandatory_checks)
+        required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         if len(failed_checks) > 0:
@@ -1066,6 +1099,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
+
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason)
     raise RuntimeError(reject_reason)
@@ -1158,7 +1192,7 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
-    find_matching_merge_rule(pr, repo, force=True, skip_internal_checks=skip_internal_checks)
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True, skip_internal_checks=skip_internal_checks)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
@@ -1200,8 +1234,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def check_for_sev(org: str, project: str, force: bool) -> None:
-    if force:
+def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
+    if skip_mandatory_checks:
         return
     response = cast(
         Dict[str, Any],
@@ -1250,7 +1284,7 @@ def categorize_checks(check_runs: Dict[str, WorkflowCheckState],
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
-          force: bool = False,
+          skip_mandatory_checks: bool = False,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
@@ -1261,19 +1295,35 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
-    explainer = TryMergeExplainer(force, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
+    explainer = TryMergeExplainer(skip_mandatory_checks, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
     on_green, land_checks = explainer.get_flags()
     land_check_commit = None
 
-    check_for_sev(org, project, force)
+    check_for_sev(org, project, skip_mandatory_checks)
 
-    if force or can_skip_internal_checks(pr, comment_id):
+    if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message())
-        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+        return pr.merge_into(
+            repo,
+            dry_run=dry_run,
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
+
+    # Important: check for merge rule once before starting land checks
+    # because we want to make sure that only approved PRs can start CI
+    # jobs. If there's missing approval, a RuntimeError will be raised
+    # here to stop the merge process right away
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
     if land_checks:
-        land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+        land_check_commit = pr.create_land_time_check_branch(
+            repo,
+            'viable/strict',
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
@@ -1283,7 +1333,7 @@ def merge(pr_num: int, repo: GitRepo,
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
-        check_for_sev(org, project, force)
+        check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
@@ -1312,7 +1362,13 @@ def merge(pr_num: int, repo: GitRepo,
             if land_checks and land_check_commit is not None:
                 validate_land_time_checks(org, project, land_check_commit)
 
-            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id, land_check_commit=land_check_commit)
+            return pr.merge_into(
+                repo,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                comment_id=comment_id,
+                land_check_commit=land_check_commit
+            )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
@@ -1330,13 +1386,32 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    def handle_exception(e: Exception, msg: str = "Merge failed") -> None:
-        msg += f"\nReason: {e}"
+    def handle_exception(e: Exception, title: str = "Merge failed") -> None:
+        exception = f"**Reason**: {e}"
+
+        troubleshooting = ""
+        if args.land_checks:
+            troubleshooting += get_land_check_troubleshooting_message()
+
+        internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
-            msg += f"\nRaised by [workflow job]({run_url})"
-        if args.land_checks:
-            msg += get_land_check_troubleshooting_message()
+            # Hide this behind a collapsed bullet since it's not helpful to most devs
+            internal_debugging = "\n".join((
+                "<details><summary>Details for Dev Infra team</summary>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                "</details>"
+            ))
+
+        msg = "\n".join((
+            f"## {title}",
+            f"{exception}",
+            "",
+            f"{troubleshooting}",
+            "",
+            f"{internal_debugging}"
+        ))
+
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
@@ -1360,7 +1435,7 @@ def main() -> None:
     try:
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
-              force=args.force,
+              skip_mandatory_checks=args.force,
               comment_id=args.comment_id,
               on_green=args.on_green,
               mandatory_only=args.on_mandatory,
