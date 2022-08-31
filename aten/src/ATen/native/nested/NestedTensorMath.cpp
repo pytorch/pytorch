@@ -1239,7 +1239,7 @@ Tensor slice_nested(
   auto new_sizes = (dim > 0) ? sizes.clone() : sizes.slice(0, start_val, end_val).clone();
   auto new_strides = (dim > 0) ? strides.clone() : strides.slice(0, start_val, end_val).clone();
   auto new_offsets = (dim > 0) ? std::vector<int64_t>(offsets) :
-      std::vector<int64_t>(offsets.begin() + start_val, offsets.begin() + end_val + 1);
+      std::vector<int64_t>(offsets.begin() + start_val, offsets.begin() + end_val);
   if (dim > 0) {
     // account for the implicit batch dim
     --dim;
