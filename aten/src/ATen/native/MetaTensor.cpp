@@ -30,14 +30,22 @@ Tensor empty_meta(
 }
 
 Tensor empty_strided_meta(
-  IntArrayRef size,
-  IntArrayRef stride,
+  SymIntArrayRef size,
+  SymIntArrayRef stride,
   c10::optional<ScalarType> dtype_opt,
   c10::optional<Layout> layout_opt,
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  return at::detail::empty_strided_meta(
+  auto opt_size = asIntArrayRefSlowOpt(size);
+  auto opt_stride = asIntArrayRefSlowOpt(stride);
+  if (opt_size.has_value()) {
+    TORCH_CHECK(opt_stride.has_value(), "empty_strided(): sizes are symbolic but not strides");
+    return at::detail::empty_strided_meta(
+        *opt_size, *opt_stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  }
+  TORCH_CHECK(!opt_stride.has_value(), "empty_strided(): strides are symbolic but not sizes");
+  return at::detail::empty_strided_symint_meta(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 

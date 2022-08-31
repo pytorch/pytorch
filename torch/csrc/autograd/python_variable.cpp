@@ -802,7 +802,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
     // TODO: this should probably be sym_sizes, sym_strides AND offset
-    tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
+    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides);
 
     // N.B. we ignore the storage argument as it's eiher stored on a python
     // tensor or gets overriden for XLA

@@ -135,6 +135,37 @@ struct IrBuilder {
   virtual ~IrBuilder() = default;
 };
 
+// dynamic ir nodes
+static inline NodePtr MakeSizeNode(const Value& input, size_t dim) {
+  return getIrBuilder()->MakeSizeNode(input, dim);
+}
+static inline NodePtr MakeSizeAdd(const Value& a, const Value& b) {
+  return getIrBuilder()->MakeSizeAdd(a, b);
+}
+static inline NodePtr MakeSizeMul(const Value& a, const Value& b) {
+  return getIrBuilder()->MakeSizeMul(a, b);
+}
+static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
+  return getIrBuilder()->MakeSizeDiv(a, b);
+}
+
+class TORCH_API SymIntNodeImpl : public c10::SymIntNodeImpl {
+ public:
+  SymIntNodeImpl(NodePtr ptr) : node_(std::move(ptr)){};
+  c10::SymIntNode add(const c10::SymIntNode& other) override {
+    TORCH_CHECK(false, "NYI");
+  }
+  c10::SymIntNode mul(const c10::SymIntNode& other) override {
+    auto pother = dynamic_cast<torch::lazy::SymIntNodeImpl*>(other.get());
+    TORCH_CHECK(pother);
+    auto mul_node = getBackend()->GetIrBuilder()->MakeSizeMul(
+        this->node_, pother->node_);
+    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(mul_node);
+    return sn;
+  }
+  NodePtr node_;
+};
+
 static inline NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) {
   return getIrBuilder()->MakeDeviceData(data);
 }
@@ -251,20 +282,6 @@ static inline NodePtr MakeSqueeze(const Value& input0, const int& dim) {
 }
 static inline NodePtr MakeUnsqueeze(const Value& input0, const int& dim) {
   return getIrBuilder()->MakeUnsqueeze(input0, dim);
-}
-
-// dynamic ir nodes
-static inline NodePtr MakeSizeNode(const Value& input, size_t dim) {
-  return getIrBuilder()->MakeSizeNode(input, dim);
-}
-static inline NodePtr MakeSizeAdd(const Value& a, const Value& b) {
-  return getIrBuilder()->MakeSizeAdd(a, b);
-}
-static inline NodePtr MakeSizeMul(const Value& a, const Value& b) {
-  return getIrBuilder()->MakeSizeAdd(a, b);
-}
-static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
-  return getIrBuilder()->MakeSizeDiv(a, b);
 }
 
 inline Value GetSymIntValue(c10::SymInt a) {

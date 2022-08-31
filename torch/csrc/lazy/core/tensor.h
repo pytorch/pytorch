@@ -1,24 +1,15 @@
 #pragma once
 
-#include <c10/core/SymIntNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
 
 namespace torch {
 namespace lazy {
-
-class TORCH_API SymIntNodeImpl : public c10::SymIntNodeImpl {
- public:
-  SymIntNodeImpl(NodePtr ptr) : node_(std::move(ptr)){};
-  c10::SymIntNode add(const c10::SymIntNode& other) override {
-    TORCH_CHECK(false, "NYI");
-  }
-  NodePtr node_;
-};
 
 class LazyTensor;
 using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;

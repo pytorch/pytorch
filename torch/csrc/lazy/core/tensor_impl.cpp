@@ -133,8 +133,17 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
+c10::SymIntArrayRef LTCTensorImpl::sym_strides() const {
+  return sym_strides_custom();
+}
+
 c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
-  return sym_strides_default();
+  if (FLAGS_ltc_enable_symbolic_shapes) {
+    setup_sym_sizes();
+    return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());
+  }
+
+  return c10::SymIntArrayRef::fromIntArrayRef(sizes_custom());
 }
 
 void LTCTensorImpl::setup_sym_sizes() const {
@@ -146,6 +155,18 @@ void LTCTensorImpl::setup_sym_sizes() const {
         this->tensor_->GetIrValue(), i);
     auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
     sym_sizes.push_back(sn->toSymInt());
+  }
+
+  // Making the symbolic strides on LazyTensorImpl always be contiguous.
+  // Is this the right thing to do?
+  std::vector<c10::SymInt> sym_strides;
+  sym_strides.resize(rank);
+  if (rank > 0) {
+    const auto last_idx = rank - 1;
+    sym_strides.at(last_idx) = 1;
+    for (auto i = last_idx - 1; i >= 0; --i) {
+      sym_strides.at(i) = sym_strides.at(i+1) * sym_sizes.at(i+1);
+    }
   }
 
   sym_sizes_ = sym_sizes;

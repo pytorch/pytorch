@@ -300,20 +300,22 @@ at::Tensor LazyNativeFunctions::empty(
 }
 
 at::Tensor LazyNativeFunctions::empty_strided(
-    at::IntArrayRef size,
-    at::IntArrayRef stride,
+    c10::SymIntArrayRef sym_size,
+    c10::SymIntArrayRef sym_stride,
     c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout,
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t = empty(
-      c10::SymIntArrayRef::fromIntArrayRef(size),
+      sym_size,
       dtype,
       layout,
       device,
       pin_memory,
       c10::nullopt);
+  auto size = c10::asIntArrayRefSlow(sym_size);
+  auto stride = c10::asIntArrayRefSlow(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 
@@ -438,8 +440,8 @@ at::Tensor LazyNativeFunctions::block_diag(at::TensorList tensors) {
 }
 at::Tensor LazyNativeFunctions::new_empty_strided(
     const at::Tensor& self,
-    at::IntArrayRef size,
-    at::IntArrayRef stride,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
     c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout,
     c10::optional<at::Device> device,
