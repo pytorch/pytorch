@@ -6,25 +6,6 @@
 namespace c10d {
 namespace {
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  auto work = process_group->allreduce(
-      tensor_vec,
-      AllreduceOptions{
-          static_cast<ReduceOp>(reduce_op),
-          std::chrono::milliseconds(timeout)});
-
-  // Return input tensors as output tensors to make inplace allreduce look like
-  // a functional API, so that make_fx can correctly build the dependencies in
-  // the graph later.
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(tensor_vec), work);
-}
-
 c10::intrusive_ptr<Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -135,8 +116,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "allreduce_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
+      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "allgather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
@@ -155,7 +135,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
-  m.def("send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
+  m.def(
+      "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
