@@ -930,6 +930,14 @@ void Value::replaceFirstUseWith(Value* newValue) {
   uses_.erase(uses_.begin());
 }
 
+void Value::replaceLastUseWith(Value* newValue) {
+  TORCH_INTERNAL_ASSERT(owningGraph() == newValue->owningGraph());
+  auto u = uses().back();
+  u.user->inputs_[u.offset] = newValue;
+  uses_.erase(uses_.end() - 1);
+  newValue->uses_.push_back(u);
+}
+
 void Value::replaceAllUsesWith(Value* newValue) {
   while (!uses().empty()) {
     replaceFirstUseWith(newValue);
