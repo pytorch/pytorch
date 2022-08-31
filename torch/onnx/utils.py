@@ -834,7 +834,7 @@ def _trace_and_get_graph_from_model(model, args):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
-    # Disable Autocast cache because it replaces kernel's weight and bias 
+    # Disable Autocast cache because it replaces kernel's weight and bias
     # to be replaced by (undesired) constants
     # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
