@@ -41,7 +41,7 @@ class TORCH_API BackendImplInterface {
 
   virtual const IrBuilder* GetIrBuilder() const = 0;
 
-  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const = 0;
+  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   /**
    * Data Transfer

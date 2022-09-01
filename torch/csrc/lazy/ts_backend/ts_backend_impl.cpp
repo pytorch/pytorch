@@ -2,7 +2,6 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
-#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
@@ -52,10 +51,6 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   const IrBuilder* GetIrBuilder() const override {
     static const IrBuilder* builder = new TorchScriptIrBuilder();
     return builder;
-  }
-
-  bool ShouldSyncTensor(const LazyTensorPtr tensor) const override {
-    return tensor->GetIrValue()->op() != ltc_not_supported;
   }
 
   std::string CreateMetricReport() const override {
