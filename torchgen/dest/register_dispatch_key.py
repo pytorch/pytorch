@@ -159,7 +159,8 @@ void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const
   if (resized) {
     if (!strides.empty()) {
       TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-      at::native::as_strided_(out, sizes, strides);
+      // TODO: avoid the redispatch here
+      out.as_strided_(sizes, strides);
     } else if (options.memory_format_opt().has_value()) {
       out.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
     }

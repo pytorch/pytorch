@@ -224,6 +224,7 @@ class LazyArgument:
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = (
             isSymIntType(arg.type)
+            or (isinstance(arg.type, OptionalType) and isSymIntType(arg.type.elem))
             # TODO: lists of symints are not currently treated as value types
             # or (isinstance(arg.type, ListType) and isSymIntType(arg.type.elem))
         )

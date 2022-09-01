@@ -22,6 +22,7 @@ from torchgen.api.types import (
     longT,
     OptionalCType,
     symIntArrayRefT,
+    SymIntT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -322,6 +323,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
+        OptionalCType(BaseCType(SymIntT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),

@@ -316,6 +316,7 @@ struct PythonArgs {
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
+  inline c10::optional<c10::SymInt> toSymIntOptional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
@@ -939,6 +940,12 @@ inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toInt64(i);
+}
+
+inline c10::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return toSymInt(i);
 }
 
 inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
