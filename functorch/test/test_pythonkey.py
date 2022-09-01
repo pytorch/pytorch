@@ -428,29 +428,16 @@ class TestEagerFusionOpInfo(AOTTestCase):
             def get_grads(args):
                 return pytree.tree_map(lambda x: x.grad, args)
 
-            # use print compile
-            def print_compile(fx_g, args):
-                print(fx_g.code)
-                return fx_g
-
-            torch.set_float32_matmul_precision("high")
-            compiled_f = compiled_function(f, print_compile, print_compile)
+            compiled_f = compiled_function(f, nop, nop)
 
             reset_grads()
             compiled_f(args, kwargs).sum().backward()
             compiled_grad = get_grads(args)
-            # increase tolerance matmul
-            # 
 
             reset_grads()
             f(args, kwargs).sum().backward()
             orig_grad = get_grads(args)
-            try:
-                self.assertEqual(orig_grad, compiled_grad)
-            except Exception as e:
-                import pdb; pdb.set_trace()
-                print(e)
-                raise e 
+            self.assertEqual(orig_grad, compiled_grad)
 
             def create_new_arg(x):
                 return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
