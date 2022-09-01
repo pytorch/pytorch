@@ -316,9 +316,15 @@ bool mkldnnPrepackedConvIsSupported(
     const std::vector<int64_t>& dilation,
     int64_t groups) {
 #if AT_MKLDNN_ENABLED()
-  if (input.dtype != c10::ScalarType::Float ||
-      weight.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: only float32 allowed");
+  bool is_fp32 = input.dtype == c10::ScalarType::Float &&
+      weight.dtype == c10::ScalarType::Float;
+
+  bool is_bf16 = input.dtype == c10::ScalarType::BFloat16 &&
+      weight.dtype == c10::ScalarType::BFloat16;
+
+  if (!is_fp32 && !is_bf16) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: only float32 of bfloat16 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4) {
