@@ -1167,7 +1167,6 @@ symbolic_tensor_failures = {
     xfail('randint_like', ''),  # aten.randint_like.default - couldn't find symbolic meta function/decomposition
     xfail('randn_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
-    xfail('repeat', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('reshape', ''),  # Tensors of type TensorImpl do not have numel
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -1230,7 +1229,6 @@ symbolic_tensor_failures = {
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('tile', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('topk', ''),  # aten.topk.default - couldn't find symbolic meta function/decomposition
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
