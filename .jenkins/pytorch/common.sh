@@ -17,8 +17,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export HSAKMT_DEBUG_LEVEL=4
   # improve rccl performance for distributed tests
   export HSA_FORCE_FINE_GRAIN_PCIE=1
-  # temporarily set this to generate full CI logs of all errors, not just first error
-  export CONTINUE_THROUGH_ERROR=1
 fi
 
 # TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
