@@ -104,6 +104,7 @@ def meta_index_select_out(self, dim, index, out):
 def meta_max(self):
     return self.new_empty(())
 
+
 @register_meta([aten.max.dim], register_dispatcher=False)
 def meta_max_dim(self, dim, keepdim=False):
     result_size = list(self.size())
