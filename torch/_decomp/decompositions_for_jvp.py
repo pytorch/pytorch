@@ -195,9 +195,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition_for_jvp(
-    aten.native_batch_norm_backward
-)
+@register_decomposition_for_jvp(aten.native_batch_norm_backward)
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
