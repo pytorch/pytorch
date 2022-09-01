@@ -1282,6 +1282,12 @@ op_db: List[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
+            ),
         ),
     ),
     OpInfo(
