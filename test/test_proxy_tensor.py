@@ -314,8 +314,8 @@ class TestGenericProxyTensor(TestCase):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
-    return copy__default
+    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy_
     """)
 
     def test_make_fx_reentrant_dispatch(self):
@@ -589,13 +589,19 @@ def forward(self, x_1):
         )
 
     def test_trace_subclasses(self):
-        def f(x):
+        def f1(x):
             x = UnwrapTensor(x)
             y = x * 2
             return y
 
+        def f2(x):
+            wrapped = UnwrapTensor(x)
+            y = x * wrapped
+            return y
+
         inp = [torch.randn(5)]
-        self._test(f, inp)
+        self._test(f1, inp)
+        self._test(f2, inp)
 
     def test_partial_decomp(self):
         def f(a, b, c):
@@ -615,6 +621,19 @@ def forward(self, x_1):
         self.assertEqual(fx_g(*inps), decomposed_fx(*inps))
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
+
+    def test_decomp_of_capture(self):
+        val = torch.randn(5)
+
+        def f(x):
+            return x.t() + val.t()
+
+        def nop(x):
+            return x.cos()
+
+        traced = make_fx(f, decomposition_table={torch.ops.aten.t.default: nop})(torch.randn(5))
+        self.assertEqual(len([n for n in traced.graph.nodes if n.target == torch.ops.aten.t.default]), 0)
+
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_amp_cache(self):
@@ -771,9 +790,9 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
-    detach_default = torch.ops.aten.detach.default(empty);  empty = None
-    sym_size_2 = torch.ops.aten.sym_size(detach_default, 0)
-    return detach_default""")
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    sym_size_2 = torch.ops.aten.sym_size(detach, 0)
+    return detach""")
 
     def test_cat(self):
         def f(a, b):
@@ -816,7 +835,7 @@ def forward(self, a_1):
         fx_g.recompile()
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['fake_result'].shape[0].get_pyobj() == meta_d.meta['sym_size'].expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
 
 make_fx_failures = {
@@ -1050,7 +1069,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
-    xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
