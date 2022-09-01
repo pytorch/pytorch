@@ -445,7 +445,8 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(ErrorHandlingMode asyncErrorHandling) {
+void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(
+    ErrorHandlingMode asyncErrorHandling) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (exception_) {
     auto exceptionMsg = c10::str(
@@ -454,7 +455,7 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(ErrorHandlingMode asyncErrorHan
         "might run on corrupted/incomplete data.");
     LOG(ERROR) << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
-    if (asyncErrorHandling == ErrorHandlingMode::TearDown) {
+    if (asyncErrorHandling == TearDown) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << tearDownMsg;
@@ -627,21 +628,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
 
   if (blockingWait_) {
-    if (asyncErrorHandling_ || desyncDebug_) {
+    if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
       LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
                 << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
                 << "should not both be enabled. "
                 << "Only NCCL_BLOCKING_WAIT is being used in this process.";
-      asyncErrorHandling_ = false;
+      asyncErrorHandling_ = NoHandling;
       desyncDebug_ = false;
     }
   } else {
-    if (desyncDebug_ && !asyncErrorHandling_) {
+    if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
       LOG(INFO) << "[Rank " << rank_
                 << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
                 << "must both be enabled. "
                 << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = true;
+      asyncErrorHandling_ = TearDown;
     }
   }
 
@@ -659,7 +660,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
 #endif
 
-  if (asyncErrorHandling_) {
+  if (asyncErrorHandling_ != NoHandling) {
     workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
   }
 
@@ -768,7 +769,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   ncclCommWatchdogThread_.join();
 #endif
 
-  if (asyncErrorHandling_) {
+  if (asyncErrorHandling_ != NoHandling) {
     workMetaListCV_.notify_one();
     workCleanupThread_.join();
   }
@@ -868,7 +869,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
               << "NCCL error: \n"
               << exceptionMsg;
 
-          if (blockingWait_ || asyncErrorHandling_) {
+          if (blockingWait_ || asyncErrorHandling_ != NoHandling) {
             LOG(INFO) << "[Rank " << rank_
                       << "] Aborting communicators that received errors";
             // We abort NCCL communicators that have received errors from this
@@ -898,7 +899,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
       }
     }
 
-    if (asyncErrorHandling_) {
+    if (asyncErrorHandling_ != NoHandling) {
       abortTimedOutCollectives(abortedCommIds);
     }
 
@@ -1638,7 +1639,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  if (asyncErrorHandling_) {
+  if (asyncErrorHandling_ != NoHandling) {
     workEnqueue(work);
   }
 

@@ -46,7 +46,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 // TearDown mode: tear down process upon error, see `WorkNCCL::handleNCCLGuard`
 // Soft mode: just clean up collectives and abort communicators without tearing down process
-enum class ErrorHandlingMode { Off = 0, TearDown = 1, Soft = 2 };
+enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -663,7 +663,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
-  ErrorHandlingMode asyncErrorHandling_ = ErrorHandlingMode::Off;
+  ErrorHandlingMode asyncErrorHandling_ = NoHandling;
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
