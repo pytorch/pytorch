@@ -68,9 +68,29 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 f"Node {node} with target {node.target} does not support nvfuser"
             )
 
-    assert len(nv_args_templates) > 0, "nv_args_templates must be non-empty"
-    call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-    assert len(call_function_nodes) > 0, "Graph must contain at least one call_function node"
+    graph_input_nodes = list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))
+    call_function_nodes = list(
+        filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    )
+    any_get_attr_used = any(
+        filter(
+            # bug in mypy https://github.com/python/mypy/issues/12682
+            lambda n: any(  # type: ignore[arg-type]
+                a.op == "get_attr" for a in n.args if isinstance(a, torch.fx.Node)  # type: ignore[attr-defined]
+            ),
+            call_function_nodes,
+        )
+    )
+    assert len(graph_input_nodes) == len(
+        nv_args_templates
+    ), "Number of placeholder nodes in the graph must match number of args"
+    assert len(nv_args_templates) > 0, "There must be at least one argument"
+    assert (
+        len(call_function_nodes) > 0
+    ), "Graph must contain at least one call_function node"
+    assert (
+        not any_get_attr_used
+    ), "Constant tensors that are saved in the graph and used as arguments are not supported yet"
 
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
