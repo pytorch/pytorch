@@ -4,7 +4,7 @@ import itertools
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -20,6 +20,7 @@ from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
+TensorWeakRef = Any
 
 aten = torch.ops.aten
 
@@ -120,7 +121,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 class FakeTensorConverter(object):
     tensor_memo: weakref.WeakValueDictionary
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[weakref.ref[torch.Tensor]]]
+    constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
         # FakeTensors store the FakeTensorMode which in turn stores a
@@ -185,7 +186,7 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, constant=False):
+    def from_real_tensor(self, fake_mode, t, make_constant=False):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -197,14 +198,19 @@ class FakeTensorConverter(object):
             meta_t = self.meta_converter(t)
             if meta_t.device.type != "meta":
                 raise UnsupportedFakeTensorException("meta converter nyi")
-            constant = None if constant is None else t
-            out = FakeTensor(fake_mode, meta_t, existing_device, constant=constant)
-            self.add_constant_storage_mapping(out)
+            out = FakeTensor(
+                fake_mode,
+                meta_t,
+                existing_device,
+                constant=t if make_constant else None,
+            )
+            if make_constant:
+                self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
-            assert constant is None
+            assert make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         if t.grad is not None:
-            assert constant is None
+            assert not make_constant
             out.grad = self.from_real_tensor(fake_mode, t.grad)
         self.set_tensor_memo(t, out)
         return out
@@ -227,11 +233,11 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(self, fake_mode, t, device=None, *, constant=False):
+    def __call__(self, fake_mode, t, device=None, *, make_constant=False):
         if device is None:
-            return self.from_real_tensor(fake_mode, t, constant)
+            return self.from_real_tensor(fake_mode, t, make_constant)
         else:
-            assert constant is False
+            assert make_constant is False
             assert t.device.type == "meta"
             return self.from_meta_and_device(fake_mode, t, device)
 
@@ -638,7 +644,7 @@ class FakeTensorMode(TorchDispatchMode):
             out = func(*args, **kwargs)
             if self.may_turn_const(out):
                 with no_dispatch():
-                    return converter(self, out.clone(), constant=True)
+                    return converter(self, out.clone(), make_constant=True)
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -664,11 +670,14 @@ class FakeTensorMode(TorchDispatchMode):
                 out = func(*const_args, **const_kwargs)
 
                 all_constant = pytree.tree_all_only(
-                    torch.Tensor, lambda t: self.may_turn_const(t), (args, kwargs)
+                    torch.Tensor, lambda t: self.may_turn_const(t), out
                 )
+
                 if all_constant:
                     return pytree.tree_map_only(
-                        torch.Tensor, lambda t: converter(self, t, constant=True), out
+                        torch.Tensor,
+                        lambda t: converter(self, t, make_constant=True),
+                        out,
                     )
 
                 # we weren't able to turn outputs to constants,

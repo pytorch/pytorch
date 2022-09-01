@@ -412,11 +412,11 @@ class FakeTensorConstHandling(TestCase):
 
     def test_shared_storages(self):
         with FakeTensorMode(const_tensors=True):
-            x = torch.tensor(4.)
+            x = torch.tensor([4.])
             y = x[:]
 
             self.assertEqual(x.storage()._cdata, y.storage()._cdata)
-            self.assertEqual(x.constant.storage()._cdata, y.storage()._cdata)
+            self.assertEqual(x.constant.storage()._cdata, y.constant.storage()._cdata)
 
     def test_constant_invalidation(self):
         with FakeTensorMode(const_tensors=True):
@@ -432,7 +432,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertConst(x)
             x.resize_([2])
             self.assertEqual(x.size(0), 2)
-            self.assertConst(x)
+            self.assertNotConst(x)
 
     def test_shared_storage_invalidation(self):
         with FakeTensorMode(const_tensors=True):
@@ -447,7 +447,7 @@ class FakeTensorConstHandling(TestCase):
             x = torch.tensor([1])
             y = x.expand([4])
             self.assertNotConst(y)
-            y.add_(1)
+            y[0] = 1
             self.assertNotConst(x)
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
