@@ -6,9 +6,9 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-struct NVTXThreadLocalState : ProfilerStateBase {
+struct NVTXThreadLocalState : ProfilerThreadLocalStateBase {
   explicit NVTXThreadLocalState(const ProfilerConfig& config)
-      : ProfilerStateBase(config) {
+      : ProfilerThreadLocalStateBase(config) {
     // Only `report_input_shapes` makes sense in this context.
     TORCH_CHECK(!config.profile_memory);
     TORCH_CHECK(!config.with_stack);
@@ -25,7 +25,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
       override {}
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    auto tls = ProfilerThreadLocalStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
