@@ -49,7 +49,12 @@ void initNvFuserPythonBindings(PyObject* module) {
           &nvfuser::FusionCache::get,
           py::arg("max_fusions") = int(8192),
           py::return_value_policy::reference)
-      .def("num_fusions", &nvfuser::FusionCache::numFusions);
+      .def("num_fusions", &nvfuser::FusionCache::numFusions)
+      .def(
+          "print_stats",
+          [](nvfuser::FusionCache& self) {
+            self.print(std::cout);
+          });
 
   py::class_<nvfuser::FusionInterface> fusion(nvfuser, "Fusion");
   fusion.def(py::init<>())

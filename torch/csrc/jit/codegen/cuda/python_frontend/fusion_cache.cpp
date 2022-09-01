@@ -31,6 +31,27 @@ size_t FusionCache::numFusions() const {
   return fusions_.size();
 }
 
+void FusionCache::print(std::ostream& os) {
+  os << "Total Fusions: " << fusions_.size() << "\n";
+
+  // Does not make sense to print stats if the cache is disabled.
+  if (fusions_.size() > 0) {
+    os << "Cache Hits by Fusion Id:\n";
+    auto total_cache_hits = 0;
+    for(size_t i = 0; i < terminal_cache_entries_.size(); ++i) {
+      // The first visit is a miss!
+      auto visits = terminal_cache_entries_[i]->visits - 1;
+      total_cache_hits += visits;
+      os << "\t" << i << " -> " << visits << " hits\n";
+    }
+ 
+    auto hit_rate = static_cast<float>(total_cache_hits) / static_cast<float>(fusion_cache_start_->visits) * 100.0;
+    os << "Cache Lookups: " << fusion_cache_start_->visits;
+    os << " Cache Hits: " << total_cache_hits;
+    os << " Hit Rate: " << hit_rate << "%\n";
+  }
+}
+
 FusionCache::FusionCache(size_t max_fusions)
     : max_fusions_(max_fusions),
       fusion_cache_start_(nullptr),
@@ -83,6 +104,9 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
   RecordFunctor* new_rec = rec->clone();
   fusionCachePtr()->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec, fusion_id);
+  if (rec->recordType() == RecordType::End) {
+    terminal_cache_entries_.push_back(fusionCachePtr()->record_hash_map[new_rec].get());
+  }
   if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
     new_rec->print(ss);
@@ -90,11 +114,6 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
               << "\n";
   }
   return result;
-}
-
-void FusionCache::print(std::ostream& os) {
-  os << "Total Fusions: " << fusions_.size() ;
-  os << " Cache Lookups: " << fusion_cache_start_->visits;
 }
 
 void FusionCache::resetFusionCachePtr() {

@@ -65,6 +65,8 @@ class TORCH_CUDA_CU_API FusionCache {
   static FusionCache* get(size_t max_fusions = 8192);
   //! Number of fusions cached
   size_t numFusions() const;
+  //! print cache stats
+  void print(std::ostream& os);
 
   //! The rest of the public methods are only used in C++
 
@@ -75,8 +77,6 @@ class TORCH_CUDA_CU_API FusionCache {
   //! Creates a child node for the current cache entry and an optional
   //! fusion_id is returned if the new entry is terminal
   c10::optional<size_t> createFusionCacheEntry(RecordFunctor* rec);
-  //! print cache stats
-  void print(std::ostream& os);
   //! Resets the current cache pointer to the top of the tree
   void resetFusionCachePtr();
   //! Traverses the cache from the current entry to the child associated
@@ -102,6 +102,8 @@ class TORCH_CUDA_CU_API FusionCache {
   FusionCacheEntry* fusion_cache_ptr_;
   //! A vector of nvFuser Fusion IR fusions.
   std::vector<std::unique_ptr<Nvf::FusionExecutorCache>> fusions_;
+  //! A vector of Terminal Cache Entries for Stats collection
+  std::vector<FusionCacheEntry*> terminal_cache_entries_;
 };
 
 } // namespace nvfuser
