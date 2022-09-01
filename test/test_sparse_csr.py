@@ -2402,56 +2402,140 @@ class TestSparseCSR(TestCase):
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_transpose(self, device, dtype):
+    @all_sparse_compressed_layouts()
+    def test_transpose(self, device, dtype, layout):
 
-        def run_test(shape, nnz, index_type):
-            # CSR
-            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-            self.assertEqual(a.layout, torch.sparse_csr)
+        def _check_transpose_view(subject, transpose):
+            self.assertTrue(transpose.values()._is_view())
+            self.assertTrue(transpose._is_view())
+            self.assertTrue(transpose._base is subject)
 
-            # CSC
-            a_t = a.transpose(0, 1)
-            self.assertEqual(a_t.layout, torch.sparse_csc)
-
-            # CSR
-            a_v = a.transpose(0, 0)
-            self.assertEqual(a_v.layout, torch.sparse_csr)
-
-            # CSR again
-            a_t_t = a_t.transpose(0, 1)
-            self.assertEqual(a_t_t.layout, torch.sparse_csr)
-
-            # TODO: Do we want to extend view properties to members as well?
-            # These checks are based on is_view_of from test_view_ops.py
-            self.assertTrue(a_t._is_view())
-            self.assertTrue(a_v._is_view())
-            self.assertTrue(a_t_t._is_view())
-
-            self.assertTrue(a_t._base is a)
-            self.assertTrue(a_v._base is a)
-            self.assertTrue(a_t_t._base is a)
-
-            self.assertFalse(a_t is a)
-            self.assertFalse(a_v is a)
-            self.assertFalse(a_t_t is a)
-
-            self.assertEqual(a.to_dense().transpose(0, 1), a_t.to_dense())
-            self.assertEqual(a.to_dense(), a_v.to_dense())
-            self.assertEqual(a.to_dense(), a_t_t.to_dense())
-
-            with self.assertRaisesRegex(RuntimeError, "torch.transpose_: in-place transposition is not supported"):
-                a.transpose_(0, 0)
-
-            with self.assertRaisesRegex(RuntimeError, "torch.transpose_: in-place transposition is not supported"):
-                a.transpose_(0, 1)
+        def _check_layout_invariants(transpose):
+            compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[transpose.layout]
+            compressed_indices, plain_indices = compressed_indices_mth(transpose), plain_indices_mth(transpose)
+            # note: invariant check for bsr/bsc values is too strict wrt to value contiguity (invariant 3.7)
+            if transpose.layout in (torch.sparse_bsr, torch.sparse_bsc):
+                n_batch = compressed_indices.dim() - 1
+                n_dense = transpose.dim() - 2 - n_batch
+                self.assertTrue(transpose.values().is_contiguous()
+                                or transpose.values().transpose(-2 - n_dense, -1 - n_dense).is_contiguous())
+                torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values().contiguous(),
+                                                              transpose.shape, transpose.layout)
+            else:
+                torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values(),
+                                                              transpose.shape, transpose.layout)
 
 
-        for shape, index_dtype in itertools.product(
-                [(10, 5), (10, 10)],
-                [torch.int32, torch.int64]):
-            run_test(shape, 0, index_dtype)
-            run_test(shape, max(shape), index_dtype)
-            run_test(shape, shape[0] * shape[1], index_dtype)
+
+        def check_good_transpose(subject, subject_dense, dim0, dim1, expected_layout):
+            transpose = subject.transpose(dim0, dim1)
+            # correct layout
+            self.assertEqual(transpose.layout, expected_layout)
+            # transpose must be return a view
+            _check_transpose_view(subject, transpose)
+            # result uses unsafe construction, so we check invariants
+            _check_layout_invariants(transpose)
+            self.assertEqual(transpose.to_dense(), subject_dense.transpose(dim0, dim1))
+
+            round_trip = transpose.transpose(dim0, dim1)
+            self.assertEqual(round_trip.layout, subject.layout)
+            # transpose must be return a view
+            _check_transpose_view(subject, round_trip)
+            # result uses unsafe construction, so we check invariants
+            _check_layout_invariants(round_trip)
+            self.assertEqual(round_trip.to_dense(), subject_dense)
+
+        def check_same_dim_transpose(subject, subject_dense, dim):
+            transpose = subject.transpose(dim, dim)
+            # correct layout
+            self.assertEqual(transpose.layout, subject.layout)
+            # transpose must be return a view
+            _check_transpose_view(subject, transpose)
+            # result uses unsafe construction, so we check invariants
+            _check_layout_invariants(transpose)
+            self.assertEqual(transpose.to_dense(), subject_dense)
+
+        def check_dim_type_mismatch_throws(subject, name0, dim0, name1, dim1):
+            mismatch_name = f"{dim0}\\({name0}\\) and {dim1}\\({name1}\\)"
+            err = r"transpose\(\): can only transpose dimensions of the same type \(Batch, Sparse, Dense\), got " + mismatch_name
+
+            with self.assertRaisesRegex(RuntimeError, err):
+                subject.transpose(dim0, dim1)
+
+        def run_test(shape, nnz, index_type, n_dense, blocksize=()):
+            subject = self.genSparseCompressedTensor(shape,
+                                                     nnz,
+                                                     layout=layout,
+                                                     device=device,
+                                                     index_dtype=index_type,
+                                                     blocksize=blocksize,
+                                                     dense_dims=n_dense,
+                                                     dtype=dtype)
+
+
+            sparse0 = len(shape) - n_dense - 1
+            sparse1 = sparse0 - 1
+
+            dense0 = sparse0 + 1 if n_dense > 0 else None
+            dense1 = dense0 + 1 if n_dense > 1 else None
+
+            n_batch = len(shape) - n_dense - 2
+            batch0 = sparse1 - 1 if n_batch > 0 else None
+            batch1 = 0 if n_batch > 1 else None
+
+            sparse_dims = (sparse0, sparse1)
+            dense_dims = (dense0, dense1)
+            batch_dims = (batch0, batch1)
+
+            named0 = [(name, d[0]) for name, d in zip(["Batch", "Sparse", "Dense"], (batch_dims, sparse_dims, dense_dims))]
+            named1 = [(name, d[1]) for name, d in zip(["Batch", "Sparse", "Dense"], (batch_dims, sparse_dims, dense_dims))]
+
+            flipped_layout = {
+                torch.sparse_csr: torch.sparse_csc,
+                torch.sparse_csc: torch.sparse_csr,
+                torch.sparse_bsr: torch.sparse_bsc,
+                torch.sparse_bsc: torch.sparse_bsr
+            }[layout]
+            if n_dense > 0:
+                # expect all transpose to throw
+                for (name0, dim0), (name1, dim1) in itertools.product(named0, named1):
+                    msg = r"transpose\(\): hybrid sparse compressed tensors with dense dimensions are not supported"
+                    if (dim0 is not None) and (dim1 is not None):
+                        with self.assertRaisesRegex(RuntimeError, msg):
+                            subject.transpose(dim0, dim1)
+            else:
+                subject_dense = subject.to_dense()
+                for (name0, dim0), (name1, dim1) in itertools.product(named0, named1):
+                    if dim0 is not None:
+                        check_same_dim_transpose(subject, subject_dense, dim0)
+
+                        if dim1 is not None:
+                            if name0 == name1:
+                                expected_layout = flipped_layout if name0 == "Sparse" else layout
+                                check_good_transpose(subject, subject_dense, dim0, dim1, expected_layout)
+                            else:
+                                check_dim_type_mismatch_throws(subject, name0, dim0, name1, dim1)
+
+        # batch/sparse, sparse/dense only and full hybrid cases
+        shape_ndense = list(itertools.product([(2, 4, 6, 2), (10, 6, 4, 2), (2, 4, 4, 2, 6)], [0, 1, 2]))
+        # sparse only cases
+        shape_ndense += [[(4, 8), 0], [(2, 2), 0], [(8, 4), 0]]
+        for (shape, n_dense), index_dtype in itertools.product(shape_ndense, [torch.int32, torch.int64]):
+            n_batch = len(shape) - n_dense - 2
+            sparse_shape = shape[n_batch: n_batch + 2]
+            if layout in (torch.sparse_bsr, torch.sparse_bsc):
+                # for blocked all combinations of 2,1 shoudl be valid blocksizes
+                run_test(shape, 0, index_dtype, n_dense, blocksize=(2, 2))
+                run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(2, 2))
+                run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense, blocksize=(2, 2))
+                # repeat the realistic sparseity case with varried block sizes
+                run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(2, 1))
+                run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(1, 2))
+                run_test(shape, max(sparse_shape), index_dtype, n_dense, blocksize=(1, 1))
+            else:
+                run_test(shape, 0, index_dtype, n_dense)
+                run_test(shape, max(sparse_shape), index_dtype, n_dense)
+                run_test(shape, sparse_shape[0] * sparse_shape[1], index_dtype, n_dense)
 
     # TODO: This is a stopgap for a rigorous extension of our autograd tests
     # to test the functionality of detach
