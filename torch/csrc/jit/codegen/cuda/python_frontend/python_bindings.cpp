@@ -1138,6 +1138,8 @@ void initNvFuserPythonBindings(PyObject* module) {
                 dtype));                                                    \
         return output;                                                      \
       },                                                                    \
+      py::arg("arg"),                                                       \
+      py::arg("dtype"),                                                     \
       py::return_value_policy::reference);                                  \
   nvf_ops.def(                                                              \
       op_str,                                                               \
@@ -1156,6 +1158,8 @@ void initNvFuserPythonBindings(PyObject* module) {
             dtype));                                                        \
         return output;                                                      \
       },                                                                    \
+      py::arg("arg"),                                                       \
+      py::arg("dtype"),                                                     \
       py::return_value_policy::reference);
 
   NVFUSER_PYTHON_BINDING_CAST_OP("cast", castOp)
