@@ -38,7 +38,7 @@ jobs:
           use-gha: true
 
       - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@cache-conda
         with:
           python-version: 3.9
 
