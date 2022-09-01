@@ -428,6 +428,7 @@ class GenLazyNativeFuncDefinition:
                         f"{self.backend_namespace}::{self.get_tensor_or_wrap_number}({arg.name}, *common_device);"
                     )
             elif isinstance(arg.lazy_type, OptionalCType):
+                assert arg.lazy_type.elem == BaseCType(getValueT()), arg.lazy_type.elem
                 # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
                 # until we encounter a real world example.
                 lazy_tensor_decls.append(
