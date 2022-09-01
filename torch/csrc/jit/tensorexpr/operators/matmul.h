@@ -9,7 +9,8 @@ namespace tensorexpr {
 
 bool mkldnnPrepackedLinearIsSupported(
     const TensorInfo& input,
-    const TensorInfo& weight);
+    const TensorInfo& weight,
+    const TensorInfo& output);
 Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
