@@ -17,6 +17,7 @@ from torch import nn
 import unittest
 import torch._prims as prims
 import contextlib
+import weakref
 import copy
 
 class FakeTensorTest(TestCase):
@@ -477,14 +478,15 @@ class FakeTensorConverterTest(TestCase):
 
     def test_no_ref_cycle(self):
         x = torch.rand([4])
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
         y = mode.from_tensor(x)
-        assert mode is torch._prims.get_prim_fake_mode()
         self.assertEqual(len(mode.fake_tensor_converter.tensor_memo), 1)
+        mode_weak = weakref.ref(mode)
+        y_weak = weakref.ref(mode)
         del mode
         del y
-        new_mode = torch._prims.get_prim_fake_mode()
-        self.assertEqual(len(new_mode.fake_tensor_converter.tensor_memo), 0)
+        assert mode_weak() is None
+        assert y_weak() is None
 
 
 class FakeTensorOperatorInvariants(TestCase):
