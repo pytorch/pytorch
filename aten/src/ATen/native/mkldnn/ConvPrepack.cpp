@@ -319,54 +319,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
     mkldnn_output.feed_from(y);
   }
 }
-/*
-void sum_run(ContextConv& context, const Tensor& input, const Tensor& other,
-Tensor& output) { std::vector<int64_t> output_sizes = get_output_sizes(context,
-input);
 
-  bool is_channels_last =
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  bool other_is_channels_last =
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  ideep::tag o_tag = is_channels_last ? ideep::tag::nhwc : ideep::tag::nchw;
-  ideep::tensor::desc o_desc = {
-      output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
-  ideep::tensor mkldnn_output = {o_desc, output.data_ptr()};;
-  if (is_channels_last) {
-    output.copy_(other);
-    mkldnn_convolution_out(
-        input,
-        mkldnn_output,
-        context.weight_packed_,
-        context.at_bias_,
-        context.padding_,
-        context.stride_,
-        context.dilation_,
-        output_sizes,
-        context.groups_,
-        context.attr_);
-  } else {
-    ideep::tensor y;
-    mkldnn_convolution_out(
-        input,
-        y,
-        context.weight_packed_,
-        context.at_bias_,
-        context.padding_,
-        context.stride_,
-        context.dilation_,
-        output_sizes,
-        context.groups_,
-        ideep::attr_t());
-    mkldnn_output.feed_from(y);
-    auto alpha = std::get<1>(context.attr_.get_params(0));
-    output.add_(other, alpha);
-    if (context.attr_.has_op_kind(ideep::kind::eltwise)) {
-      output.relu_();
-    }
-  }
-}
-*/
 Tensor conv_run(
     const Tensor& input,
     const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context) {

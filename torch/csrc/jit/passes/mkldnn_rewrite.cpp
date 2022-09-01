@@ -374,7 +374,6 @@ void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "After FuseEltwiseWithPackedOps, before FuseAddReluWithPackedOps\n",
       *graph);
-  // graph->dump();
   FuseAddReluWithPackedOps(graph);
   GRAPH_DEBUG(
       "After FuseAddReluWithPackedOps, before ConstantPropagation\n", *graph);
