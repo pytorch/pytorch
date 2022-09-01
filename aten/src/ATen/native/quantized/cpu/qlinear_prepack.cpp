@@ -289,14 +289,20 @@ class QLinearPackWeightInt8 final {
 
 #if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::X86) {
-      // For linear, we always use FBGEMM for X86 backend
-      // as long as it is available
-      if (at::globalContext().hasFBGEMM()) {
+      // For linear, we prefer to use FBGEMM
+#ifdef USE_FBGEMM
+      if (fbgemm::fbgemmSupportedCPU()) {
         return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
-      } else if (at::globalContext().hasMKLDNN()) {
+      }
+#endif
+#if AT_MKLDNN_ENABLED()
+      bool w_sym_quant =
+          onednn_utils::is_weight_symmetric_quant(weight, /* is_transposed_conv */false);
+      if (w_sym_quant) {
         return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
       }
-    }
+#endif
+    } // x86
 #endif
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
@@ -329,16 +335,16 @@ class QLinearPackWeightFp16 final {
     auto& ctx = at::globalContext();
 #if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::X86) {
-      // For linear, we always use FBGEMM for X86 backend
-      // as long as it is available
-      if (at::globalContext().hasFBGEMM()) {
+      // For linear, we always use FBGEMM
+#ifdef USE_FBGEMM
+      if (fbgemm::fbgemmSupportedCPU()) {
         return PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));
-      } else {
-        TORCH_CHECK(
-            false,
-            "quantized::linear_prepack_fp16 is not supported by X86"
-            " since FBGEMM is not available");
       }
+#endif
+      TORCH_CHECK(
+          false,
+          "quantized::linear_prepack_fp16 is not supported by X86 backend"
+          " since FBGEMM is not available");
     }
 #endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
 #ifdef USE_FBGEMM

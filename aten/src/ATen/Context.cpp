@@ -230,18 +230,6 @@ void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
 
-bool Context::hasFBGEMM() {
-#ifdef USE_FBGEMM
-  if (fbgemm::fbgemmSupportedCPU()) {
-    return true;
-  } else {
-    return false;
-  }
-#else
-  return false;
-#endif
-}
-
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -324,9 +312,13 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     }
 #endif
 
-    if (hasFBGEMM() || hasMKLDNN()) {
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kX86);
+#elif defined(USE_FBGEMM)
+    if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
     }
+#endif
 
     return engines;
   }();

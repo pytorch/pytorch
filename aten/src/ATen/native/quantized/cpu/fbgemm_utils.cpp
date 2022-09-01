@@ -446,9 +446,9 @@ int register_linear_params() {
 
 #if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
                 if (at::globalContext().qEngine() == at::QEngine::X86) {
-                  // For linear, we always use FBGEMM for X86 backend
-                  // as long as it is available
-                  if (at::globalContext().hasFBGEMM()) {
+                  // For linear, we prefer to use FBGEMM
+#if defined(USE_FBGEMM)
+                  if (fbgemm::fbgemmSupportedCPU()) {
                     if (weight.scalar_type() == at::kQInt8) {
                       return PackedLinearWeight::prepack(
                           std::move(weight), std::move(bias));
@@ -463,16 +463,18 @@ int register_linear_params() {
                           c10::toString(weight.scalar_type()),
                           " in serialized LinearPackedParams object!");
                     }
-                  } else if (at::globalContext().hasMKLDNN()) {
-                    TORCH_CHECK(
-                        weight.scalar_type() == at::kQInt8,
-                          "Unsupported data type",
-                          c10::toString(weight.scalar_type()),
-                          " in serialized LinearPackedParams object!");
-                    return PackedLinearWeightsOnednn::prepack(
-                        std::move(weight), std::move(bias));
                   }
-                }
+#endif
+#if AT_MKLDNN_ENABLED()
+                  TORCH_CHECK(
+                    weight.scalar_type() == at::kQInt8,
+                      "Unsupported data type",
+                      c10::toString(weight.scalar_type()),
+                      " in serialized LinearPackedParams object!");
+                  return PackedLinearWeightsOnednn::prepack(
+                      std::move(weight), std::move(bias));
+#endif
+                } // X86 backend
 #endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
 
 #ifdef USE_FBGEMM

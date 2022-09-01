@@ -147,4 +147,37 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       int64_t output_zero_point);
 };
 
+namespace onednn_utils {
+
+// ONEDNN requires symmetric quantization of weight
+// Use this util function to check.
+static bool is_weight_symmetric_quant(
+      const at::Tensor& weight,
+      bool is_transposed_conv) {
+  bool is_symmetric = true;
+  const auto qtype = weight.qscheme();
+  if (qtype == c10::kPerTensorAffine) {
+    is_symmetric &= (weight.q_zero_point() == 0);
+  } else if (qtype == c10::kPerChannelAffine) {
+    if (is_transposed_conv) {
+      // This case is currently not supported in PyTorch
+      // but we do not want to raise an error in this util function.
+      is_symmetric = false;
+    } else {
+      auto output_channels = weight.size(0);
+      for (int i = 0; i < output_channels; ++i) {
+        auto zp = weight.q_per_channel_zero_points()[i].item<int32_t>();
+        is_symmetric &= (zp == 0);
+      }
+    }
+  } else {
+    // This case is currently not supported in PyTorch
+      // but we do not want to raise an error in this util function.
+    is_symmetric = false;
+  }
+  return is_symmetric;
+}
+
+} // onednn_utils
+
 #endif // #if AT_MKLDNN_ENABLED()

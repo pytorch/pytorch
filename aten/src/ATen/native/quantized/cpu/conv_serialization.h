@@ -333,10 +333,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
 #if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
   if (ctx.qEngine() == at::QEngine::X86) {
+#if defined(USE_FBGEMM) && AT_MKLDNN_ENABLED()
     bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
-    bool prefer_fbgemm = no_vnni || groups > 100;
-    if (ctx.hasFBGEMM() &&
-        ((ctx.hasMKLDNN() && prefer_fbgemm) || !ctx.hasMKLDNN())) {
+    bool w_sym_quant =
+        onednn_utils::is_weight_symmetric_quant(weight.value(), transpose);
+    bool prefer_fbgemm = no_vnni || (groups > 100) || !w_sym_quant;
+    if (!fbgemm::fbgemmSupportedCPU()) prefer_fbgemm = false;
+    if (prefer_fbgemm) {
       return PackedConvWeight<kSpatialDim>::prepack(
         weight.value(),
         bias,
@@ -347,7 +350,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         groups,
         transpose
       );
-    } else if (ctx.hasMKLDNN()) {
+    } else if (w_sym_quant) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
         weight.value(),
         bias,
@@ -359,8 +362,33 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         transpose
       );
     }
-  }
-#endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
+#elif defined(USE_FBGEMM)
+    if (fbgemm::fbgemmSupportedCPU()) {
+      return PackedConvWeight<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+    }
+#else
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+#endif
+  } // x86
+#endif
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {

@@ -55,7 +55,6 @@ class TORCH_API Context {
   static bool isPinnedPtr(void* data) {
     return detail::getCUDAHooks().isPinnedPtr(data);
   }
-  static bool hasFBGEMM();
   static bool hasOpenMP();
   static bool hasMKL();
   static bool hasLAPACK();
@@ -354,10 +353,6 @@ static inline size_t getNumGPUs() {
   } else {
     return 0;
   }
-}
-
-static inline bool hasFBGEMM() {
-  return globalContext().hasFBGEMM();
 }
 
 static inline bool hasOpenMP() {
