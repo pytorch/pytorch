@@ -1,13 +1,19 @@
 #ifndef ATOMIC_ADD_FLOAT
 #define ATOMIC_ADD_FLOAT
 
-#if (defined(__x86_64__) || defined(__i386__))
+#if (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__))
 #include <ATen/native/cpu/Intrinsics.h>
-#else
-#define _mm_pause()
 #endif
 
 #include <atomic>
+
+#ifdef __aarch64__
+static __inline void _mm_pause() {
+  __asm__ __volatile__("yield;" : : : "memory");
+}
+#else
+#define _mm_pause()
+#endif
 
 static inline void cpu_atomic_add_float(float* dst, float fvalue)
 {
