@@ -24,6 +24,7 @@ enum class RecordType {
   Scalar,
   Start,
   VarianceOp,
+  VarianceMeanOp,
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -1009,28 +1010,28 @@ struct StartRecord : RecordFunctor {
   virtual void operator()(FusionDefinition& fd) final {}
 };
 
-//! Specialized Record Functor for the FusionDefinition's var op.
+//! Specialized Record Functors for Normalization based ops.
 
-struct VarianceOpRecord : RecordFunctor {
-  VarianceOpRecord(
-      std::vector<State> _args,
-      std::vector<State> _outputs,
+struct NormOpRecord : RecordFunctor {
+  NormOpRecord(
+      std::vector<State> args,
+      std::vector<State> outputs,
+      std::string name,
+      RecordType type,
       std::vector<int>& axes,
       int64_t correction,
       bool keep_dim)
       : RecordFunctor(
-            std::move(_args),
-            std::move(_outputs),
-            "ops.var",
-            RecordType::VarianceOp),
+            std::move(args),
+            std::move(outputs),
+            name,
+            type),
         axes_(axes),
         correction_(correction),
         keep_dim_(keep_dim) {}
-  virtual ~VarianceOpRecord() = default;
-  virtual RecordFunctor* clone() final {
-    return new VarianceOpRecord(*this);
-  }
-
+  virtual ~NormOpRecord() = default;
+  virtual RecordFunctor* clone() = 0;
+  
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
   //! Child specific hash function in lower 32 bits.
@@ -1050,7 +1051,7 @@ struct VarianceOpRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const VarianceOpRecord*>(&other)) {
+    if (auto child_ptr = dynamic_cast<const NormOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       result = result && (correction_ == child_ptr->correction_);
       result = result && (keep_dim_ == child_ptr->keep_dim_);
@@ -1068,15 +1069,11 @@ struct VarianceOpRecord : RecordFunctor {
     }
     return result;
   }
+ 
+  //! Each NormOp Child should define the operator() to build the IR 
+  virtual void operator()(FusionDefinition& fd) = 0;
 
-  virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
-    auto output =
-        torch::jit::fuser::cuda::variance(arg, axes_, correction_, keep_dim_);
-    fd.setFusionState(outputs_.at(0).index, output);
-  }
-
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", axes=[";
     bool first_arg = true;
@@ -1096,7 +1093,7 @@ struct VarianceOpRecord : RecordFunctor {
     }
   }
 
- private:
+ protected:
   //! Dimensions of tensor to reduce for variance calculation
   std::vector<int> axes_;
   //! Bessel's correction value
@@ -1105,35 +1102,62 @@ struct VarianceOpRecord : RecordFunctor {
   bool keep_dim_;
 };
 
-/*struct VarianceMeanOpRecord : RecordFunctor {
-  VarianceMeanOpRecord(
-      std::vector<size_t> _args,
-      std::vector<size_t> _outputs,
-      std::vector<int>& dims,
+struct VarianceOpRecord : NormOpRecord {
+  VarianceOpRecord(
+      std::vector<State> args,
+      std::vector<State> outputs,
+      std::vector<int>& axes,
       int64_t correction,
-      bool keepdim)
-      : RecordFunctor(std::move(_args), std::move(_outputs)),
-        dims_(dims),
-        correction_(correction),
-        keepdim_(keepdim) {}
-  virtual ~VarianceMeanOpRecord() = default;
-
-  void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
-    auto output = torch::jit::fuser::cuda::variance_mean(
-        arg, dims_, correction_, keepdim_);
-    fd.setFusionState(outputs.at(0), output.var);
-    fd.setFusionState(outputs.at(1), output.mean);
+      bool keep_dim)
+      : NormOpRecord(
+            std::move(args),
+            std::move(outputs),
+            "ops.var",
+            RecordType::VarianceOp,
+            axes,
+            correction,
+            keep_dim) {}
+  virtual ~VarianceOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new VarianceOpRecord(*this);
   }
 
- private:
-  //! Dimensions of tensor to reduce for variance calculation
-  std::vector<int> dims_;
-  //! Bessel's correction value
-  int64_t correction_;
-  //! Indicates whether to keep the reduced dimension(s).
-  bool keepdim_;
-};*/
+  virtual void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
+    auto output = Nvf::variance(arg, axes_, correction_, keep_dim_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+};
+
+//! VarianceMean requires a separate Record because nvFuser defines the output
+//! of var_mean as a custom struct.  
+struct VarianceMeanOpRecord : NormOpRecord {
+  VarianceMeanOpRecord(
+      std::vector<State> args,
+      std::vector<State> outputs,
+      std::vector<int>& axes,
+      int64_t correction,
+      bool keep_dim)
+      : NormOpRecord(
+            std::move(args),
+            std::move(outputs),
+            "ops.var_mean",
+            RecordType::VarianceMeanOp,
+            axes,
+            correction,
+            keep_dim) {}
+  virtual ~VarianceMeanOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new VarianceMeanOpRecord(*this);
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
+    auto output = Nvf::variance_mean(arg, axes_, correction_, keep_dim_);
+    fd.setFusionState(outputs_.at(0).index, output.var);
+    fd.setFusionState(outputs_.at(1).index, output.mean);
+  }
+};
 
 } // namespace nvfuser
 

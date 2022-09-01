@@ -1184,26 +1184,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("correction"),
       py::arg("keepdim") = false,
       py::return_value_policy::reference);
-
-  /*nvf_ops.def(
+  nvf_ops.def(
       "var_mean",
       [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor* arg,
-         std::vector<int>& dims,
+         nvfuser::Tensor arg,
+         std::vector<int>& axes,
          int64_t correction,
          bool keepdim) -> decltype(auto) {
-        nvfuser::Tensor* var = self.fusion_definition->defineTensor();
-        nvfuser::Tensor* mean = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::VarianceMeanOpRecord(
-            {arg->index},
-            {var->index, mean->index},
-            dims,
+        FUSER_PERF_SCOPE("Operators.var_mean");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor var = fd->defineTensor();
+        nvfuser::Tensor mean = fd->defineTensor();
+        fd->defineRecord(new nvfuser::VarianceMeanOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(var()), fd->recordingState(mean())},
+            axes,
             correction,
             keepdim));
         return std::make_tuple(var, mean);
       },
       py::return_value_policy::reference);
-  */
   nvf_ops.def(
       "broadcast_in_dim",
       [](nvfuser::FusionDefinition::Operators& self,
