@@ -173,7 +173,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         graph = self._check_model(m, x)
                         if enabled:
-                            self.assertFused(graph, ['aten::conv2d', 'aten::' + op_name])
+                            self.assertFused(graph, ['aten::conv2d', op_name])
                             self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
                         else:
                             self.assertGraphContains(graph, kind='aten::conv2d')
