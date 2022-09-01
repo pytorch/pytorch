@@ -199,6 +199,7 @@ class StreamSynchronizations:
     def __init__(self):
         self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
         self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
+        self.host_sync_state: Dict[StreamId, SeqNum] = {}
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
         if stream not in self.current_sync_states:
@@ -252,7 +253,7 @@ class StreamSynchronizations:
                 )
             )
         else:
-            self.current_sync_states[stream] = {}
+            self.current_sync_states[stream] = self.host_sync_state.copy()
 
     def create_event(self, event: EventId) -> None:
         self._ensure_event_does_not_exist(event)
@@ -271,13 +272,43 @@ class StreamSynchronizations:
         self._ensure_stream_exists(stream)
         self.recorded_sync_states[event] = self.current_sync_states[stream].copy()
 
-    def state_wait_for_event(self, stream: StreamId, event: EventId) -> None:
-        self._ensure_event_exists(event)
+    def _state_wait_for_other(
+        self, state: Dict[StreamId, SeqNum], other: Dict[StreamId, SeqNum]
+    ) -> None:
+        for stream, seq_num in other.items():
+            state[stream] = max(state.get(stream, -1), seq_num)
+
+    def stream_wait_for_event(self, stream: StreamId, event: EventId) -> None:
         self._ensure_stream_exists(stream)
-        for other_stream, seq_num in self.recorded_sync_states[event].items():
-            self.current_sync_states[stream][other_stream] = max(
-                self.current_sync_states[stream].get(other_stream, -1), seq_num
-            )
+        self._ensure_event_exists(event)
+        self._state_wait_for_other(
+            self.current_sync_states[stream], self.recorded_sync_states[event]
+        )
+
+    def all_streams_wait_for_event(self, event: EventId) -> None:
+        self._ensure_event_exists(event)
+        for stream in self.current_sync_states.keys():
+            self.stream_wait_for_event(stream, event)
+
+        self._state_wait_for_other(
+            self.host_sync_state, self.recorded_sync_states[event]
+        )
+
+    def all_streams_wait_for_stream(self, stream: StreamId) -> None:
+        self._ensure_stream_exists(stream)
+        for state in self.current_sync_states.values():
+            self._state_wait_for_other(state, self.current_sync_states[stream])
+
+        self._state_wait_for_other(
+            self.host_sync_state, self.current_sync_states[stream]
+        )
+
+    def all_streams_sync_to_seq_num(self, seq_num: SeqNum) -> None:
+        for stream in self.current_sync_states.keys():
+            self.host_sync_state[stream] = seq_num
+
+        for state in self.current_sync_states.values():
+            self._state_wait_for_other(state, self.host_sync_state)
 
     def is_ordered_after(
         self, current_stream: StreamId, seq_num: SeqNum, other_stream: StreamId
@@ -376,7 +407,7 @@ class EventHandler:
         self.syncs.record_state(event, stream)
 
     def _handle_event_wait(self, event: EventId, stream: StreamId) -> None:
-        self.syncs.state_wait_for_event(stream, event)
+        self.syncs.stream_wait_for_event(stream, event)
 
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
@@ -388,6 +419,15 @@ class EventHandler:
 
     def _handle_stream_creation(self, stream: StreamId) -> None:
         self.syncs.create_stream(stream)
+
+    def _handle_device_synchronization(self) -> None:
+        self.syncs.all_streams_sync_to_seq_num(self.seq_num)
+
+    def _handle_stream_synchronization(self, stream: StreamId) -> None:
+        self.syncs.all_streams_wait_for_stream(stream)
+
+    def _handle_event_synchronization(self, event: EventId) -> None:
+        self.syncs.all_streams_wait_for_event(event)
 
 
 def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
@@ -471,6 +511,15 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         )
         cuda_trace.register_callback_for_cuda_stream_creation(
             self.event_handler._handle_stream_creation
+        )
+        cuda_trace.register_callback_for_cuda_device_synchronization(
+            self.event_handler._handle_device_synchronization
+        )
+        cuda_trace.register_callback_for_cuda_stream_synchronization(
+            self.event_handler._handle_stream_synchronization
+        )
+        cuda_trace.register_callback_for_cuda_event_synchronization(
+            self.event_handler._handle_event_synchronization
         )
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):

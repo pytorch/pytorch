@@ -334,6 +334,39 @@ class TestEventHandler(TestCase):
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
 
+    def test_device_synchronize(self):
+        # Tests that a device synchronization does correctly cause all streams
+        # to synchronize with each other.
+
+        iterations = 10
+        for i in range(1, iterations):
+            self.assert_good_kernel_launch(stream_id(i), read_write=[tensor_id(i)])
+
+        self.handler._handle_device_synchronization()
+        self.assert_good_kernel_launch(
+            stream_id(0), read_write=[tensor_id(i) for i in range(1, iterations)]
+        )
+
+    def test_stream_synchronize(self):
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+        self.handler._handle_stream_synchronization(stream_id(1))
+
+        self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
+        self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
+
+    def test_event_synchronize(self):
+        # Tests that an event synchronization does correctly cause all streams to wait
+        # for a recorded event, but does not guarantee synchronization with the current
+        # state of the stream that recorded the event.
+
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+        self.handler._handle_event_record(event_id(1), stream_id(1))
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(2)])
+
+        self.handler._handle_event_synchronization(event_id(1))
+        self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(2)])
+
 
 class TestMessages(TestCase):
     def setUp(self):
