@@ -200,8 +200,8 @@ class TestPrims(TestCase):
             execute(gm, a, a, a, executor="strictly_nvfuser")
 
         # Should pass with partitioned executor
-        # out = execute(gm, executor="nvfuser")
-        # self.assertEqual(out, func())
+        out = execute(gm, executor="nvfuser")
+        self.assertEqual(out, func())
 
     @onlyCUDA
     @skipCUDAIfRocm

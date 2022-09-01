@@ -212,6 +212,12 @@ def maybe_partition_graph(gm: GraphModule):
     )
     any_unsupported |= len(call_function_nodes) == 0
 
+    # When there are constant tensors in the graph, we can't partition it
+    # because deepcopy fails. Here we just return the original graph to be
+    # executed by eager mode
+    if len(list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))) == 0:
+        return gm, True
+
     if any_unsupported:
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
