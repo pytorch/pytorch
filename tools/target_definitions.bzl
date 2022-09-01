@@ -204,6 +204,7 @@ def add_torch_libs():
             ("llvm-fb", None, "LLVMipo"),
         ] + ([("openmpi", None, "openmpi")] if use_mpi else []),
         compiler_flags = compiler_flags_cpu,
+        supports_python_dlopen = True,
         **common_flags
     )
 
