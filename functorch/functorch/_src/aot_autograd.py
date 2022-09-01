@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._decomp import get_decompositions
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.nn.utils import stateless
@@ -21,7 +22,6 @@ from functorch.experimental import functionalize
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-from torch._decomp import get_decompositions
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -278,17 +278,26 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
+pre_autograd_decompositions = get_decompositions(
+    {
+        aten.upsample_bilinear2d.vec,
+    }
+)
+
+
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
-    pre_autograd_decomps = get_decompositions(
-        [
-            aten.upsample_bilinear2d.vec
-        ]
-    )
-    # Trace with selective decompositions before autograd
-    decomposed_forward = make_fx(flat_fn, pre_autograd_decomps)(*flat_args)
+    if config.enable_pre_autograd_decomps:
+        # Trace with decompositions before autograd so that
+        # we can generate backward function from forward decomposition
+        with torch.no_grad():
+            decomposed_forward = make_fx(flat_fn, pre_autograd_decompositions)(
+                *flat_args
+            )
 
-    joint_forward_backward = create_joint_forward_backward(decomposed_forward)
+        joint_forward_backward = create_joint_forward_backward(decomposed_forward)
+    else:
+        joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     out = flat_fn(*flat_args)
     out = pytree.tree_map(

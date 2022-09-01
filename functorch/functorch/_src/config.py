@@ -11,6 +11,8 @@ import os
 
 use_functionalize = False
 
+enable_pre_autograd_decomps = True
+
 # TODO: flip this to true by default
 # Waiting on
 #   https://github.com/pytorch/pytorch/pull/81617
