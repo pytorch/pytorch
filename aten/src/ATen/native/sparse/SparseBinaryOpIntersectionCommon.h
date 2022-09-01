@@ -106,9 +106,29 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     // If both are coalesced, search into the larger tensor is faster.
     // Same holds when both are non-coalesced.
     else {
-      return x._nnz() >= y._nnz()
-        ? std::make_tuple(x, y)
-        : std::make_tuple(y, x);
+      Tensor larger, smaller;
+      std::tie(larger, smaller) = [&]() -> std::tuple<Tensor, Tensor> {
+        return x._nnz() >= y._nnz()
+          ? std::make_tuple(x, y)
+          : std::make_tuple(y, x);
+      }();
+
+      // If under a uniform distribution it is likely to hit many elements in larger,
+      // it is best to coalesce it for better performance.
+      const auto larger_sizes = larger.sizes();
+      const auto sparse_dim_numel = std::accumulate(
+          larger_sizes.begin(),
+          larger_sizes.begin() + larger.sparse_dim(),
+          1,
+          std::multiplies<int64_t>());
+      // If nnz > prod(larger.shape[:sparse_dim]), by the pidgeonhole principle,
+      // there is at least one bucket with nnz / prod(larger.shape[:sparse_dim]) elements.
+      // It provides a lower bound for the max count in the intersection.
+      const auto max_count_lower_bound = larger._nnz() / sparse_dim_numel;
+      constexpr int64_t MAX_COPIES_PER_THREAD = 50;
+      return max_count_lower_bound > MAX_COPIES_PER_THREAD
+        ? std::make_tuple(larger.coalesce(), smaller)
+        : std::make_tuple(larger, smaller);
     }
   }();
 
@@ -394,18 +414,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  // Result is coalesced iff arguments are coalesced, conditioned on the fact
-  // that we do not check that intersection hash values are sorted and unique.
-  // <= : intersection contains only unique indices (or empty), and the algorithm's
-  // behavior is order-preserving. So, the result has only unique indices (or empty) which are sorted.
-  // => : proof by contraposition. The contrapositive statement reads
-  // `there is an uncoalesced argument => result is not coalesced`.
-  // If both arguments are uncoalesced, the result is clearly uncoalesced again
-  // thanks to the order-preserving behavior of the algorithm.
-  // Otherwise we have a coalesced argument `probably_coalesced` and an uncoalesced `source`.
-  // Since the matching beahavior of the algorithm respects the order of `source`, the result
-  // will be as coalesced as `source` is, which is uncoalesced.
-  res._coalesced_(source.is_coalesced() && probably_coalesced.is_coalesced());
+  // The algorithm implemented is source order-preserving,
+  // hence the result is coalesce as source is.
+  res._coalesced_(source.is_coalesced());
 
   return res;
 }
