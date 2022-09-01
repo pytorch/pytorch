@@ -28,7 +28,6 @@ from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -2287,7 +2286,6 @@ def batch_norm(
         return res
 
 
-@_beartype.beartype
 def _layer_norm_returns_normalized_input_mean_rstd(
     g,
     input: _C.Value,
