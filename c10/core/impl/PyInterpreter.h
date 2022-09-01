@@ -43,7 +43,8 @@ struct C10_API GPUTraceFunctionWrapper {
   using memory_deallocation_sig = void(const PyInterpreter*, uintptr_t pointer);
   using stream_creation_sig = void(const PyInterpreter*, uintptr_t stream);
   using device_synchronization_sig = void(const PyInterpreter*);
-  using stream_synchronization_sig = void(const PyInterpreter*, uintptr_t stream);
+  using stream_synchronization_sig =
+      void(const PyInterpreter*, uintptr_t stream);
   using event_synchronization_sig = void(const PyInterpreter*, uintptr_t event);
 
   event_creation_sig* event_creation_fn_;
@@ -335,8 +336,7 @@ struct C10_API PyInterpreter {
     return (*trace_gpu_functions.stream_creation_fn_)(this, stream);
   }
 
-  __ubsan_ignore_function__ void trace_gpu_device_synchronization() 
-      const {
+  __ubsan_ignore_function__ void trace_gpu_device_synchronization() const {
     return (*trace_gpu_functions.device_synchronization_fn_)(this);
   }
 
