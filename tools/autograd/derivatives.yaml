@@ -2982,3 +2982,6 @@
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
+
+- name: special_prime_number(Tensor n) -> Tensor
+  n: not_implemented("prime_number")

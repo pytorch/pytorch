@@ -1401,5 +1401,17 @@ inline Tensor spherical_bessel_j0(const Tensor& x) {
 inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
 }
+
+/// :math:`n^{\textup{th}}` prime number.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.prime_number.
+inline Tensor prime_number(const Tensor& n) {
+  return torch::special_prime_number(n);
+}
+
+inline Tensor& prime_number(Tensor& out, const Tensor& n) {
+  return torch::special_prime_number_out(out, n);
+}
 } // namespace special
 } // namespace torch

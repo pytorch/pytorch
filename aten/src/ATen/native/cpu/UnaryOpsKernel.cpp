@@ -24,6 +24,8 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/irange.h>
 
+#include <ATen/native/special_functions/prime_number.h>
+
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
@@ -654,6 +656,14 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     });
 } // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
 
+static void special_prime_number_cpu_kernel(TensorIteratorBase &iterator) {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "prime_number_cpu_kernel", [&]() {
+    cpu_kernel(iterator, [](scalar_t n) {
+      return at::native::special_functions::prime_number<scalar_t>(static_cast<unsigned int>(n));
+    });
+  });
+} // void cos_pi_cpu_kernel(TensorIteratorBase &iterator)
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -752,6 +762,7 @@ REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+REGISTER_DISPATCH(special_prime_number_stub, &CPU_CAPABILITY::special_prime_number_cpu_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

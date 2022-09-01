@@ -59,6 +59,7 @@ __all__ = [
     'xlog1py',
     'xlogy',
     'zeta',
+    'prime_number'
 ]
 
 Tensor = torch.Tensor
@@ -1277,6 +1278,20 @@ Spherical Bessel function of the first kind of order :math:`0`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+prime_number = _add_docstr(_special.special_prime_number,
+                              r"""
+prime_number(n, *, out=None) -> Tensor
+
+:math:`n^{\textup{th}}` prime number.
+
+""" + r"""
+Args:
+    n (Tensor): input tensor.
 
 Keyword args:
     {out}

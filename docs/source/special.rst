@@ -25,6 +25,7 @@ Functions
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
 .. autofunction:: gammaln
+.. autofunction:: prime_number
 .. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1

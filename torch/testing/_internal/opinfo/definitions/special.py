@@ -113,6 +113,17 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     )
 
 
+def prime_number(n: int) -> float:
+    summation = 1
+
+    for index in range(2, n + 1):
+        summation = summation + (1 / index)
+
+    return summation
+
+
+prime_number_ref = np.vectorize(prime_number)
+
 op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
@@ -645,6 +656,20 @@ op_db: List[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.prime_number",
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-05, rtol=1e-05),
+                    torch.float64: tol(atol=1e-05, rtol=1e-05),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=prime_number_ref,
         supports_autograd=False,
     ),
 ]

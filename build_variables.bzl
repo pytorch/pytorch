@@ -1187,6 +1187,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+    "aten/src/ATen/native/cpu/prime_number.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
