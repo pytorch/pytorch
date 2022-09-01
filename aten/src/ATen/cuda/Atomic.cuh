@@ -256,7 +256,7 @@ static inline __device__ double atomicAdd(double* address, double val)
  * minimal.
  */
 
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
+#if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  double atomicAdd(double *address, double val) { }
 #endif
