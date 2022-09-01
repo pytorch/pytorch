@@ -97,8 +97,7 @@ TORCH_LIBRARY(c10d, m) {
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
-      "reduce_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
+      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "gather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
