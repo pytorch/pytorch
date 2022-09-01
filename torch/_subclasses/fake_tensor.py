@@ -207,7 +207,7 @@ class FakeTensorConverter(object):
             if make_constant:
                 self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
-            assert make_constant
+            assert not make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         if t.grad is not None:
             assert not make_constant
