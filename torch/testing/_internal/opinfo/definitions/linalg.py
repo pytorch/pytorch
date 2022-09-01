@@ -1312,6 +1312,18 @@ op_db: List[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.skip("Skipped, see https://github.com//issues/84192"),
+                "TestGradients",
+                "test_fn_gradgrad",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped, see https://github.com//issues/84192"),
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
+            ),
         ),
     ),
     OpInfo(
