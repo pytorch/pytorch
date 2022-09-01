@@ -128,6 +128,9 @@ ALLOW_LIST = [
     ("aten::nanmean.out", datetime.date(2022, 8, 30)),
     ("aten::nansum", datetime.date(2022, 8, 30)),
     ("aten::nansum.out", datetime.date(2022, 8, 30)),
+    # nested tensor temporary auxiliary ops
+    ("aten::_reshape_nested", datetime.date(9999, 1, 1)),
+    ("aten::_reshape_nested_backward", datetime.date(9999, 1, 1)),
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     ("aten::mps_linear", datetime.date(9999, 1, 1)),
     ("aten::_mps_linear", datetime.date(9999, 1, 1)),
