@@ -22,11 +22,11 @@
 /aten/src/ATen/native/tags.yaml @anjali411
 
 # Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai
-/aten/src/ATen/native/quantized @vkuzo @jerryzh168
-/aten/src/ATen/native/quantized/cpu @vkuzo @jerryzh168
-/aten/src/ATen/native/quantized/cuda @vkuzo @jerryzh168
-/aten/src/ATen/native/quantized/cudnn @vkuzo @jerryzh168
+/aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda @vkuzo @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized/cudnn @vkuzo @jerryzh168 @dzdang
 /test/test_quantization.py @jerryzh168
 /test/ao/ @jerryzh168 @z-a-f @hdcharles
 /test/quantization/ @jerryzh168 @z-a-f
