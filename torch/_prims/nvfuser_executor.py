@@ -54,7 +54,11 @@ def to_nvfuser_template_args(args):
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
-    # PROTOTYPE nvfuser executor
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "Attempting to use nvFuser trace executor but CUDA is not available!"
+        )
+
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
         if node.op == "call_function" and "getitem" in node.name:
@@ -146,11 +150,6 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
 
 def nvfuser_execute(gm: GraphModule, *args):
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "Attempting to use nvFuser trace executor but CUDA is not available!"
-        )
-
     flat_args, _ = tree_flatten(args)
 
     # Construction of the fusion is expensive and cached based on the GraphModule
