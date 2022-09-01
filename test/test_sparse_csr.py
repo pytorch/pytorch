@@ -2553,8 +2553,8 @@ class TestSparseCSR(TestCase):
         """
 
         # adjust this block as support is added
-        supports_batched_from_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr)
-        supports_batched_to_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr)
+        supports_batched_from_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
+        supports_batched_to_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
         supports_hybrid_from_sparse = ()
         supports_hybrid_to_sparse = ()
 
