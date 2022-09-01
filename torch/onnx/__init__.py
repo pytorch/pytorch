@@ -25,7 +25,6 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
-    symbolic_registry,
     utils,
 )
 from ._exporter_states import ExportTypes, SymbolicContext
@@ -42,11 +41,11 @@ from .utils import (
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
 )
+from torch.onnx._internal import registration as _registration
 
 __all__ = [
     # Modules
     "symbolic_helper",
-    "symbolic_registry",
     "utils",
     "errors",
     # All opsets

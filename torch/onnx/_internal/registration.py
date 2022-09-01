@@ -10,32 +10,15 @@ Function overloads are not allowed. Custom op overrides are supported.
 """
 
 import functools
+import importlib
+import inspect
+import itertools
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
-from torch.onnx import errors
+from torch.onnx import _constants, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
-
-
-# class _SymbolicFunctionSignature(Hashable):
-#     """A hashable class for storing the argument signature of a symbolic function."""
-
-#     def __init__(self, name: str, opset: int, arg_count: Optional[int]) -> None:
-#         self.name = name
-#         self.opset = int
-#         self.arg_count = arg_count
-
-#     def __hash__(self) -> int:
-#         return hash((self.opset, self.arg_count))
-
-#     def __eq__(self, other: object) -> bool:
-#         if not isinstance(other, _SymbolicFunctionSignature):
-#             return False
-#         return self.opset == other.opset and self.arg_count == other.arg_count
-
-#     def __repr__(self) -> str:
-#         return f"SymbolicFunctionSignature({self.name}, opset={self.opset}, arg_count={self.arg_count})"
 
 OpsetVersion = int
 
@@ -77,7 +60,7 @@ class _SymbolicFunctionGroup:
         self._merged.update(self._overrides)
         self.get.cache_clear()
 
-    @functools.cache
+    @functools.lru_cache(maxsize=None)
     def get(self, opset: OpsetVersion) -> Optional[Callable]:
         """Find the most recent version of the function."""
         # Remember to clear the cache when the merged dictionary is updated.
@@ -101,6 +84,7 @@ class _SymbolicFunctionGroup:
                 f"Symbolic function '{self._name}' already registered for opset {opset}"
             )
         self._functions[opset] = func
+        self._update_merged()
 
     def add_custom(self, func: Callable, opset: OpsetVersion) -> None:
         """Adds a custom symbolic function.
@@ -126,6 +110,10 @@ class _SymbolicFunctionGroup:
         del self._overrides[opset]
         self._update_merged()
 
+    def get_min_supported(self) -> OpsetVersion:
+        """Returns the lowest built-in opset version supported by the function."""
+        return min(self._functions)
+
 
 class SymbolicRegistry:
     """Registry for symbolic functions.
@@ -137,8 +125,12 @@ class SymbolicRegistry:
 
     def __init__(self) -> None:
         self._registry: Dict[str, _SymbolicFunctionGroup] = {}
-        # Store the discovered functions for delayed registration.
-        self._collected_symbolic_functions: List[Tuple[str, OpsetVersion, Callable, bool]] = []
+        # Whether the registry has not been initialized with builtin symbolic functions.
+        self._uninitialized = True
+
+    @property
+    def uninitialized(self) -> bool:
+        return self._uninitialized
 
     def register(
         self, name: str, opset: OpsetVersion, func: Callable, custom=False
@@ -157,7 +149,8 @@ class SymbolicRegistry:
         if custom:
             symbolic_functions.add_custom(func, opset)
         else:
-            self._collected_symbolic_functions.append((name, opset, func, custom))
+            self._uninitialized = False
+            symbolic_functions.add(func, opset)
 
     def unregister(self, name: str, opset: OpsetVersion) -> None:
         """Unregisters a symbolic function.
@@ -172,16 +165,19 @@ class SymbolicRegistry:
 
     def get_function_group(self, name: str) -> _SymbolicFunctionGroup:
         """Returns the function group for the given name."""
-
-        # Delay register all built-in symbolic functions.
-        if self._collected_symbolic_functions:
-            for name, opset, func, custom in self._collected_symbolic_functions:
-                self.register(name, opset, func, custom)
-            self._collected_symbolic_functions.clear()
-
         if name not in self._registry:
             raise ValueError(f"No symbolic function registered for '{name}'")
         return self._registry[name]
+
+    def is_registered_op(self, name: str, version: int) -> bool:
+        functions = self.get_function_group(name)
+        if functions is None:
+            return False
+        return functions.get(version) is not None
+
+    def all_functions(self) -> Set[str]:
+        """Returns the set of all registered function names."""
+        return set(self._registry)
 
 
 @_beartype.beartype
@@ -238,6 +234,51 @@ def custom_onnx_symbolic(
         The decorator.
     """
     return onnx_symbolic(name, opset, decorate, custom=True)
+
+
+def discover_and_register_all_symbolic_opsets():
+    """Discover all symbolic functions.
+
+    Opset 9 is the base version. It is selected as the base version because
+        1. It is the first opset version supported by PyTorch export.
+        2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
+            that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
+            we chose to handle them as special cases separately.
+
+    Backward support for opset versions beyond opset 7 is not in our roadmap.
+
+    For opset versions other than 9, by default they will inherit the symbolic functions defined in
+    symbolic_opset9.py.
+
+    To extend support for updated operators in different opset versions on top of opset 9,
+    simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
+    Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+    """
+    global registry
+    if not registry.uninitialized:
+        return
+
+    for opset_version in itertools.chain(
+        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
+    ):
+        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset_version}")
+        _register_module(module, opset_version)
+
+
+def _register_module(module, opset_version: int):
+    global registry
+    members = inspect.getmembers(module)
+    for name, obj in members:
+        if isinstance(obj, type) and hasattr(obj, "domain"):
+            # Symbolic functions in domains other than aten
+            ops = inspect.getmembers(obj, predicate=inspect.isfunction)
+            for op in ops:
+                registry.register(f"{obj.domain}::{op[0]}", opset_version, op[1])  # type: ignore[attr-defined]
+
+        elif inspect.isfunction(obj):
+            if name in {"_len", "_list", "_any", "_all"}:
+                name = name[1:]
+            registry.register(f"aten::{name}", opset_version, obj)
 
 
 # The registry for all symbolic functions.

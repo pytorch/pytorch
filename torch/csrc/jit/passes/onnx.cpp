@@ -243,7 +243,8 @@ void NodeToONNX(
     std::unordered_map<Value*, Value*>& env) {
   py::object onnx = py::module::import("torch.onnx");
   py::object onnx_globals = py::module::import("torch.onnx._globals");
-  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
+  py::object onnx_registration =
+      py::module::import("torch.onnx._internal.registration");
 
   // Setup all the lambda helper functions.
 
@@ -452,10 +453,11 @@ void NodeToONNX(
 
     py::object opset_version =
         onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version");
-    py::object is_registered_op = onnx_registry.attr("is_registered_op")(
-        "PythonOp", "prim", opset_version);
-    if (!py::hasattr(pyobj, "symbolic") &&
-        (!PyObject_IsTrue(is_registered_op.ptr()))) {
+    bool is_registered_op =
+        onnx_registration.attr("registry")
+            .attr("is_registered_op")("prim::PythonOp", opset_version)
+            .cast<bool>();
+    if (!py::hasattr(pyobj, "symbolic") && !is_registered_op) {
       // Inline the subgraph within the prim::PythonOp unless
       // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
@@ -514,8 +516,9 @@ void NodeToONNX(
       // Call the symbolic function
       // Use a little trampoline function so we can give good error messages
       // upon argument mismatch
-      onnx_registry.attr("register_op")(
-          op->name(), pyobj.attr("symbolic"), "", opset_version);
+      onnx_registration.attr("registry")
+          .attr("register")(
+              "::" + op->name(), opset_version, pyobj.attr("symbolic"));
       py::object raw_output = onnx.attr("_run_symbolic_method")(
           new_block->owningGraph(),
           op->name(),
@@ -524,7 +527,7 @@ void NodeToONNX(
 
       processSymbolicOutput(op->name(), op, raw_output);
     } else {
-      TORCH_INTERNAL_ASSERT(PyObject_IsTrue(is_registered_op.ptr()));
+      TORCH_INTERNAL_ASSERT(is_registered_op);
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
