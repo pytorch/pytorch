@@ -3625,7 +3625,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
+        @sandcastle_skip_if(BACKEND == "ucc", "flaky on PyTorch CI with timeout")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -9033,7 +9033,10 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
+        @sandcastle_skip_if(
+            BACKEND == "ucc",
+            "flaky on PyTorch CI: No such file or directory: '/tmp/checkpoint.pt'"
+        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):
 
