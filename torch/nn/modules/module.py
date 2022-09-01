@@ -21,6 +21,7 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
 
+
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -40,6 +41,7 @@ def _addindent(s_, numSpaces):
     s = '\n'.join(s)
     s = first + '\n' + s
     return s
+
 
 class _WrappedHook:
     def __init__(self, hook: Callable, module: Optional["Module"] = None):
@@ -151,6 +153,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     _global_forward_hooks[handle.id] = hook
     return handle
 
+
 def register_module_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
 ) -> RemovableHandle:
@@ -176,6 +179,7 @@ def register_module_backward_hook(
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
+
 
 def register_module_full_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
@@ -933,6 +937,7 @@ class Module:
             Parameter containing:
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
             >>> gpu1 = torch.device("cuda:1")
             >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)
@@ -1069,7 +1074,7 @@ class Module:
 
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
-            if not (isinstance(result, tuple) and all([isinstance(r, torch.Tensor) for r in result])):
+            if not (isinstance(result, tuple) and all(isinstance(r, torch.Tensor) for r in result)):
                 warnings.warn("Using non-full backward hooks on a Module that does not return a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_output. "
@@ -1079,7 +1084,7 @@ class Module:
             result = (result,)
 
         if not isinstance(inputs, torch.Tensor):
-            if not (isinstance(inputs, tuple) and all([isinstance(i, torch.Tensor) for i in inputs])):
+            if not (isinstance(inputs, tuple) and all(isinstance(i, torch.Tensor) for i in inputs)):
                 warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_input. "

@@ -35,7 +35,7 @@ For example, you can the torch.linalg.inv function will raise torch.linalg.LinAl
 a matrix is not invertible.\n \
 \n\
 Example:\n \
->>> # xdoctest: +REQUIRES(--lapac)\n \
+>>> # xdoctest: +REQUIRES(env:TORCH_DOCKTEST_LAPACK)\n \
 >>> matrix = torch.eye(3, 3)\n \
 >>> matrix[-1, -1] = 0\n \
 >>> matrix\n \

@@ -444,12 +444,6 @@ $0 = input('x')
 $1 = torch._ops.aten.detach.default($0)
 $2 = torch._ops.aten.detach.default($1)''')
 
-    def test_metadata_change_not_allowed(self) -> None:
-        x = LoggingTensor(torch.ones(1))
-        y = x.data
-        self.assertIsInstance(y, LoggingTensor)
-        self.assertRaises(RuntimeError, lambda: y.resize_(4))
-
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
@@ -1715,7 +1709,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func == torch.ops.aten.stride.default:
+                    if func == torch.ops.aten.sym_stride.default:
                         return (4, 2)
                     return NotImplemented
 
@@ -1726,13 +1720,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func == torch.ops.aten.stride.default:
+                    if func == torch.ops.aten.sym_stride.default:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.stride'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.stride()
 
             e = StridesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)

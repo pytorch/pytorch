@@ -34,6 +34,8 @@ class GruPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Train = 4u;
     static constexpr uint32_t Bidirectional = 5u;
     static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
   };
 
   /*
@@ -47,6 +49,8 @@ class GruPackedContext final : virtual public VulkanPackedContext,
     static constexpr uint32_t Train = 4u;
     static constexpr uint32_t Bidirectional = 5u;
     static constexpr uint32_t BatchFirst = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
   };
 
   static GruPackedContext pack(c10::impl::GenericList);

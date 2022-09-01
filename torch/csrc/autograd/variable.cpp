@@ -45,6 +45,8 @@ DifferentiableViewMeta::DifferentiableViewMeta(
     self_impl->set_version_counter(
         impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+    TORCH_INTERNAL_ASSERT(
+        backward_info_.value().base_.unsafeGetTensorImpl() != self_impl);
   }
   if (shared_view_info_) {
     TORCH_INTERNAL_ASSERT(
@@ -679,7 +681,12 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //       that would provide a way to recreate the grad_fn chain.
       if (view_info.has_view_fn()) {
         auto view_fn = view_info.view_fn();
-        auto diff_view = view_fn(view_info.base_);
+        Tensor diff_view;
+        {
+          // We can reach this path with grad_mode disabled, e.g. engine
+          AutoGradMode grad_mode(true);
+          diff_view = view_fn(view_info.base_);
+        }
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {
         auto fn =
