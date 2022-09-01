@@ -1056,7 +1056,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t2 = torch.zeros([1], dtype=torch.float64)
         t3 = torch.zeros([2], dtype=torch.float32)
 
-        with self.assertRaisesRegex(RuntimeError, "requires non-empty input tensor list"):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             pg.allgather([], [])
 
         with self.assertRaisesRegex(
