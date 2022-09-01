@@ -2682,7 +2682,7 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Frobenius Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self) {
@@ -2728,7 +2728,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Nuclear Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//              Just used in torch.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
