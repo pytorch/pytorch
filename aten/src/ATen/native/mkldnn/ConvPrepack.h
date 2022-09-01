@@ -20,10 +20,17 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::vector<int64_t> dilation,
     int64_t groups,
     std::vector<int64_t> input_size,
-    std::string attr);
+    std::string attr,
+    std::vector<c10::optional<at::Scalar>> scalars,
+    c10::optional<std::string> algorithm);
 
 Tensor conv_run(
     const Tensor& input,
+    const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context);
+
+Tensor& conv_sum_run(
+    const Tensor& input,
+    Tensor& other,
     const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context);
 
 ContextConv create(
@@ -39,6 +46,8 @@ ContextConv create(
 Tensor run(ContextConv& context, const Tensor& input);
 
 void run(ContextConv& context, const Tensor& input, void* output);
+
+Tensor& sum_run(ContextConv& context, const Tensor& input, Tensor& other);
 
 } // namespace convolution
 } // namespace internal

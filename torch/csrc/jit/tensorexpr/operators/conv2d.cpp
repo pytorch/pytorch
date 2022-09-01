@@ -489,6 +489,31 @@ Tensor computeMkldnnPrepackedConvRun(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeMkldnnPrepackedConvSumRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  // BufHandle ResultBuf(
+  //     "computeMkldnnPrepackedConvSumRun", outputShape, outputStrides, dtype);
+  BufHandle ResultBuf = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& other = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[2]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_mkldnn_prepacked_conv_sum_run",
+      {inp, other, prepacked},
+      {});
+  return Tensor(ResultBuf.node(), s);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

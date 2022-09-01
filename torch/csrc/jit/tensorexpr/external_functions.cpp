@@ -1434,6 +1434,28 @@ void nnc_mkldnn_prepacked_conv_run(
   context->run(x, buf_data[0]);
 }
 
+void nnc_mkldnn_prepacked_conv_sum_run(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  using namespace at::native::mkldnn;
+
+  auto tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+
+  at::Tensor& result = tensors[0];
+  const at::Tensor& x = tensors[1];
+  // const at::Tensor& other = tensors[2];
+  auto context = reinterpret_cast<ConvOpContext*>(buf_data[3]);
+
+  context->sum_run(x, result);
+}
+
 #endif // AT_MKLDNN_ENABLED()
 
 #ifdef USE_XNNPACK
@@ -1618,6 +1640,9 @@ const static RegisterNNCExternalFunction nnc_embedding(
 const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
     "nnc_mkldnn_prepacked_conv_run",
     nnc_mkldnn_prepacked_conv_run);
+const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_sum_run(
+    "nnc_mkldnn_prepacked_conv_sum_run",
+    nnc_mkldnn_prepacked_conv_sum_run);
 #endif // AT_MKLDNN_ENABLED()
 
 #ifdef USE_XNNPACK

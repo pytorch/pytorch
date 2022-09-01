@@ -113,6 +113,66 @@ class TestMkldnnFusion(JitTestCase):
                         else:
                             self.assertGraphContains(graph, kind='aten::conv2d')
 
+    def test_conv_sum(self):
+        class M(nn.Module):
+            def __init__(self, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.conv2 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                identity = x
+                out = self.conv1(x)
+                identity = self.conv2(x)
+                out = out + identity
+                return out
+
+        for memory_format, enabled in [
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
+        ]:
+            for bias in [True, False]:
+                for oC in [1, 10]:
+                    m = M(3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+
+                    graph = self._check_model(m, x)
+                    if enabled:
+                        self.assertFused(graph, ['aten::conv2d', 'aten::add'])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, kind='aten::conv2d')
+
+    def test_conv_sum_relu(self):
+        class M(nn.Module):
+            def __init__(self, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+                self.conv2 = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
+
+            def forward(self, x):
+                identity = x
+                out = self.conv1(x)
+                identity = self.conv2(x)
+                out = out + identity
+                out = out.relu()
+                return out
+
+        for memory_format, enabled in [
+            [torch.contiguous_format, False],
+            [torch.channels_last, True],
+        ]:
+            for bias in [True, False]:
+                for oC in [1, 10]:
+                    m = M(3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                    x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+
+                    graph = self._check_model(m, x)
+                    if enabled:
+                        self.assertFused(graph, ['aten::conv2d', 'aten::add', 'aten::relu'])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, kind='aten::conv2d')
 
 if __name__ == "__main__":
     run_tests()
