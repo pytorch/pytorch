@@ -29,8 +29,6 @@ prim = torch.ops.prim
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
-CONSTANT_NUMEL_LIMIT = 1
-
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -105,7 +103,7 @@ def set_meta(proxy, val):
     return proxy
 
 
-def track_tensor(tensor, proxy, *, constant, tracer):
+def track_tensor(tensor, proxy, *, tracer):
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
@@ -123,32 +121,26 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             set_proxy_slot(inner_s, tracer, s_proxy)
 
         # TODO: also do stride/numel
-    set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
+    set_proxy_slot(tensor, tracer, _ProxyTensor(proxy))
 
-def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
-    def wrap_with_proxy(e, proxy, constant):
+def track_tensor_tree(inner_res, proxy_res, *, tracer):
+    def wrap_with_proxy(e, proxy):
         if isinstance(e, torch.Tensor):
-            track_tensor(e, proxy, tracer=tracer, constant=constant)
+            track_tensor(e, proxy, tracer=tracer)
             set_meta(proxy, e)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
-                wrap_with_proxy(ee, proxy[idx], get_constant(idx))
-
-    def get_constant(idx):
-        if constant is None:
-            return None
-        else:
-            return constant[idx]
+                wrap_with_proxy(ee, proxy[idx])
 
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple) or isinstance(inner_res, list):
         for idx, e in enumerate(inner_res):
-            wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
+            wrap_with_proxy(e, proxy_res[idx])
     elif isinstance(inner_res, torch.Tensor):
-        wrap_with_proxy(inner_res, proxy_res, constant)
+        wrap_with_proxy(inner_res, proxy_res)
 
     return inner_res
 
@@ -166,7 +158,6 @@ def maybe_disable_fake_tensor_mode():
 @dataclass
 class _ProxyTensor:
     proxy: Proxy
-    constant: Optional[torch.Tensor]
 
 
 def fetch_symint_proxy(tracer):
@@ -213,24 +204,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
 
-    # If there are SymInts, we also should not consider this constant.
-    # However, fake tensor handling of SymInts is sufficiently broken that
-    # I couldn't write a test for this case
-    all_constant = (
-        pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
-        # TODO: maybe constant SymInts should also be allowed?  Not sure if
-        # this can happen
-        and pytree.tree_all_only(SymInt, lambda _: False, (args, kwargs))
-    )
-
     if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
-        # Check if all of the Tensor inputs are constants
-        if all_constant:
-            const_args, const_kwargs = pytree.tree_map_only(
-                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
-            )
-            with maybe_disable_fake_tensor_mode():
-                return func(*const_args, **const_kwargs)
         raise RuntimeError(
             "It appears that you're trying to get value out of a tracing tensor - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
@@ -295,53 +269,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
     out = func(*args, **kwargs)
 
-    # In some circumstances, we will be tracing in a situation where a tensor
-    # is *statically* known to be a constant (currently, this only happens if
-    # you run torch.tensor; deterministic factory functions like torch.arange
-    # don't get this treatment).  When the tensor in question is small, it's
-    # helpful to due constant propagation in case we call item() (in which
-    # case we can return the constant value that is known, rather than give
-    # an error.)  The logic here tests if constant propagation is possible
-    # (because all of the inputs are constant).  If so, we disable fake tensor
-    # mode (if it is on) and do true compute on the constant.
-    #
-    # It's worth highlighting that we're making a policy decision here.
-    # There is a potential that the tensor is actually quite large, and we
-    # don't actually want to run the compute.  The tensor being quite large
-    # is one of the reasons why factory functions don't get this treatment
-    # (since they can be quite large; if a parameter is initialized to a
-    # constant value it will be!)  Similarly, there is also a potential
-    # to run an operator that blows up the size of a small tensor; we don't
-    # protect against this case, but we could force, e.g., only single
-    # element constant computation by testing the numel of the result before
-    # propagating const-ness.  Similarly, we don't require the constant to
-    # live on CPU, but we could.
-    any_constant = pytree.tree_any_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
-
-    constant = None
-
-    # If this is a lift, the input tensor is guaranteed to be a
-    # constant, so we keep a copy of the original argument along so
-    # we can query it if we're asked to item() it at some later point
-    if func is torch.ops.aten.lift_fresh_copy.default and out.numel() <= CONSTANT_NUMEL_LIMIT:
-        with maybe_disable_fake_tensor_mode():
-            constant = args[0].clone()
-    elif (
-        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
-        and all_constant
-        and any_constant
-        and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
-    ):
-        # NB: do NOT include factories as constants
-        with maybe_disable_fake_tensor_mode():
-            const_args, const_kwargs = pytree.tree_map_only(
-                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
-            )
-            constant = func(*const_args, **const_kwargs)
-    else:
-        constant = None
-
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(out, proxy_out, tracer=tracer)
     return out
 
 
@@ -401,7 +329,7 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+        track_tensor_tree(flat_tensors, flat_proxies, tracer=tracer)
 
         out = f(*tensors)
         return pytree.tree_map_only(
@@ -511,14 +439,14 @@ class DecompositionInterpreter(torch.fx.Interpreter):
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
         proxy = torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer)
-        track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
+        track_tensor_tree(out, proxy, tracer=self.tracer)
         # TODO handle case where the first character of target is '*'
         return out
 
     def get_attr(self, target, args, kwargs):
         out = super().get_attr(target, args, kwargs)
         proxy = torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer)
-        track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
+        track_tensor_tree(out, proxy, tracer=self.tracer)
         return out
 
     # call_function, call_method, call_module get traced automatically by the outer mode.
