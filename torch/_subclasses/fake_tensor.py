@@ -652,11 +652,10 @@ class FakeTensorMode(TorchDispatchMode):
         # sequences like: x = torch.tensor(0.); y = x.add_(1)
         # Whenver a constant is written to but with inputs that cannot be evaluated
         # statically, such as random_(), we invalidate all constants that alias the input
-        # It does bit handle constants as persistent objects on an FX Graph. Likely we would want
-        # to materialize each use of the 1-element constant as a separate constant if it is mutated
+        # We will rely on functionalization for use of fake tensors constants as persistent
+        # objects on an FX Graph.
 
-        # We dispatch size/stride/numel on the FakeTensor not its constant, so bail for now
-
+        # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
