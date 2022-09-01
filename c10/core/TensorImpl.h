@@ -240,7 +240,8 @@ struct C10_API ExtraMeta {
     r->strides_ = strides_;
     r->numel_ = numel_;
     r->storage_offset_ = storage_offset_;
-    r->named_tensor_meta_ = named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr;
+    r->named_tensor_meta_ =
+        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr;
     return r;
   }
 };
