@@ -1203,6 +1203,10 @@ void initNvFuserPythonBindings(PyObject* module) {
             keepdim));
         return std::make_tuple(var, mean);
       },
+      py::arg("arg"),
+      py::arg("axes"),
+      py::arg("correction"),
+      py::arg("keepdim") = false,
       py::return_value_policy::reference);
   nvf_ops.def(
       "broadcast_in_dim",
