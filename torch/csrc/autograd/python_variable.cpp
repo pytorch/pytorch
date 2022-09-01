@@ -282,6 +282,12 @@ static constexpr char trace_cuda_memory_deallocation_fn_name[] =
     "CUDAMemoryDeallocationCallbacks";
 static constexpr char trace_cuda_stream_creation_fn_name[] =
     "CUDAStreamCreationCallbacks";
+static constexpr char trace_cuda_device_synchronization_fn_name[] =
+    "CUDADeviceSynchronizationCallbacks";
+static constexpr char trace_cuda_stream_synchronization_fn_name[] =
+    "CUDAStreamSynchronizationCallbacks";
+static constexpr char trace_cuda_event_synchronization_fn_name[] =
+    "CUDAEventSynchronizationCallbacks";
 
 class PyInterpreterHolder {
  public:
@@ -306,7 +312,10 @@ class PyInterpreterHolder {
                 &concrete_trace_cuda<trace_cuda_event_wait_fn_name>,
                 &concrete_trace_cuda<trace_cuda_memory_allocation_fn_name>,
                 &concrete_trace_cuda<trace_cuda_memory_deallocation_fn_name>,
-                &concrete_trace_cuda<trace_cuda_stream_creation_fn_name>))) {}
+                &concrete_trace_cuda<trace_cuda_stream_creation_fn_name>,
+                &concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>,
+                &concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>,
+                &concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>))) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();

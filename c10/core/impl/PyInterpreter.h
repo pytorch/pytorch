@@ -42,6 +42,9 @@ struct C10_API GPUTraceFunctionWrapper {
   using memory_allocation_sig = void(const PyInterpreter*, uintptr_t pointer);
   using memory_deallocation_sig = void(const PyInterpreter*, uintptr_t pointer);
   using stream_creation_sig = void(const PyInterpreter*, uintptr_t stream);
+  using device_synchronization_sig = void(const PyInterpreter*);
+  using stream_synchronization_sig = void(const PyInterpreter*, uintptr_t stream);
+  using event_synchronization_sig = void(const PyInterpreter*, uintptr_t event);
 
   event_creation_sig* event_creation_fn_;
   event_deletion_sig* event_deletion_fn_;
@@ -50,6 +53,9 @@ struct C10_API GPUTraceFunctionWrapper {
   memory_allocation_sig* memory_allocation_fn_;
   memory_deallocation_sig* memory_deallocation_fn_;
   stream_creation_sig* stream_creation_fn_;
+  device_synchronization_sig* device_synchronization_fn_;
+  stream_synchronization_sig* stream_synchronization_fn_;
+  event_synchronization_sig* event_synchronization_fn_;
 
   GPUTraceFunctionWrapper(
       event_creation_sig* event_creation_fn,
@@ -58,14 +64,20 @@ struct C10_API GPUTraceFunctionWrapper {
       event_wait_sig* event_wait_fn,
       memory_allocation_sig* memory_allocation_fn,
       memory_deallocation_sig* memory_deallocation_fn,
-      stream_creation_sig* stream_creation_fn)
+      stream_creation_sig* stream_creation_fn,
+      device_synchronization_sig* device_synchronization_fn,
+      stream_synchronization_sig* stream_synchronization_fn,
+      event_synchronization_sig* event_synchronization_fn)
       : event_creation_fn_(event_creation_fn),
         event_deletion_fn_(event_deletion_fn),
         event_record_fn_(event_record_fn),
         event_wait_fn_(event_wait_fn),
         memory_allocation_fn_(memory_allocation_fn),
         memory_deallocation_fn_(memory_deallocation_fn),
-        stream_creation_fn_(stream_creation_fn) {}
+        stream_creation_fn_(stream_creation_fn),
+        device_synchronization_fn_(device_synchronization_fn),
+        stream_synchronization_fn_(stream_synchronization_fn),
+        event_synchronization_fn_(event_synchronization_fn) {}
 
   void disarm();
 };
@@ -321,6 +333,21 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ void trace_gpu_stream_creation(
       uintptr_t stream) const {
     return (*trace_gpu_functions.stream_creation_fn_)(this, stream);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_device_synchronization() 
+      const {
+    return (*trace_gpu_functions.device_synchronization_fn_)(this);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_stream_synchronization(
+      uintptr_t stream) const {
+    return (*trace_gpu_functions.stream_synchronization_fn_)(this, stream);
+  }
+
+  __ubsan_ignore_function__ void trace_gpu_event_synchronization(
+      uintptr_t event) const {
+    return (*trace_gpu_functions.event_synchronization_fn_)(this, event);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

@@ -20,6 +20,9 @@ void GPUTraceFunctionWrapper::disarm() {
   memory_allocation_fn_ = &noop_trace_gpu_fn;
   memory_deallocation_fn_ = &noop_trace_gpu_fn;
   stream_creation_fn_ = &noop_trace_gpu_fn;
+  device_synchronization_fn_ = &noop_trace_gpu_fn;
+  stream_synchronization_fn_ = &noop_trace_gpu_fn;
+  event_synchronization_fn_ = &noop_trace_gpu_fn;
 }
 
 static std::string noop_name_fn(const PyInterpreter*) {
