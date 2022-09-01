@@ -7625,7 +7625,6 @@ class TestConsistency(TestCase):
                               'torch.uint8'],
              'split': ['torch.bool',
                        'torch.float16',
-                       'torch.float32',
                        'torch.int16',
                        'torch.int32',
                        'torch.int64',
@@ -7978,6 +7977,7 @@ class TestConsistency(TestCase):
         'repeat': ['torch.bool'],
         'rot90': ['torch.bool'],
         'tile': ['torch.bool'],
+        'split': ['torch.float32'],
     }
 
     # Used for accept mode only
