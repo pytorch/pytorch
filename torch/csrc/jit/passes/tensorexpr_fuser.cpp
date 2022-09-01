@@ -465,6 +465,23 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(*TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -493,23 +510,6 @@ class TensorExprFuser {
         continue;
       }
 
-      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(*TensorType::get());
-      });
-      GRAPH_DEBUG("Building sizes for ", getHeader(n));
-      bool all_inputs_have_sizes = true;
-      auto shapes = fmap(tensor_inputs, [&](Value* v) {
-        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
-        all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
-      });
-
-      if (!all_inputs_have_sizes) {
-        GRAPH_DEBUG(
-            "Not all tensor arguments have sizes available to compute the broadcasted size",
-            getHeader(n));
-        continue;
-      }
       shape_of.emplace(
           n->output(),
           shapes.size() == 1 ? shapes[0]
@@ -1046,7 +1046,8 @@ class TensorExprFuser {
     }
 
     if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupportedJit(node)) {
+      if (!tensorexpr::conv2dIsSupportedJit(node) &&
+          !tensorexpr::mkldnnPrepackedConvIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
         return false;
       }

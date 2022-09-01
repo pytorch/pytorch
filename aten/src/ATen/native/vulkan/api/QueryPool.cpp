@@ -176,6 +176,23 @@ void QueryPool::print_results() {
   std::cout << generate_string_report() << std::endl;
 }
 
+uint64_t QueryPool::get_total_op_ns(std::string op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  uint64_t sum = 0;
+  for (ShaderDuration& entry : shader_log_) {
+    if (entry.kernel_name == op_name) {
+      sum += entry.execution_duration_ns;
+    }
+  }
+  return sum;
+}
+
+void QueryPool::shader_log_for_each(
+    std::function<void(const ShaderDuration&)> fn) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::for_each(shader_log_.begin(), shader_log_.end(), fn);
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native

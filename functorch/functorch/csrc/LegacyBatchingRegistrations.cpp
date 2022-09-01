@@ -150,12 +150,67 @@ Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
     return self.squeeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(batched && batched->bdim() == 0);
+  const auto bdim = batched->bdim();
   auto logical_dim = self.dim();
-  auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim);
-  batched->value().squeeze_(dim_physical);
 
-  // Also need to change some metadata...
+  // If logically a scalar tensor, then Tensor.squeeze_(dim) is a no-op
+  if (logical_dim == 0) {
+    return self;
+  }
+
+  dim = maybe_wrap_dim(dim, logical_dim);
+  if (dim >= bdim) {
+    dim = dim + 1;
+    batched->value().squeeze_(dim);
+    batched->refreshTensorMetadata();
+    return self;
+  }
+
+  // Tensor.squeeze_(0) is a no-op if dim 0 has a size other than 1
+  if (batched->value().size(dim) != 1) {
+    return self;
+  }
+
+  // dim < bdim, so we need to adjust bdim
+  batched->value().squeeze_(dim);
+  batched->unsafe_set_bdim(bdim - 1);
+  batched->refreshTensorMetadata();
+  return self;
+}
+
+Tensor& squeeze__batching_rule(Tensor& self) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.squeeze_();
+  }
+  auto* batched = maybeGetBatchedImpl(self);
+
+  // Need to find out how many dimensions of size 1 are before the bdim
+  const auto bdim = batched->bdim();
+  const auto physical_shape = batched->value().sizes();
+  auto how_many_dims_of_size_1_before_bdim = 0;
+  for (const auto i : c10::irange(0, physical_shape.size())) {
+    if ((int64_t)i == bdim) {
+      break;
+    }
+    if (physical_shape[i] == 1) {
+      how_many_dims_of_size_1_before_bdim++;
+    }
+  }
+
+  int64_t new_bdim = bdim - how_many_dims_of_size_1_before_bdim;
+  if (physical_shape[bdim] != 1) {
+    // if bdim is not 1, can just call squeeze_()
+    batched->value().squeeze_();
+  } else {
+    // otherwise, squeeze_() is going to get rid of the bdim too.
+    // We "fix it up" by calling unsqueeze_.
+    batched->value().squeeze_();
+    batched->value().unsqueeze(new_bdim);
+  }
+
+  // Refresh metadata
+  batched->unsafe_set_bdim(new_bdim);
   batched->refreshTensorMetadata();
   return self;
 }
@@ -166,10 +221,46 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
     return self.unsqueeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(batched && batched->bdim() == 0);
   auto logical_dim = self.dim();
-  auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim + 1);
+  int64_t dim_physical = maybe_wrap_dim(dim, logical_dim + 1);
+  if (dim_physical >= batched->bdim()) {
+    dim_physical = 1 + dim_physical;
+  } else {
+    batched->unsafe_set_bdim(batched->bdim() + 1);
+  }
   batched->value().unsqueeze_(dim_physical);
+
+  // Also need to change some metadata...
+  batched->refreshTensorMetadata();
+  return self;
+}
+
+Tensor& transpose__batching_rule(Tensor& self, int64_t dim0, int64_t dim1) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.transpose_(dim0, dim1);
+  }
+  auto* batched = maybeGetBatchedImpl(self);
+  auto logical_dim = self.dim();
+
+  // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
+  // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(lambda x: x.transpose_(0, -1), x)
+  // then we replicate this behavior.
+  if (logical_dim == 0 &&
+      is_allowed_dim_on_scalar_tensor(dim0) &&
+      is_allowed_dim_on_scalar_tensor(dim1)) {
+    // No transposing happened :P
+    return self;
+  }
+
+  dim0 = maybe_wrap_dim(dim0, logical_dim);
+  dim1 = maybe_wrap_dim(dim1, logical_dim);
+
+  dim0 = dim0 >= batched->bdim() ? dim0 + 1 : dim0;
+  dim1 = dim1 >= batched->bdim() ? dim1 + 1 : dim1;
+  batched->value().transpose_(dim0, dim1);
 
   // Also need to change some metadata...
   batched->refreshTensorMetadata();
@@ -411,12 +502,9 @@ Tensor as_strided_batching_rule(
       "same length! Got size ", sizes, " and stride ", strides);
 
   // Sanity checks:
-  // 1. All batch dims are at the front in memory layout (not necessary for
-  // correctness, but we are worried the user might be doing crazy things)
-  // 2. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
+  // 1. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
   // is valid for a slice of the input tensor.
   // See Note: [When will the as_strided batching rule fail?] for details.
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), num_batch_dims);
   checkBasicAsStridedValidForSlice(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
@@ -702,8 +790,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("stack", stack_batching_rule);
 
   // still legacy b/c needs special inplace rules
+  m.impl("squeeze_", squeeze__batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
+  m.impl("transpose_", transpose__batching_rule);
 
   // still legacy because these are ridiculously complicated
   m.impl("as_strided", as_strided_batching_rule);

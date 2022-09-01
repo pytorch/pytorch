@@ -148,7 +148,7 @@ void GetSubArray(
 
   out_array->derived().resize(indices.size());
   for (const auto i : c10::irange(indices.size())) {
-    DCHECK_LT(indices[i], array.size());
+    TORCH_DCHECK_LT(indices[i], array.size());
     (*out_array)[i] = array[indices[i]];
   }
 }
@@ -181,7 +181,7 @@ void GetSubArrayRows(
   out_array->derived().resize(row_indices.size(), array2d.cols());
 
   for (const auto i : c10::irange(row_indices.size())) {
-    DCHECK_LT(row_indices[i], array2d.size());
+    TORCH_DCHECK_LT(row_indices[i], array2d.size());
     out_array->row(i) =
         array2d.row(row_indices[i]).template cast<typename Derived2::Scalar>();
   }
