@@ -360,6 +360,7 @@ StmtPtr computeIndirectIndexing(
         innerStmtFunc) {
   auto outputRank = outputShape.size();
   auto indicesRank = indices.node()->dims().size();
+  auto idxingTargetRank = idxingTarget.node()->dims().size();
   auto dtypeIndirectIdxing =
       idxingTarget.node()->dims().at(dimOfIndirectIdxing)->dtype();
 
@@ -383,7 +384,7 @@ StmtPtr computeIndirectIndexing(
 
   // Generate target load with indirect-indexing: idxingTarget[..., x, ...]
   std::vector<ExprPtr> idxingTargetIndices;
-  for (size_t i = 0, idxLoopIndices = indicesRank; i < indicesRank; ++i) {
+  for (size_t i = 0, idxLoopIndices = indicesRank; i < idxingTargetRank; ++i) {
     idxingTargetIndices.push_back(
         (i == dimOfIndirectIdxing) ? indirectIdxVar
                                    : loopIndices[idxLoopIndices++]);
