@@ -14930,7 +14930,7 @@ op_db: List[OpInfo] = [
         op=torch.cuda.jiterator._create_multi_output_jit_fn(
             """
             template <typename T>
-            T binary_2outputs(T i0, T i1, T& out0, T& out1) {
+            void binary_2outputs(T i0, T i1, T& out0, T& out1) {
                 out0 = i0 + i1;
                 out1 = i0 - i1;
             }
