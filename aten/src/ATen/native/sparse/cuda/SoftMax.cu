@@ -80,10 +80,18 @@ static int getNumThreads(int nElem) {
   return threadSizes[4];
 }
 
+int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
+  /* Return the number of entries in the dense part of a sparse tensor.
+     `sizes` is a vector of sparse tensor dimensions.
+     `sparse_dim` is the dimension of the sparse part of a sparse tensor.
+   */
+  return c10::multiply_integers(sizes.begin() + sparse_dim, sizes.end());
+}
+
 template <typename scalar_t, bool LogSoftMax>
 __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t* sorted_pool_indices,
-    int64_t size,
+    int64_t pool_size,
     int64_t* pool_sizes,
     int64_t* pool_offsets,
     int64_t nvalues,
@@ -91,7 +99,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     PackedTensorAccessor<scalar_t, 2> input_values_acc,
     PackedTensorAccessor<scalar_t, 2> output_values_acc) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -103,7 +111,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
   int index = tid + blkid * blksz;
   int step = blksz * gridsz;
 
-  while (index < size) {
+  while (index < pool_size) {
     int64_t offset = pool_offsets[index];
     int64_t* pool_indices = sorted_pool_indices + offset;
     int64_t pool_indices_size = pool_sizes[index];
@@ -153,7 +161,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     PackedTensorAccessor<scalar_t, 2> out_values_accessor,
     PackedTensorAccessor<scalar_t, 2> grad_values_accessor) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
@@ -226,7 +234,7 @@ Tensor get_offsets(
     const IntArrayRef& sizes,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/Softmax.cpp:get_offsets for the CPU
+    See ATen/native/sparse/SoftMax.cpp:get_offsets for the CPU
     implementation of get_offsets function that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -250,7 +258,7 @@ Tensor get_offsets(
           cudaMemcpyHostToDevice,
           stream));
 
-  auto indices_accessor = indices.packed_accessor<int64_t, 2>();
+  auto indices_accessor = indices.packed_accessor64<int64_t, 2>();
 
   Tensor offsets = at::empty({nnz}, indices.options());
 
@@ -284,8 +292,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     Return pools of indices that align with the given dimension and the
     corresponding max values for each pool.
 
-    See ATen/native/sparse/Softmax.cpp:get_offsets and
-    ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:get_offsets and
+    ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -337,7 +345,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   if (requireMxRows) {
 
     auto values_accessor =
-        values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
+        values.packed_accessor64<scalar_t, 2>(); // {nnz, nvalues}
 
     mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
 
@@ -379,7 +387,7 @@ void cuda_sparse_coo_softmax(
     const Tensor& input,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -408,14 +416,14 @@ void cuda_sparse_coo_softmax(
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
-  auto nvalues = values.numel() / nnz;
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
   /* Prepare accessors */
   auto values_2 = values.view({nnz, nvalues});
-  auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
+  auto values_accessor = values_2.packed_accessor64<scalar_t, 2>();
 
   auto out_values_2 = out_values.view({nnz, nvalues});
-  auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
+  auto out_values_accessor = out_values_2.packed_accessor64<scalar_t, 2>();
 
   Tensor sorted_indices;
   Tensor pool_offsets;
@@ -429,17 +437,23 @@ void cuda_sparse_coo_softmax(
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
-  cuda_sparse_coo_softmax_kernel<scalar_t, LogSoftMax>
-      <<<grid_size, block_size, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          pool_size,
-          pool_sizes.data_ptr<int64_t>(),
-          pool_offsets.data_ptr<int64_t>(),
-          nvalues,
-          mx_buffer.data_ptr<scalar_t>(),
-          values_accessor,
-          out_values_accessor);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  // If either nvalues or pool_size are zero, then cuda_sparse_coo_softmax_kernel
+  // won't actually perform any computation. Further, they will be
+  // invalid configuration parameters for the launch. So let's not
+  // launch a kernel unless both are non-zero.
+  if (nvalues > 0 && pool_size > 0) {
+    cuda_sparse_coo_softmax_kernel<scalar_t, LogSoftMax>
+        <<<grid_size, block_size, 0, stream>>>(
+            sorted_indices.data_ptr<int64_t>(),
+            pool_size,
+            pool_sizes.data_ptr<int64_t>(),
+            pool_offsets.data_ptr<int64_t>(),
+            nvalues,
+            mx_buffer.data_ptr<scalar_t>(),
+            values_accessor,
+            out_values_accessor);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 template <typename scalar_t, bool LogSoftMax>
@@ -450,7 +464,7 @@ void cuda_sparse_coo_softmax_backward(
     const int64_t dim,
     ScalarType input_dtype) {
   /*
-    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
@@ -522,16 +536,16 @@ void cuda_sparse_coo_softmax_backward(
   }
 
   auto nnz = values.size(0);
-  auto nvalues = values.numel() / nnz;
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
   auto values_2 = values.view({nnz, nvalues});
-  auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
+  auto values_accessor = values_2.packed_accessor64<scalar_t, 2>();
 
   auto out_values_2 = out_values.view({out_nnz, nvalues});
-  auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
+  auto out_values_accessor = out_values_2.packed_accessor64<scalar_t, 2>();
 
   auto grad_values_2 = grad_values.view({grad_nnz, nvalues});
-  auto grad_values_accessor = grad_values_2.packed_accessor<scalar_t, 2>();
+  auto grad_values_accessor = grad_values_2.packed_accessor64<scalar_t, 2>();
 
   Tensor lower_bound_values =
       at::empty({out_offsets.size(0)}, indices.options());
@@ -559,21 +573,23 @@ void cuda_sparse_coo_softmax_backward(
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
-  cuda_sparse_coo_softmax_backward_kernel<scalar_t, LogSoftMax>
-      <<<grid_size, block_size, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          pool_size,
-          pool_sizes.data_ptr<int64_t>(),
-          pool_offsets.data_ptr<int64_t>(),
-          nvalues,
-          grad_nnz,
-          grad_offsets.data_ptr<int64_t>(),
-          out_offsets.data_ptr<int64_t>(),
-          lower_bound_values.data_ptr<int64_t>(),
-          values_accessor,
-          out_values_accessor,
-          grad_values_accessor);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (nvalues > 0 && pool_size > 0) {
+    cuda_sparse_coo_softmax_backward_kernel<scalar_t, LogSoftMax>
+        <<<grid_size, block_size, 0, stream>>>(
+            sorted_indices.data_ptr<int64_t>(),
+            pool_size,
+            pool_sizes.data_ptr<int64_t>(),
+            pool_offsets.data_ptr<int64_t>(),
+            nvalues,
+            grad_nnz,
+            grad_offsets.data_ptr<int64_t>(),
+            out_offsets.data_ptr<int64_t>(),
+            lower_bound_values.data_ptr<int64_t>(),
+            values_accessor,
+            out_values_accessor,
+            grad_values_accessor);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 } // end anonymous namespace

@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_scalars.h>
@@ -361,7 +362,7 @@ Tensor internal_new_from_data(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
             scalar_type,
-            " or an _UntypedStorage, but got ",
+            " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
             sizes,
@@ -642,7 +643,7 @@ Tensor legacy_tensor_generic_ctor_new(
           storage_scalar_type == scalar_type,
           "Expected a Storage of type ",
           scalar_type,
-          " or an _UntypedStorage, but got type ",
+          " or an UntypedStorage, but got type ",
           storage_scalar_type,
           " for argument 1 'storage'");
     }

@@ -110,13 +110,6 @@ def _broadcast_object(
     return obj
 
 
-def _get_global_rank(group: Any, rank: int) -> int:
-    r"""
-    Returns the global rank for the given group and rank.
-    """
-    return (rank if group is dist.group.WORLD
-            else dist.distributed_c10d._get_global_rank(group, rank))
-
 
 class _ZeROJoinHook(JoinHook):
     def __init__(self, zero):
@@ -243,6 +236,7 @@ class _OverlapInfo():
         self.params_per_rank: List[List[torch.Tensor]] = \
             [[] for _ in range(world_size)]
         self.offsets: Dict[int, int] = {}
+        # Group Ranks
         self.assigned_ranks_per_bucket: List[Set[int]] = []
         self.num_bucket_assignments: int = 0
         self.total_size: Optional[int] = None
@@ -331,6 +325,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         >>> from torch.distributed.optim import ZeroRedundancyOptimizer
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
 
+        >>> # xdoctest: +SKIP
         >>> model = nn.Sequential(*[nn.Linear(2000, 2000).to(rank) for _ in range(20)])
         >>> ddp = DDP(model, device_ids=[rank])
         >>> opt = ZeroRedundancyOptimizer(
@@ -403,7 +398,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self.process_group = process_group if process_group is not None else dist.group.WORLD
         self.world_size: int = dist.get_world_size(self.process_group)
         self.rank: int = dist.get_rank(self.process_group)
-        self.global_rank: int = _get_global_rank(self.process_group, self.rank)
+        self.global_rank: int = dist.distributed_c10d.get_global_rank(self.process_group, self.rank)
 
         self._overlap_with_ddp: bool = overlap_with_ddp
         self._optim_defaults = defaults
@@ -522,7 +517,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # is to move all sharded state management to RPC RRef
         self._all_state_dicts = []
         for rank in range(self.world_size):
-            global_rank = _get_global_rank(self.process_group, rank)
+            global_rank = dist.distributed_c10d.get_global_rank(self.process_group, rank)
             if self.rank == to:
                 # Consolidate all local `state_dict`s on this rank, storing on
                 # CPU to save GPU memory
@@ -742,14 +737,14 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         if self.parameters_as_bucket_view:
             for dev_i_buckets in self._buckets:
                 bucket = dev_i_buckets[rank]
-                global_rank = _get_global_rank(self.process_group, rank)
+                global_rank = dist.distributed_c10d.get_global_rank(self.process_group, rank)
                 handles.append(
                     dist.broadcast(tensor=bucket, src=global_rank,
                                    group=self.process_group, async_op=True)
                 )
         else:
             param_groups = self._partition_parameters()[rank]
-            global_rank = _get_global_rank(self.process_group, rank)
+            global_rank = dist.distributed_c10d.get_global_rank(self.process_group, rank)
             for param_group in param_groups:
                 for param in param_group["params"]:
                     handles.append(
@@ -856,8 +851,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 corresponding to the bucket to assign.
             bucket_offset (int): offset giving the index of the first element
                 in ``bucket_params`` in the bucket's full parameter list.
-            assigned_rank (int): rank to assign to.
-            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of ranks
+            assigned_rank (int): group rank to assign to.
+            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of group ranks
                 assigned to each bucket.
         """
         overlap_info = self._overlap_info
@@ -984,7 +979,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 If the argument itself is ``None``, then all parameters are
                 updated, and the gradients are assumed to be already populated.
                 (default: ``None``)
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers and should be
                 ``None`` if ``gradients`` is not ``None``; (default: ``None``)
         Returns:
@@ -1043,7 +1038,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         Performs a single optimizer step and syncs parameters across all ranks.
 
         Arguments:
-            closure (callable): a closure that re-evaluates the model and
+            closure (Callable): a closure that re-evaluates the model and
                 returns the loss; optional for most optimizers.
         Returns:
             Optional loss depending on the underlying local optimizer.

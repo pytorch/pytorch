@@ -11,47 +11,6 @@
 
 namespace at { namespace functorch {
 
-static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
-  auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
-  if (logical_scalar_tensor.scalar_type() != result_type) {
-    logical_scalar_tensor = logical_scalar_tensor.to(result_type);
-  }
-  if (second.scalar_type() != result_type) {
-    second = second.to(result_type);
-  }
-}
-
-std::tuple<Tensor, Tensor> _binary_pointwise_helper(
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim) {
-  // compute max logical rank
-  auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
-  auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
-  auto max_logical_rank = std::max(tensor_logical_rank, other_logical_rank);
-
-  auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
-  auto other_ = moveBatchDimToFront(other, other_batch_dim);
-
-  // In the (0D, ND) case, type promotion semantics are different :/
-  auto tensor_is_logical_scalar = (tensor_logical_rank == 0 && tensor_batch_dim.has_value());
-  auto other_is_logical_scalar = (other_logical_rank == 0 && other_batch_dim.has_value());
-  if (tensor_is_logical_scalar && !other_is_logical_scalar) {
-    handleScalarTypePromotion(tensor_, other_);
-  }
-  if (other_is_logical_scalar && !tensor_is_logical_scalar) {
-    handleScalarTypePromotion(other_, tensor_);
-  }
-
-  // If the dimensions aren't aligned, we need to line them up.
-  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
-  // Note that only tensors that have a batch dim need to be modified.
-  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
-  tensor_ = maybePadToLogicalRank(tensor_, tensor_batch_dim, max_logical_rank);
-  other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
-
-  return std::make_tuple(tensor_, other_);
-}
-
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim,
@@ -309,6 +268,25 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
+void fill__Tensor_batch_rule(
+    Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& other,
+    optional<int64_t> other_bdim) {
+  if (!other_bdim.has_value()) {
+    // Optimization: fill_ is faster than the other path which does
+    // reshaping + copy_
+    self.fill_(other);
+    return;
+  }
+  if (!self_bdim && other_bdim) {
+    vmapIncompatibleInplaceError("fill_");
+  }
+  auto self_and_other = _binary_pointwise_helper(
+      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
+  std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
+}
+
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
@@ -497,7 +475,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #undef SINGLE_ARG
 #undef LOGICAL_COMPARISON_POINTWISE
   VMAP_SUPPORT(masked_select, masked_select_batch_rule);
-  VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule)
+  VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule);
+
+  VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
 }
 
 }}
