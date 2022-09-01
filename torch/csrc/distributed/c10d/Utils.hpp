@@ -70,7 +70,7 @@ inline void assertSameType(
   }
 }
 
-inline bool parseEnvVarFlag(const char* envVarName) {
+inline int parseEnvVarInt(const char* envVarName) {
   char* stringValue = std::getenv(envVarName);
   if (stringValue != nullptr) {
     int val;
@@ -80,16 +80,22 @@ inline bool parseEnvVarFlag(const char* envVarName) {
       TORCH_CHECK(false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
+    return val;
+  }
+  // Use -2 to represent unset state
+  return -2;
+}
+
+inline bool parseEnvVarFlag(const char* envVarName) {
+    int val = parseEnvVarInt(envVarName);
     if (val == 1) {
       return true;
-    } else if (val == 0) {
+    } else if (val == 0 || val == -2) {
       return false;
-    } else {
-      TORCH_CHECK(false,
-          "Invalid value for environment variable: " + std::string(envVarName));
     }
-  }
-  return false;
+    TORCH_CHECK(false,
+        "Invalid value for environment variable: " + std::string(envVarName));
+    return false;
 }
 
 inline void assertSameSizes(

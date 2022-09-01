@@ -445,17 +445,21 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
+void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(ErrorHandlingMode asyncErrorHandling) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
         "asynchronous nature of CUDA kernels, subsequent GPU operations ",
-        "might run on corrupted/incomplete data. To avoid this inconsistency, ",
-        "we are taking the entire process down.");
+        "might run on corrupted/incomplete data.");
     LOG(ERROR) << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
-    std::rethrow_exception(exception_);
+    if (asyncErrorHandling == ErrorHandlingMode::TearDown) {
+      auto tearDownMsg = c10::str(
+          "To avoid data inconsistency, we are taking the entire process down.");
+      LOG(ERROR) << tearDownMsg;
+      std::rethrow_exception(exception_);
+    }
   }
 }
 
@@ -618,7 +622,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
-  asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
+  asyncErrorHandling_ = parseEnvVarInt(NCCL_ASYNC_ERROR_HANDLING);
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 
@@ -862,7 +866,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
               << "[Rank " << rank_
               << "] Received NCCL errors for communicators in the cache: \n"
               << "NCCL error: \n"
-              << getExceptionMsgFromExceptionPtr(ncclErrorException);
+              << exceptionMsg;
 
           if (blockingWait_ || asyncErrorHandling_) {
             LOG(INFO) << "[Rank " << rank_
@@ -1023,7 +1027,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           // Handle Exceptions on failed GPU operations and remove completed
           // workNCCL objects from work vector.
           if (!terminateProcessGroup_.load()) {
-            work.handleNCCLGuard();
+            work.handleNCCLGuard(asyncErrorHandling_);
           }
           doneWorks.push_back(std::move(*it));
           it = workMetaList_.erase(it);
