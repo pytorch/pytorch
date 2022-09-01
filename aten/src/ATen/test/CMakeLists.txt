@@ -7,8 +7,6 @@ endif(MSVC)
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
-  # Fix this.
-  # ${CMAKE_CURRENT_SOURCE_DIR}/ExclusivelyOwned_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NamedTensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
@@ -111,6 +109,7 @@ list(APPEND ATen_VEC_TEST_SRCS
 # Caffe2 specific tests
 if(BUILD_CAFFE2)
   list(APPEND ATen_CPU_TEST_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ExclusivelyOwned_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp)
