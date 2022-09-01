@@ -286,8 +286,8 @@ class C10_API SizesAndStrides {
 
   void resizeOutOfLineStorage(size_t newSize) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
-    outOfLineStorage_ =
-        static_cast<int64_t*>(realloc(outOfLineStorage_, storageBytes(newSize)));
+    outOfLineStorage_ = static_cast<int64_t*>(
+        realloc(outOfLineStorage_, storageBytes(newSize)));
     TORCH_CHECK(
         outOfLineStorage_,
         "Could not allocate memory for Tensor SizesAndStrides!");

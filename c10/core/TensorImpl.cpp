@@ -233,8 +233,7 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d =
-        sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
     if (size_d != 1) {
       if (sizes_and_strides_.stride_at_unchecked(d) == z) {
         z *= size_d;
@@ -254,11 +253,9 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d =
-            sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) !=
-              expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
             return false;
           }
           expected *= size_d;
@@ -282,11 +279,9 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d =
-            sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) !=
-              expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
             return false;
           }
           expected *= size_d;
@@ -708,8 +703,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) *
-          (1 + growthPct / 100))));
+          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
   Resize(newCapacity);
@@ -878,7 +872,8 @@ void TensorImpl::set_sym_sizes_and_strides(
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;
   sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
-  if (!extra_meta_) extra_meta_ = std::make_unique<ExtraMeta>();
+  if (!extra_meta_)
+    extra_meta_ = std::make_unique<ExtraMeta>();
   extra_meta_->sizes_ = sizes;
   extra_meta_->strides_ = strides;
   SymInt numel = 1;

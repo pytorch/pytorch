@@ -28,7 +28,8 @@ void SizesAndStrides::resizeSlowPath(
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      int64_t* tempStorage = static_cast<int64_t*>(malloc(storageBytes(newSize)));
+      int64_t* tempStorage =
+          static_cast<int64_t*>(malloc(storageBytes(newSize)));
       TORCH_CHECK(
           tempStorage,
           "Could not allocate memory to change Tensor SizesAndStrides!");

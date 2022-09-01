@@ -2,7 +2,6 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/CopyBytes.h>
-#include <c10/util/DimVector.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
@@ -13,6 +12,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
@@ -229,7 +229,7 @@ struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
-  SymInt storage_offset_ = 0;  // TODO
+  SymInt storage_offset_ = 0; // TODO
   // TODO:
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -1530,8 +1530,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1),
-                    1) *
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
                 sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
@@ -1619,17 +1618,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the pointer to named tensor metadata.
    */
   const c10::NamedTensorMetaInterface* named_tensor_meta() const {
-    if (!extra_meta_) return nullptr;
+    if (!extra_meta_)
+      return nullptr;
     return extra_meta_->named_tensor_meta_.get();
   }
 
   c10::NamedTensorMetaInterface* named_tensor_meta() {
-    if (!extra_meta_) return nullptr;
+    if (!extra_meta_)
+      return nullptr;
     return extra_meta_->named_tensor_meta_.get();
   }
 
   bool has_named_tensor_meta() const {
-    if (!extra_meta_) return false;
+    if (!extra_meta_)
+      return false;
     return extra_meta_->named_tensor_meta_ != nullptr;
   }
 
@@ -2128,8 +2130,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(i) =
                 sizes_and_strides_.stride_at_unchecked(i + 1) *
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1),
-                    1);
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
           }
         }
         break;
