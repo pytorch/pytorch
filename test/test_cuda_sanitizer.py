@@ -252,7 +252,9 @@ class TestEventHandler(TestCase):
                     self.handler._handle_event_creation(event_id(0))
 
                 self.handler._handle_event_wait(event_id(0), stream_id(2))
-                self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
+                self.assert_bad_kernel_launch(
+                    1, stream_id(2), read_write=[tensor_id(1)]
+                )
 
     def test_all_reads_checked_failing(self):
         iterations = 10
