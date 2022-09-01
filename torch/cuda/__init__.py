@@ -444,7 +444,7 @@ def createAllocFreeEvent(ptr, size):
     E.size = size
     return E
 
-
+ 
 def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     r"""Checks if peer access between two devices is possible.
     """
