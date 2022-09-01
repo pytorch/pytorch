@@ -232,9 +232,9 @@ class TestPrims(TestCase):
             torch.ops.nvprims.exp.default == node.target
             for node in call_function_nodes
         )
-        self.assertFalse(includes_aten_sigmoid)
         self.assertFalse(includes_prims_digamma)
-        self.assertTrue(includes_nvprims_exp)
+        self.assertEqual(includes_aten_sigmoid, not a.is_cuda)
+        self.assertEqual(includes_nvprims_exp, a.is_cuda)
 
 
     def test_aten_overload_to_prims(self, device):
