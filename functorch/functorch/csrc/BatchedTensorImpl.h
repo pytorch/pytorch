@@ -68,6 +68,7 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 
   // We have to override this because we opted into CustomStrides
   IntArrayRef strides_custom() const override;
+  SymIntArrayRef sym_strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error messages.
   bool is_contiguous_custom(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   void set_size(int64_t dim, int64_t new_size) override;
@@ -80,6 +81,10 @@ struct BatchedTensorImpl : public c10::TensorImpl {
   void refreshTensorMetadata();
   void _unsafe_set_level(int64_t level) {
     level_ = level;
+  }
+  void unsafe_set_bdim(int64_t bdim) {
+    // NB: you MUST call refreshTensorMetadata after doing this.
+    bdim_ = bdim;
   }
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]

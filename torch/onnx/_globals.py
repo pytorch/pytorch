@@ -5,14 +5,14 @@ Do not use this module outside of `torch.onnx` and its tests.
 Be very judicious when adding any new global variables. Do not create new global
 variables unless they are absolutely necessary.
 """
-
+import os
 from typing import Optional
 
 import torch._C._onnx as _C_onnx
 
 # This module should only depend on _constants and nothing else in torch.onnx to keep
 # dependency direction clean.
-from torch.onnx import _constants
+from torch.onnx import _constants, _exporter_states
 
 
 class _InternalGlobals:
@@ -29,7 +29,21 @@ class _InternalGlobals:
         # Whether the user's model is training during export
         self.export_training: bool = False
         self.operator_export_type: Optional[_C_onnx.OperatorExportTypes] = None
-        self.onnx_shape_inference: bool = False
+        self.onnx_shape_inference: bool = True
+
+        # Internal feature flags
+        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "ERRORS":
+            self.runtime_type_check_state = (
+                _exporter_states.RuntimeTypeCheckState.ERRORS
+            )
+        elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "DISABLED":
+            self.runtime_type_check_state = (
+                _exporter_states.RuntimeTypeCheckState.DISABLED
+            )
+        else:
+            self.runtime_type_check_state = (
+                _exporter_states.RuntimeTypeCheckState.WARNINGS
+            )
 
     @property
     def training_mode(self):
