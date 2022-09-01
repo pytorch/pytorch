@@ -992,6 +992,9 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
         @staticmethod
         def forward(ctx, input, mask):
             """Return input with masked-out elements eliminated for the given operations."""
+            ctx.mark_non_differentiable(mask)
+            ctx.save_for_backward(mask)
+
             if mask is None:
                 return input
 
@@ -1003,9 +1006,6 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
                 raise ValueError(
                     f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
                 )
-
-            ctx.mark_non_differentiable(mask)
-            ctx.save_for_backward(mask)
 
             return result
 
