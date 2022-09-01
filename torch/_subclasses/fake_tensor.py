@@ -482,7 +482,7 @@ class FakeTensor(torch.Tensor):
         # returning meta device within the kernel we need to intercept
         # the call here
         # because it doesn't go through the dispatcher, we run into errors
-        # when attempting to compute an outpu  in meta, so
+        # when attempting to compute an output in meta, so
         # we compute the real tensor then convert to meta
         out_device = self.fake_device
         with no_dispatch():
