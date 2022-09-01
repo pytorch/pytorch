@@ -242,9 +242,6 @@ void insertPrePackedLinearOp(Block* b) {
 }
 
 void insertMkldnnPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
-  // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
-
   insertPrePackedConvOp(graph->block());
 }
 
