@@ -830,7 +830,43 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
-  return self.to_sparse().to_sparse_csc();
+  auto n_batch_dim = self.dim() - 2;
+  auto values = self;
+  auto not_zero_mask = self != 0;
+
+  if (n_batch_dim > 0) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseCsc, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  // Compressed col indices are the same as the row indices of the transpose!
+  std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+  Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
+      col_indices, not_zero_mask.size(-1), false /*out_int32*/);
+  {
+    // We need to transpose the mask and values before flattening so the nnz dim
+    // will run in col-major order.
+    values = values.transpose(0, 1).flatten();
+    auto mask_indices =
+        _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
+    values = values.index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, ccol_indices, row_indices, values);
+  }
+  return at::native::_sparse_csc_tensor_unsafe(
+      ccol_indices,
+      row_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseCsc,
+      values.device());
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
