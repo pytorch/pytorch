@@ -200,7 +200,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 //    conditionally compile fragments of the case statements such
 //    that the kernel functions are specialized only for the dtypes
 //    that are needed. The NAME parameter *must* be a build time
-//    cons char* (can't be std::string, etc...)
+//    const char* (can't be std::string, etc...)
 //
 // Please ensure that the NAME is unique for every implementation
 // or you run the risk of over-including code for the kernel
