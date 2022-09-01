@@ -1251,7 +1251,8 @@ class TestTensorExprFuser(BaseTestClass):
         for test in (test_softmax, test_log_softmax, test_softmax_neg_index):
             for data_type in self.dtypes:
                 old = torch._C._jit_set_texpr_reductions_enabled(True)
-                traced = torch.jit.trace(test, (torch.randn(2, 3, dtype=data_type, device=device), torch.randn(2, 3, dtype=data_type, device=device)))
+                traced_input = torch.randn(2, 3, dtype=data_type, device=device)
+                traced = torch.jit.trace(test, (traced_input, traced_input))
                 inp = torch.randn(2, 3, dtype=data_type, device=device)
                 res = traced(inp, inp)
                 # Use eager mode as reference.
