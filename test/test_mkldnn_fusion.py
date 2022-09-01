@@ -20,6 +20,10 @@ class TestMkldnnFusion(JitTestCase):
             self.assertGraphContainsExactly(graph, pat, 0)
 
     def _check_model(self, m, x, trace=False, bf16=False):
+        rtol = 1.6e-2 if bf16 else 1.3e-6
+        atol = 1e-2 if bf16 else 1e-5
+        previous_jit_autocast_pass = torch._C._jit_set_autocast_mode(False)
+
         old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
 
@@ -43,8 +47,9 @@ class TestMkldnnFusion(JitTestCase):
             y_ref = m(x)
 
             graph = script.graph_for(*x)
-            self.assertEqual(y, y_ref)
+            self.assertEqual(y, y_ref, rtol=rtol, atol=atol)
 
+        torch._C._jit_set_autocast_mode(previous_jit_autocast_pass)
         torch._C._debug_set_fusion_group_inlining(old_fusion_inlining)
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
@@ -179,7 +184,7 @@ class TestMkldnnFusion(JitTestCase):
                     # torch.jit.script doesn't work with autocast
                     if not trace and bf16:
                         continue                    
-                    for eltwise_fn in [torch.relu]:
+                    for eltwise_fn, op_name in self._eltwise_list():
                         for bias in [True, False]:
                             for oC in [1, 10]:
                                 m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
@@ -188,7 +193,7 @@ class TestMkldnnFusion(JitTestCase):
                                 graph = self._check_model(m, x, trace, bf16)
                                 conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
                                 if enabled:
-                                    self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                                    self.assertFused(graph, ['aten::conv2d', op_name])
                                     self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
                                 else:
                                     self.assertGraphContains(graph, kind=conv_node_name)
