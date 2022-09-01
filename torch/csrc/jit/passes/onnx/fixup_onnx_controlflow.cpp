@@ -210,7 +210,7 @@ void ReplaceBlockOutputWithOptional(
   Value* block_output = block->outputs().at(i);
   // replace only the last value as Optional type only affects
   // the value right before output
-  block_output->replaceLastUseWith(opt_node->output());
+  block_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());
   if (!block_output->type()->cast<NoneType>()) {
     opt_node->addInput(block_output);
     opt_node->copyMetadata(block_output->node());
