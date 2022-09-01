@@ -19,10 +19,10 @@ struct C10_API GPUTrace {
   // it. For all of the next ones it will be a no-op.
   static void set_trace(const PyInterpreter*);
 
-  static const PyInterpreter* get_trace() {
+  static const PyInterpreter& get_trace() {
     if (!haveState)
       return nullptr;
-    return gpuTraceState.load(std::memory_order_acquire);
+    return *gpuTraceState.load(std::memory_order_acquire);
   }
 };
 
