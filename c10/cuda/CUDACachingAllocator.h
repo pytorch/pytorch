@@ -131,6 +131,44 @@ struct SegmentInfo {
   std::vector<BlockInfo> blocks;
 };
 
+class CachingAllocatorConfig {
+ public:
+  static size_t max_split_size() {
+    return instance().m_max_split_size;
+  }
+  static double garbage_collection_threshold() {
+    return instance().m_garbage_collection_threshold;
+  }
+
+  // This is used to round-up allocation size to nearest power of 2 divisions.
+  // More description below in function roundup_power2_next_division
+  // As ane example, if we want 4 divisions between 2's power, this can be done
+  // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
+  static size_t roundup_power2_divisions() {
+    return instance().m_roundup_power2_divisions;
+  }
+
+ private:
+  static CachingAllocatorConfig& instance() {
+    static CachingAllocatorConfig* s_instance = ([]() {
+      auto inst = new CachingAllocatorConfig();
+      inst->parseArgs();
+      return inst;
+    })();
+    return *s_instance;
+  }
+
+  CachingAllocatorConfig()
+      : m_max_split_size(std::numeric_limits<size_t>::max()),
+        m_roundup_power2_divisions(0),
+        m_garbage_collection_threshold(0) {}
+  size_t m_max_split_size;
+  size_t m_roundup_power2_divisions;
+  double m_garbage_collection_threshold;
+
+  void parseArgs();
+};
+
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
