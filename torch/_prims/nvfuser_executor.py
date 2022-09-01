@@ -127,10 +127,6 @@ def nvfuser_execute(gm: GraphModule, *args):
             "Attempting to use nvFuser trace executor but CUDA is not available!"
         )
 
-    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
-    if len(list(call_function_nodes)) <= 1:
-        return gm(*args)
-
     flat_args, _ = tree_flatten(args)
 
     # Construction of the fusion is expensive and cached based on the GraphModule
