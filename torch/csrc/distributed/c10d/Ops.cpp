@@ -6,16 +6,6 @@
 namespace c10d {
 namespace {
 
-c10::intrusive_ptr<Work> allgather_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t timeout) {
-  return process_group->allgather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      const_cast<std::vector<at::Tensor>&>(input_tensors),
-      AllgatherOptions{std::chrono::milliseconds(timeout)});
-}
 
 c10::intrusive_ptr<Work> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
@@ -91,8 +81,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allgather_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
+      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
@@ -164,14 +153,14 @@ c10::intrusive_ptr<Work> allreduce(
 
 c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    const std::vector<std::vector<at::Tensor>> &output_tensors,
+    const at::TensorList& input_tensors,
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
                        .typed<c10::intrusive_ptr<::c10d::Work>(
                            const std::vector<std::vector<at::Tensor>>&,
-                           const std::vector<at::Tensor>&,
+                           const at::TensorList&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
   return op.call(
