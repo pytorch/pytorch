@@ -834,9 +834,18 @@ def _trace_and_get_graph_from_model(model, args):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
+    # Disable Autocast cache because it replaces kernel's weight and bias
+    # to be replaced by (undesired) constants
+    # TODO: https://github.com/pytorch/pytorch/issues/84092
+    prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
+    # When weights are not reused, there is no perf impact
+    # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
+    torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model, args, strict=False, _force_outplace=False, _return_inputs_states=True
     )
+    torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
+
     warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != torch.jit._unique_state_dict(model).keys():
@@ -1004,28 +1013,6 @@ def _pre_trace_quant_model(model, args):
     return model
 
 
-def _assign_onnx_node_name(graph, node_names):
-    """Takes in ONNX graph, and mapping from _C.Node to node name in exported ONNX ModelProto.
-
-    Returns:
-        graph (_C.Graph): A TorchScript IR Graph with ONNX nodes, where each _C.Node gets its name
-        in exported ONNX ModelProto assigned as attribute ``onnx_name``.
-    """
-
-    def n_fn(n, b_fn, node_names):
-        for b in n.blocks():
-            b_fn(b, node_names)
-        if n in node_names:
-            n.s_("onnx_name", node_names[n])
-
-    def b_fn(b, node_names):
-        for n in b.nodes():
-            n_fn(n, b_fn, node_names)
-
-    b_fn(graph, node_names)
-    return graph
-
-
 def _model_to_graph(
     model,
     args,
@@ -1096,7 +1083,7 @@ def _model_to_graph(
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
 
-        output_tensors, out_desc = _C._jit_flatten(tuple(output_wrapped))
+        output_tensors, out_desc = torch.jit._flatten(tuple(output_wrapped))
         # assign_output_shape pass is not compatible with quantized outputs.
         # Quantized outputs are flattened to 3 values in ONNX, while packed as
         # single value in PyTorch.
@@ -1472,6 +1459,7 @@ def _export(
             params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                 graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
+            _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
                     proto,
@@ -1511,9 +1499,7 @@ def _export(
                     node_attr_to_name,
                 )
             if verbose:
-                torch.onnx.log(
-                    "Exported graph: ", _assign_onnx_node_name(graph, node_names)
-                )
+                torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:

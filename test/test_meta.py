@@ -420,7 +420,6 @@ meta_function_expected_failures = {
     torch.linalg.solve_triangular : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.matrix_exp : {f64, c128, c64, bf16, f32},
-    torch.nn.functional.unfold : {f64, f16, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
     torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
@@ -647,7 +646,6 @@ meta_dispatch_expected_failures = {
     aten.count_nonzero.dim_IntList : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.eig.default : {c64, c128, f64, f32},
     aten.geqrf.default : {c64, c128, f64, f32},
-    aten.im2col.default : {c64, bf16, f32, f16, f64, c128},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_householder_product.default : {c64, c128, f64, f32},
     aten.linalg_householder_product.out : {c64, c128, f64, f32},
@@ -727,7 +725,6 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
-    aten.empty.SymInt: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
