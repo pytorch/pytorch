@@ -806,9 +806,6 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
     tensor_impl->set_storage_offset(r.toSymIntOptional(3).value_or(c10::SymInt{0}));
 
-    // N.B. we ignore the storage argument as it's eiher stored on a python
-    // tensor or gets overriden for XLA
-
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
