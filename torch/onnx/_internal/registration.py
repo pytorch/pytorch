@@ -1,30 +1,67 @@
-"""Module for handling symbolic function registration.
-
-
-O(opset_count) search is performed to find the most recent version of the op.
-the results are cached in a dictionary for faster lookup.
-
-The registration is delayed until op is used to improve startup time.
-
-Function overloads are not allowed. Custom op overrides are supported.
-"""
+"""Module for handling symbolic function registration."""
 
 import functools
 import importlib
 import inspect
 import itertools
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Collection, Dict, Optional, Sequence, Set
 
-from torch.onnx import _constants, errors
-from torch.onnx._globals import GLOBALS
+from torch.onnx import _constants
 from torch.onnx._internal import _beartype
 
 OpsetVersion = int
+_BASE_OPSET_VERSION = 9
+
+
+def _dispatch_opset_version(
+    target: OpsetVersion, available_opsets: Collection[OpsetVersion]
+) -> Optional[OpsetVersion]:
+    """Finds the registered opset given a target opset version and the available opsets.
+
+    Args:
+        target: The target opset version.
+        available_opsets: The available opsets.
+
+    Returns:
+        The registered opset version.
+    """
+    available_versions_set = set(available_opsets)
+    if target in available_versions_set:
+        # An exact match
+        return target
+
+    available_versions = sorted(available_opsets)
+    # Linear search for the opset version, which is fine since the number of opset
+    # versions is small.
+
+    # Always round toward opset 9 (_BASE_OPSET_VERSION).
+    # Count down until opset 9 is reached.
+    for version in reversed(available_versions):
+        if _BASE_OPSET_VERSION <= version <= target:
+            return version
+
+    for version in available_versions:
+        # Count back up until _BASE_OPSET_VERSION
+        if target < version <= _BASE_OPSET_VERSION:
+            return version
+
+    # The lowest supported opset is higher than the target opset.
+    assert not available_versions or available_versions[0] > target
+    return None
 
 
 class _SymbolicFunctionGroup:
-    """Overloads of symbolic functions registered to the same name."""
+    """Different versions of symbolic functions registered to the same name.
+
+    O(n) search is performed to find the most recent version of the op.
+    The results are cached for faster lookup.
+
+    The registration is delayed until op is used to improve startup time.
+
+    Function overloads with different arguments are not allowed.
+    Custom op overrides are supported.
+    """
 
     def __init__(self, name: str) -> None:
         self._name = name
@@ -35,23 +72,13 @@ class _SymbolicFunctionGroup:
         self._merged: Dict[OpsetVersion, Callable] = {}
 
     def __repr__(self) -> str:
-        return f"_SymbolicFunctionGroup({self._name})"
+        return f"_SymbolicFunctionGroup({self._name}, registered={self._merged})"
 
     def __getitem__(self, key: OpsetVersion) -> Callable:
         result = self.get(key)
         if result is None:
             raise KeyError(key)
         return result
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Calls the current opset version of the function."""
-        func = self.get(GLOBALS.export_onnx_opset_version)
-        if func is None:
-            domain, op = self._name.split("::")
-            raise errors.UnsupportedOperatorError(
-                domain, op, GLOBALS.export_onnx_opset_version, min(self._functions)
-            )
-        return func(*args, **kwargs)
 
     def _update_merged(self) -> None:
         """Updates the merged dictionary of functions."""
@@ -64,13 +91,17 @@ class _SymbolicFunctionGroup:
     def get(self, opset: OpsetVersion) -> Optional[Callable]:
         """Find the most recent version of the function."""
         # Remember to clear the cache when the merged dictionary is updated.
+        if not self._merged:
+            return None
 
         # Linear search across the merged dictionary. This is OK because the
         # number of opsets is small and the result is cached.
-        for version in reversed(sorted(self._merged.keys())):
-            if version <= opset:
-                return self._merged[version]
-        return None
+
+        version = _dispatch_opset_version(opset, self._merged)
+        if version is None:
+            return None
+
+        return self._merged[version]
 
     def add(self, func: Callable, opset: OpsetVersion) -> None:
         """Adds a symbolic function.
@@ -130,6 +161,7 @@ class SymbolicRegistry:
 
     @property
     def uninitialized(self) -> bool:
+        """Whether the registry has not been initialized with builtin symbolic functions."""
         return self._uninitialized
 
     def register(
@@ -143,6 +175,10 @@ class SymbolicRegistry:
             func: the symbolic function to register.
             custom: whether the function is a custom function that overrides existing ones.
         """
+        if "::" not in name:
+            raise ValueError(
+                f"The name must be in the form of 'domain::op', not '{name}'"
+            )
         symbolic_functions = self._registry.setdefault(
             name, _SymbolicFunctionGroup(name)
         )
@@ -163,13 +199,12 @@ class SymbolicRegistry:
             return
         self._registry[name].remove_custom(opset)
 
-    def get_function_group(self, name: str) -> _SymbolicFunctionGroup:
+    def get_function_group(self, name: str) -> Optional[_SymbolicFunctionGroup]:
         """Returns the function group for the given name."""
-        if name not in self._registry:
-            raise ValueError(f"No symbolic function registered for '{name}'")
-        return self._registry[name]
+        return self._registry.get(name)
 
     def is_registered_op(self, name: str, version: int) -> bool:
+        """Returns whether the given op is registered for the given opset version."""
         functions = self.get_function_group(name)
         if functions is None:
             return False
@@ -236,7 +271,7 @@ def custom_onnx_symbolic(
     return onnx_symbolic(name, opset, decorate, custom=True)
 
 
-def discover_and_register_all_symbolic_opsets():
+def discover_and_register_all_symbolic_opsets() -> None:
     """Discover all symbolic functions.
 
     Opset 9 is the base version. It is selected as the base version because
@@ -258,14 +293,20 @@ def discover_and_register_all_symbolic_opsets():
     if not registry.uninitialized:
         return
 
-    for opset_version in itertools.chain(
+    for opset in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
     ):
-        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset_version}")
-        _register_module(module, opset_version)
+        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset}")
+        _register_module(module, opset)
 
 
-def _register_module(module, opset_version: int):
+def _register_module(module, opset: OpsetVersion) -> None:
+    """Registers all functions in the given module.
+
+    Args:
+        module: the module to register.
+        opset: the opset version to register.
+    """
     global registry
     members = inspect.getmembers(module)
     for name, obj in members:
@@ -273,12 +314,12 @@ def _register_module(module, opset_version: int):
             # Symbolic functions in domains other than aten
             ops = inspect.getmembers(obj, predicate=inspect.isfunction)
             for op in ops:
-                registry.register(f"{obj.domain}::{op[0]}", opset_version, op[1])  # type: ignore[attr-defined]
+                registry.register(f"{obj.domain}::{op[0]}", opset, op[1])  # type: ignore[attr-defined]
 
         elif inspect.isfunction(obj):
             if name in {"_len", "_list", "_any", "_all"}:
                 name = name[1:]
-            registry.register(f"aten::{name}", opset_version, obj)
+            registry.register(f"aten::{name}", opset, obj)
 
 
 # The registry for all symbolic functions.

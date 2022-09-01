@@ -41,7 +41,6 @@ from .utils import (
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
 )
-from torch.onnx._internal import registration as _registration
 
 __all__ = [
     # Modules

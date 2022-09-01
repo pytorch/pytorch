@@ -1700,7 +1700,6 @@ def _run_symbolic_function(
         registration.discover_and_register_all_symbolic_opsets()
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
-            # TODO(justinchuby): Update this thing
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
         if namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():

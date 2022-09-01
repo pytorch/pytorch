@@ -2,8 +2,8 @@ import inspect
 from typing import Dict, List, Union
 
 from torch import _C
-from torch.onnx._internal import registration
 from torch.onnx import _constants
+from torch.onnx._internal import registration
 
 registration.discover_and_register_all_symbolic_opsets()
 
@@ -81,6 +81,7 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
 
     for name in registration.registry.all_functions():
         func_group = registration.registry.get_function_group(name)
+        assert func_group is not None
         symbolics_schema = _TorchSchema(name)
         symbolics_schema.arguments = _symbolic_argument_count(
             func_group.get(_constants.onnx_main_opset)
