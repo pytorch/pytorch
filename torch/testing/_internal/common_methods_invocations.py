@@ -3874,6 +3874,44 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 0}),
                      error_regex='non-empty 4D or 5D')
 
+
+def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # test_multiple_devices_to_cuda would fail if we use a different device than given
+    devices = [device]
+    if torch.device(device).type == 'cpu':
+        devices = [torch.device('cpu'), torch.device('cuda:0')] if torch.cuda.is_available() else devices
+    memory_formats = [torch.preserve_format, torch.channels_last]
+
+    # to.device overload
+    for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
+        kwargs = {
+            "non_blocking": nb,
+            "copy": cp,
+            "memory_format": mem_f,
+        }
+        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64,), kwargs=kwargs)
+
+    # to.dtype overload
+    for nb, cp, mem_f in product([True, False], [True, False], memory_formats):
+        kwargs = {
+            "non_blocking": nb,
+            "copy": cp,
+            "memory_format": mem_f,
+        }
+        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64,), kwargs=kwargs)
+
+    # to.other overload
+    for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
+        kwargs = {
+            "non_blocking": nb,
+            "copy": cp,
+            "memory_format": mem_f,
+        }
+        other = make_arg((S, S, S, S), dtype=torch.float64, device=device)
+        yield SampleInput(make_arg((S, S, S, S)), args=(other,), kwargs=kwargs)
+
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -11611,6 +11649,41 @@ op_db: List[OpInfo] = [
                     dtypes=floating_types_and(torch.bfloat16),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False),
+    OpInfo(
+        "to",
+        op=lambda x, *args, **kwargs: x.to(*args, **kwargs),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_to,
+        skips=(
+            # RuntimeError: undefined value cpu
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+            ),
+            # NotImplementedError: Cannot copy out of meta tensor; no data!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMeta",
+                "test_meta",
+            ),
+            # https://github.com/pytorch/pytorch/issues/84335
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestProxyTensorOpInfo",
+                "test_make_fx_symbolic_exhaustive",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNormalizeOperators",
+                "test_normalize_operator_exhaustive",
+            ),
+        ),
+    ),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -15896,6 +15969,12 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
         supports_nvfuser=False,
     ),
+    # TODO: https://github.com/pytorch/pytorch/issues/84264
+    # PythonRefInfo(
+    #     "_refs.to",
+    #     torch_opinfo_name="to",
+    #     supports_nvfuser=False,
+    # ),
     PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",
