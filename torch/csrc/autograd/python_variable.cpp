@@ -48,6 +48,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "c10/core/SymInt.h"
 
 using namespace at;
 using namespace torch;
@@ -269,6 +270,9 @@ c10::SymIntArrayRef concrete_sym_strides_fn(
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+c10::SymInt concrete_sym_storage_offset_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
 template <const char*, typename... Ts>
 void concrete_trace_cuda(const c10::impl::PyInterpreter*, Ts...);
 static constexpr char trace_cuda_event_creation_fn_name[] =
@@ -302,6 +306,7 @@ class PyInterpreterHolder {
             &concrete_sym_sizes_fn,
             &concrete_layout_fn,
             &concrete_sym_numel_fn,
+            &concrete_sym_storage_offset_fn,
             &concrete_sym_strides_fn,
             c10::impl::GPUTraceFunctionWrapper(
                 &concrete_trace_cuda<trace_cuda_event_creation_fn_name>,
@@ -723,7 +728,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
-      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "SymInt? storage_offset, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
@@ -799,12 +804,10 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     // TODO: this should probably be sym_sizes, sym_strides AND offset
     tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
+    tensor_impl->set_storage_offset(r.toSymIntOptional(3).value_or(c10::SymInt{0}));
 
-    // TODO: this may need to be symbolic as well
-    auto storage_offset = r.toInt64Optional(3);
-    if (storage_offset) {
-      tensor_impl->set_storage_offset(*storage_offset);
-    }
+    // N.B. we ignore the storage argument as it's eiher stored on a python
+    // tensor or gets overriden for XLA
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
@@ -2504,7 +2507,6 @@ c10::Layout concrete_layout_fn(
 c10::SymInt concrete_sym_numel_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self) {
-  pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   auto out = torchDispatchFromTensorImpl(
       self,
@@ -2520,12 +2522,31 @@ c10::SymInt concrete_sym_numel_fn(
   if (out == Py_None) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
-        "Cannot call numel on a tensor with symbolic shapes/strides");
+        "Cannot call sym_numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return py::cast<c10::SymInt>(out);
+}
+
+c10::SymInt concrete_sym_storage_offset_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_numel",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_storage_offset")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    return self->sym_storage_offset_default();
+  }
+  return py::cast<c10::SymInt>(out);
 }
 
 template <const char* func_name, typename... Ts>
