@@ -20,6 +20,10 @@ class TestMkldnnFusion(JitTestCase):
             self.assertGraphContainsExactly(graph, pat, 0)
 
     def _check_model(self, m, x, trace=False, bf16=False):
+        rtol = 1.6e-2 if bf16 else 1.3e-6
+        atol = 1e-2 if bf16 else 1e-5
+        previous_jit_autocast_pass = torch._C._jit_set_autocast_mode(False)
+
         old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
 
@@ -43,8 +47,9 @@ class TestMkldnnFusion(JitTestCase):
             y_ref = m(x)
 
             graph = script.graph_for(*x)
-            self.assertEqual(y, y_ref)
+            self.assertEqual(y, y_ref, rtol=rtol, atol=atol)
 
+        torch._C._jit_set_autocast_mode(previous_jit_autocast_pass)
         torch._C._debug_set_fusion_group_inlining(old_fusion_inlining)
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(old_te_must_use_llvm_cpu)
@@ -179,7 +184,7 @@ class TestMkldnnFusion(JitTestCase):
                     # torch.jit.script doesn't work with autocast
                     if not trace and bf16:
                         continue                    
-                    for eltwise_fn in [torch.relu]:
+                    for eltwise_fn, op_name in self._eltwise_list():
                         for bias in [True, False]:
                             for oC in [1, 10]:
                                 m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
@@ -188,7 +193,7 @@ class TestMkldnnFusion(JitTestCase):
                                 graph = self._check_model(m, x, trace, bf16)
                                 conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
                                 if enabled:
-                                    self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
+                                    self.assertFused(graph, ['aten::conv2d', op_name])
                                     self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
                                 else:
                                     self.assertGraphContains(graph, kind=conv_node_name)
@@ -266,17 +271,25 @@ class TestMkldnnFusion(JitTestCase):
                 return res
         iC = 2
         oC = 3
-        for bias in [True, False]:
-            for x_shape in [
-                [1, iC],
-                [2, iC],
-                [3, 2, iC]
-            ]:
-                m = M(iC, oC, bias)
-                x = torch.randn(x_shape)
-                graph = self._check_model(m, x)
-                self.assertFused(graph, ['aten::linear'])
-                self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+        trace = True
+        for bf16, enabled in[
+            [True, True],
+            [False, False],
+        ]:
+            for bias in [True, False]:
+                for x_shape in [
+                    [1, iC],
+                    [2, iC],
+                    [3, 2, iC]
+                ]:
+                    m = M(iC, oC, bias)
+                    x = torch.randn(x_shape)
+                    graph = self._check_model(m, x, trace, bf16)
+                    if enabled:
+                        self.assertFused(graph, ['aten::linear'])
+                        self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                    else:
+                        self.assertGraphContains(graph, 'aten::linear')
 
     def test_linear_eltwise(self):
         class M(nn.Module):
@@ -291,37 +304,53 @@ class TestMkldnnFusion(JitTestCase):
                 return x
         iC = 2
         oC = 3
-        for eltwise_fn, op_name in self._eltwise_list():
-            for bias in [True, False]:
-                for x_shape in [
-                    [1, iC],
-                    [2, iC],
-                    [3, 2, iC]
-                ]:
-                    m = M(eltwise_fn, iC, oC, bias)
-                    x = torch.randn(x_shape)
+        trace = True
+        for bf16, enabled in[
+            [True, True],
+            [False, False],
+        ]:        
+            for eltwise_fn, op_name in self._eltwise_list():
+                for bias in [True, False]:
+                    for x_shape in [
+                        [1, iC],
+                        [2, iC],
+                        [3, 2, iC]
+                    ]:
+                        m = M(eltwise_fn, iC, oC, bias)
+                        x = torch.randn(x_shape)
 
-                    graph = self._check_model(m, x)
-                    self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
-                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                        graph = self._check_model(m, x, trace, bf16)
+                        if enabled:
+                            self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
+                            self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                        else:
+                            self.assertGraphContains(graph, 'aten::linear')
 
     def test_linear_clamp(self):
         modules = self._clamp_modules()
         op_name = 'aten::clamp'
         iC = 2
         oC = 3
+        trace = True
         for M in modules:
-            for bias in [True, False]:
-                for x_shape in [
-                    [1, iC],
-                    [2, iC],
-                    [3, 2, iC]
-                ]:
-                    m = M(nn.Linear, iC, oC, bias)
-                    x = torch.randn(x_shape)
-                    graph = self._check_model(m, x)
-                    self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
-                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+            for bf16, enabled in[
+                [True, True],
+                [False, False],
+            ]:            
+                for bias in [True, False]:
+                    for x_shape in [
+                        [1, iC],
+                        [2, iC],
+                        [3, 2, iC]
+                    ]:
+                        m = M(nn.Linear, iC, oC, bias)
+                        x = torch.randn(x_shape)
+                        graph = self._check_model(m, x, trace, bf16)
+                        if enabled:
+                            self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
+                            self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                        else:
+                            self.assertGraphContains(graph, 'aten::linear')
 
 if __name__ == "__main__":
     run_tests()
