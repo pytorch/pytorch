@@ -739,7 +739,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":flatbuffers_jit"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -1347,7 +1347,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":flatbuffers_jit",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
@@ -1417,6 +1417,7 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",
@@ -1633,7 +1634,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1660,7 +1660,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1704,12 +1703,12 @@ def define_buck_targets(
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
-            "{}:flatbuffer_serializer".format(ROOT),
+            "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1744,7 +1743,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1774,7 +1772,7 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
+        name = "flatbuffers_serializer_jit",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
@@ -1792,7 +1790,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
+            ":flatbuffers_serializer_mobile",
             ":torch_core",
             ":torch_mobile_module",
             C10,
@@ -1804,8 +1802,17 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 

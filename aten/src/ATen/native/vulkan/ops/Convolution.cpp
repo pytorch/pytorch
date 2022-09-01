@@ -955,7 +955,7 @@ Conv2dPackedContext::Conv2dPackedContext(
   const auto method = determine_method(
       weight.sizes(), stride, padding, dilation, groups, transposed, quantized);
 
-  packed_.reserve(14);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(
       convert(pack_weights(weight, transposed, quantized, method)));
   packed_.emplace_back(
@@ -977,18 +977,20 @@ Conv2dPackedContext::Conv2dPackedContext(
   packed_.emplace_back(method);
   packed_.emplace_back(weight.sizes().vec());
 
-  unpacked_.reserve(11);
-  unpacked_.emplace_back(weight);
-  unpacked_.emplace_back(bias);
-  unpacked_.emplace_back(stride_arg.vec());
-  unpacked_.emplace_back(padding_arg.vec());
-  unpacked_.emplace_back(dilation_arg.vec());
-  unpacked_.emplace_back(transposed);
-  unpacked_.emplace_back(quantized);
-  unpacked_.emplace_back(output_padding_arg.vec());
-  unpacked_.emplace_back(groups);
-  unpacked_.emplace_back(output_min);
-  unpacked_.emplace_back(output_max);
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+    unpacked_.emplace_back(stride_arg.vec());
+    unpacked_.emplace_back(padding_arg.vec());
+    unpacked_.emplace_back(dilation_arg.vec());
+    unpacked_.emplace_back(transposed);
+    unpacked_.emplace_back(quantized);
+    unpacked_.emplace_back(output_padding_arg.vec());
+    unpacked_.emplace_back(groups);
+    unpacked_.emplace_back(output_min);
+    unpacked_.emplace_back(output_max);
+  }
 }
 
 Conv2dPackedContext Conv2dPackedContext::pack(c10::impl::GenericList unpacked) {
@@ -1398,6 +1400,8 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
 
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
   const c10::impl::GenericList unpacked_ = conv_context_.unpack();
+
+  TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
 
   return Conv2dOpContext::State(
       unpacked_.get(Conv2dPackedContext::Unpacked::Weight).toTensor(),

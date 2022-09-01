@@ -63,7 +63,7 @@ on:
 jobs:
   build:
     runs-on: linux.4xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -209,10 +209,9 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         with:
           name: ${{ inputs.build_name }}
-          retention-days: 14
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*

@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -1248,7 +1248,7 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < (10, 1),
+        TEST_CUDA and _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     @coalescedonoff
@@ -1310,7 +1310,7 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        _get_torch_cuda_version() < (10, 1),
+        _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self, device, dtype, coalesced):
@@ -2990,41 +2990,6 @@ class TestSparse(TestSparseBase):
                          .is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0. + 0j, (1,), dtype=torch.cdouble, device=device)
                          .is_nonzero())
-
-    def test_allow_tensor_metadata_change(self, device):
-        def do_test(t):
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "raw_resize_ is not allowed on a Tensor created from .data or .detach()"):
-                t.transpose_(0, 1)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
-                t.resize_as_(self.sparse_empty(3, 3))
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
-                t.mul_(t)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_coalesced is not allowed on a Tensor created from .data or .detach()"):
-                t._coalesced_(True)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_indices_and_values_unsafe is not allowed on a Tensor created from .data or .detach()"):
-                a = self.sparse_tensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
-                a.add_(a)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
-                a.zero_()
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
-                a.copy_(self.sparse_empty(3, 3))
-
-        do_test(self.sparse_empty([3, 0], device=device).data)
-        do_test(self.sparse_empty([3, 0], device=device).detach())
 
     @dtypes(torch.double, torch.cdouble)
     def test_change_tensor_metadata(self, device, dtype):

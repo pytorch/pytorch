@@ -19,6 +19,7 @@ import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import IS_WINDOWS
+from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
@@ -2014,6 +2015,162 @@ class TestJvp(TestCase):
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
 
+# The tests here follow the cases in [Forward Grad View/inplace]
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/autograd/autograd_meta.cpp#L18-L43
+class TestVmapJvpInplaceView(TestCase):
+    # Case 1 in [Forward Grad View/inplace]
+    def test_all_dual_no_view(self, device):
+        B = 2
+
+        def push_jvp(f):
+            def inner(x, xt, y, yt):
+                return jvp(f, (x, y), (xt, yt))
+            return inner
+
+        def f(x, y):
+            x.copy_(y)
+            return x
+        x = torch.randn(3, B, device=device)
+        xt = torch.randn(3, B, device=device)
+        y = torch.randn(3, B, device=device)
+        yt = torch.randn(3, B, device=device)
+        out, out_tangent = vmap(push_jvp(f), in_dims=1)(x, xt, y, yt)
+        self.assertEqual(out, x.movedim(1, 0))
+        self.assertEqual(out_tangent, yt.movedim(1, 0))
+
+        x = torch.randn(3, B, device=device)
+        xt = torch.randn(3, B, device=device)
+        y = torch.randn(3, 3, device=device)[:, 1]
+        yt = torch.randn(6, device=device)[::2]
+        out, out_tangent = vmap(push_jvp(f), in_dims=(1, 1, None, None))(x, xt, y, yt)
+        self.assertEqual(out, x.movedim(1, 0))
+        self.assertEqual(out_tangent, yt.expand(B, 3))
+
+    # Case 2 in [Forward Grad View/inplace]
+    def test_all_dual_base_view_inplace(self, device):
+        B = 2
+
+        def push_jvp(f):
+            def inner(x, xt, y, yt):
+                return jvp(f, (x, y), (xt, yt))
+            return inner
+
+        # with view, propagate from view to base
+        def f(x, y):
+            view = x[:, ::2]
+            view.copy_(y)
+            return view, x
+
+        orig_x = torch.randn(2, 6, B, device=device)
+        orig_xt = torch.randn(2, 6, B, device=device)
+        x = orig_x.clone()
+        xt = orig_xt.clone()
+        y = torch.randn(2, B, 3, device=device)
+        yt = torch.randn(2, B, 3, device=device)
+        out, out_tangent = vmap(push_jvp(f), in_dims=(2, 2, 1, 1))(x, xt, y, yt)
+
+        expected_out = vmap(f, in_dims=(2, 1))(orig_x.clone(), y)
+        self.assertEqual(out[0], expected_out[0])
+        self.assertEqual(out[1], expected_out[1])
+
+        self.assertEqual(out_tangent[0], yt.movedim(1, 0))
+
+        expected_x_tangent = orig_xt.movedim(-1, 0).clone()
+        expected_x_tangent[:, :, ::2].copy_(yt.movedim(1, 0))
+        self.assertEqual(out_tangent[1], expected_x_tangent)
+
+        expected = orig_x.movedim(2, 0).clone()
+        expected[:, :, ::2] = y.movedim(1, 0)
+        self.assertEqual(x.movedim(2, 0), expected)
+
+    # Case 3 in [Forward Grad View/inplace]
+    def test_all_dual_base_inplace(self, device):
+        B = 2
+
+        def push_jvp(f):
+            def inner(x, xt, y, yt):
+                return jvp(f, (x, y), (xt, yt))
+            return inner
+
+        # Case 3: with view, propagate from base to view
+        def f(x, y):
+            view = x[0, ::2]
+            x.copy_(y)
+            return x, view
+
+        x = torch.randn(2, B, 6, device=device)
+        xt = torch.randn(2, 6, B, device=device)
+        y = torch.randn(2, B, 6, device=device)
+        yt = torch.randn(2, B, 6, device=device)
+        out, out_tangent = vmap(push_jvp(f), in_dims=(1, 2, 1, 1))(x.clone(), xt, y, yt)
+
+        expected_out = vmap(f, in_dims=(1, 1))(x.clone(), y)
+        self.assertEqual(out[0], expected_out[0])
+        self.assertEqual(out[1], expected_out[1])
+
+        self.assertEqual(out_tangent[0], yt.movedim(1, 0))
+        self.assertEqual(out_tangent[1], yt.movedim(1, 0)[:, 0, ::2])
+
+    # Case 4 in [Forward Grad View/inplace]
+    def test_right_dual_view_prop(self, device):
+        B = 2
+
+        # Changes on the view must propagate to its base. Also:
+        # - x is a regular Tensor
+        # - y is a dual tensor
+        def f(x, y):
+            x = x.clone()
+            view = x[0]
+            view.copy_(y)
+            return view, x
+
+        def push_jvp(x, y, yt):
+            return jvp(partial(f, x), (y,), (yt,))
+
+        x = torch.randn(2, B, 6, device=device)
+        y = torch.randn(6, B, device=device)
+        yt = torch.randn(6, B, device=device)
+        outs, tangents = vmap(push_jvp, in_dims=(1, 1, 1))(x, y, yt)
+
+        expected_out = vmap(f, in_dims=(1, 1))(x.clone(), y)
+        self.assertEqual(outs[0], expected_out[0])
+        self.assertEqual(outs[1], expected_out[1])
+
+        self.assertEqual(tangents[0], yt.movedim(1, 0))
+
+        expected_tangent_1 = torch.zeros_like(x).movedim(1, 0)
+        expected_tangent_1[:, 0].copy_(yt.movedim(1, 0))
+        self.assertEqual(tangents[1], expected_tangent_1)
+
+    # Case 5 in [Forward Grad View/inplace]
+    def test_right_dual_base_prop(self, device):
+        B = 2
+
+        # Changes on the base must propagate on all its views. Also:
+        # - x is a regular Tensor
+        # - y is a dual tensor
+        def f(x, y):
+            x = x.clone()
+            view = x[0]
+            x.copy_(y)
+            return view, x
+
+        def push_jvp(x, y, yt):
+            return jvp(partial(f, x), (y,), (yt,))
+
+        x = torch.randn(2, B, 6)
+        y = torch.randn(2, 6, B)
+        yt = torch.randn(2, 6, B)
+        outs, tangents = vmap(push_jvp, in_dims=(1, 2, 2))(x, y, yt)
+
+        expected_out = vmap(f, in_dims=(1, 2))(x, y)
+        self.assertEqual(outs[0], expected_out[0])
+        self.assertEqual(outs[1], expected_out[1])
+
+        self.assertEqual(tangents[0], yt.movedim(2, 0)[:, 0])
+        self.assertEqual(tangents[1], yt.movedim(2, 0))
+
+
 class TestCustomFunction(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")
     @onlyCPU
@@ -3059,6 +3216,19 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         out2 = vmap(functionalize(jvp_wrapper))(x, t)
         self.assertEqual(out1, out2)
 
+    # TODO: move this test into test_fake_tensor.py
+    # once functionalize() can be used in core tests.
+    def test_functionalize_fake_tensors(self, device):
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            y = x.detach()
+            return y + y
+
+        with FakeTensorMode() as mode:
+            x = torch.ones(2, device=device, requires_grad=True)
+            out = functionalize(f)(x)
+        self.assertEqual(x.size(), (2,))
+
     def test_functionalize_fx_simple(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -3237,6 +3407,26 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index_tensor
     """)
 
+    def test_resize_program_inputs(self, device):
+        def f(x):
+            x.resize_(10)
+            x.fill_(2)
+
+        fn = make_fx(functionalize(f))
+        out = fn(torch.zeros(0, device=device))
+        out = normalize_devices(out)
+        self.assertExpectedInline((out.code), """\
+
+
+
+def forward(self, x_1):
+    resize_default = torch.ops.aten.resize.default(x_1, [10])
+    fill_scalar = torch.ops.aten.fill.Scalar(resize_default, 2);  resize_default = None
+    resize__default = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None
+    copy__default = torch.ops.aten.copy_.default(resize__default, fill_scalar);  resize__default = fill_scalar = None
+    return None
+    """)
+
 
 
 only_for = ("cpu", "cuda")
@@ -3257,6 +3447,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestJvp,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestVmapJvpInplaceView,
     globals(),
     only_for=only_for,
 )
