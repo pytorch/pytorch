@@ -2900,7 +2900,7 @@ class TestQuantizedOps(TestCase):
             ]
 
             q_data = []
-            reduce_range = (qengine in ('fbgemm', 'onednn'))
+            reduce_range = (qengine in ('x86', 'fbgemm', 'onednn'))
             for idx, x in enumerate(fp_data):
                 scale, zero_point = _calculate_dynamic_qparams(
                     x, dtype=dtype, reduce_range=reduce_range)
@@ -3018,7 +3018,7 @@ class TestDynamicQuantizedOps(TestCase):
             (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32) if use_bias else None
 
-        if torch.backends.quantized.engine in ('fbgemm', 'onednn'):
+        if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
             avoid_vpmaddubsw_overflow_linear(
                 batch_size,
                 input_channels,
@@ -3590,7 +3590,7 @@ class TestQuantizedLinear(TestCase):
                 np.random.rand(output_channels) *
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
-            if torch.backends.quantized.engine in ('fbgemm', 'onednn'):
+            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
                 avoid_vpmaddubsw_overflow_linear(
                     batch_size,
                     input_channels,
