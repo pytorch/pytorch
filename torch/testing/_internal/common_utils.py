@@ -933,13 +933,23 @@ if TEST_WITH_TORCHDYNAMO:
 
 def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if TEST_WITH_TORCHDYNAMO:
-                raise unittest.SkipTest(msg)
-            else:
-                fn(*args, **kwargs)
-        return wrapper
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_TORCHDYNAMO:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if TEST_WITH_TORCHDYNAMO:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+
     return decorator
 
 # Determine whether to enable cuda memory leak check.
