@@ -1296,14 +1296,26 @@ def chunk(g, self, chunks, dim):
     return split(g, self, chunk_vec, dim)
 
 
-def normal(g, loc, scale, seed):
+def normal(
+    g,
+    mean,
+    std,
+    sizes=None,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
     # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
     # from a mean 0 and variance 1 distribution then
     #       σx+μ
     # is a sample with mean μ and variance σ's square.
-    result = opset9.mul(g, scale, g.op("RandomNormalLike", loc))
-    return add(g, result, loc)
+    if sizes is not None and not symbolic_helper._is_none(sizes):
+        mean = opset9.expand(g, mean, sizes, None)
+    result = opset9.mul(g, std, g.op("RandomNormalLike", mean))
+    return add(g, result, mean)
 
 
 class Prim:
