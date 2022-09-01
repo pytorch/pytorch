@@ -14,7 +14,7 @@
 
 namespace at {
 namespace native {
-namespace utils {
+inline namespace CPU_CAPABILITY {
 
 constexpr int64_t kChunkSize = 16;
 
@@ -63,7 +63,7 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   constexpr int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
-  const int64_t depth = CeilLog2(m);
+  const int64_t depth = utils::CeilLog2(m);
 
   const Vec kZeroVec(T(0));
   c10::SmallVector<int64_t, kMaxDepth> m0_stk(depth, 0);
@@ -136,7 +136,7 @@ std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   constexpr int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
-  const int64_t depth = CeilLog2(m);
+  const int64_t depth = utils::CeilLog2(m);
   if (depth <= 4) {
     return RowwiseMomentsImpl<T, 4>(X, N, ddof);
   } else if (depth <= 8) {
@@ -150,6 +150,6 @@ std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   }
 }
 
-} // namespace utils
+} // namespace
 } // namespace native
 } // namespace at
