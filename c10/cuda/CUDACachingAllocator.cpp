@@ -1683,7 +1683,8 @@ class THCCachingAllocator {
     *devPtr = (void*)block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(*devPtr));
+      (*interp)->trace_gpu_memory_allocation(
+          reinterpret_cast<uintptr_t>(*devPtr));
     }
   }
 
