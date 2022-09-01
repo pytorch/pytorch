@@ -12,6 +12,8 @@ from torch.nn.utils.rnn import PackedSequence
 
 """Useful functions to deal with tensor types with other python container types."""
 
+__all__ = ["p_assert"]
+
 def _contains_batchnorm(module):
     return any(
         isinstance(mod, _BatchNorm) for mod in module.modules()
