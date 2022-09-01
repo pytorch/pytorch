@@ -359,7 +359,7 @@ void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    pyobj_interpreter_.load(std::memory_order_acquire)
+    (*pyobj_interpreter_.load(std::memory_order_acquire))
         ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
@@ -382,15 +382,15 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
+impl::PyInterpreter& TensorImpl::load_pyobj_interpreter() const {
   auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
   if (interpreter) {
-    return interpreter;
+    return *interpreter;
   }
   TORCH_CHECK(
       false,
       "cannot access PyObject for Tensor on interpreter ",
-      pyobj_interpreter_.load()->name());
+      (*pyobj_interpreter_.load())->name());
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
@@ -550,7 +550,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
   }
   if (r) {
     r->set_version_counter(std::forward<VariableVersion>(version_counter));
