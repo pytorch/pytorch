@@ -5,8 +5,8 @@ import textwrap
 from typing import List
 
 import torch
-import torch._cuda_sanitizer._sanitizer as csan
-from torch._cuda_sanitizer._sanitizer import StreamId, DataPtr, EventId
+import torch.cuda._sanitizer as csan
+from torch.cuda._sanitizer import StreamId, DataPtr, EventId
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
@@ -169,11 +169,13 @@ class TestEventHandler(TestCase):
 
     def assert_bad_kernel_launch(
         self,
+        number_of_errors: int,
         stream: StreamId,
         read_only: List[DataPtr] = None,
         read_write: List[DataPtr] = None,
     ) -> None:
-        self.assertNotEqual(self.kernel_launch(stream, read_only, read_write), [])
+        errors = self.kernel_launch(stream, read_only, read_write)
+        self.assertEqual(len(errors), number_of_errors)
 
     def test_empty_kernel_launch(self):
         self.assert_good_kernel_launch(stream_id(0))
@@ -184,7 +186,7 @@ class TestEventHandler(TestCase):
 
     def test_simple_error(self):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
-        self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
 
     def test_simple_sync(self):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
@@ -201,7 +203,7 @@ class TestEventHandler(TestCase):
         self.handler._handle_event_wait(event_id(0), stream_id(2))
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
 
-        self.assert_bad_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(3), read_only=[tensor_id(1)])
 
     def test_branch_sync(self):
         # Tests that two streams can read after both waiting for a third, but they
@@ -214,7 +216,7 @@ class TestEventHandler(TestCase):
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
 
-        self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
 
     def test_chain_sync(self):
         iterations = 10
@@ -231,7 +233,7 @@ class TestEventHandler(TestCase):
         self.assert_good_kernel_launch(stream_id(1), read_only=[tensor_id(1)])
         self.handler._handle_event_wait(event_id(0), stream_id(2))
 
-        self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
 
     def test_deleted_record(self):
         for should_delete, should_create in [
@@ -250,18 +252,22 @@ class TestEventHandler(TestCase):
                     self.handler._handle_event_creation(event_id(0))
 
                 self.handler._handle_event_wait(event_id(0), stream_id(2))
-                self.assert_bad_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+                self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
 
     def test_all_reads_checked_failing(self):
         iterations = 10
-        for i in range(1, iterations + 1):
+        for i in range(1, iterations):
             self.assert_good_kernel_launch(stream_id(i), read_only=[tensor_id(1)])
             self.handler._handle_event_record(event_id(i), stream_id(i))
 
         for i in range(1, iterations):
             self.handler._handle_event_wait(event_id(i), stream_id(0))
 
-        self.assert_bad_kernel_launch(stream_id(0), read_write=[tensor_id(1)])
+        self.assert_good_kernel_launch(stream_id(iterations), read_only=[tensor_id(1)])
+        self.handler._handle_event_record(event_id(iterations), stream_id(i))
+
+        # Does not synchronize with the last read.
+        self.assert_bad_kernel_launch(1, stream_id(0), read_write=[tensor_id(1)])
 
     def test_all_reads_checked_passing(self):
         iterations = 10
@@ -279,14 +285,11 @@ class TestEventHandler(TestCase):
         self.assert_good_kernel_launch(
             stream_id(0), read_write=[tensor_id(i) for i in range(iterations)]
         )
-        errors = self.handler._handle_kernel_launch(
+        self.assert_bad_kernel_launch(
+            iterations,
             stream_id(1),
-            read_only=[],
             read_write=[tensor_id(i) for i in range(iterations)],
-            operator="",
-            tensor_names={i: [""] for i in range(iterations)},
         )
-        self.assertEqual(len(errors), iterations)
 
     def test_correct_state_merging(self):
         # Tests that after waiting for an event, a stream's state is indeed set
@@ -315,7 +318,7 @@ class TestEventHandler(TestCase):
         self.handler._handle_event_record(event_id(1), stream_id(2))
 
         self.handler._handle_event_wait(event_id(1), stream_id(3))
-        self.assert_bad_kernel_launch(stream_id(3), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(3), read_write=[tensor_id(1)])
 
     def test_multiple_wait(self):
         # Tests that a wait operation can be performed multiple times on the same event
@@ -341,13 +344,13 @@ class TestMessages(TestCase):
                 self.handler._handle_event_deletion,
                 f"Found Event with id: {ARG}, but no matching event "
                 "creation in the trace. Backfilling the trace now. "
-                "No action is necessary.",
+                "Perhaps the sanitizer was enabled after some torch operations?",
             ),
             (
                 self.handler._handle_memory_deallocation,
                 f"Found tensor with pointer: {ARG}, but no matching tensor "
                 "allocation in the trace. Backfilling the trace now. "
-                "No action is necessary.",
+                "Perhaps the sanitizer was enabled after some torch operations?",
             ),
         ]:
             with self.subTest(func=func, out=out):
@@ -364,7 +367,8 @@ class TestMessages(TestCase):
                 self.handler._handle_event_creation,
                 "Found duplicate event creation in the trace for event with "
                 f"id: {ARG}. Assuming the trace for event deletion wasn't caught "
-                "and backfilling it now. No action is necessary.",
+                "and backfilling it now. "
+                "Perhaps the sanitizer was enabled after some torch operations?",
             ),
             (
                 self.handler._handle_stream_creation,
@@ -397,7 +401,7 @@ class TestMessages(TestCase):
         )
         error = csan.UnsynchronizedAccessError(
             data_ptr=tensor_id(1),
-            allocation_trace=["  alloc\n    trace\n"],
+            allocation_stack_trace=["  alloc\n    trace\n"],
             current_access=current_access,
             previous_access=previous_access,
         )

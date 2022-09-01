@@ -1,3 +1,15 @@
+r"""
+This module introduces CUDA Sanitizer, a tool for detecting synchronization errors
+between kernels ran on different streams. It stores information on accesses to tensors
+to determine if they are synchronized or not. When enabled in a python program and a
+possible data race is detected, a detailed warning will be printed and the program
+will exit.
+
+It can be enabled either by importing this module and using
+:func:`enable_cuda_sanitizer()` or by exporting ``TORCH_CUDA_SANITIZER``
+environment variable.
+"""
+
 import enum
 import functools
 import io
@@ -10,11 +22,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
-from torch.utils._cuda_trace import _CUDA_HOOK_TRACE_OFFSET
-from torch.utils._python_dispatch import (
-    TorchDispatchMode,
-    _PYTHON_DISPATCH_TRACE_OFFSET,
-)
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
@@ -40,6 +48,17 @@ class AccessType(enum.Enum):
 
 @dataclass
 class Access:
+    r"""Stores information about a single access to a tensor by a kernel.
+
+    Args:
+        type: either AccessType.READ or AccessType.Write.
+        seq_num: the sequential number of the kernel performing the access.
+        stream: the stream id of the stream executing the kernel.
+        operator: the schema of the launched kernel, which lists the
+            arguments and return type.
+        names: the arguments in the schema this access corresponds to.
+        stack_trace: the captured stack trace of the access.
+    """
     type: AccessType
     seq_num: SeqNum
     stream: StreamId
@@ -58,7 +77,7 @@ class UnsynchronizedAccessError(SynchronizationError):
     def __init__(
         self,
         data_ptr: DataPtr,
-        allocation_trace: Optional[List[str]],
+        allocation_stack_trace: Optional[List[str]],
         current_access: Access,
         previous_access: Access,
     ):
@@ -87,10 +106,10 @@ class UnsynchronizedAccessError(SynchronizationError):
                 )
             )
             message.write(f"{''.join(previous_access.stack_trace)}\n")
-            if allocation_trace:
+            if allocation_stack_trace:
                 message.write(
                     "Tensor was allocated with stack trace:\n"
-                    f"{''.join(allocation_trace)}"
+                    f"{''.join(allocation_stack_trace)}"
                 )
             else:
                 message.write("Trace for tensor allocation not found.")
@@ -103,7 +122,16 @@ def format_log_message(message: str) -> str:
 
 @dataclass
 class TensorInfo:
-    allocation_trace: Optional[List[str]]
+    r"""Stores information about a single tensor and recent accesses to it.
+
+    Args:
+        allocation_stack_trace: the captured stack trace of the tensor's allocation.
+            Can be ``None`` if the allocation wasn't caught by CSAN.
+        reads: list of read accesses to the tensor that were performed since
+            the last write.
+        write: the last write access to the tensor.
+    """
+    allocation_stack_trace: Optional[List[str]]
     reads: List[Access] = field(default_factory=list)
     write: Optional[Access] = None
 
@@ -119,7 +147,7 @@ class _TensorsAccessed:
                     f"""
                     Found tensor with pointer: {data_ptr}, but no matching tensor
                     allocation in the trace. Backfilling the trace now.
-                    No action is necessary.
+                    Perhaps the sanitizer was enabled after some torch operations?
                     """
                 )
             )
@@ -133,7 +161,7 @@ class _TensorsAccessed:
                     Found duplicate tensor allocation in the trace for tensor with
                     pointer: {data_ptr}. Assuming the trace for tensor deallocation
                     wasn't caught and backfilling it now.
-                    No action is necessary.
+                    Perhaps the sanitizer was enabled after some torch operations?
                     """
                 )
             )
@@ -150,8 +178,8 @@ class _TensorsAccessed:
     def were_there_reads_since_last_write(self, data_ptr: DataPtr) -> bool:
         return True if self.accesses[data_ptr].reads else False
 
-    def get_allocation_trace(self, data_ptr: DataPtr) -> Optional[List[str]]:
-        return self.accesses[data_ptr].allocation_trace
+    def get_allocation_stack_trace(self, data_ptr: DataPtr) -> Optional[List[str]]:
+        return self.accesses[data_ptr].allocation_stack_trace
 
     def get_write(self, data_ptr: DataPtr) -> Optional[Access]:
         return self.accesses[data_ptr].write
@@ -179,7 +207,7 @@ class StreamSynchronizations:
                     f"""
                     Found Stream with id: {stream}, but no matching stream
                     creation in the trace. Backfilling the trace now.
-                    No action is necessary.
+                    Perhaps the sanitizer was enabled after some torch operations?
                     """
                 )
             )
@@ -192,7 +220,7 @@ class StreamSynchronizations:
                     f"""
                     Found Event with id: {event}, but no matching event
                     creation in the trace. Backfilling the trace now.
-                    No action is necessary.
+                    Perhaps the sanitizer was enabled after some torch operations?
                     """
                 )
             )
@@ -205,7 +233,8 @@ class StreamSynchronizations:
                     f"""
                     Found duplicate event creation in the trace for event with
                     id: {event}. Assuming the trace for event deletion wasn't caught
-                    and backfilling it now. No action is necessary.
+                    and backfilling it now.
+                    Perhaps the sanitizer was enabled after some torch operations?
                     """
                 )
             )
@@ -290,7 +319,7 @@ class EventHandler:
                 error_list.append(
                     UnsynchronizedAccessError(
                         data_ptr,
-                        self.tensors_accessed.get_allocation_trace(data_ptr),
+                        self.tensors_accessed.get_allocation_stack_trace(data_ptr),
                         current_access,
                         previous_access,
                     )
@@ -299,7 +328,7 @@ class EventHandler:
         error_list: List[SynchronizationError] = []
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
-        stack_trace = traceback.format_stack()[: _PYTHON_DISPATCH_TRACE_OFFSET - 1]
+        stack_trace = traceback.format_stack()
 
         for data_ptr in read_only:
             self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -351,10 +380,7 @@ class EventHandler:
 
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
-        trace_offset = _PYTHON_DISPATCH_TRACE_OFFSET + _CUDA_HOOK_TRACE_OFFSET - 1
-        self.tensors_accessed.create_tensor(
-            data_ptr, traceback.format_stack()[:trace_offset]
-        )
+        self.tensors_accessed.create_tensor(data_ptr, traceback.format_stack())
 
     def _handle_memory_deallocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -457,7 +483,6 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         outputs = func(*args, **kwargs)
 
         argument_handler.parse_outputs(outputs)
-
         errors = self.event_handler._handle_kernel_launch(
             torch.cuda.current_stream().cuda_stream,
             list(argument_handler.dataptrs_read - argument_handler.dataptrs_written),
@@ -467,8 +492,8 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         )
         if errors:
             for error in errors:
-                print(error)
-            sys.exit()
+                print(error, file=sys.stderr)
+            raise RuntimeError(errors)
 
         return outputs
 
@@ -477,14 +502,26 @@ class CUDASanitizer:
     """Manages the lifetime of a CUDASanitizer dispatch mode object.
 
     The CUDASanitizer class wraps the entering/exiting functions of the dispatch mode
-    context manager in its constructor/destructor, respectively. This is to explicitly
-    set the lifetime of the dispatch mode object to that of the application.
+    context manager in the enable function/destructor, respectively. This is to
+    explicitly set the lifetime of the dispatch mode object to that of the application.
     This approach was deemed more elegant than using the atexit module.
     """
 
     def __init__(self):
         self.dispatch = CUDASanitizerDispatchMode()
+        self.enabled = False
+
+    def enable(self):
         self.dispatch.__enter__()
+        self.enabled = True
 
     def __del__(self):
-        self.dispatch.__exit__(None, None, None)
+        if self.enabled:
+            self.dispatch.__exit__(None, None, None)
+
+
+def enable_cuda_sanitizer():
+    cuda_sanitizer.enable()
+
+
+cuda_sanitizer = CUDASanitizer()
