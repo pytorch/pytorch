@@ -1655,6 +1655,31 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
+# TODO: extend to device and layout similar to
+# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
+def _to_will_alias(
+    a: TensorLikeType,
+    dtype: torch.dtype,
+    copy: bool,
+    memory_format: torch.memory_format,
+) -> bool:
+    return (
+        not copy
+        and a.dtype == dtype
+        and (
+            memory_format == torch.preserve_format
+            or a.is_contiguous(memory_format=memory_format)
+        )
+    )
+
+
+# TODO: there are multiple overloads of to, but we only support one here
+# aten/src/ATen/native/native_functions.yaml lists all overloads
+# Missing overloads:
+# to.dtype_layout
+# to.device
+# to.other
+# https://github.com/pytorch/pytorch/issues/84264
 def to(
     a: TensorLikeType,
     dtype: torch.dtype,
@@ -1662,6 +1687,8 @@ def to(
     copy: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
+    if _to_will_alias(a, dtype, copy, memory_format):
+        return a
     if (
         (copy is True or dtype != a.dtype)
         and memory_format == torch.preserve_format
@@ -2632,13 +2659,17 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     return a_
 
 
-# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 # CompositeImplicitAutograd - don't register decomp
 # NOTE: shape is a vararg because Tensor.reshape can be called with as
 # Tensor.reshape(a, b, c) or Tensor.reshape((a, b, c)) Function call
 # torch.reshape doesn't support unpacked shapes
 def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=True)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.reshape(other.size())
 
 
 @register_decomposition(torch.ops.aten.roll)
@@ -3142,6 +3173,11 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.view(other.size())
 
 
 # CompositeImplicitAutograd - don't register decomp
