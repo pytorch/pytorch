@@ -337,8 +337,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 extern "C" {
 C10_IMPORT
 #if defined(__SYCL_DEVICE_ONLY__)
-extern SYCL_EXTERNAL void _wassert(
-    const wchar_t *wexpr, const wchar_t *wfile, unsigned line);
+extern SYCL_EXTERNAL void _wassert(const wchar_t *wexpr, const wchar_t *wfile, unsigned line);
 #else
 #if defined(__CUDA_ARCH__)
 __host__ __device__
