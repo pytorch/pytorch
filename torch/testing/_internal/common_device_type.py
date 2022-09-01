@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -1161,7 +1161,7 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
-    return expectedFailure('meta')(fn)
+    return skipIfTorchDynamo(expectedFailure('meta')(fn))
 
 def expectedFailureXLA(fn):
     return expectedFailure('xla')(fn)
