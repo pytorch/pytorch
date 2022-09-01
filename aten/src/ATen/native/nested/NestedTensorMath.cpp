@@ -1139,7 +1139,6 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
       "Use .reshape(...) instead.");
   return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_offsets()));
 }
-
   /**
    * Create a buffer tensor that is a view of self
    *
@@ -1211,13 +1210,8 @@ Tensor _nested_from_buffer(
       nested_size_tensor, nested_stride_tensor, offsets);
 }
 
-// Special rules for reshape(nested tensor):
-// 1. Only 1 regular dimension can be collapsed with
-//    or splitted from the implicit batch dimension
-// 2. Instead of infering size, -1 means "inherit the old size", so:
-//    * negative size is legal for a ragged dimension
-//    * multiple sizes can be -1
-Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
+// See Note [Special size rule for nested tensor]
+Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
       proposed_shape.size() > 0,
       "shape '[]' is invalid for a nested tensor");
@@ -1228,7 +1222,7 @@ Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
       ntensors > 0,
       "empty nested tensor cannot be reshaped");
   // basic information after reshaping
-  int64_t ntensors_reshaped;
+  int64_t ntensors_reshaped{0};
   if (proposed_shape[0] >= 0) {
     ntensors_reshaped = proposed_shape[0];
   }
@@ -1246,7 +1240,7 @@ Tensor _reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_size_tensor();
-  bool viewable;
+  bool viewable{false};
   Tensor sizemat_reshaped, stridemat_reshaped;
   std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
