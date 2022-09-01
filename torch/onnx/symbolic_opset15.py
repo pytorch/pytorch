@@ -27,8 +27,7 @@ Updated operators:
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 
 
 def __is_(g, self, other):

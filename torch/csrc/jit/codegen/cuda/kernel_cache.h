@@ -25,8 +25,7 @@ class SchedulerRuntimeInfo;
 
 // Utilities for benchmarking and profiling
 struct ExecutorLog {
-  c10::optional<ReductionParams> reduction_params = c10::nullopt;
-  c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
+  std::shared_ptr<HeuristicParams> params = nullptr;
   FusionExecutor* fusion_executor = nullptr;
 };
 

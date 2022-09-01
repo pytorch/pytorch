@@ -63,11 +63,7 @@ def assert_state_dict_equal(
 
     for key, value_1 in state_dict_1.items():
         value_2 = state_dict_2[key]
-        if isinstance(value_1, torch.Tensor):
-            self.assertTrue(
-                torch.equal(value_1, value_2), f"Key {key}'s tensor does not match"
-            )
-        elif isinstance(value_1, ShardedTensor):
+        if isinstance(value_1, ShardedTensor):
             for local_shard_1, local_shard_2 in zip(
                 value_1.local_shards(), value_2.local_shards()
             ):
@@ -75,6 +71,10 @@ def assert_state_dict_equal(
                     torch.equal(local_shard_1.tensor, local_shard_1.tensor),
                     f"Key {key}'s shard does not match",
                 )
+        elif isinstance(value_1, torch.Tensor):
+            self.assertTrue(
+                torch.equal(value_1, value_2), f"Key {key}'s tensor does not match"
+            )
 
     return True
 

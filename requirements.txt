@@ -2,6 +2,7 @@
 astunparse
 expecttest
 future
+hypothesis
 numpy
 psutil
 pyyaml

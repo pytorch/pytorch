@@ -2,7 +2,7 @@ import json
 import logging
 
 import math
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,7 +21,7 @@ from torchgen.model import (
 )
 from torchgen.static_runtime import config
 
-logger: logger = logging.getLogger()
+logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
@@ -98,7 +98,9 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             return False
 
     if isinstance(g, NativeFunctionsViewGroup):
-        if "at::Tensor" != cpp.returns_type(func.returns).cpp_type():
+        # TODO: stop doing type tests by converting to C++ and then testing
+        # the string, just test the dang thing directly
+        if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
             logger.info(f"NON-TENSOR RET TYPE: {str(func)}")
             return False
@@ -122,7 +124,8 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             or not str(func.name).endswith(".out")
         ):
             return False
-    if "at::Tensor &" != cpp.returns_type(func.returns).cpp_type():
+    # TODO: stop type testing by converting to C++
+    if "at::Tensor &" != cpp.returns_type(func.returns, symint=False).cpp_type():
         logger.info(f"NON_TENSOR RET TYPE: {str(func)}")
         return False
     if has_alias(func.arguments.non_out):
@@ -229,7 +232,7 @@ def test_tensor_dim(op_name: str) -> int:
 
 
 test_tensor_shapes_string = '{"view_as_complex": "{2, 2}"}'
-test_tensor_shape_json = json.loads(test_tensor_shapes_string)
+test_tensor_shape_json: Dict[str, str] = json.loads(test_tensor_shapes_string)
 
 
 def test_tensor_shape(op_name: str) -> str:
