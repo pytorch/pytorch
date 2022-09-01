@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -214,8 +215,10 @@ class FakeTensorConverter(object):
         if type(t) is torch.nn.Parameter:
             assert not make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        if t.grad is not None:
-            assert not make_constant
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+            grad_not_none = t.grad is not None
+        if grad_not_none:
             out.grad = self.from_real_tensor(fake_mode, t.grad)
         self.set_tensor_memo(t, out)
         return out
@@ -486,7 +489,7 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         with in_kernel_invocation_manager(self.fake_mode):
             self_repr = super().__repr__()
-        return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
+        return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern

@@ -1622,6 +1622,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isfinite',
         '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.poisson_nll_loss',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
@@ -1791,7 +1793,7 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(inner=None)
+                mode = FakeTensorMode()
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
