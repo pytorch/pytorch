@@ -1861,9 +1861,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           false,
           "cannot access PyObject for Tensor on interpreter ",
-          (*self_interpreter)->name(),
+          self_interpreter->name(),
           " that has already been used by another torch deploy interpreter ",
-          (*pyobj_interpreter_.load())->name());
+          pyobj_interpreter_.load()->name());
     }
   }
 
@@ -1882,7 +1882,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_;
   }
 
-  impl::PyInterpreter& load_pyobj_interpreter() const;
+  impl::PyInterpreter* load_pyobj_interpreter() const;
 
  public:
   /**
