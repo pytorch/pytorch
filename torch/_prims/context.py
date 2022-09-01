@@ -217,7 +217,7 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     flat_args, _ = tree_flatten(args)
     # TODO: allow cpu scalar once we plumb the support via python API
     # check for unsupport cpu tensor
-    if any(isinstance(arg, torch.Tensor) and arg.is_cpu for arg in flat_args):  # type: ignore[attr-defined]
+    if any(isinstance(arg, torch.Tensor) and arg.is_cpu and arg.ndim != 0 for arg in flat_args):  # type: ignore[attr-defined]
         return True
 
     return False
