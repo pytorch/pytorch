@@ -790,8 +790,8 @@ class TestSymbolicTracing(TestCase):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
-    mul_1 = sym_size * 2;  sym_size = None
-    empty = torch.ops.aten.empty.memory_format([mul_1], device = device(type='cpu'), pin_memory = False);  mul_1 = None
+    mul = sym_size * 2;  sym_size = None
+    empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
 

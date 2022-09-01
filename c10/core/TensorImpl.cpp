@@ -213,12 +213,12 @@ void TensorImpl::HandleResize() {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
     reset_tensor =
-        storage_.nbytes() < (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize();
+        storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
   } else {
     reset_tensor = storage_.nbytes() <
-            (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize() ||
+            (storage_offset_ + numel_) * data_type_.itemsize() ||
         !FLAGS_caffe2_keep_on_shrink ||
-        storage_.nbytes() - (storage_offset_.as_int_unchecked() + numel_) * data_type_.itemsize() >
+        storage_.nbytes() - (storage_offset_ + numel_) * data_type_.itemsize() >
             static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
   }
 
@@ -389,83 +389,93 @@ impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+    // TODO: pass memory_format to is_contiguous call
     return load_pyobj_interpreter()->is_contiguous(this);
   }
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have is_contiguous");
+  return is_contiguous_default(memory_format);
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return load_pyobj_interpreter()->sizes(this);
   }
-  TORCH_CHECK(
-      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+  return sizes_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  if (C10_UNLIKELY(is_python_dispatch())) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return load_pyobj_interpreter()->sym_sizes(this);
   }
   return sym_sizes_default();
 }
 
 c10::SymInt TensorImpl::sym_numel_custom() const {
-  if (C10_UNLIKELY(is_python_dispatch())) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return load_pyobj_interpreter()->sym_numel(this);
   }
   return sym_numel_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
-  if (C10_UNLIKELY(is_python_dispatch())) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return load_pyobj_interpreter()->sym_strides(this);
   }
   return sym_strides_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(python_custom_device_)) {
     return load_pyobj_interpreter()->device(this);
   }
-  TORCH_CHECK(
-      false, "Tensors of type ", tensorimpl_type_name(), " do not have device");
+  return device_default();
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return load_pyobj_interpreter()->strides(this);
   }
-  TORCH_CHECK(
-      false,
-      "Tensors of type ",
-      tensorimpl_type_name(),
-      " do not have strides");
+  return strides_default();
 }
 
 int64_t TensorImpl::dim_custom() const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return load_pyobj_interpreter()->dim(this);
   }
-  TORCH_CHECK(
-      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
+  return dim_default();
 }
 
 int64_t TensorImpl::numel_custom() const {
-  TORCH_CHECK(
-      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+    // TODO: fix this
+    return load_pyobj_interpreter()->sym_numel(this).expect_int();
+  }
+  return numel_default();
 }
 
 c10::Layout TensorImpl::layout_custom() const {
-  if (is_python_dispatch()) {
+  if (C10_UNLIKELY(python_custom_layout_)) {
     return load_pyobj_interpreter()->layout(this);
   }
+  // TODO: fix this
   TORCH_CHECK(
-      false, "Tensors of type ", tensorimpl_type_name(), " do not have layout");
+      0, "Tensors of type ", tensorimpl_type_name(), " do not have layout")
+  // return layout_default();
+}
+
+int64_t TensorImpl::storage_offset_custom() const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+    // TODO: fix this
+    return load_pyobj_interpreter()->sym_storage_offset(this).expect_int();
+  }
+  return storage_offset_default();
+}
+
+c10::SymInt TensorImpl::sym_storage_offset_custom() const {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+    return load_pyobj_interpreter()->sym_storage_offset(this);
+  }
+  return sym_storage_offset_default();
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -623,7 +633,15 @@ void TensorImpl::copy_generic_tensor_metadata(
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
   }
-  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
+
+  // NB: symbolic sizes and strides are copied, but custom policy is
+  // NOT (you have no Python object to dispatch to!)
+  // NB: subclass relevant policy doesn't have to be copied; the
+  // constructor sets this up
+
+  dest_impl->refresh_sizes_strides_policy();
+  dest_impl->refresh_layout_policy();
+  dest_impl->refresh_device_policy();
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
@@ -871,7 +889,7 @@ void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;
-  sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
+  refresh_sizes_strides_policy();
   if (!extra_meta_)
     extra_meta_ = std::make_unique<ExtraMeta>();
   extra_meta_->sizes_ = sizes;

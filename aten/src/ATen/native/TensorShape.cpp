@@ -56,10 +56,9 @@ inline void setStrided_symint(
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 #endif
-  self_->set_storage_offset(storage_offset);
-
   /* size and stride */
   self_->set_sizes_and_strides(size, stride);
+  self_->set_storage_offset(storage_offset);
 }
 
 } // anonymous namespace
