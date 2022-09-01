@@ -737,16 +737,16 @@ Tensor gelu_double_backward(
 Tensor as_strided_backward(
     Tensor grad,
     TensorGeometry input_geometry,
-    c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset_);
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    optional<int64_t> storage_offset_);
 Tensor as_strided_scatter_backward(
     Tensor grad,
     TensorGeometry input_geometry,
     TensorGeometry src_geometry,
-    c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset);
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    optional<int64_t> storage_offset);
 std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& grad,
     const Tensor& self,
