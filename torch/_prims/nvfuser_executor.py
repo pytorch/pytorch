@@ -218,6 +218,7 @@ def maybe_partition_graph(gm: GraphModule):
     # When there are constant tensors in the graph, we can't partition it
     # because deepcopy fails. Here we just return the original graph to be
     # executed by eager mode
+    # https://github.com/pytorch/pytorch/issues/84415
     if (
         _any_get_attr_used(call_function_nodes)
         or len(list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))) == 0
