@@ -90,6 +90,12 @@ class _SymbolicFunctionGroup:
         return None
 
     def add(self, func: Callable, opset: OpsetVersion) -> None:
+        """Adds a symbolic function.
+
+        Args:
+            func: The function to add.
+            opset: The opset version of the function to add.
+        """
         if opset in self._functions:
             raise ValueError(
                 f"Symbolic function '{self._name}' already registered for opset {opset}"
@@ -127,10 +133,6 @@ class SymbolicRegistry:
     The registry maintains a mapping from qualified names to symbolic functions.
     It is used to register new symbolic functions and to dispatch calls to
     the appropriate function.
-
-    Attributes:
-        registry: mapping from qualified names to symbolic functions.
-
     """
 
     def __init__(self) -> None:
@@ -142,7 +144,10 @@ class SymbolicRegistry:
         """Registers a symbolic function.
 
         Args:
-            func: the function to register.
+            name: the qualified name of the function to register.
+            opset: the opset version of the function to register.
+            func: the symbolic function to register.
+            custom: whether the function is a custom function that overrides existing ones.
         """
         symbolic_functions = self._registry.setdefault(
             name, _SymbolicFunctionGroup(name)
