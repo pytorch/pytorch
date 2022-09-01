@@ -7,13 +7,8 @@ namespace nvfuser {
 static std::mutex fusion_cache_lock;
 FusionCache* FusionCache::singleton_ = nullptr;
 
-FusionCacheEntry::FusionCacheEntry(
-    RecordFunctor* rec,
-    size_t _fusion_id)
-    : record(rec),
-      record_hash_map(),
-      fusion_id(_fusion_id),
-      visits(0) {}
+FusionCacheEntry::FusionCacheEntry(RecordFunctor* rec, size_t _fusion_id)
+    : record(rec), record_hash_map(), fusion_id(_fusion_id), visits(0) {}
 
 bool FusionCacheEntry::isTerminal() const {
   return (record.get()->recordType() == RecordType::End);
@@ -38,14 +33,15 @@ void FusionCache::print(std::ostream& os) {
   if (fusions_.size() > 0) {
     os << "Cache Hits by Fusion Id:\n";
     auto total_cache_hits = 0;
-    for(size_t i = 0; i < terminal_cache_entries_.size(); ++i) {
+    for (size_t i = 0; i < terminal_cache_entries_.size(); ++i) {
       // The first visit is a miss!
       auto visits = terminal_cache_entries_[i]->visits - 1;
       total_cache_hits += visits;
       os << "\t" << i << " -> " << visits << " hits\n";
     }
- 
-    auto hit_rate = static_cast<float>(total_cache_hits) / static_cast<float>(fusion_cache_start_->visits) * 100.0;
+
+    auto hit_rate = static_cast<float>(total_cache_hits) /
+        static_cast<float>(fusion_cache_start_->visits) * 100.0;
     os << "Cache Lookups: " << fusion_cache_start_->visits;
     os << " Cache Hits: " << total_cache_hits;
     os << " Hit Rate: " << hit_rate << "%\n";
@@ -82,7 +78,7 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
       !fusionCachePtr()->isTerminal(),
       "Cannot create a cache entry from a terminal entry!");
   TORCH_CHECK(rec, "Record is null!");
-  
+
   size_t fusion_id = 0;
   if (rec->recordType() == RecordType::End) {
     TORCH_CHECK(
@@ -95,7 +91,7 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
         std::make_unique<Nvf::Fusion>()));
     fusion_id = fusions_.size() - 1;
     result = c10::optional<size_t>(fusion_id);
-  } 
+  }
 
   // Copying the record owned by the FusionDefinition that calls this function
   // so the cache owns a copy when the FusionDefinition gets destroyed rather
@@ -105,7 +101,8 @@ c10::optional<size_t> FusionCache::createFusionCacheEntry(RecordFunctor* rec) {
   fusionCachePtr()->record_hash_map[new_rec] =
       std::make_unique<FusionCacheEntry>(new_rec, fusion_id);
   if (rec->recordType() == RecordType::End) {
-    terminal_cache_entries_.push_back(fusionCachePtr()->record_hash_map[new_rec].get());
+    terminal_cache_entries_.push_back(
+        fusionCachePtr()->record_hash_map[new_rec].get());
   }
   if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;

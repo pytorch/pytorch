@@ -201,7 +201,7 @@ class TestNvFuserFrontend(TestCase):
             return norm_output
 
         def nvfuser_fusion(
-            fd: FusionDefinition, 
+            fd: FusionDefinition,
             normalization_axis: int,
             norm_size: int,
             input_shape: List[int],
@@ -231,7 +231,7 @@ class TestNvFuserFrontend(TestCase):
             fd.add_output(invstd)
 
         def nvfuser_fusion_var_mean(
-            fd: FusionDefinition, 
+            fd: FusionDefinition,
             normalization_axis: int,
             norm_size: int,
             input_shape: List[int],
@@ -295,7 +295,7 @@ class TestNvFuserFrontend(TestCase):
             return norm_output
 
         def nvfuser_fusion(
-            fd: FusionDefinition, 
+            fd: FusionDefinition,
             normalization_axis: int,
             norm_size: int,
             input_shape: List[int],

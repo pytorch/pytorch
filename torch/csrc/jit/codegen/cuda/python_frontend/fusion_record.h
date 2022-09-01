@@ -1021,17 +1021,13 @@ struct NormOpRecord : RecordFunctor {
       std::vector<int>& axes,
       int64_t correction,
       bool keep_dim)
-      : RecordFunctor(
-            std::move(args),
-            std::move(outputs),
-            name,
-            type),
+      : RecordFunctor(std::move(args), std::move(outputs), name, type),
         axes_(axes),
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~NormOpRecord() = default;
   virtual RecordFunctor* clone() = 0;
-  
+
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
   //! Child specific hash function in lower 32 bits.
@@ -1069,8 +1065,8 @@ struct NormOpRecord : RecordFunctor {
     }
     return result;
   }
- 
-  //! Each NormOp Child should define the operator() to build the IR 
+
+  //! Each NormOp Child should define the operator() to build the IR
   virtual void operator()(FusionDefinition& fd) = 0;
 
   virtual void print(std::ostream& os, bool close_function = true) const final {
@@ -1130,7 +1126,7 @@ struct VarianceOpRecord : NormOpRecord {
 };
 
 //! VarianceMean requires a separate Record because nvFuser defines the output
-//! of var_mean as a custom struct.  
+//! of var_mean as a custom struct.
 struct VarianceMeanOpRecord : NormOpRecord {
   VarianceMeanOpRecord(
       std::vector<State> args,
