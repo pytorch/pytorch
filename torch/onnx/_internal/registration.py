@@ -215,6 +215,62 @@ class SymbolicRegistry:
         return set(self._registry)
 
 
+@_beartype.beartype
+def onnx_symbolic(
+    name: str,
+    opset: OpsetVersion,
+    decorate: Optional[Sequence[Callable]] = None,
+    custom: bool = False,
+) -> Callable:
+    """Registers a symbolic function.
+
+    Usage::
+
+    ```
+    @onnx_symbolic("aten::symbolic_b", opset=10, decorate=[quantized_aten_handler(scale=1/128, zero_point=0)])
+    @symbolic_helper.parse_args("v", "v", "b")
+    def symbolic_b(g: _C.Graph, x: _C.Value, y: _C.Value, arg1: bool) -> _C.Value:
+        ...
+    ```
+
+    Args:
+        name: the qualified name of the function.
+        opset: the opset version of the function.
+        decorate: a sequence of decorators to apply to the function.
+        custom: whether the function is a custom symbolic function.
+    """
+
+    def wrapper(func: Callable) -> Callable:
+        decorated = func
+        if decorate is not None:
+            for decorate_func in decorate:
+                decorated = decorate_func(decorated)
+
+        global registry
+        registry.register(name, opset, decorated, custom=custom)
+
+        return decorated
+
+    return wrapper
+
+
+@_beartype.beartype
+def custom_onnx_symbolic(
+    name: str, opset: OpsetVersion, decorate: Optional[Sequence[Callable]] = None
+) -> Callable:
+    """Registers a custom symbolic function.
+
+    Args:
+        name: the qualified name of the function.
+        opset: the opset version of the function.
+        decorate: a sequence of decorators to apply to the function.
+
+    Returns:
+        The decorator.
+    """
+    return onnx_symbolic(name, opset, decorate, custom=True)
+
+
 def discover_and_register_all_symbolic_opsets() -> None:
     """Discover all symbolic functions.
 
