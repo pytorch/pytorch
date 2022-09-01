@@ -1532,47 +1532,6 @@ workflows:
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64
       - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64
-          context: org-member
-          filters:
-            branches:
-              ignore:
-                - master
-                - nightly
-                - postnightly
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-metal
-          context: org-member
-          filters:
-            branches:
-              ignore:
-                - master
-                - nightly
-                - postnightly
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-metal
-          use_metal: "1"
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-custom-ops
-          context: org-member
-          filters:
-            branches:
-              ignore:
-                - master
-                - nightly
-                - postnightly
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-custom-ops
-          op_list: mobilenetv2.yaml
-      - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64-coreml
           filters:
             branches:
@@ -1584,19 +1543,5 @@ workflows:
           ios_platform: SIMULATOR
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64-coreml
-          use_coreml: "1"
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-coreml
-          context: org-member
-          filters:
-            branches:
-              ignore:
-                - master
-                - nightly
-                - postnightly
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-coreml
           use_coreml: "1"
     when: << pipeline.parameters.run_build >>
