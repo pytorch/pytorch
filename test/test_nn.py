@@ -11462,6 +11462,20 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_GroupNorm_cpu_mixed_dtype(self):
+        def helper(self, size, groups, memory_format):
+            channels = size[1]
+            input = torch.empty(size, dtype=torch.bfloat16).cpu().random_(1, 10)
+            input = input.contiguous(memory_format=memory_format)
+            m = nn.GroupNorm(groups, channels).cpu().bfloat16()
+            m2 = deepcopy(m).float()
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+        helper(self, (1, 8, 3, 4), 4, torch.contiguous_format)
+        helper(self, (1, 8, 4, 3), 2, torch.channels_last)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.channels_last_3d)
+
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
             _inp.requires_grad_(True)
@@ -11842,6 +11856,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+        if self.device_type == 'cpu':
+            self._test_GroupNorm_cpu_mixed_dtype()
 
     def test_GroupNorm_raises_error_if_one_value_per_group(self, device):
         x = torch.rand(10)[None, :, None]
