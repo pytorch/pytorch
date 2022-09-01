@@ -315,7 +315,8 @@ class PyInterpreterHolder {
                 &concrete_trace_cuda<trace_cuda_stream_creation_fn_name>,
                 &concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>,
                 &concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>,
-                &concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>))) {}
+                &concrete_trace_cuda<
+                    trace_cuda_event_synchronization_fn_name>))) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
