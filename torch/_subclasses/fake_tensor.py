@@ -650,6 +650,11 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        has_symbolic_sizes = (
+            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+        )
+
         converter = self.fake_tensor_converter
 
         # If this is a lift, the input tensor is guaranteed to be a
@@ -676,6 +681,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
             and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
             and all_constant
+            and len(flat_arg_tensors) != 0
+            and not has_symbolic_sizes
         ):
             with no_dispatch():
                 const_args, const_kwargs = pytree.tree_map_only(
@@ -703,10 +710,6 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
 
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
-        has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
-        )
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
