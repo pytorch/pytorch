@@ -10,10 +10,10 @@ from typing import Callable, Optional, Tuple, Union
 import torch
 import torch.fx as fx
 import torch.nn as nn
+from torch._decomp import get_decompositions
 
 from .aot_autograd import aot_function, aot_module, make_boxed_compiler
 from .compile_utils import strip_overloads
-from .decompositions import get_decompositions
 from .partitioners import (
     default_partition,
     draw_graph,
