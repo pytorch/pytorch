@@ -118,24 +118,28 @@ struct SegmentInfo {
   std::vector<BlockInfo> blocks;
 };
 
+enum AllocType {
+  served_by_cached, // if served by a cached block
+  served_by_new_block, // if served after allocating a new block of sufficient
+                       // size
+  served_by_new_block_retry, // if served with a new block after freeing one
+                             // cached block of sufficient size
+  defrag // if allocated after defragmentation
+};
+
 struct AllocFreeEvent {
   intptr_t ptr; // start location in memory
   int size; // size in bytes, negative size for free
   bool raw_alloc = false; // if it is a raw allocation
-  bool served_by_cached = false; // if served by a cached block
-  bool served_by_new_block =
-      false; // if served after allocating a new block of sufficient size
-  bool served_by_new_block_retry =
-      false; // if served with a new block after freeing one cached block of
-             // sufficient size
-  bool defrag = false; // if allocated after defragmentation
-  bool planned = false; // if allocated after defragmentation
+  AllocType alloc_type;
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
 C10_CUDA_API std::vector<std::vector<AllocFreeEvent>> getAllocFreeEvents();
+C10_CUDA_API void enableMemoryTracker();
+C10_CUDA_API void disableMemoryTracker();
 C10_CUDA_API void set_mem_plan(std::vector<std::vector<AllocFreeEvent>> plan);
 
 C10_CUDA_API Allocator* get();

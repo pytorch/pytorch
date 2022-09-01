@@ -377,17 +377,72 @@ def get_alloc_free_events() -> list:
     return _get_alloc_free_events()  # type: ignore[name-defined]
 
 
-def set_memory_plan(mem_plan) -> None:
+def enable_memory_tracker() -> None:
+    r"""Enable memory tracker.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    _lazy_init()  # will define _set_memory_tracker()
+    _enable_memory_tracker()  # type: ignore[name-defined]
+
+
+def disable_memory_tracker() -> None:
+    r"""Disable memory tracker.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    _lazy_init()  # will define _disable_memory_tracker()
+    _disable_memory_tracker()  # type: ignore[name-defined]
+
+
+def set_memory_plan(**kwargs) -> None:
     r"""Set memory plan.
 
     Args:
-        List of lists of AllocFreeEvents.
+        plan: List of lists of AllocFreeEvents.
+        plan_size: List of sizes needed for the plan of each device
+        non_rec_length: List of number of non-recurrent events in each plan
 
     Returns:
         None.
     """
     _lazy_init()  # will define _set_mem_plan()
+
+    # add the plan_size and non_rec_length as a first element in the plan
+    mem_plan = kwargs["plan"]
+    sizes = kwargs["plan_size"]
+    # if non_rec_length is not given, use zeros
+    if "non_rec_length" not in kwargs:
+        kwargs["non_rec_length"] = [0] * len(mem_plan)
+    non_rec_length = kwargs["non_rec_length"]
+    for i in range(len(mem_plan)):
+        mem_plan[i] = [torch.cuda.createAllocFreeEvent(non_rec_length[i], sizes[i]), *mem_plan[i]]
+
     _set_mem_plan(mem_plan)  # type: ignore[name-defined]
+
+
+def createAllocFreeEvent(ptr, size):
+    r"""Creates AllocFreeEvent with ptr, size.
+
+    Args:
+        ptr: int representing block ptr
+        size: int representing block size
+
+    Returns:
+        AllocFreeEvent with ptr, size
+    """
+    E = torch.cuda.AllocFreeEvent()  # type: ignore[attr-defined]
+    E.ptr = ptr
+    E.size = size
+    return E
 
 
 def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:

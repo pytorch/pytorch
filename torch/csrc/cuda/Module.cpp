@@ -660,23 +660,20 @@ static void bindGetAllocFreeEvents(PyObject* module) {
           "raw_alloc",
           &c10::cuda::CUDACachingAllocator::AllocFreeEvent::raw_alloc)
       .def_readwrite(
-          "served_by_cached",
-          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::served_by_cached)
-      .def_readwrite(
-          "served_by_new_block",
-          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::served_by_new_block)
-      .def_readwrite(
-          "served_by_new_block_retry",
-          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::
-              served_by_new_block_retry)
-      .def_readwrite(
-          "defrag", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::defrag)
-      .def_readwrite(
-          "planned", &c10::cuda::CUDACachingAllocator::AllocFreeEvent::planned);
+          "alloc_type",
+          &c10::cuda::CUDACachingAllocator::AllocFreeEvent::alloc_type);
   m.def(
       "_get_alloc_free_events",
       &c10::cuda::CUDACachingAllocator::getAllocFreeEvents,
       "Get allocation/free sequence");
+  m.def(
+      "_enable_memory_tracker",
+      &c10::cuda::CUDACachingAllocator::enableMemoryTracker,
+      "Enable memory tracker");
+  m.def(
+      "_disable_memory_tracker",
+      &c10::cuda::CUDACachingAllocator::disableMemoryTracker,
+      "Disable memory tracker");
   m.def(
       "_set_mem_plan",
       &c10::cuda::CUDACachingAllocator::set_mem_plan,

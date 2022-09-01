@@ -294,19 +294,99 @@ class TestCuda(TestCase):
 
     def test_get_alloc_free_events(self):
         gc.collect()
+        torch.cuda.enable_memory_tracker()
         size = 1
         mem = torch.cuda.caching_allocator_alloc(size)
         current_device = torch.cuda.current_device()
         events = torch.cuda.get_alloc_free_events()[current_device]
         num_events = len(events)
         ptr = events[-1].ptr
-        self.assertTrue(events[-1].size == 1)
+        self.assertTrue(events[-1].size == size)
 
         torch.cuda.caching_allocator_delete(mem)
         events = torch.cuda.get_alloc_free_events()[current_device]
         self.assertTrue(len(events) == (num_events + 1))
         self.assertEqual(events[-1].ptr, ptr)
         self.assertTrue(events[-1].size < 0)
+
+    def test_set_disable_memory_tracker(self):
+        gc.collect()
+        torch.cuda.enable_memory_tracker()
+        size, size2 = 1, 2
+        current_device = torch.cuda.current_device()
+        mem = torch.cuda.caching_allocator_alloc(size)
+        events = torch.cuda.get_alloc_free_events()[current_device]
+        self.assertTrue(events[-1].size == size)
+
+        torch.cuda.disable_memory_tracker()
+        mem2 = torch.cuda.caching_allocator_alloc(size2)
+        events = torch.cuda.get_alloc_free_events()[current_device]
+        self.assertTrue(events[-1].size == size)
+
+        torch.cuda.enable_memory_tracker()
+        mem3 = torch.cuda.caching_allocator_alloc(size2)
+        events = torch.cuda.get_alloc_free_events()[current_device]
+        self.assertTrue(events[-1].size == size2)
+
+        torch.cuda.caching_allocator_delete(mem)
+        torch.cuda.caching_allocator_delete(mem2)
+        torch.cuda.caching_allocator_delete(mem3)
+
+    def test_set_memory_plan(self):
+        gc.collect()
+        torch.cuda.enable_memory_tracker()
+        size = 3
+        mem_plan = []
+        # event should be allocated according to plan
+        mem_plan.append(torch.cuda.createAllocFreeEvent(2, 3))
+        # event shouldn't be allocated according to plan because of overlap
+        mem_plan.append(torch.cuda.createAllocFreeEvent(0, 3))
+        # event shouldn't be allocated according to plan because of overlap
+        mem_plan.append(torch.cuda.createAllocFreeEvent(3, 3))
+        # event should be allocated according to plan after freeing previous planned events
+        mem_plan.append(torch.cuda.createAllocFreeEvent(0, 3))
+        # event should be allocated according to plan after freeing previous planned events
+        mem_plan.append(torch.cuda.createAllocFreeEvent(2, 3))
+        # event shouldn't be allocated according to plan because it exceeds planning memory limit
+        mem_plan.append(torch.cuda.createAllocFreeEvent(511, 3))
+        # get current device and set its plan
+        current_device = torch.cuda.current_device()
+        plans = [[]] * torch.cuda.device_count()
+        plans[current_device] = mem_plan
+        plan_sizes = [0] * torch.cuda.device_count()
+        plan_sizes[current_device] = 512
+        torch.cuda.set_memory_plan(plan=plans, plan_size=plan_sizes)
+        planning_ptr = torch.cuda.get_alloc_free_events()[current_device][-1].ptr
+        # following memory should be allocated according to plan
+        mem = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) == 2)
+        # following memory should not be allocated according to plan
+        mem2 = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) != 0)
+        # following memory should not be allocated according to plan
+        mem3 = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) != 3)
+        torch.cuda.caching_allocator_delete(mem)
+        # following memory should be allocated according to plan
+        mem4 = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) == 0)
+        torch.cuda.caching_allocator_delete(mem4)
+        # following memory should be allocated according to plan
+        mem5 = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) == 2)
+        # following memory should not be allocated according to plan
+        mem6 = torch.cuda.caching_allocator_alloc(size)
+        self.assertTrue((torch.cuda.get_alloc_free_events()[current_device][-1].ptr - planning_ptr) != 511)
+        # delete allocated memory
+        torch.cuda.caching_allocator_delete(mem2)
+        torch.cuda.caching_allocator_delete(mem3)
+        torch.cuda.caching_allocator_delete(mem5)
+        torch.cuda.caching_allocator_delete(mem6)
+        torch.cuda.caching_allocator_delete(planning_ptr)
+
+    def test_createAllocFreeEvent(self):
+        E = torch.cuda.createAllocFreeEvent(1, 2)
+        self.assertTrue((E.ptr == 1) & (E.size == 2))
 
     def test_check_error(self):
         # Assert this call doesn't raise.
@@ -3824,6 +3904,72 @@ torch.cuda.synchronize()
         model_graphed.eval()
         model_control.eval()
         self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_amp_graph_make_graphed_callables(self):
+        seed = 123
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+
+        N = 20
+        C_in, L_in, C_out, L_out = 16, 50, 16, 14
+        kernel_size = 3
+
+        models = []
+        for _ in range(2):
+            model_section = torch.nn.Sequential(torch.nn.Linear(L_in, C_in, bias=False),
+                                                torch.nn.Conv1d(C_in, C_out, kernel_size, bias=False),
+                                                torch.nn.Sigmoid()).cuda()
+            models.append(model_section)
+
+        x = torch.randn(N, C_in, L_in, device='cuda', dtype=torch.float32)
+        y_pred = torch.randn(N, C_out, L_out, device='cuda', dtype=torch.float32, requires_grad=True)
+        y = torch.randn(N, C_out, L_out, device='cuda', dtype=torch.float32)
+
+        loss_fn_control = torch.nn.functional.mse_loss
+
+        for cache_enabled in (False, True,):
+            model_graphed = models[0]
+            model_control = models[1]
+
+            model_graphed.load_state_dict(model_control.state_dict())
+
+            opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
+            opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
+
+            with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
+                model_graphed, loss_fn_graphed = \
+                    torch.cuda.make_graphed_callables((model_graphed, loss_fn_control),
+                                                      ((x,), (y_pred, y)))
+
+            real_inputs = [torch.rand_like(x) for _ in range(10)]
+            real_targets = [torch.rand_like(y) for _ in range(10)]
+
+
+            for m, opt, loss_fn in zip((model_graphed, model_control),
+                                       (opt_graphed, opt_control),
+                                       (loss_fn_graphed, loss_fn_control)):
+                # Resets RNC states before iterations for graphed and ungraphed models,
+                # so dropout math should be bitwise identical for both.
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
+                for data, target in zip(real_inputs, real_targets):
+                    opt.zero_grad(set_to_none=True)
+                    with torch.cuda.amp.autocast(cache_enabled=cache_enabled):
+                        y_pred = m(data)
+                        loss = loss_fn(y_pred, target)
+                        loss.backward()
+                    opt.step()
+
+            for pg, pc in zip(model_graphed.parameters(), model_control.parameters()):
+                self.assertEqual(pg, pc)
+
+            # We graphed the models in training mode. Eval should still run ungraphed.
+            model_graphed.eval()
+            model_control.eval()
+            self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]), exact_dtype=False)
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or

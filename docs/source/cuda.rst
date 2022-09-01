@@ -110,7 +110,12 @@ Memory management
      reset_peak_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
+     set_memory_tracker
+     disable_memory_tracker
      get_alloc_free_events
+     enable_memory_plan
+     createAllocFreeEvent
+
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved
