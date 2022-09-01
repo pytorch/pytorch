@@ -59,7 +59,7 @@ class HalfNormal(TransformedDistribution):
         if self._validate_args:
             self._validate_sample(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        log_prob = torch.where(value >= 0, log_prob, -inf)
+        log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
 
     def cdf(self, value):

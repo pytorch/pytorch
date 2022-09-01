@@ -4,7 +4,7 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
 import operator
@@ -137,7 +137,6 @@ def create_symbolic_tensor(name, arg, shape_env):
 CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
-@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
     @skipIfNoSympy
