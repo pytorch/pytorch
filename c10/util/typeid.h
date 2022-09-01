@@ -31,16 +31,19 @@
 
 /*
  * TypeIdentifier is a small type containing an id.
- * Types must be registered using CAFFE_KNOWN_TYPE() for them to have a type id.
- * If a type is registered, you can also create an object containing meta data
- * like constructor, destructor, stringified name, ... about the type by calling
- * TypeMeta::Make<T>. This returns a TypeMeta() object, which is basically just
- * a pointer to the type information, so it's cheap to pass around.
+ * Types must be registered using CAFFE_DECLARE_KNOWN_TYPE() (in their header)
+ * and CAFFE_DEFINE_KNOWN_TYPE() (in their .cpp file) for them to have a type
+ * id. If a type is registered, you can also create an object containing meta
+ * data like constructor, destructor, stringified name, ... about the type by
+ * calling TypeMeta::Make<T>. This returns a TypeMeta() object, which is
+ * basically just a pointer to the type information, so it's cheap to pass
+ * around.
  */
 
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro
-// CAFFE_KNOWN_TYPE defines a template specialization, which relies
+// CAFFE_KNOWN_TYPE (and CAFFE_DECLARE_KNOWN_TYPE) defines a template
+// specialization, which relies
 // on the namespace of TypeMeta matching the namespace where the macro is
 // called.  This requires us to fix all of the call-sites, which I want to do
 // later.  So the namespace is not fixed at the moment.
@@ -508,12 +511,40 @@ class C10_API TypeMeta final {
 #define MaxTypeIndex UINT8_MAX
 #endif
 
-  static std::atomic<uint16_t> nextTypeIndex;
+  // Protects type metadata allocation.
+  // NOLINTNEXTLINE(facebook-hte-NonPodStaticDeclaration)
+  static std::mutex typeMetaDatasLock;
+  static uint16_t nextTypeIndex;
 
   static detail::TypeMetaData* typeMetaDatas();
 
+  static uint16_t existingMetaDataIndexForType(TypeIdentifier identifier);
+
+#ifdef __CUDACC__
+  // NOTE [ TypeIdentifier::Get nvcc/clang discrepancy]
+  // nvcc and clang do not produce identical results for
+  // TypeIdentifier::Get, because TypeIdentifier::Get relies on
+  // __PRETTY_FUNCTION__ and they don't agree on the canonical names
+  // of types (e.g., nvcc normalizes to `short unsigned int`, but clang
+  // calls it `unsigned short`). Hide the implementation of this function
+  // from nvcc so that we always use clang (or whatever host C++ compiler)
+  // for TypeIdentifier::Get.
   template <class T>
-  static uint16_t addTypeMetaData() {
+  C10_EXPORT static uint16_t addTypeMetaData();
+#else
+  template <class T>
+  C10_EXPORT static uint16_t addTypeMetaData() {
+    const auto identifier = TypeIdentifier::Get<T>();
+    // Need to hold this for the rest of the function, protecting:
+    // 1) existingMetaDataIndexForType()
+    // 2) nextTypeIndex++
+    // 3) the write into typeMetaDatas()
+    std::lock_guard<std::mutex> lock(typeMetaDatasLock);
+    // It may exist already if added in a different dynamic shared library.
+    const uint16_t existing_index = existingMetaDataIndexForType(identifier);
+    if (existing_index != MaxTypeIndex) {
+      return existing_index;
+    }
     const uint16_t index = nextTypeIndex++;
     TORCH_CHECK(
         index <= MaxTypeIndex,
@@ -526,10 +557,11 @@ class C10_API TypeMeta final {
         detail::_PickCopy<T>(),
         detail::_PickPlacementDelete<T>(),
         detail::_PickDelete<T>(),
-        TypeIdentifier::Get<T>(),
+        identifier,
         c10::util::get_fully_qualified_type_name<T>()};
     return index;
   }
+#endif
 
   // specializations return indexes into typeMetaDataInstances()
   template <class T>
@@ -582,6 +614,9 @@ inline std::ostream& operator<<(
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
  *
+ * CAFFE_KNOWN_TYPE is deprecated; prefer CAFFE_DECLARE_KNOWN_TYPE and
+ * CAFFE_DEFINE_KNOWN_TYPE.
+ *
  * CAFFE_KNOWN_TYPE does explicit instantiation of TypeIdentifier::Get<T>
  * template function and thus needs to be put in a single translation unit (.cpp
  * file) for a given type T. Other translation units that use type T as a type
@@ -603,12 +638,43 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
+// CAFFE_KNOWN_TYPE is deprecated! Use CAFFE_DECLARE_KNOWN_TYPE and
+// CAFFE_DEFINE_KNOWN_TYPE instead.
 #define CAFFE_KNOWN_TYPE(T)                                          \
+  template uint16_t TypeMeta::addTypeMetaData<T>();                  \
   template <>                                                        \
   EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
     static const uint16_t index = addTypeMetaData<T>();              \
     return index;                                                    \
   }
+
+#define CAFFE_DEFINE_KNOWN_TYPE(T) \
+  template uint16_t TypeMeta::addTypeMetaData<T>();
+
+// Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
+// call to access _typeMetaData in the common case.
+#ifdef __CUDACC__
+// nvcc needs its own specialization that doesn't use
+// C10_ALWAYS_INLINE so that it doesn't need to see a definition for
+// _addTypeMeta. See NOTE [ TypeIdentifier::Get nvcc/clang discrepancy
+// ].
+#define CAFFE_DECLARE_KNOWN_TYPE(T)                                         \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>();                  \
+  template <>                                                               \
+  EXPORT_IF_NOT_GCC inline uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
+    static const uint16_t index = addTypeMetaData<T>();                     \
+    return index;                                                           \
+  }
+#else
+#define CAFFE_DECLARE_KNOWN_TYPE(T)                        \
+  extern template uint16_t TypeMeta::addTypeMetaData<T>(); \
+  template <>                                              \
+  EXPORT_IF_NOT_GCC C10_ALWAYS_INLINE uint16_t             \
+  TypeMeta::_typeMetaData<T>() noexcept {                  \
+    static const uint16_t index = addTypeMetaData<T>();    \
+    return index;                                          \
+  }
+#endif
 
 #define CAFFE_KNOWN_TYPE_NOEXPORT(T)                    \
   template <>                                           \
@@ -616,5 +682,42 @@ inline std::ostream& operator<<(
     static const uint16_t index = addTypeMetaData<T>(); \
     return index;                                       \
   }
+
+CAFFE_DECLARE_KNOWN_TYPE(std::string)
+CAFFE_DECLARE_KNOWN_TYPE(uint16_t)
+CAFFE_DECLARE_KNOWN_TYPE(char)
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int32_t>)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<int64_t>)
+CAFFE_DECLARE_KNOWN_TYPE(std::vector<unsigned long>)
+CAFFE_DECLARE_KNOWN_TYPE(bool*)
+CAFFE_DECLARE_KNOWN_TYPE(char*)
+CAFFE_DECLARE_KNOWN_TYPE(int*)
+
+// For some of the compilers, long is defined separately from int32_t and
+// int64_t. As a result we will need to actually define them separately.
+// It is recommended that one does NOT use long - use int32_t and int64_t
+// explicitly. Explicit long type annotation may go away in the future.
+// details: This hack works by defining a _guard_long_unique type, which is
+// long iff the compiler has a separate long type and is a dummy type otherwise.
+// we then allocate a type id to that _guard_long_unique. If the compiler has a
+// separate long type, this allocates a type id for long. Otherwise, it
+// allocates a type id for the dummy type, which doesn't matter.
+namespace detail {
+template <class T>
+class _guard_long_unique_dummy final {};
+template <class T>
+using _guard_long_unique = std::conditional_t<
+    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
+    _guard_long_unique_dummy<T>,
+    T>;
+} // namespace detail
+
+CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<long>);
+CAFFE_DECLARE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
+
+CAFFE_DECLARE_KNOWN_TYPE(float*)
+CAFFE_DECLARE_KNOWN_TYPE(at::Half*)
 
 } // namespace caffe2
