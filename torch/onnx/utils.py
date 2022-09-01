@@ -834,9 +834,18 @@ def _trace_and_get_graph_from_model(model, args):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
+    # Disable Autocast cache because it replaces kernel's weight and bias
+    # to be replaced by (undesired) constants
+    # TODO: https://github.com/pytorch/pytorch/issues/84092
+    prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
+    # When weights are not reused, there is no perf impact
+    # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
+    torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model, args, strict=False, _force_outplace=False, _return_inputs_states=True
     )
+    torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
+
     warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != torch.jit._unique_state_dict(model).keys():
@@ -1074,7 +1083,7 @@ def _model_to_graph(
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
 
-        output_tensors, out_desc = _C._jit_flatten(tuple(output_wrapped))
+        output_tensors, out_desc = torch.jit._flatten(tuple(output_wrapped))
         # assign_output_shape pass is not compatible with quantized outputs.
         # Quantized outputs are flattened to 3 values in ONNX, while packed as
         # single value in PyTorch.
