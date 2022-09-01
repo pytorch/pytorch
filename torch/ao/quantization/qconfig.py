@@ -355,6 +355,12 @@ def get_default_qat_qconfig(backend='x86', version=1):
                                                                                  quant_min=0,
                                                                                  quant_max=255),
                               weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
     else:

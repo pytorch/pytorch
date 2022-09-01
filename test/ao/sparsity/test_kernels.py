@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_fbgemm,
     qengine_is_onednn,
+    qengine_is_x86,
 )
 
 # TODO: Once more test files are created, move the contents to a ao folder.
