@@ -993,7 +993,8 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
         def forward(ctx, input, mask):
             """Return input with masked-out elements eliminated for the given operations."""
             if mask is None:
-                result = input
+                return input
+
             canonical_mask = _input_mask(input, mask=mask)
             if callable(op):
                 fill_value = _reduction_identity(op.__name__, input, *args)
