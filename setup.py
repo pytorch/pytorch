@@ -873,12 +873,6 @@ def configure_extension_build():
     extensions.append(C)
     extensions.append(C_flatbuffer)
 
-    if not IS_WINDOWS:
-        DL = Extension("torch._dl",
-                       sources=["torch/csrc/dl.c"],
-                       language='c')
-        extensions.append(DL)
-
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
     if cmake_cache_vars['BUILD_CAFFE2']:
