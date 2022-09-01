@@ -169,7 +169,14 @@ struct inner_reduce {
 template <typename T, typename acc_t>
 struct inner_reduce<T, acc_t, true> {
   static inline void call(T * data, int64_t size, acc_t & acc) {
-    std::tie(acc.mean, acc.m2) = utils::RowwiseMoments(data, size);
+    double new_mean = 0, new_m2 = 0;
+    std::tie(new_mean, new_m2) = RowwiseMoments(data, size);
+    new_m2 = new_m2 * size;
+    double delta = new_mean - acc.mean;
+    double new_count = acc.nf + size;
+    double nb_over_n = double(size) / new_count;
+    acc.mean = acc.mean + delta * nb_over_n;
+    acc.m2 = acc.m2 + new_m2 + delta * delta * acc.nf * nb_over_n;
     acc.n += size;
     acc.nf += size;
   }

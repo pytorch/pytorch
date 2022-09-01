@@ -1795,6 +1795,20 @@ class TestReductions(TestCase):
                 with self.assertRaisesRegex(RuntimeError, e_msg):
                     op(x, dim=dim)
 
+    @onlyCPU
+    def test_var_bfloat16(self, device):
+        input_bf = torch.randn(2, 10, 10, dtype=torch.bfloat16, device=device)
+        input_f = input_bf.float()
+        out_f = input_f.var()
+        out_bf = input_bf.var()
+        self.assertEqual(out_f, out_bf.float(), atol=0.01, rtol=0.01)
+        out_f = input_f.var(1)
+        out_bf = input_bf.var(1)
+        self.assertEqual(out_f, out_bf.float(), atol=0.01, rtol=0.01)
+        out_f = input_f.var(1)
+        out_bf = input_bf.var(1)
+        self.assertEqual(out_f, out_bf.float(), atol=0.01, rtol=0.01)
+
     # TODO: update this test to comapre against NumPy
     @onlyCUDA
     def test_var(self, device):
