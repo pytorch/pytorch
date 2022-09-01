@@ -615,7 +615,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
 bool addExecutionGraphObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
-    ObserverManager::init();
+    ObserverManager::push(std::make_shared<ExecutionGraphObserver>());
     auto& ob = *ObserverManager::get();
     ob.pid = processId();
     // Set output
@@ -652,7 +652,9 @@ void removeExecutionGraphObserver() {
       removeCallback(ob->cb_handle);
       ob->cb_handle = INVALID_CALLBACK_HANDLE;
       // Release the current EG observer object and reset.
-      ObserverManager::pop();
+      TORCH_INTERNAL_ASSERT(
+          ObserverManager::pop() != nullptr,
+          "Global state ptr cannot be null before resetting");
       VLOG(1) << "Removed PyTorch execution graph observer";
     } else {
       LOG(WARNING) << "Execution graph observer was not registered.";
