@@ -623,7 +623,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
-  asyncErrorHandling_ = parseEnvVarInt(NCCL_ASYNC_ERROR_HANDLING);
+  asyncErrorHandling_ = static_cast<ErrorHandlingMode>(parseEnvVarInt(NCCL_ASYNC_ERROR_HANDLING));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 
