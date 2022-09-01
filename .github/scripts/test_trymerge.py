@@ -151,7 +151,6 @@ class TestGitHubPR(TestCase):
         repo = DummyGitRepo()
         self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
 
-
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
     def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any) -> None:
