@@ -398,7 +398,8 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+Tensor diagonal_backward_batching_rule(const Tensor& grad, SymIntArrayRef input_sym_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto input_sizes = c10::asIntArrayRefSlow(input_sym_sizes);
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   auto dim1_physical = getGradInputPhysicalDim(dim1, input_sizes, grad_physical.numBatchDims());

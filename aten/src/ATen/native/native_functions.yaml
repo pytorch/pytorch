@@ -1785,7 +1785,7 @@
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
 
-- func: diagonal_backward(Tensor grad_output, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+- func: diagonal_backward(Tensor grad_output, SymInt[] input_sizes, int offset, int dim1, int dim2) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -7532,7 +7532,7 @@
   dispatch:
     CompositeExplicitAutograd: diag
 
-- func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
+- func: diag_backward(Tensor grad, SymInt[] input_sizes, int diagonal) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False

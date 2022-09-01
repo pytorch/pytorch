@@ -863,6 +863,47 @@ def forward(self, a_1):
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
+    def test_backwards(self):
+        def get_fw_bw(fn, *extra_args, **extra_kwargs):
+            def tmp(*args):
+                new_args = tuple(t.detach().requires_grad_(True) for t in args)
+                out = fn(*new_args, *extra_args, **extra_kwargs)
+                # TODO Use ones_like once it supports symints
+                go = torch.empty(out.size()) * 0. + 1.
+                res = torch.autograd.grad(out, new_args, go, allow_unused=True)
+                return res
+            return tmp
+
+        # torch.diag
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag), [(2, 2)], [[(3, 3)], [(4, 4)]])
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
+        assert len(shape_env.guards) == 3
+
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(2, 2)], [[(3, 3)], [(4, 4)]])
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
+        assert len(shape_env.guards) == 3
+
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(2, 3)], [[(3, 4)], [(4, 5)]])
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 6)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
+        assert len(shape_env.guards) == 2
+
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(3, 2)], [[(4, 3)], [(5, 4)]])
+        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 6)))
+        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
+        assert len(shape_env.guards) == 2
+
+        # TODO alban for tomorrow
+        # # torch.diagonal
+        # shape_env = self._test_dynamic(get_fw_bw(torch.diagonal), [(2, 2)], [[(3, 3)], [(4, 4)]])
+        # self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
+        # self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
+        # assert len(shape_env.guards) == 3
+
 
 make_fx_failures = {
     # unknown

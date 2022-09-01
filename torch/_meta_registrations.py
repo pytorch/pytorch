@@ -692,6 +692,10 @@ def meta_diag(self, dim=0):
         sz = min(self.size(0) + dim, self.size(1))
     return self.new_empty((sz,))
 
+@register_meta(aten.diagonal_scatter.default)
+def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    return self.clone()
+
 
 @register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):

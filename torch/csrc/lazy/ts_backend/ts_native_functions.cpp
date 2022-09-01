@@ -529,7 +529,7 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
 
 at::Tensor LazyNativeFunctions::diagonal_backward(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    at::SymIntArrayRef input_sizes,
     int64_t offset,
     int64_t dim1,
     int64_t dim2) {

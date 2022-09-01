@@ -3270,7 +3270,7 @@ Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   return result;
 }
 
-Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+Tensor diag_backward(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   AT_ASSERT(ndimension == 1 || ndimension == 2);
 
@@ -3279,11 +3279,11 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
+  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor diagonal_backward(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;
