@@ -45,6 +45,7 @@ def argumenttype_type(
         t,
         mutable=mutable,
         binds=binds,
+        symint=True,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
 
@@ -62,7 +63,7 @@ def argument_type(
 
 def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
-    return cpp.returns_type(rs)
+    return cpp.returns_type(rs, symint=True)
 
 
 def jit_arguments(func: FunctionSchema) -> List[Argument]:

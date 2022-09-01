@@ -1616,7 +1616,6 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -1725,7 +1724,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -4269,7 +4267,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
         self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4301,8 +4298,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
-
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
@@ -8580,7 +8575,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(grad_output, grad_output_clone)
 
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_pixel_shuffle_unshuffle(self):
         def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
                                                  upscale_factor=None):
@@ -9213,7 +9207,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
             self.assertTrue(gradcheck(F.pdist, (inp,)))
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @unittest.expectedFailure
     def test_pdist_cpu_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, requires_grad=True)
@@ -9265,32 +9258,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
             expected = torch.nn.functional.kl_div(input, target)
-            for input_dtype in get_all_math_dtypes(device):
-                if input_dtype.is_complex:
+            real_dtypes = (torch.float32, torch.float64, torch.float16)
+            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                     continue
-                for target_dtype in [torch.float32, torch.float64, torch.float16]:
-                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                        continue
-                    input = input.to(input_dtype)
-                    target = target.to(target_dtype)
-                    result = torch.nn.functional.kl_div(input, target)
-                    self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+                input = input.to(input_dtype)
+                target = target.to(target_dtype)
+                result = torch.nn.functional.kl_div(input, target)
+                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
     def test_kl_div_with_diff_type_log_target(self):
         for device in device_():
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
-            for input_dtype in get_all_math_dtypes(device):
-                if input_dtype.is_complex:
+            real_dtypes = (torch.float32, torch.float64, torch.float16)
+            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+                if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                     continue
-                for target_dtype in [torch.float32, torch.float64, torch.float16]:
-                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
-                        continue
-                    input = input.to(input_dtype)
-                    target = target.to(target_dtype)
-                    result = torch.nn.functional.kl_div(input, target, log_target=True)
-                    self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+                input = input.to(input_dtype)
+                target = target.to(target_dtype)
+                result = torch.nn.functional.kl_div(input, target, log_target=True)
+                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
     def test_kl_div_log_softmax_target(self):
         for device in device_():
@@ -14179,7 +14168,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 0, device=device)
+            inp = torch.randn(2, 1, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv2d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14187,7 +14176,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 40, 0, device=device)
+            inp = torch.randn(2, 1, 40, 0, device=device, dtype=dtype)
             mod(inp)
 
         mod = torch.nn.Conv3d(in_channels, 33, 3, stride=2, dtype=dtype).to(device)
@@ -14195,7 +14184,7 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Given groups=1, weight"):
-            inp = torch.randn(2, 1, 50, 0, 40, device=device)
+            inp = torch.randn(2, 1, 50, 0, 40, device=device, dtype=dtype)
             mod(inp)
 
     def test_group_conv_empty(self, device):
@@ -15137,7 +15126,6 @@ class TestNNDeviceType(NNTestCase):
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
@@ -15552,7 +15540,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
-    def test_softmax_64bit_indexing(self, device, dtype):
+    def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
@@ -15566,6 +15554,22 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    @largeTensorTest("90GB", "cpu")
+    @precisionOverride({torch.half: 0.001})
+    def test_softmax_64bit_indexing(self, device, dtype):
+        def run_test(*shape):
+            x = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
+            y = F.log_softmax(x, dim=-1, dtype=dtype)
+            y.backward(y)
+            self.assertEqual(y[0], y[-1])
+            self.assertEqual(x.grad[0], x.grad[-1])
+
+        run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -15902,6 +15906,7 @@ class TestNNDeviceType(NNTestCase):
     @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=-1, count_expected=1)
@@ -18217,7 +18222,6 @@ class TestNNDeviceType(NNTestCase):
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]

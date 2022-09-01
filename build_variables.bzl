@@ -19,10 +19,13 @@ GENERATED_LAZY_TS_CPP = [
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/array.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/array_rocm.cu",
     "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fused_reduction.cu",
@@ -31,15 +34,16 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/grid_sync.cu",
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/index_utils.cu",
-    "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
-    "torch/csrc/jit/codegen/cuda/runtime/swizzle.cu",
     "torch/csrc/jit/codegen/cuda/runtime/memory.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/swizzle.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tuple.cu",
     "torch/csrc/jit/codegen/cuda/runtime/type_traits.cu",
-    "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
     "torch/csrc/jit/codegen/cuda/runtime/warp.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/warp_rocm.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
     "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
     "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
@@ -134,6 +138,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
     "torch/csrc/profiler/itt_observer.cpp",
+    "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -300,6 +305,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/quantization/dedup_module_uses.cpp",
     "torch/csrc/jit/passes/quantization/finalize.cpp",
     "torch/csrc/jit/passes/quantization/fusion_passes.cpp",
+    "torch/csrc/jit/passes/quantization/register_packed_params.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
@@ -453,6 +459,7 @@ libtorch_core_sources = sorted(
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
+    "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
@@ -563,6 +570,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/quantization.cpp",
     "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
@@ -611,6 +619,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/quantization.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
