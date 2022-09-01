@@ -718,16 +718,6 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
-// Sparse layout conversions Start
-
-Tensor dense_to_sparse_csr(const Tensor& self) {
-  return self.to_sparse().to_sparse_csr();
-}
-
-Tensor dense_to_sparse_csc(const Tensor& self) {
-  return self.to_sparse().to_sparse_csc();
-}
-
 Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   // This code turns a matrix into a sequence of blocks
   //
@@ -800,6 +790,47 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
           .expand_as(not_zero_mask)
           .masked_select(not_zero_mask);
   return std::pair<Tensor, Tensor>(col_indices, row_indices);
+}
+
+// Sparse layout conversions Start
+
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  auto n_batch_dim = self.dim() - 2;
+  auto values = self;
+  auto not_zero_mask = self != 0;
+
+  if (n_batch_dim > 0) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseCsr, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, not_zero_mask.size(0), false /*out_int32*/);
+  {
+    auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
+    values = values.flatten().index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, crow_indices, col_indices, values);
+  }
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseCsr,
+      values.device());
+}
+
+Tensor dense_to_sparse_csc(const Tensor& self) {
+  return self.to_sparse().to_sparse_csc();
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
