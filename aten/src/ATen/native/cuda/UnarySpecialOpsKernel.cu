@@ -1390,7 +1390,7 @@ prime_number(unsigned int n) {
     if (n < 6542) {
       return static_cast<T1>(prime_numbers[n]) + T1(0);
     } else {
-      return static_cast<T1>(prime_numbers[n]) + std::numeric_limits<T2>::max();
+      return static_cast<T1>(prime_numbers[n]) + std::numeric_limits<T1>::max();
     }
   } else {
     return T1(0);
