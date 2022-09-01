@@ -11404,6 +11404,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+        for elementwise_affine in [True, False]:
+            # layer norm input shape is normalized to m x n, cpu vectorized on n,
+            # so make sure n exceeds vector length
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            m2 = deepcopy(m).to(device, torch.float)
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -11787,6 +11798,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
+
+        if self.device_type == 'cpu':
+            self._test_LayerNorm_cpu_mixed_dtype(device)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
