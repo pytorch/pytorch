@@ -752,9 +752,10 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
     samples = (
-        (torch.zeros([10], dtype=dtype, device=device), 0, 1),
-        (torch.zeros([10], dtype=dtype, device=device), 0, 1),
+        (make_arg((S, S), dtype=dtype, device=device), 0, 1),
     )
     for t, hi, lo in samples:
         yield SampleInput(t, args=(hi, lo))
@@ -8049,6 +8050,8 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
+           method_variant=None,
+           inplace_variant=torch.Tensor.resize_,
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            supports_out=False,
            supports_autograd=False,
@@ -8075,6 +8078,10 @@ op_db: List[OpInfo] = [
                #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
                #   return (%25)
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure,
+                            'TestVmapOperatorsOpInfo', 'vmap_exhaustive_uniform', dtypes=(torch.float32,)),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
