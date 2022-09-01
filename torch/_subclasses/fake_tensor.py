@@ -266,14 +266,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
-@register_op_impl(aten.clone.default)
-def clone(fake_mode, func, input, memory_format=None):
-    out_device = input.device
-    with no_dispatch():
-        out = aten._to_copy(input.to("meta"), memory_format=memory_format)
-        return FakeTensor(fake_mode, out, out_device)
-
-
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
@@ -622,8 +614,13 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            constructors = [aten.empty.memory_format, aten.as_strided.default]
-            if func not in constructors:
+            functions_with_cpp_meta_impl_that_support_symint = [
+                aten.empty.memory_format,
+                aten.as_strided.default,
+                aten.zeros.default,
+                aten.clone.default,
+            ]
+            if func not in functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )

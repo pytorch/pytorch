@@ -1483,7 +1483,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides, this is marginally faster than calling empty_like
-      self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self = at::empty_strided_symint(src.sym_sizes(), src.sym_strides(), src.options());
     } else {
       self = at::empty_like(src);
     }
