@@ -13,7 +13,11 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import all_types_and, floating_types
-from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
+from torch.testing._internal.common_utils import (
+    TEST_SCIPY,
+    TEST_SYMPY,
+    torch_to_numpy_dtype_dict,
+)
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     DecorateInfo,
@@ -35,6 +39,9 @@ from torch.testing._internal.opinfo.utils import (
 
 if TEST_SCIPY:
     import scipy.special
+
+if TEST_SCIPY:
+    import sympy.ntheory.generate
 
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
@@ -650,7 +657,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         "special.prime_number",
         dtypes=all_types_and(torch.bool),
-        ref=None,
+        ref=lambda x: sympy.ntheory.generate.prime(x) if TEST_SYMPY else None,
         supports_autograd=False,
     ),
 ]
