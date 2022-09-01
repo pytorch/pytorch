@@ -391,8 +391,7 @@ WithoutTop::~WithoutTop() {
 
 static void dynamicLayerFrontFallbackOperator(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    bool decomp_jvp) {
+    torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -421,7 +420,7 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
 }
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack, false);
+  return dynamicLayerFrontFallbackOperator(op, stack);
 }
 
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
