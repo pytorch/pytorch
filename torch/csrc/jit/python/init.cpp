@@ -1742,6 +1742,11 @@ void initJITBindings(PyObject* module) {
             return self.is_mutable(argument);
           })
       .def(
+          "has_argument",
+          [](SchemaInfo& self, const std::string& name) {
+            return self.has_argument(name);
+          })
+      .def(
           "is_mutable",
           [](SchemaInfo& self, const std::string& name) {
             return self.is_mutable(name);
