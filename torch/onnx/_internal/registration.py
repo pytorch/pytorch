@@ -137,6 +137,8 @@ class SymbolicRegistry:
 
     def __init__(self) -> None:
         self._registry: Dict[str, _SymbolicFunctionGroup] = {}
+        # Store the discovered functions for delayed registration.
+        self._collected_symbolic_functions: List[Tuple[str, OpsetVersion, Callable, bool]] = []
 
     def register(
         self, name: str, opset: OpsetVersion, func: Callable, custom=False
@@ -155,7 +157,7 @@ class SymbolicRegistry:
         if custom:
             symbolic_functions.add_custom(func, opset)
         else:
-            symbolic_functions.add(func, opset)
+            self._collected_symbolic_functions.append((name, opset, func, custom))
 
     def unregister(self, name: str, opset: OpsetVersion) -> None:
         """Unregisters a symbolic function.
@@ -170,6 +172,13 @@ class SymbolicRegistry:
 
     def get_function_group(self, name: str) -> _SymbolicFunctionGroup:
         """Returns the function group for the given name."""
+
+        # Delay register all built-in symbolic functions.
+        if self._collected_symbolic_functions:
+            for name, opset, func, custom in self._collected_symbolic_functions:
+                self.register(name, opset, func, custom)
+            self._collected_symbolic_functions.clear()
+
         if name not in self._registry:
             raise ValueError(f"No symbolic function registered for '{name}'")
         return self._registry[name]
@@ -206,13 +215,8 @@ def onnx_symbolic(
             for decorate_func in decorate:
                 decorated = decorate_func(decorated)
 
-        if custom:
-            global registry
-            registry.register(name, opset, decorated, custom=custom)
-        else:
-            # Store all torch.onnx built-in functions for delayed registration.
-            global collected_symbolic_functions
-            collected_symbolic_functions.append((name, opset, decorated, custom))
+        global registry
+        registry.register(name, opset, decorated, custom=custom)
 
         return decorated
 
@@ -238,5 +242,3 @@ def custom_onnx_symbolic(
 
 # The registry for all symbolic functions.
 registry = SymbolicRegistry()
-# Store the discovered functions for delayed registration.
-collected_symbolic_functions: List[Tuple[str, OpsetVersion, Callable, bool]] = []
