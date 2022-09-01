@@ -16,6 +16,7 @@ from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 
 from torch._prims_common import torch_function_passthrough
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+from torch.utils._pytree import tree_flatten
 
 
 @functools.lru_cache(None)
@@ -207,10 +208,21 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
-    any_unsupported = any(
+    # check for any unsupported ops
+    if any(
         not supported_ops.is_node_supported(None, node) for node in call_function_nodes
-    )
-    return any_unsupported
+    ):
+        return True
+
+    flat_args, _ = tree_flatten(args)
+    # TODO: allow cpu scalar once we plumb the support via python API
+    # check for unsupport cpu tensor
+    if any(
+        isinstance(arg, torch.Tensor) and arg.is_cpu for arg in flat_args
+    ):
+        return True
+
+    return False
 
 
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
