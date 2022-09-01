@@ -5189,6 +5189,12 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K, /*left=*/true);
 
   Tensor input_grad, tau_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as `input`, 'tau' or `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
   if (areAnyTensorSubclassLike({input, tau, K})) {
     std::vector<Tensor> input_grads = {};
     std::vector<Tensor> tau_grads = {};
@@ -5212,6 +5218,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       }
     }
 
+    // zero gradients for the inputs not indexed by `k`.
     if (k < input.size(-1)) {
       for (const auto i : c10::irange(input.size(-1) - k)) {
         std::ignore = i;
@@ -5232,8 +5239,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(
 
       Tensor v_i_grad, tau_i_grad;
       std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-      // input_grads.push_back(v_i_grad.squeeze(-1));
-      // tau_grads.push_back(tau_i_grad.squeeze(-1));
       input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
       tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
@@ -5340,6 +5345,8 @@ Tensor householder_product_jvp(
         apply_simple_product(v_i, v_i, dtau_i, H_plus) +
         apply_simple_product(dv_i, v_i, tau_i, H_plus) +
         apply_simple_product(v_i, dv_i, tau_i, H_plus));
+    // For Composite Compliance, if `intermediate` is a Tensor-Subclass,
+    // we use out-of-place variant of add.
     if (at::isTensorSubclassLike(intermediate)) {
       dprod = dprod.add(intermediate);
     } else {
