@@ -5,6 +5,7 @@ import torch
 import unittest
 import warnings
 import torch.nn.utils._stateless as stateless
+import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
@@ -712,6 +713,12 @@ class TestFakeProxyTensor(TestCase):
         x, y = torch.randn(2), torch.randn(2)
         self.assertEqual(g(x, y), f(x, y))
 
+def _get_node(fx_g, cond):
+    for n in fx_g.graph.nodes:
+        if cond(n):
+            return n
+    raise AssertionError
+
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
@@ -764,7 +771,9 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     sym_size_1 = torch.ops.aten.sym_size(empty, 0)
-    return empty""")
+    detach_default = torch.ops.aten.detach.default(empty);  empty = None
+    sym_size_2 = torch.ops.aten.sym_size(detach_default, 0)
+    return detach_default""")
 
     def test_cat(self):
         def f(a, b):
@@ -798,6 +807,16 @@ def forward(self, a_1):
         self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
         self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
 
+    def test_symbolic_meta(self):
+        def f(a, b):
+            d = a.new_empty(a.shape[0] + b.shape[0])
+            return d
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
+        fx_g.graph.eliminate_dead_code()
+        fx_g.recompile()
+        meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
+        meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
+        self.assertTrue(meta_c.meta['fake_result'].shape[0].get_pyobj() == meta_d.meta['sym_size'].expr)
 
 
 make_fx_failures = {
