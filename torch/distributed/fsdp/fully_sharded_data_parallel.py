@@ -111,7 +111,7 @@ __all__ = [
     "FullyShardedDataParallel", "ShardingStrategy", "MixedPrecision",
     "CPUOffload", "BackwardPrefetch", "StateDictType", "StateDictConfig",
     "FullStateDictConfig", "LocalStateDictConfig", "ShardedStateDictConfig",
-    "OptimStateKeyType", "TrainingState_", "p_assert", "clean_tensor_name",
+    "OptimStateKeyType", "TrainingState_", "clean_tensor_name",
 ]
 
 
