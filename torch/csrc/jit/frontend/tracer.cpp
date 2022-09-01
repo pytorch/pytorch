@@ -806,7 +806,11 @@ void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
-  addInputs(n, name, value.has_value() ? c10::make_optional(value->expect_int()) : c10::nullopt);
+  addInputs(
+      n,
+      name,
+      value.has_value() ? c10::make_optional(value->expect_int())
+                        : c10::nullopt);
 }
 
 void addInputs(

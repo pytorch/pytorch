@@ -41,6 +41,7 @@
 
 #include <ATen/ATen.h>
 
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
@@ -48,7 +49,6 @@
 #include <memory>
 #include <utility>
 #include <vector>
-#include "c10/core/SymInt.h"
 
 using namespace at;
 using namespace torch;
@@ -804,7 +804,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     // TODO: this should probably be sym_sizes, sym_strides AND offset
     tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
-    tensor_impl->set_storage_offset(r.toSymIntOptional(3).value_or(c10::SymInt{0}));
+    tensor_impl->set_storage_offset(
+        r.toSymIntOptional(3).value_or(c10::SymInt{0}));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
