@@ -1,5 +1,4 @@
 load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
-load("//caffe2/tools:perf_kernel_defs.bzl", "define_perf_kernels")
 load("//caffe2/tools:sgx_target_definitions.bzl", "is_sgx")
 
 def add_sgx_caffe_libs():
@@ -203,54 +202,6 @@ def add_sgx_caffe_libs():
             "//caffe2:miniz",
         ],
         exported_external_deps = core_external_deps,
-    )
-
-def add_sgx_perf_kernel_libs():
-    # we do not need to define these targets if we are in not SGX mode
-    if not is_sgx:
-        return
-
-    dependencies = [
-        "//caffe2/caffe2:caffe2_sgx_headers",
-        "//caffe2/aten:ATen-core-sgx-headers",
-    ]
-
-    compiler_common_flags = [
-        "-DCAFFE2_PERF_WITH_AVX2",
-        "-DCAFFE2_PERF_WITH_AVX",
-    ]
-
-    external_deps = []
-
-    # these are esentially disabled for hte sgx build but we still need them
-    # to avoid linking issues
-    levels_and_flags = {
-        "x86_64": [
-            (
-                "avx2",
-                [
-                    "-mavx2",
-                    "-mfma",
-                    "-mavx",
-                    "-mf16c",
-                ],
-            ),
-            (
-                "avx",
-                [
-                    "-mavx",
-                    "-mf16c",
-                ],
-            ),
-        ],
-    }
-
-    define_perf_kernels(
-        prefix = "sgx_",
-        levels_and_flags = levels_and_flags,
-        compiler_common_flags = compiler_common_flags,
-        dependencies = dependencies,
-        external_deps = external_deps,
     )
 
 def _get_patterns(ext):
