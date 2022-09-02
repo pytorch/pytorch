@@ -1,24 +1,31 @@
 import contextlib
 import functools
 import itertools
+import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
+pytree = torch.utils._pytree
+T = TypeVar("T")
+TensorWeakRef = Any
 
 aten = torch.ops.aten
+
+CONSTANT_NUMEL_LIMIT = 1
 
 
 @dataclass
@@ -98,6 +105,16 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
+@functools.lru_cache(None)
+def get_schema_info(func):
+    return torch._C._SchemaInfo(func._schema)  # type: ignore[attr-defined]
+
+
+def tree_flatten_only(ty: Type[T], pytree: PyTree):
+    flat_vals, _ = tree_flatten(pytree)
+    return [elem for elem in flat_vals if isinstance(elem, ty)]
+
+
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
 # structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
@@ -105,6 +122,7 @@ def _is_tensor_constructor(func: OpOverload):
 class FakeTensorConverter(object):
     tensor_memo: weakref.WeakValueDictionary
     meta_converter: MetaConverter
+    constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
         # FakeTensors store the FakeTensorMode which in turn stores a
@@ -112,6 +130,38 @@ class FakeTensorConverter(object):
         # otherwise we would induce a circular reference
         self.tensor_memo = weakref.WeakValueDictionary()
         self.meta_converter = MetaConverter()
+
+        # map from to storage to corresponding constant tensors
+        self.constant_storage_mapping = {}
+
+    def add_constant_storage_mapping(self, fake_tensor):
+        # when you have a constant, aliased tensor:
+        # const_tensor.add_(torch.rand([1]))
+        # all aliases of it must become no longer const
+        assert isinstance(fake_tensor, FakeTensor) and fake_tensor.constant is not None
+        weak_st = StorageWeakRef(fake_tensor.constant.storage())
+
+        # we need a map from a weak storage to all of its corresponding
+        # constant tensors. python doesn't have the weak value equivalent
+        # of defaultdict(list), so we are using a WeakValueDictionary as one
+        if weak_st not in self.constant_storage_mapping:
+            self.constant_storage_mapping[weak_st] = []
+        self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
+
+    def invalidate_constant_aliases(self, tensor):
+        assert not isinstance(tensor, FakeTensor)
+
+        weak_st = StorageWeakRef(tensor.storage())
+        if weak_st not in self.constant_storage_mapping:
+            return
+
+        for weak_tensor_ref in self.constant_storage_mapping[weak_st]:
+            ten = weak_tensor_ref()
+            if ten is not None:
+                ten._fix_weakref()
+                ten.constant = None
+
+        del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
         if WeakTensorRefKey(t) in self.tensor_memo:
@@ -137,7 +187,7 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t):
+    def from_real_tensor(self, fake_mode, t, make_constant=False):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -149,10 +199,21 @@ class FakeTensorConverter(object):
             meta_t = self.meta_converter(t)
             if meta_t.device.type != "meta":
                 raise UnsupportedFakeTensorException("meta converter nyi")
-            out = FakeTensor(fake_mode, meta_t, existing_device)
+            out = FakeTensor(
+                fake_mode,
+                meta_t,
+                existing_device,
+                constant=t if make_constant else None,
+            )
+            if make_constant:
+                self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
+            assert not make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        if t.grad is not None:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+            grad_not_none = t.grad is not None
+        if grad_not_none:
             out.grad = self.from_real_tensor(fake_mode, t.grad)
         self.set_tensor_memo(t, out)
         return out
@@ -175,10 +236,11 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(self, fake_mode, t, device=None):
+    def __call__(self, fake_mode, t, device=None, *, make_constant=False):
         if device is None:
-            return self.from_real_tensor(fake_mode, t)
+            return self.from_real_tensor(fake_mode, t, make_constant)
         else:
+            assert make_constant is False
             assert t.device.type == "meta"
             return self.from_meta_and_device(fake_mode, t, device)
 
@@ -352,6 +414,7 @@ class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     has_sym_ints: bool
+    constant: Optional[torch.Tensor]
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -366,7 +429,7 @@ class FakeTensor(torch.Tensor):
     # The `device_for_backend_keys` does that below
 
     @staticmethod
-    def __new__(cls, fake_mode, elem, device):
+    def __new__(cls, fake_mode, elem, device, constant=None):
         return torch.Tensor._make_subclass(
             cls,
             elem,
@@ -375,7 +438,13 @@ class FakeTensor(torch.Tensor):
             device_for_backend_keys=device,
         )
 
-    def __init__(self, fake_mode, elem, device: Union[torch.device, str]):
+    def __init__(
+        self,
+        fake_mode,
+        elem,
+        device: Union[torch.device, str],
+        constant: Optional[torch.Tensor] = None,
+    ):
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
         # NB: it is fine, if a little confusing, for device to be meta
@@ -393,6 +462,10 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
+        assert not (
+            self.has_sym_ints and constant is not None
+        ), f"meta: {elem}, constant: {constant}"
+        self.constant = constant
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -534,10 +607,13 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, *, allow_fallback_kernels=True, allow_meta=False):
+    def __init__(
+        self, *, allow_fallback_kernels=True, allow_meta=False, const_tensors=True
+    ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         self.allow_meta = allow_meta
+        self.const_tensors = const_tensors
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
@@ -560,17 +636,68 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        flat_arg_tensors = [
-            i for i in tree_flatten((args, kwargs))[0] if isinstance(i, FakeTensor)
-        ]
-        flat_symints = [
-            i
-            for i in tree_flatten((args, kwargs))[0]
-            if isinstance(i, torch._C.SymIntNode)
-        ]
+
+        flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
+
+        converter = self.fake_tensor_converter
+
+        # If this is a lift, the input tensor is guaranteed to be a
+        # constant, so we keep a copy of the original argument along so
+        # we can query it if we're asked to item() it at some later point
+        if func in (torch.ops.aten.lift_fresh.default, aten.lift_fresh_copy.default):
+            out = func(*args, **kwargs)
+            if self.may_turn_const(out):
+                with no_dispatch():
+                    return converter(self, out.clone(), make_constant=True)
+
+        # The current constant handling only support tracing systems
+        # (aot autograd, torchdynamo) where each operation is run consecutively.
+        # Because each operation is run in order, we can trace out and support
+        # sequences like: x = torch.tensor(0.); y = x.add_(1)
+        # Whenver a constant is written to but with inputs that cannot be evaluated
+        # statically, such as random_(), we invalidate all constants that alias the input
+        # We will rely on functionalization for use of fake tensors constants as persistent
+        # objects on an FX Graph.
+
+        # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
+        all_constant = all(e.constant is not None for e in flat_arg_tensors)
+        if (
+            torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+            and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
+            and all_constant
+            and len(flat_arg_tensors) != 0
+            and not has_symbolic_sizes
+        ):
+            with no_dispatch():
+                const_args, const_kwargs = pytree.tree_map_only(
+                    FakeTensor, lambda t: t.constant, (args, kwargs)
+                )
+                out = func(*const_args, **const_kwargs)
+
+                all_constant = pytree.tree_all_only(
+                    torch.Tensor, lambda t: self.may_turn_const(t), out
+                )
+
+                if all_constant:
+                    return pytree.tree_map_only(
+                        torch.Tensor,
+                        lambda t: converter(self, t, make_constant=True),
+                        out,
+                    )
+
+                # we weren't able to turn outputs to constants,
+                # so invalidate all constants that might be aliases of the outputs
+                for ten in tree_flatten_only(torch.Tensor, out):
+                    converter.invalidate_constant_aliases(ten)
+
+        # we are falling through to running non constant tensors, any input constant that
+        # is written to must be invalidated
+        self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
+
         if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
@@ -619,9 +746,6 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         with no_dispatch():
-            # TODO: apply as no_dispatch decorator
-            converter = self.fake_tensor_converter
-
             # if we are in the dispatch mode, we will enter this function even if the inputs
             # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
             # and just support constructors. TODO: extend more broadly
@@ -717,6 +841,27 @@ class FakeTensorMode(TorchDispatchMode):
                 return tree_map(partial(wrap, device=kwargs["device"]), r)
 
             return tree_map(partial(wrap), r)
+
+    def may_turn_const(self, t):
+        return (
+            self.const_tensors and t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse
+        )
+
+    def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
+        any_constant = any(e.constant is not None for e in flat_arg_tensors)
+        if any_constant and get_schema_info(func).is_mutable():
+            schema_info = get_schema_info(func)
+            _, new_kwargs = normalize_function(
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            )
+            for k, v in new_kwargs.items():
+                k = k if (k != "input" or schema_info.has_argument(k)) else "self"
+                if (
+                    isinstance(v, FakeTensor)
+                    and schema_info.is_mutable(k)
+                    and v.constant is not None
+                ):
+                    self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
