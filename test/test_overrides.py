@@ -1150,11 +1150,6 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
             self.assertEqual(torch.as_tensor([1]), -1)
 
-    def test_enable_torch_function_mode_with_tensor_subclass(self):
-        x = torch.randn(1)
-        with torch.overrides.enable_torch_function_mode(SubTensor):
-            self.assertEqual(torch.mm(x, x), -1)
-
     def test_modes_handle_first(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1180,51 +1175,6 @@ class TestTorchFunctionMode(TestCase):
             self.assertRaisesRegex(
                 TypeError, r'SubTensor.+MyMode',
                 lambda: self.assertEqual(torch.max(x, x)))
-
-    def test_enable_torch_function_mode_trivial(self):
-        class A(TorchFunctionMode):
-            def __torch_function__(self, *args, **kwargs):
-                return -40
-        a = A()
-        with torch.overrides.enable_torch_function_mode(a):
-            with torch.overrides.enable_torch_function_mode(a):
-                self.assertEqual(bar(None), -40)
-
-    def test_enable_torch_function_mode_replace(self):
-        class A(TorchFunctionMode):
-            def __init__(self, val):
-                self.val = val
-
-            def __torch_function__(self, *args, **kwargs):
-                return self.val
-        a1 = A(-40)
-        a2 = A(-41)
-        with torch.overrides.enable_torch_function_mode(a1):
-            with torch.overrides.enable_torch_function_mode(a2, replace=a1):
-                self.assertEqual(bar(None), -41)
-
-    def test_enable_torch_function_mode_ignore_preexisting(self):
-        class A(TorchFunctionMode):
-            def __init__(self, val):
-                self.val = val
-
-            def __torch_function__(self, *args, **kwargs):
-                return self.val
-        a1 = A(-40)
-        a2 = A(-41)
-        with torch.overrides.enable_torch_function_mode(a1):
-            with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
-                self.assertEqual(bar(None), -41)
-
-    def test_ctor_no_inner(self):
-        class A(TorchFunctionMode):
-            def __torch_function__(self, *args, **kwargs):
-                return torch.zeros([])
-
-        with torch.overrides.enable_torch_function_mode(A()):
-            x = torch.randn((3, 4))
-
-        self.assertEqual(x, torch.zeros([]))
 
     def test_with_mode(self):
         class ErrorA(RuntimeError):
@@ -1417,7 +1367,7 @@ class TestTorchFunctionMode(TestCase):
                     kwargs = {}
                 log.append(func)
                 if func is torch.sub:
-                    with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                    with self.restore():
                         input, other = args
                         assert not kwargs
                         return torch.add(input, other, alpha=-1)

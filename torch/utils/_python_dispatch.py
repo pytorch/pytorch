@@ -25,41 +25,6 @@ class TorchDispatchModeInfo(_ModeInfo):
 #   is able to selectively disable __torch_dispatch__ of a particular class.
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
-@contextlib.contextmanager
-def enable_torch_dispatch_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
-    """
-    Context manager that causes all pytorch operators to dispatch to the passed-in
-    type's __torch_dispatch__ function, including operations that accept no tensors
-    but return a tensor.
-
-    This function is non-compositional; if there is already an existing mode,
-    it will raise an error
-
-    This function is safe to use inside a ``__torch_dispatch__`` mode handler,
-    as the mode is guaranteed to be disabled in this context.  You can use
-    this context manager to reinstate the mode so that calls to overridable
-    APIs recursively call back into your mode handler (this can easily cause
-    infinite loops, so use with care!)
-
-    enable_torch_dispatch_mode is affected by _DisableTorchDispatch.
-
-    Args:
-        mode (:class:`TorchDispatchMode`, Tensor-like class, or None): the
-            mode to set as current mode.  If you pass a Tensor-like class,
-            it will be treated as a non-compositional mode with no state,
-            which is convenient if you have an existing tensor subclass
-            that you'd like to apply globally in a quick and dirty way.
-            Passing None will disable the current mode.
-        replace (:class:`TorchDispatchMode` or Tensor-like class): the
-            mode to replace.  You can use this argument to change the mode in
-            a situation where you know what the current mode is (and you are
-            intentionally overwriting it.)  If you don't know what the current
-            mode is, use ``ignore_preexisting`` instead.
-        ignore_preexisting (bool): if True, ignore any preexisting mode
-            and overwrite it with the passed mode.
-    """
-
-    return _enable_mode(mode, mode_info=TorchDispatchModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
 
 def _wrap_torch_dispatch(f):
@@ -68,9 +33,8 @@ def _wrap_torch_dispatch(f):
         if isinstance(f, classmethod):
             raise RuntimeError("TorchDispatchMode's torch_dispatch function " +
                                "should be a normal method not a class method")
-        inner = getattr(self, "inner", None)
 
-        with enable_torch_dispatch_mode(inner):
+        with self._enable_inner_torch_dispatch_mode():
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -145,6 +109,16 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
+
+    @contextlib.contextmanager
+    def _enable_inner_torch_dispatch_mode(self) -> Iterator[None]:
+        """
+        Helper function for pushing during the wrapped torch dispatch. Only staying around
+        until we do the mode stack update
+        """
+
+        inner = getattr(self, "inner", None)
+        return _enable_mode(inner, mode_info=TorchDispatchModeInfo())
 
     def __enter__(self):
         old = _get_torch_dispatch_mode()

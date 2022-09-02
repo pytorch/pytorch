@@ -17,7 +17,7 @@ import inspect
 from dataclasses import dataclass
 import weakref
 
-from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -157,7 +157,8 @@ def maybe_disable_fake_tensor_mode():
     # library
     mb_fake_mode = torch._C._get_torch_dispatch_mode()
     if isinstance(mb_fake_mode, FakeTensorMode):
-        return enable_torch_dispatch_mode(mb_fake_mode.inner, replace=mb_fake_mode)
+        # TODO: this is a nasty hack of an API that shouldn't be exposed, remove once we're using new mode stock
+        return mb_fake_mode._enable_inner_torch_dispatch_mode()
     else:
         return nullcontext()
 
