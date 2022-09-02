@@ -1773,9 +1773,9 @@ def _run_symbolic_function(
 
 
 def _verity_custom_op_name(symbolic_name: str):
-    if not re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
-        raise ValueError(
-            f"Failed to register operator {symbolic_name}."
+    if not re.match(r"^[a-zA-Z0-9-_]+::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
+        raise errors.OnnxExporterError(
+            f"Failed to register operator {symbolic_name}. "
             "The symbolic name must match the format domain::name, "
             "and should start with a letter and contain only "
             "alphanumerical characters"
@@ -1808,6 +1808,9 @@ def register_custom_op_symbolic(
             operator nodes to add to the graph.
         opset_version (int): The ONNX opset version in which to register.
     """
+    if symbolic_name.startswith("::"):
+        symbolic_name = f"aten{symbolic_name}"
+
     _verity_custom_op_name(symbolic_name)
 
     for version in itertools.chain(
@@ -1829,6 +1832,9 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
             format.
         opset_version (int): The ONNX opset version in which to unregister.
     """
+    if symbolic_name.startswith("::"):
+        symbolic_name = f"aten{symbolic_name}"
+
     _verity_custom_op_name(symbolic_name)
 
     for version in itertools.chain(
