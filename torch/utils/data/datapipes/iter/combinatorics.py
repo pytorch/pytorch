@@ -46,7 +46,10 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
     def __len__(self) -> int:
         # Dataset has been tested as `Sized`
-        if isinstance(self.sampler, Sized) and len(self.sampler) >= 0:
+        # OpenRefactory Warning: Collection length comparison should be meaningful.
+        # The length of a collection is always greater than or equal to zero.
+        # So testing that a length is greater than or equal to zero is always true.
+        if isinstance(self.sampler, Sized) and len(self.sampler) > 0:
             return len(self.sampler)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
