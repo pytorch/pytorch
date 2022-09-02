@@ -48,21 +48,14 @@ struct TORCH_API ExperimentalConfig {
 };
 
 struct TORCH_API ProfilerConfig {
-  explicit ProfilerConfig(
+  ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
       bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig())
-      : state(state),
-        experimental_config(experimental_config),
-        report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory),
-        with_stack(with_stack),
-        with_flops(with_flops),
-        with_modules(with_modules) {}
+      ExperimentalConfig experimental_config = ExperimentalConfig());
   ~ProfilerConfig() = default;
 
   bool disabled() const;
@@ -76,22 +69,30 @@ struct TORCH_API ProfilerConfig {
   bool with_flops;
   bool with_modules;
 
-  // Returns IValues corresponding to ProfilerConfig struct, to be used for
-  // serialization.
+  // For serialization
   at::IValue toIValue() const;
-
-  // Reconstructs a ProfilerConfig from IValues given by toIValue.
   static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
 };
 
-struct TORCH_API ProfilerThreadLocalStateBase
-    : public c10::MemoryReportingInfoBase {
-  explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config);
-  ~ProfilerThreadLocalStateBase() override;
+// ----------------------------------------------------------------------------
+// -- Profiler base class -----------------------------------------------------
+// ----------------------------------------------------------------------------
+struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
+  explicit ProfilerStateBase(const ProfilerConfig& config);
+  ~ProfilerStateBase() override;
 
-  static ProfilerThreadLocalStateBase* getTLS() {
-    return static_cast<ProfilerThreadLocalStateBase*>(
-        c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+  static ProfilerStateBase* get(bool global);
+  static ProfilerStateBase* get() {
+    auto* out = get(/*global=*/true);
+    return out ? out : get(/*global=*/false);
+  }
+
+  static void push(std::shared_ptr<ProfilerStateBase>&& state);
+
+  static std::shared_ptr<ProfilerStateBase> pop(bool global);
+  static std::shared_ptr<ProfilerStateBase> pop() {
+    auto out = pop(/*global=*/true);
+    return out ? out : pop(/*global=*/false);
   }
 
   const ProfilerConfig& config() const {
@@ -116,12 +117,9 @@ struct TORCH_API ProfilerThreadLocalStateBase
   at::CallbackHandle handle_ = 0;
 };
 
-// Returns if the profiler is currently enabled in the current thread.
+// Note: The following are only for the active *thread local* profiler.
 TORCH_API bool profilerEnabled();
-
 TORCH_API ActiveProfilerType profilerType();
-
-// Retrieve the thread_local ProfilerConfig.
 TORCH_API ProfilerConfig getProfilerConfig();
 
 } // namespace impl
