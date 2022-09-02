@@ -553,6 +553,7 @@ def _optimize_graph(
 ):
     if params_dict is None:
         params_dict = {}
+
     # Inline everything
     _C._jit_pass_inline(graph)
 
