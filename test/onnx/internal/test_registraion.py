@@ -29,12 +29,13 @@ class TestGlobalHelpers(common_utils.TestCase):
             ((7, 9, 10, 16), 9, 9),
             ((7, 9, 10, 16), 8, 9),
             ((7, 9, 10, 16), 7, 7),
-            ([17], 16, None),
+            ([17], 16, None),  # New op added in 17
             ([9], 9, 9),
             ([9], 8, 9),
             ([], 16, None),
             ([], 9, None),
             ([], 8, None),
+            ([8], 16, None),  # Ops lower than 9 are not supported by versions >= 9
         ],
     )
     def test_dispatch_opset_version_returns_correct_version(
