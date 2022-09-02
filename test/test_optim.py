@@ -330,15 +330,13 @@ class TestOptim(TestCase):
         optim1 = optimizer_constructor([a1])
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
-        for i in range(10):
+        for _ in range(10):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            self.assertEqual(a1, a2)
-            o = f(a1)
-            o2 = f(a2)
-            o.backward()
-            o2.backward()
+            f(a1).backward()
+            f(a2).backward()
+
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
 
@@ -890,7 +888,7 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias, maximize: optimizer(
+                lambda weight, bias, maximi gze: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, t0=100, maximize=maximize),
                 constructor_accepts_maximize=True
