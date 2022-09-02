@@ -322,9 +322,7 @@ class TestOptim(TestCase):
     def _test_complex_2d(self, optimizer_constructor, f=None):
         if f is None:
             f = rosenbrock
-        # a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
-        a1 = torch.tensor([-0.4329+0.3561j,  0.1633+0.4901j], requires_grad=True)
-        print(a1)
+        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
         a1_real = a1.real.clone().detach()
         a1_imag = a1.imag.clone().detach()
         a1_real.requires_grad_()
@@ -333,20 +331,14 @@ class TestOptim(TestCase):
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
         for i in range(10):
-            print(f"*****{i}****")
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            print(a1, a2, "A1, A2")
-            print(a1_real, a1_imag)
             self.assertEqual(a1, a2)
             o = f(a1)
             o2 = f(a2)
-            print(o, o2)
             o.backward()
             o2.backward()
-            print("TEST", a1.grad.real, a1_real.grad)
-            print("TEST", a1.grad.imag, a1_imag.grad)
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
 
@@ -893,24 +885,30 @@ class TestOptim(TestCase):
 
     def test_asgd(self):
         for optimizer in [optim.ASGD, optim_mt.ASGD]:
-            print(optimizer)
-            # self._test_basic_cases(
-            #     lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
-            #     constructor_accepts_maximize=True
-            # )
-            # self._test_basic_cases(
-            #     lambda weight, bias, maximize: optimizer(
-            #         self._build_params_dict(weight, bias, lr=1e-2),
-            #         lr=1e-3, t0=100, maximize=maximize),
-            #     constructor_accepts_maximize=True
-            # )
-            # self._test_basic_cases(
-            #     lambda weight, bias, maximize: optimizer(
-            #         self._build_params_dict(weight, bias, lr=1e-2),
-            #         lr=1e-3, weight_decay=1, maximize=maximize),
-            #     constructor_accepts_maximize=True
-            # )
-            self._test_complex_2d(optimizer)
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, t0=100, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            # TODO: File an issue!
+            # self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(lambda params: optimizer([params]))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=False, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], weight_decay=0.9))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 

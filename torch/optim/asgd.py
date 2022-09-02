@@ -215,7 +215,6 @@ def _single_tensor_asgd(params: List[Tensor],
         eta.copy_(new_eta)
         new_mu = torch.tensor(1 / max(1, step - t0))
         mu.copy_(new_mu)
-        print(eta, mu, param.clone(), grad)
 
 
 def _multi_tensor_asgd(params: List[Tensor],
@@ -244,14 +243,12 @@ def _multi_tensor_asgd(params: List[Tensor],
     grads = _view_complex_as_real(grads)
     params = _view_complex_as_real(params)
     axs = _view_complex_as_real(axs)
-    print("PARAMS:", params)
-    print("GRADS:", grads)
-    print("axs:", axs)
+
     # update step
     torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
     eta = etas[0].item()
@@ -273,4 +270,3 @@ def _multi_tensor_asgd(params: List[Tensor],
         etas[i].copy_(new_eta)
         new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
         mus[i].copy_(new_mu)
-    print("GRADS END:", grads)
