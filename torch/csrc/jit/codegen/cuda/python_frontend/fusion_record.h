@@ -242,7 +242,7 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
       NvfDataType _dtype,
-      bool _is_cpu)
+      bool _is_cpu = false)
       : RecordFunctor({}, std::move(_outputs)),
         symbolic_sizes(std::move(_symbolic_sizes)),
         contiguous_info(std::move(_contiguous_info)),
