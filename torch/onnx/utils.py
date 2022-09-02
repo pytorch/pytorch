@@ -1772,7 +1772,7 @@ def _run_symbolic_function(
         raise
 
 
-def _verity_custom_op_name(symbolic_name: str):
+def _verify_custom_op_name(symbolic_name: str):
     if not re.match(r"^[a-zA-Z0-9-_]+::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
         raise errors.OnnxExporterError(
             f"Failed to register operator {symbolic_name}. "
@@ -1811,7 +1811,7 @@ def register_custom_op_symbolic(
     if symbolic_name.startswith("::"):
         symbolic_name = f"aten{symbolic_name}"
 
-    _verity_custom_op_name(symbolic_name)
+    _verify_custom_op_name(symbolic_name)
 
     for version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
@@ -1835,7 +1835,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     if symbolic_name.startswith("::"):
         symbolic_name = f"aten{symbolic_name}"
 
-    _verity_custom_op_name(symbolic_name)
+    _verify_custom_op_name(symbolic_name)
 
     for version in itertools.chain(
         _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
