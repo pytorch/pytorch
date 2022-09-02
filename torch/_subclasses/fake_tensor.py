@@ -16,7 +16,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import PyTree, tree_any, tree_flatten, tree_map
 
 
 aten = torch.ops.aten
@@ -579,6 +579,8 @@ class FakeTensorMode(TorchDispatchMode):
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
+                # TODO: the naming of this function is awful, this doesn't
+                # mean that an op is SymInt, it is more narrow
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
