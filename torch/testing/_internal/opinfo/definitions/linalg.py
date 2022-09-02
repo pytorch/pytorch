@@ -1711,6 +1711,16 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
+            # RuntimeError: linalg.matrix_norm: Low precision dtypes not supported.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.norm",
@@ -1733,6 +1743,17 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
             DecorateInfo(
                 unittest.expectedFailure, "TestGradients", "test_fn_fwgrad_bwgrad"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestGradients", "test_forward_mode_AD"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad"),
+            # RuntimeError: linalg.matrix_norm: Low precision dtypes not supported.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
     ),
