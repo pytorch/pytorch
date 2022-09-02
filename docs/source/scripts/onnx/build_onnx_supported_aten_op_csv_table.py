@@ -8,8 +8,8 @@ import os
 from torch.onnx import _onnx_supported_ops
 
 # Constants
-BUILD_DIR = "build"
-AUTO_GEN_ATEN_OPS_CSV_FILE = "auto_gen_aten_op_list.csv"
+BUILD_DIR = "build/onnx"
+AUTO_GEN_ATEN_OPS_CSV_FILE = "auto_gen_op_support_list.csv"
 
 
 def main():

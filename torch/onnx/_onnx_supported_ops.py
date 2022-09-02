@@ -52,14 +52,6 @@ class _TorchSchema:
         return "backward" in self.name
 
 
-def _all_forward_schemas():
-    """Creates a list of _TorchSchema for all schemas."""
-    torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
-    torch_schemas = sorted(torch_schemas, key=lambda x: x.name)
-    aten_schemas = [s for s in torch_schemas if not s.is_backward()]
-    return aten_schemas
-
-
 def _symbolic_argument_count(func):
     params = []
     signature = inspect.signature(func)
@@ -74,7 +66,14 @@ def _symbolic_argument_count(func):
     return params
 
 
+def _all_forward_schemas() -> Dict[str, _TorchSchema]:
+    """Returns schemas for all TorchScript forward ops."""
+    torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
+    return {schema.name: schema for schema in torch_schemas if not schema.is_backward()}
+
+
 def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
+    """Returns schemas for all onnx supported ops."""
     symbolics_schemas = {}
 
     for name in registration.registry.all_functions():
@@ -102,21 +101,26 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
 def onnx_supported_ops():
     all_schemas = _all_forward_schemas()
     symbolic_schemas = _all_symbolics_schemas()
-    torch_schemas = set(symbolic_schemas.values())
-    supported_ops = []
-    onnx_supported = []
-    for schema in all_schemas:
-        if schema in torch_schemas:
-            opname = schema.name
+    supported_result = set()
+    not_supported_result = set()
+    for opname in all_schemas:
+        if opname.endswith("_"):
+            opname = opname[:-1]
+        if opname in symbolic_schemas:
+            # Supported op
             opsets = symbolic_schemas[opname].opsets
-            if schema not in supported_ops:
-                supported_ops.append(symbolic_schemas[opname])
-                onnx_supported.append(
-                    (
-                        opname,
-                        f"{opsets[0]}-{opsets[-1]}"
-                        if len(opsets) > 1
-                        else f"{opsets[0]}",
-                    )
+            supported_result.add(
+                (
+                    opname,
+                    f"{opsets[0]}-{opsets[-1]}" if len(opsets) > 1 else f"{opsets[0]}",
                 )
-    return sorted(onnx_supported, key=lambda x: x[0])
+            )
+        else:
+            # Unsupported op
+            not_supported_result.add(
+                (
+                    opname,
+                    "Not yet supported",
+                )
+            )
+    return sorted(supported_result) + sorted(not_supported_result)
