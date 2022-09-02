@@ -127,7 +127,7 @@ export PYTORCH_NVFUSER_DUMP=python_definition
 ```
 Example Output:
 ```python
-def nvfuser_fusion(fd : FusionDefinition) -> None :
+def nvfuser_fusion_id0(fd : FusionDefinition) -> None :
     T0 = fd.define_tensor(symbolic_sizes=[-1, 1, -1], contiguous=[True, True, True], dtype=DataType.Float)
     T1 = fd.define_tensor(symbolic_sizes=[-1, -1, -1], contiguous=[False, False, False], dtype=DataType.Float)
     S2 = fd.define_constant(3.00000)
