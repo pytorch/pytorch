@@ -20,6 +20,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
+#include <cmath>
 #include <fstream>
 
 namespace torch {
@@ -28,6 +29,16 @@ namespace fuser {
 namespace cuda {
 
 int FusionExecutor::fusion_id_counter_ = 0; // NOLINT
+
+bool fill_allocation_with_nan_ = false;
+
+bool shouldFillAllocationWithNan() {
+  return fill_allocation_with_nan_;
+}
+
+void setFillAllocationWithNan(bool value) {
+  fill_allocation_with_nan_ = value;
+}
 
 namespace {
 
@@ -280,6 +291,42 @@ void FusionExecutor::compileFusion(
 
 namespace {
 
+void fillTensorWithNan(at::Tensor& t) {
+  switch (t.scalar_type()) {
+    case at::ScalarType::Byte:
+      t.fill_(0xFF);
+      break;
+    case at::ScalarType::Char:
+      t.fill_(0x7F);
+      break;
+    case at::ScalarType::Short:
+      t.fill_(0x7FFF);
+      break;
+    case at::ScalarType::Int:
+      t.fill_(0x7FFFFFFF);
+      break;
+    case at::ScalarType::Long:
+      t.fill_(0x7FFFFFFFFFFFFFFFL);
+      break;
+    case at::ScalarType::Bool:
+      t.fill_(true);
+      break;
+    case at::ScalarType::Half:
+    case at::ScalarType::Float:
+    case at::ScalarType::Double:
+    case at::ScalarType::BFloat16:
+      t.fill_(std::nan(""));
+      break;
+    case at::ScalarType::ComplexHalf:
+    case at::ScalarType::ComplexFloat:
+    case at::ScalarType::ComplexDouble:
+      t.fill_(c10::complex<double>(std::nan(""), std::nan("")));
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown dtype");
+  }
+}
+
 at::Tensor inferAndAlloc(
     const TensorView* tv,
     const std::vector<Val*>& sizes,
@@ -349,6 +396,9 @@ at::Tensor inferAndAlloc(
     // Non Variable type guard for empty_cuda call
     at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     auto empty = at::empty(isizes, tensor_options);
+    if (shouldFillAllocationWithNan()) {
+      fillTensorWithNan(empty);
+    }
     if (expanded_dim) {
       return empty.expand(expanded_sizes);
     }
@@ -892,6 +942,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
               c10::nullopt,
               options_.device,
               c10::nullopt));
+          if (shouldFillAllocationWithNan()) {
+            fillTensorWithNan(allocated_outputs.back());
+          }
         }
         // Note: aliased output is not returned as output. But we still need it
         // for kernel execution, so would need to push them to args
@@ -932,6 +985,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
                 c10::nullopt,
                 options_.device,
                 c10::nullopt));
+            if (shouldFillAllocationWithNan()) {
+              fillTensorWithNan(global_buffers.buffers.back());
+            }
             global_buffers.zero_init.push_back(false);
           }
         }

@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -36,6 +37,7 @@ class NVFuserTest : public ::testing::Test {
     if (!deviceMajorMinorCheck(6)) {
       GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
     }
+    setFillAllocationWithNan(true);
   }
 
   void TearDown() override {
