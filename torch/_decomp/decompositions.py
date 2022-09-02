@@ -1,5 +1,6 @@
 import functools
 from enum import Enum
+from itertools import product
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -1459,26 +1460,13 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.nn.functional.avg_pool2d(input, kernel, stride)
 
     def start_index(a, b, c):
-        return (a * c) // b
+        return torch.div(a * c, b, rounding_mode="trunc")
 
     def end_index(a, b, c):
-        return (((a + 1) * c) / b).ceil().to(a.dtype)
+        return torch.div((a + 1) * c + b - 1, b, rounding_mode="trunc")
 
-    # Let's assume the reduction we want to apply is to sum all the elements (averaging from this is easy)
-    # Even more, let's assume that we want to just do the 1d case.
-    # The 2d case is recovered by applying the 1d case along two dimensions
-    # The issue here is that we may want to sum segments of different sizes.
-    # What we do is to get the largest segment, and select all the elements from the initial points
-    # up to the max length. Then we zero out the elements that we picked up and were not necessary if there were any such elements
-    # If all the elements have the same length, we compute the average already, otherwise, we return
-    # the sizes of each window, to compute the sizes of the rectrangles at the end.
-    # This function should recover the efficiency of avg_pool2d if the shape does not need the dynamic window shape
-
-    def adaptive_avg_pool1d(x, dim, out_size):
-        assert dim == -2 or dim == -1
-        in_size = x.size(dim)
-
-        orange = torch.arange(out_size, device=device)
+    def compute_idx(in_size, out_size):
+        orange = torch.arange(out_size, device=device, dtype=torch.int64)
         i0 = start_index(orange, out_size, in_size)
         # Let length = end_index - start_index, i.e. the length of the pooling kernels
         # length.max() can be computed analytically as follows:
@@ -1491,40 +1479,62 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         elif in_size_mod == 0:
             maxlength -= 1
 
-        range_max = torch.arange(maxlength, device=device)
+        range_max = torch.arange(maxlength, device=device, dtype=torch.int64)
         idx = i0.unsqueeze(-1) + range_max
         if adaptive:
             # Need to clamp to avoid accesing out-of-bounds memory
-            idx = idx.clamp(max=in_size - 1)
-        adv_idx_pad = tuple(slice(None) for _ in range(dim + ndim))
-        vals = x[(*adv_idx_pad, idx)]
+            # TODO make minimum accept scalars
+            maxval = torch.scalar_tensor(
+                in_size - 1, dtype=idx.dtype, device=idx.device
+            )
+            idx = torch.minimum(idx, maxval)
 
-        if adaptive:
+            # Compute the lenghts
             i1 = end_index(orange, out_size, in_size)
             length = i1 - i0
+        else:
+            length = maxlength
+        return idx, length, range_max, adaptive
+
+    # length is not None if it's constant, otherwise we'll need to compute it
+    idxh, length_h, range_max_h, adaptive_h = compute_idx(shape[-2], output_size[-2])
+    idxw, length_w, range_max_w, adaptive_w = compute_idx(shape[-1], output_size[-1])
+
+    vals = input[..., _unsqueeze_to_dim(idxh, 4), idxw]
+    # Shortcut for the simpler case
+    if not adaptive_h and not adaptive_w:
+        return torch.mean(vals, dim=(-3, -1))
+
+    def maybe_mask(vals, length, range_max, adaptive, dim):
+        if isinstance(length, int):
+            return vals, length
+        else:
             # zero-out the things we didn't really want to select
             assert dim < 0
-            mask = _unsqueeze_to_dim(range_max >= length.unsqueeze(-1), -dim + 1)
+            # hack
+            mask = range_max >= length.unsqueeze(-1)
+            if dim == -2:
+                mask = _unsqueeze_to_dim(mask, 4)
             vals = torch.masked_fill(vals, mask, 0.0)
-
             # Compute the length of each window
-            div = _unsqueeze_to_dim(length, -dim)
-            return vals.sum(dim), div
-        else:
-            # No need to return div as we have already divided by the mean
-            return vals.mean(dim), None
+            length = _unsqueeze_to_dim(length, -dim)
+            return vals, length
 
-    out, div1 = adaptive_avg_pool1d(input, -1, output_size[-1])
-    out, div2 = adaptive_avg_pool1d(out, -2, output_size[-2])
-    # Filter the Nones
-    divs = tuple(div for div in (div1, div2) if div is not None)
-    # prod(divs) does not work because it accumulates with *=
-    if len(divs) == 0:
-        return out
-    elif len(divs) == 1:
-        return out / divs[0]
-    else:  # len(divs) == 2
-        return out / (divs[0] * divs[1])
+    vals, length_h = maybe_mask(
+        vals, length_h, range_max_h, adaptive=adaptive_h, dim=-2
+    )
+    vals, length_w = maybe_mask(
+        vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1
+    )
+
+    # We unroll the sum as we assume that the kernels are going to be small
+    ret = None
+    for i, j in product(range(vals.shape[-3]), range(vals.shape[-1])):
+        if ret is None:
+            ret = vals[..., i, :, j]
+        else:
+            ret = ret + vals[..., i, :, j]
+    return ret / (length_h * length_w)
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
