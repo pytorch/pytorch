@@ -80,20 +80,6 @@ def prim_reorder(tensor, order: List[Union[int, None]]):
     return torch.as_strided(tensor, nsz, nst, tensor.storage_offset())
 
 
-t = torch.rand(3, 4, 5)
-t2 = prim_slice(t, [0, 2], [slice(1, None), 3])
-assert list(t2.shape) == [2, 4, 1]
-
-i = torch.arange(4)[:, None].expand(4, 5)
-j = torch.arange(5)[None, :].expand(4, 5)
-
-assert list(prim_gather(t, [1], [i]).shape) == [4, 5, 3, 1, 5]
-assert list(prim_gather(t, [1, 2], [i, j]).shape) == [4, 5, 3, 1, 1]
-
-t = torch.rand(2, 1, 5, 3)
-assert list(prim_reorder(t, [0, 3, 2, None]).shape) == [2, 3, 5, 1]
-
-
 # as close as we can get...
 def pysequence_check(obj):
     return not isinstance(obj, dict) and hasattr(type(obj), "__getitem__")
