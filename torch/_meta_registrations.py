@@ -105,6 +105,17 @@ def meta_max(self):
     return self.new_empty(())
 
 
+@register_meta([aten.max.dim], register_dispatcher=False)
+def meta_max_dim(self, dim, keepdim=False):
+    result_size = list(self.size())
+    if self.dim() > 0:
+        if keepdim:
+            result_size[dim] = 1
+        else:
+            del result_size[dim]
+    return self.new_empty(result_size), self.new_empty(result_size, dtype=torch.int64)
+
+
 @register_meta(aten.angle.default)
 def meta_angle(self):
     if self.is_complex():
