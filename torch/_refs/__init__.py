@@ -2784,6 +2784,7 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def softmax(
     a: TensorLikeType,
@@ -2791,9 +2792,8 @@ def softmax(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    assert isinstance(a_, TensorLike)  # to avoid MyPy error for amax
     a_max = amax(a_, dim, keepdim=True)
     a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
