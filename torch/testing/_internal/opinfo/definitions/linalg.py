@@ -1720,6 +1720,12 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=(torch.float16, torch.bfloat16),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
         ),
     ),
     OpInfo(
@@ -1753,6 +1759,12 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
                 dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
