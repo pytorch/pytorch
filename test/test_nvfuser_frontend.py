@@ -6,9 +6,12 @@ from typing import List
 import torch
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._C._nvfuser import Fusion, FusionCache, FusionDefinition, DataType
 import torch._refs as refs
 import torch._prims as prims
+
+# Will only create the _nvfuser module if CUDA is available
+if hasattr(torch._C, "_nvfuser"):
+    from torch._C._nvfuser import Fusion, FusionCache, FusionDefinition, DataType
 
 RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 
@@ -24,6 +27,8 @@ class TestNvFuserFrontend(TestCase):
     def test_basic(self) :
         input1 = torch.ones(2, 4, 8, device='cuda')
         input2 = torch.ones(2, 4, 8, device='cuda')
+        fc = FusionCache.get()
+        before_fusions = fc.num_fusions()
 
         fs1 = Fusion()
         with FusionDefinition(fs1) as fd :
@@ -57,7 +62,7 @@ class TestNvFuserFrontend(TestCase):
 
         # Check there is still only 1 cache entry
         fc = FusionCache.get()
-        self.assertEqual(fc.num_fusions(), 1)
+        self.assertEqual(fc.num_fusions() - before_fusions, 1)
 
         # Create a fusion from a fusion id and make sure it executes!
         fs3 = Fusion(fs2.id())
@@ -261,6 +266,8 @@ class TestNvFuserFrontend(TestCase):
         inputs = torch.randn(*input_size, device=device, requires_grad=True)
         weights = torch.nn.Parameter(torch.randn(input_size[2], dtype=dtype, device=device))
         biases = torch.nn.Parameter(torch.randn(input_size[2], dtype=dtype, device=device))
+        fc = FusionCache.get()
+        before_fusions = fc.num_fusions()
 
         for _ in range(5) :
             nvf_fusion = Fusion()
@@ -280,7 +287,7 @@ class TestNvFuserFrontend(TestCase):
         self.assertEqual(eager_out, nvf_out[0])
         self.assertEqual(eager_out, nvf_var_mean_out[0])
         fusion_cache = FusionCache.get()
-        self.assertEqual(fusion_cache.num_fusions(), 2)
+        self.assertEqual(fc.num_fusions() - before_fusions, 2)
 
     def test_prim_rms_norm_fwd(self) :
         def primitive_definition(
@@ -322,6 +329,8 @@ class TestNvFuserFrontend(TestCase):
         device = 'cuda'
         inputs = torch.randn(*input_size, device=device, requires_grad=True)
         weights = torch.nn.Parameter(torch.randn(input_size[2], dtype=dtype, device=device))
+        fc = FusionCache.get()
+        before_fusions = fc.num_fusions()
 
         for _ in range(5) :
             nvf_fusion = Fusion()
@@ -333,8 +342,7 @@ class TestNvFuserFrontend(TestCase):
             eager_out = primitive_definition(inputs, weights, 2, True)
 
         self.assertEqual(eager_out, nvf_out[0])
-        fusion_cache = FusionCache.get()
-        self.assertEqual(fusion_cache.num_fusions(), 1)
+        self.assertEqual(fc.num_fusions() - before_fusions, 1)
 
 if __name__ == '__main__':
     run_tests()
