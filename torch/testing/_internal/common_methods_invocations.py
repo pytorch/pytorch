@@ -169,99 +169,66 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((6,), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(2,),),
-            SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=([1, 2, 3],),),)
+    make_arg = partial(make_tensor, dtype=dtype, device=device,
+                       low=None, high=None, requires_grad=requires_grad)
+    yield SampleInput(make_arg((6,)), args=(2,))
+    yield SampleInput(make_arg((S, S, S)), args=([1, 2, 3],))
 
 def sample_inputs_vsplit(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((6, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(2,),),
-            SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=([1, 2, 3],),),)
+    make_arg = partial(make_tensor, dtype=dtype, device=device,
+                       low=None, high=None, requires_grad=requires_grad)
+    yield SampleInput(make_arg((6, S)), args=(2,))
+    yield SampleInput(make_arg((S, S, S)), args=([1, 2, 3],))
 
 def sample_inputs_dsplit(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=([1, 2, 3],),),
-            SampleInput(make_tensor((S, S, 6), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(2,),),)
+    make_arg = partial(make_tensor, dtype=dtype, device=device,
+                       low=None, high=None, requires_grad=requires_grad)
+    yield SampleInput(make_arg((S, S, S)), args=([1, 2, 3],))
+    yield SampleInput(make_arg((S, S, 6)), args=(2,))
 
 def error_inputs_hsplit(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.hsplit requires a tensor with at least 1 dimension, "
                 "but got a tensor with 0 dimensions!")
-    si1 = SampleInput(make_tensor((),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si1 = SampleInput(make_arg(()), args=(0,))
     err_msg2 = (f"torch.hsplit attempted to split along dimension 1, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_tensor((S, S, S),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
 
     # Incorrect type for indices_or_section argument
     err_msg3 = ("received an invalid combination of arguments.")
-    si3 = SampleInput(make_tensor((S, S, S),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=("abc",),)
+    si3 = SampleInput(make_arg((S, S, S)), args=("abc",))
     yield ErrorInput(si1, error_regex=err_msg1)
     yield ErrorInput(si2, error_regex=err_msg2)
     yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
                 "but got a tensor with 1 dimensions!")
-    si1 = SampleInput(make_tensor((S,),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si1 = SampleInput(make_arg((S,)), args=(0,))
     err_msg2 = (f"torch.vsplit attempted to split along dimension 0, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_tensor((S, S, S),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
 
     # Incorrect type for indices_or_section argument
     err_msg3 = ("received an invalid combination of arguments.")
-    si3 = SampleInput(make_tensor((S, S, S),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=("abc",),)
+    si3 = SampleInput(make_arg((S, S, S)), args=("abc",))
     yield ErrorInput(si1, error_regex=err_msg1)
     yield ErrorInput(si2, error_regex=err_msg2)
     yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
                 "but got a tensor with 1 dimensions!")
-    si1 = SampleInput(make_tensor((S,),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si1 = SampleInput(make_arg((S,)), args=(0,))
     err_msg2 = (f"torch.dsplit attempted to split along dimension 2, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_tensor((S, S, S),
-                                  dtype=torch.float32,
-                                  device=device),
-                      args=(0,),)
+    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
     return (ErrorInput(si1, error_regex=err_msg1),
             ErrorInput(si2, error_regex=err_msg2),)
 
@@ -833,37 +800,36 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
 
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for shape_a, shape_b, shape_c, broadcasts_input in test_cases:
         yield SampleInput(
-            make_tensor(shape_a, dtype=dtype, device=device, requires_grad=requires_grad),
-            args=(
-                make_tensor(shape_b, dtype=dtype, device=device,
-                            requires_grad=requires_grad),
-                make_tensor(shape_c, dtype=dtype, device=device,
-                            requires_grad=requires_grad)),
+            make_arg(shape_a),
+            args=(make_arg(shape_b), make_arg(shape_c)),
             kwargs={'alpha': alpha_val, 'beta': beta_val},
-            broadcasts_input=broadcasts_input)
+            broadcasts_input=broadcasts_input
+        )
 
     if dtype.is_complex:
         shape = (3, 3)
         yield SampleInput(
-            make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad),
+            make_arg(shape),
             args=(
-                make_tensor(shape, dtype=dtype, device=device).mH.requires_grad_(requires_grad),
-                make_tensor(shape, dtype=dtype, device=device,
-                            requires_grad=requires_grad)),
-            kwargs={'alpha': alpha_val, 'beta': beta_val},)
+                make_arg(shape, requires_grad=False).mH.requires_grad_(requires_grad),
+                make_arg(shape)),
+            kwargs={'alpha': alpha_val, 'beta': beta_val},
+        )
         yield SampleInput(
-            make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad),
+            make_arg(shape),
             args=(
-                make_tensor(shape, dtype=dtype, device=device,
-                            requires_grad=requires_grad),
-                make_tensor(shape, dtype=dtype, device=device).mH.requires_grad_(requires_grad)),
-            kwargs={'alpha': alpha_val, 'beta': beta_val},)
+                make_arg(shape),
+                make_arg(shape, requires_grad=False).mH.requires_grad_(requires_grad)),
+            kwargs={'alpha': alpha_val, 'beta': beta_val},
+        )
 
 def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha = 2 + 3j if dtype.is_complex else 0.6
     beta = 1 + 2j if dtype.is_complex else 0.2
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # sparse.sampled_addmm performs: alpha * (A @ B) * sparse_ones_like(C) + beta * C
     for m, n, k in itertools.product([0, 5], repeat=3):
@@ -871,42 +837,17 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
             torch.eye(m, n, device=device, dtype=dtype)
             .to_sparse_csr()
             .requires_grad_(requires_grad),
-            args=(
-                make_tensor(
-                    (m, k),
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=requires_grad,
-                ),
-                make_tensor(
-                    (k, n),
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=requires_grad,
-                ),
-            ),
+            args=(make_arg((m, k)), make_arg((k, n))),
             kwargs={"alpha": alpha, "beta": beta},
         )
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
-            make_tensor((S, M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            )
-        ),
-    )
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    return (SampleInput(make_arg((S, M, )), args=(make_arg((M, )),)),)
 
 def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
-            make_tensor((M, S, M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                make_tensor((M, M, S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            )
-        ),
-    )
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    return (SampleInput(make_arg((M, S, M, )), args=(make_arg((M, M, S, )),)),)
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -962,6 +903,7 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=is_broadcasting)
 
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     test_cases = [(((S, S), (S, S), (S, S)), False),
                   (((S, S), (S, 1), (1, S)), False),
                   (((1,), (S, S, 1), (1, S)), True),
@@ -970,13 +912,11 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
                   (((), (S, S, 1), (1, S)), True)
                   ]
 
-    sample_inputs = []
     for input_args, broadcasts_input in test_cases:
         # addcdiv should accept inputs with zero value
         # Currently, it throws ZeroDivisionError when the denominator is zero
         # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad,
-                     exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(
             args[0],
@@ -986,8 +926,7 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         # addcdiv should accept inputs with zero value
         # Currently, it throws ZeroDivisionError when the denominator is zero
         # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
-        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad,
-                     exclude_zero=True) if isinstance(arg, tuple) else arg
+        args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         yield SampleInput(
             args[0],
@@ -1045,38 +984,23 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((), (S, S, S), (S, S, M), 1, 1, True),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ]
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
-        args = (make_tensor(input_shape, dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(batch1_shape, dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(batch2_shape, dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad))
+        args = (make_arg(input_shape), make_arg(batch1_shape), make_arg(batch2_shape))
 
-        yield SampleInput(args[0], args=(args[1], args[2]),
+        yield SampleInput(args[0], args=tuple(args[1:]),
                           kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=broadcasts_input)
         if dtype.is_complex:
+            args = (make_arg(input_shape), make_arg(batch1_shape), make_arg(batch2_shape))
             yield SampleInput(
-                args[0].clone().requires_grad_(requires_grad),
-                args=(args[1].clone().requires_grad_(requires_grad),
-                      args[2].clone().requires_grad_(requires_grad)),
+                args[0],
+                args=tuple(args[1:]),
                 kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
                 broadcasts_input=broadcasts_input)
 
     if dtype.is_complex:
         shapes = [(S, S, S), (S, M, S), (S, S, M)]
-        args = (make_tensor(shapes[0], dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(shapes[1], dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(shapes[2], dtype=dtype, device=device,
-                            low=None, high=None,
-                            requires_grad=requires_grad))
+        args = tuple(make_arg(s) for s in shapes)
         yield SampleInput(
             args[0].transpose_(-1, 1),
             args=(args[1].transpose(-1, 1).conj().requires_grad_(requires_grad),
@@ -1099,17 +1023,18 @@ def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_g
                           kwargs={'weight': _make_tensor(shape, requires_grad=False)})
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None
+    )
     yield SampleInput(
-        make_tensor((S, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+        make_arg((S, M)),
         args=(
-            make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)))
+            make_arg((S, )),
+            make_arg((M, ))))
 
     yield SampleInput(
-        make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)),
+        make_arg(()),
+        args=(make_arg((S, )), make_arg((M, ))),
         broadcasts_input=True)
 
     if dtype.is_complex:
@@ -1120,36 +1045,33 @@ def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
         alpha, beta = 2, 3
 
     yield SampleInput(
-        make_tensor((S, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)),
+        make_arg((S, M)),
+        args=(make_arg((S, )), make_arg((M, ))),
         kwargs=dict(beta=beta, alpha=alpha))
 
     yield SampleInput(
-        make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((M, ), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)),
+        make_arg(()),
+        args=(make_arg((S, )), make_arg((M, ))),
         kwargs=dict(beta=beta, alpha=alpha),
         broadcasts_input=True)
 
     # These samples fail gradcheck
     if dtype.is_floating_point and not requires_grad:
+        tensor_options = dict(device=device, dtype=dtype, requires_grad=requires_grad)
         yield SampleInput(
-            torch.tensor([[math.nan]], device=device, requires_grad=requires_grad),
+            torch.tensor([[math.nan]], **tensor_options),
             args=(
-                torch.tensor([0.0], device=device, requires_grad=requires_grad),
-                torch.tensor([0.0], device=device, requires_grad=requires_grad),
+                torch.tensor([0.0], **tensor_options),
+                torch.tensor([0.0], **tensor_options),
             ),
             kwargs=dict(beta=0.0, alpha=0.0),
             broadcasts_input=True)
 
         yield SampleInput(
-            torch.tensor([[0.0]], device=device, requires_grad=requires_grad),
+            torch.tensor([[0.0]], **tensor_options),
             args=(
-                torch.tensor([math.nan], device=device, requires_grad=requires_grad),
-                torch.tensor([math.nan], device=device, requires_grad=requires_grad),
+                torch.tensor([math.nan], **tensor_options),
+                torch.tensor([math.nan], **tensor_options),
             ),
             kwargs=dict(beta=0.0, alpha=0.0),
             broadcasts_input=True)
@@ -1572,13 +1494,14 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     Their matrix product could be used to generate tensor of shape (*, m, n) of rank k.
     """
 
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batches = [(), (0, ), (2, ), (1, 1)]
     size = [1, 5, 10]
 
     for batch, m, n in product(batches, size, size):
         for k in range(min(3, min(m, n))):
-            a = make_tensor((*batch, m, k), dtype=dtype, device=device, requires_grad=requires_grad)
-            b = make_tensor((*batch, n, k), dtype=dtype, device=device, requires_grad=requires_grad)
+            a = make_arg((*batch, m, k))
+            b = make_arg((*batch, n, k))
             yield SampleInput(a, args=(b,), kwargs=kwargs)
 
 
@@ -1649,7 +1572,7 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
         ((), (1, 3, 2)),
     )
 
-    return tuple(
+    yield from (
         SampleInput(
             make_tensor(size, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
@@ -1715,15 +1638,14 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 1, small_S), (small_S, 1, small_S, small_S)),
     )
 
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
         # FIXME add an override for JIT and revert 0. back to 0
         # since it's accepted by eager
         for p in [0., 1., 2., 3., 0.5, 1.5, 2.5, float("inf")]:
             for t1_size, t2_size in test_cases:
                 # The args should never be non-contiguous as this is not supported in the backward
-                yield SampleInput(
-                    make_tensor(t1_size, dtype=dtype, device=device, requires_grad=requires_grad),
-                    args=(make_tensor(t2_size, dtype=dtype, device=device, requires_grad=requires_grad), p, cm))
+                yield SampleInput(make_arg(t1_size), args=(make_arg(t2_size), p, cm))
 
 
 def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
@@ -1904,22 +1826,23 @@ def reference_unbind(t, dim):
     return tuple(s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     return (
         SampleInput(
-            make_tensor((M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+            make_arg((M, S)),
             args=(0, gather_variable((S, S), 1, M, True, device=device))),
         SampleInput(
-            make_tensor((M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+            make_arg((M, S)),
             args=(1, gather_variable((M, S // 2), 0, S, True, device=device))),
         SampleInput(
-            make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+            make_arg(()),
             args=(0, torch.tensor([0], dtype=torch.int64, device=device))),
         # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
         SampleInput(
-            make_tensor((S,), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+            make_arg((S,)),
             args=(0, torch.tensor([], dtype=torch.uint8, device=device))),
         SampleInput(
-            make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+            make_arg(()),
             args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
     )
 
@@ -2204,31 +2127,22 @@ def error_inputs_logcumsumexp(op_info, device, **kwargs):
                          error_regex='Dimension out of range')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
-    return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    return (SampleInput(make_arg((S, S)),
                         args=(gather_variable((S, S), 1, S, True, device=device), 0)),
 
             # `indices` broadcast
-            SampleInput(make_tensor((S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
+            SampleInput(make_arg((S, S)),
                         args=(gather_variable((1, S // 2), 0, S, True, device=device), 1)),
 
             # `self` broadcast
-            SampleInput(make_tensor((1, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
+            SampleInput(make_arg((1, S)),
                         args=(gather_variable((S, S // 2), 0, S, True, device=device), 1)),
 
             # without `dim` arg
-            SampleInput(make_tensor((S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
+            SampleInput(make_arg((S, S)),
                         args=(gather_variable((S, S // 2), 0, S, True, device=device), )),
-            SampleInput(make_tensor((S, S), dtype=dtype, device=device,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
+            SampleInput(make_arg((S, S)),
                         args=(gather_variable((S, S // 2), 0, S, True, device=device),)),
             )
 
@@ -2426,6 +2340,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter))
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     test_cases_float = (
         ((S,), None, None, 1),
         ((S,), 2., None, 1),
@@ -2435,7 +2350,7 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
         ((4, 4, 4), [2., 1.], (0, 1), 2),
     )
     for size, spacing, dim, edge_order in test_cases_float:
-        t = make_tensor(size, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        t = make_arg(size)
         yield SampleInput(t, kwargs=dict(dim=dim, spacing=spacing, edge_order=edge_order))
 
     test_cases_tensor = (
@@ -2443,7 +2358,7 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
         ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1), 2),
     )
     for size, coordinates, dim, edge_order in test_cases_tensor:
-        t = make_tensor(size, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        t = make_arg(size)
         coordinates_tensor_list = []
         for coords in coordinates:
             # `coords` will always contain floating point values and Python 3.10 does not support this
@@ -2541,9 +2456,11 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(x_size), args=(make_arg(()).item(), make_arg(()).item()))
 
 def sample_inputs_argsort(*args, **kwargs):
-    return [sample_input for sample_input in sample_inputs_sort(*args, **kwargs) if "stable" not in sample_input.kwargs]
+    return (sample_input for sample_input in sample_inputs_sort(*args, **kwargs)
+            if "stable" not in sample_input.kwargs)
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
 
     for shape, sorted, return_inverse, return_counts, dim in \
@@ -2563,13 +2480,12 @@ def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_t, kwargs=kwargs.copy())
 
         # construct a test case with mixed 0s and 1s
-        input_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)\
+        input_t = make_arg(shape, dtype=torch.bool, requires_grad=False)\
             .to(dtype).requires_grad_(requires_grad)
         yield SampleInput(input_t, kwargs=kwargs.copy())
 
         # construct a test case with many different values
-        input_t = make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
-        yield SampleInput(input_t, kwargs=kwargs.copy())
+        yield SampleInput(make_arg(shape), kwargs=kwargs.copy())
 
 def sample_inputs_unique_consecutive(*args, **kwargs):
     for sample_input in sample_inputs_unique(*args, **kwargs):
@@ -3469,20 +3385,16 @@ def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_gr
         ((), (0,),),
         ((), (0, True,),),
     )
-    inputs = list((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=args,))
-                  for input_tensor, args in args_for_reduction_with_dim)
-    return inputs
+    yield from ((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
+                                         low=None, high=None,
+                                         requires_grad=requires_grad),
+                             args=args,))
+                for input_tensor, args in args_for_reduction_with_dim)
 
 def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad, **kwargs):
-    yield SampleInput(make_tensor((S, S, S), dtype=dtype, device=device,
-                                  low=None, high=None,
-                                  requires_grad=requires_grad),)
-    yield SampleInput(make_tensor((), dtype=dtype, device=device,
-                                  low=None, high=None,
-                                  requires_grad=requires_grad),)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    yield SampleInput(make_arg((S, S, S)))
+    yield SampleInput(make_arg(()))
 
 def _generate_nan_reduction_inputs(device, dtype, requires_grad, **kwargs):
     yield from _generate_reduction_inputs(device, dtype, requires_grad)
@@ -3531,8 +3443,8 @@ def sample_inputs_reduction_count_nonzero(*args, **kwargs):
 
 def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad, **kwargs):
     N = 10
-    tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
-               requires_grad=requires_grad)) for _ in range(1, N)]
+    tensors = (SampleInput(make_tensor((N, N), device=device, dtype=dtype,
+               requires_grad=requires_grad)) for _ in range(1, N))
     return tensors
 
 def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3781,9 +3693,8 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), args=(1, -1, True, True))
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
-    arg_a = make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad)
-    arg_b = make_tensor((M,), dtype=dtype, device=device, requires_grad=requires_grad)
-    return [SampleInput(arg_a, args=(arg_b,))]
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return (SampleInput(make_arg((S,)), args=(make_arg((M,)),)),)
 
 def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3891,12 +3802,11 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         # Non-fused mode kernel on CUDA
         ((3000,), ()),
     )
-    inputs = list((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),
-                               args=args,))
-                  for input_tensor, args in args)
-    return inputs
+    yield from ((SampleInput(make_tensor(input_tensor, dtype=dtype, device=device,
+                                         low=None, high=None,
+                                         requires_grad=requires_grad),
+                             args=args,))
+                for input_tensor, args in args)
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
@@ -3966,14 +3876,9 @@ def sample_inputs_take(op_info, device, dtype, requires_grad, **kwargs):
                           args=(idx.clone(),))
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
-            make_tensor((4, 3, 2, 1), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            args=([0, 1, 2, 3], [3, 2, 1, 0])),
-        SampleInput(
-            make_tensor((4, 3, 2, 1), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-            args=([0, -1, -2, -3], [-3, -2, -1, -0]))
-    )
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    yield SampleInput(make_arg((4, 3, 2, 1)), args=([0, 1, 2, 3], [3, 2, 1, 0]))
+    yield SampleInput(make_arg((4, 3, 2, 1)), args=([0, -1, -2, -3], [-3, -2, -1, -0]))
 
 def reference_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs)
@@ -4117,12 +4022,12 @@ def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
         ((5,), None, {'dx': 2.0}),
         ((2, 2), None, {'dx': 3.0})
     ]
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None,
+                       requires_grad=requires_grad)
     for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
-        y_tensor = make_tensor(y_shape, dtype=dtype, device=device, low=None, high=None,
-                               requires_grad=requires_grad)
+        y_tensor = make_arg(y_shape)
         if x_shape is not None:
-            x_tensor = make_tensor(x_shape, dtype=dtype, device=device, low=None, high=None,
-                                   requires_grad=requires_grad)
+            x_tensor = make_arg(x_shape)
             yield SampleInput(y_tensor, args=(x_tensor,), kwargs=kwarg)
         else:
             yield SampleInput(y_tensor, kwargs=kwarg)
@@ -4143,12 +4048,12 @@ def sample_cumulative_trapezoid(op_info, device, dtype, requires_grad, **kwargs)
         ((5,), None, {'dx': 2.0}),
         ((2, 2), None, {'dx': 3.0})
     ]
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=None, high=None)
     for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
-        y_tensor = make_tensor(y_shape, dtype=dtype, device=device, low=None, high=None,
-                               requires_grad=requires_grad)
+        y_tensor = make_arg(y_shape)
         if x_shape is not None:
-            x_tensor = make_tensor(x_shape, dtype=dtype, device=device, low=None, high=None,
-                                   requires_grad=requires_grad)
+            x_tensor = make_arg(x_shape)
             yield SampleInput(y_tensor, args=(x_tensor,), kwargs=kwarg)
         else:
             yield SampleInput(y_tensor, kwargs=kwarg)
@@ -4180,13 +4085,13 @@ def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
     strides = (1, 2, (1, 2))
 
     cases = product(shapes, kernel_sizes, dilations, paddings, strides)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     for shape, kernel_size, dilation, padding, stride in cases:
-        tensor = make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        tensor = make_arg(shape)
         yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
 
     # With default args
-    yield SampleInput(make_tensor((1, 1, 5, 5), dtype=dtype, device=device, requires_grad=requires_grad),
-                      args=((3, 3),))
+    yield SampleInput(make_arg((1, 1, 5, 5)), args=((3, 3),))
 
 
 def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
@@ -4329,7 +4234,7 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(mt(10), kwargs=dict(n_fft=7, center=center))
         yield SampleInput(mt((10, 100)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_tensor(16, low=.5, high=2.0, dtype=dtype, device=device, requires_grad=requires_grad)
+    window = mt(16, low=.5, high=2.0)
     yield SampleInput(
         mt((2, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
     yield SampleInput(
@@ -4340,10 +4245,11 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     def mt(shape, **kwargs):
         real_shape = shape if dtype.is_complex else shape + (2,)
-        return make_tensor(real_shape, device=device, dtype=dtype,
-                           requires_grad=requires_grad, **kwargs)
+        return make_arg(real_shape, **kwargs)
 
     yield SampleInput(mt((10, 2)), kwargs=dict(n_fft=10))
     yield SampleInput(mt((6, 3)), kwargs=dict(n_fft=6, onesided=False))
@@ -4353,7 +4259,7 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
         yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_tensor(10, low=.5, high=2.0, dtype=dtype, device=device, requires_grad=requires_grad)
+    window = make_arg(10, low=.5, high=2.0)
     yield SampleInput(mt((10, 10, 6)), kwargs=dict(
         n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
     yield SampleInput(mt((10, 10, 10)), kwargs=dict(
@@ -4432,22 +4338,17 @@ def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def error_inputs_roll(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
     err_msg1 = "`shifts` required"
-    s1 = SampleInput(
-        make_tensor((S,), dtype=torch.float32, device=device), args=(tuple(),)
-    )
+    s1 = SampleInput(make_arg((S,)), args=(tuple(),))
     yield ErrorInput(s1, error_regex=err_msg1)
 
     err_msg2 = ("shifts and dimensions must align")
-    s2 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), args=((2, 1), 0)
-    )
+    s2 = SampleInput(make_arg((S, S)), args=((2, 1), 0))
     yield ErrorInput(s2, error_regex=err_msg2)
 
     err_msg3 = ("out of range")
-    s3 = SampleInput(
-        make_tensor((S, ), dtype=torch.float32, device=device), args=(0, 2)
-    )
+    s3 = SampleInput(make_arg((S, )), args=(0, 2))
     yield ErrorInput(s3, error_regex=err_msg3, error_type=IndexError)
 
 def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -4461,22 +4362,17 @@ def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
 
 
 def error_inputs_rot90(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
     err_msg1 = "expected total rotation dims"
-    s1 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (0,)}
-    )
+    s1 = SampleInput(make_arg((S, S)), kwargs={"dims": (0,)})
     yield ErrorInput(s1, error_regex=err_msg1)
 
     err_msg2 = "expected total dims >= 2"
-    s2 = SampleInput(
-        make_tensor((S,), dtype=torch.float32, device=device),
-    )
+    s2 = SampleInput(make_arg((S,)))
     yield ErrorInput(s2, error_regex=err_msg2)
 
     err_msg3 = "expected rotation dims to be different"
-    s3 = SampleInput(
-        make_tensor((S, S), dtype=torch.float32, device=device), kwargs={"dims": (1, 1)}
-    )
+    s3 = SampleInput(make_arg((S, S)), kwargs={"dims": (1, 1)})
     yield ErrorInput(s3, error_regex=err_msg3)
 
 
@@ -4666,15 +4562,16 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
         return t.clone().requires_grad_(requires_grad)
 
-    x = make_tensor((3,), dtype=dtype, device=device, requires_grad=requires_grad)
-    y = make_tensor((4,), dtype=dtype, device=device, requires_grad=requires_grad)
-    A = make_tensor((2, 3,), dtype=dtype, device=device, requires_grad=requires_grad)
-    B = make_tensor((1, 3,), dtype=dtype, device=device, requires_grad=requires_grad)
-    C = make_tensor((1, 2, 3,), dtype=dtype, device=device, requires_grad=requires_grad)
-    D = make_tensor((1, 3, 4,), dtype=dtype, device=device, requires_grad=requires_grad)
-    E = make_tensor((4, 4,), dtype=dtype, device=device, requires_grad=requires_grad)
-    H = make_tensor((3, 3,), dtype=dtype, device=device, requires_grad=requires_grad)
-    I = make_tensor((1, 3, 1,), dtype=dtype, device=device, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    x = make_arg((3,))
+    y = make_arg((4,))
+    A = make_arg((2, 3,))
+    B = make_arg((1, 3,))
+    C = make_arg((1, 2, 3,))
+    D = make_arg((1, 3, 4,))
+    E = make_arg((4, 4,))
+    H = make_arg((3, 3,))
+    I = make_arg((1, 3, 1,))
 
     # Vector operations
     yield SampleInput([c(x)], args=('i->',))                      # sum
@@ -4707,11 +4604,9 @@ def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(size), kwargs={"dims": dims})
 
 def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = (
-        make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((S, 0, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    )
-    return [SampleInput(tensor) for tensor in tensors]
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    yield SampleInput(make_arg((S, M, S)))
+    yield SampleInput(make_arg((S, 0, M)))
 
 def error_inputs_fliplr(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device)),
@@ -4723,9 +4618,10 @@ def error_inputs_flipud(op, device, **kwargs):
 
 # TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
-    x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    lb = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    ub = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    x = make_arg((S, M, S))
+    lb = make_arg((S, M, S))
+    ub = make_arg((S, M, S))
 
     def detach(tensor):
         return tensor.clone().detach_().requires_grad_(requires_grad)
@@ -4854,13 +4750,11 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(prod_zeros([1, 2]), args=(1,), kwargs={'dtype': dtype})
 
 def sample_inputs_view_as_complex(op_info, device, dtype, requires_grad, **kwargs):
-    return [SampleInput(make_tensor((S, 2), dtype=dtype, device=device, requires_grad=requires_grad),)]
+    return [SampleInput(make_tensor((S, 2), dtype=dtype, device=device, requires_grad=requires_grad))]
 
 def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
-    tensors = (
-        make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-        make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
-    )
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    tensors = (make_arg((S, S)), make_arg(()))
     return [SampleInput(tensor) for tensor in tensors]
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
@@ -4904,10 +4798,12 @@ def error_inputs_neg(op_info, device, **kwargs):
     return (ErrorInput(si, error_regex=msg),)
 
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+
     tensors = (
-        make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((3, 5), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-        make_tensor((5, 3), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
+        make_arg((M, M)),
+        make_arg((3, 5)),
+        make_arg((5, 3)),
     )
 
     args = ((), (2,), (-2,), (1,), (2,))
@@ -5126,14 +5022,14 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     low = low + domain_eps
     high = high - domain_eps
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=low, high=high)
 
     samples = (
-        SampleInput(make_tensor((S, S, S), dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)),
-        SampleInput(make_tensor((S, S, S), dtype=dtype, device=device, low=low,
-                                high=high, requires_grad=requires_grad), args=(0.2,)),
-        SampleInput(make_tensor((), dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)),
-        SampleInput(make_tensor((), dtype=dtype, device=device, low=low,
-                                high=high, requires_grad=requires_grad), args=(0.2,)),
+        SampleInput(make_arg((S, S, S))),
+        SampleInput(make_arg((S, S, S)), args=(0.2,)),
+        SampleInput(make_arg(())),
+        SampleInput(make_arg(()), args=(0.2,)),
     )
 
     return samples
@@ -5200,40 +5096,37 @@ def error_inputs_masked_fill(op_info, device, **kwargs):
 
 
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     samples = (
-        SampleInput(make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn(M, M, device=device) > 0,)),
+        SampleInput(make_arg((M, M)), args=(torch.randn(M, M, device=device) > 0,)),
 
-        SampleInput(make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((M,), device=device) > 0,)),
+        SampleInput(make_arg((M, M)), args=(torch.randn((M,), device=device) > 0,)),
+        SampleInput(make_arg((M,)), args=(torch.randn((M, M), device=device) > 0,)),
 
-        SampleInput(make_tensor((M,), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((M, M), device=device) > 0,)),
+        SampleInput(make_arg((M, 1, M)), args=(torch.randn((M, M), device=device) > 0,)),
 
-        SampleInput(make_tensor((M, 1, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((M, M), device=device) > 0,)),
+        SampleInput(make_arg(()), args=(torch.tensor(1, device=device, dtype=torch.bool),)),
 
-        SampleInput(make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.tensor(1, device=device, dtype=torch.bool),)),
+        SampleInput(make_arg((M, M)), args=(torch.tensor(1, device=device, dtype=torch.bool),)),
 
-        SampleInput(make_tensor((M, M), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.tensor(1, device=device, dtype=torch.bool),)),
-
-        SampleInput(make_tensor((), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((M, M), device=device) > 0,)),
+        SampleInput(make_arg(()), args=(torch.randn((M, M), device=device) > 0,)),
     )
 
     return samples
 
 def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = (
-        SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)),
-        SampleInput(make_tensor((S, S, S), dtype=dtype, device=device, requires_grad=requires_grad)),
+        SampleInput(make_arg((S, S))),
+        SampleInput(make_arg((S, S, S))),
     )
 
     return samples
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5249,8 +5142,8 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        lhs = make_arg(lhs_shape)
+        rhs = make_arg(rhs_shape)
         if op_info.name == 'matmul':
             yield SampleInput(lhs, args=(rhs,))
         elif op_info.name == '__rmatmul__':

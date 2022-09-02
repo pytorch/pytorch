@@ -50,41 +50,27 @@ def sample_inputs_softmax_variant(
     if torch.device(device).type != "xla":
         cases.append(((), (0,)))
 
-    return [
-        SampleInput(make_arg(shape), args=dim, kwargs=kwargs) for shape, dim in cases
-    ]
+    for shape, dim in cases:
+        yield SampleInput(make_arg(shape), args=dim, kwargs=kwargs)
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
+    make_arg = partial(
+        make_tensor, dtype=torch.bool, device=device, requires_grad=False
+    )
     yield None
-    yield make_tensor(input_shape, dtype=torch.bool, device=device, requires_grad=False)
+    yield make_arg(input_shape)
     if len(input_shape) > 2:
         # broadcast last mask dimension:
-        yield make_tensor(
-            input_shape[:-1] + (1,),
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:-1] + (1,))
         # broadcast middle mask dimension:
-        yield make_tensor(
-            input_shape[:1] + (1,) + input_shape[2:],
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:1] + (1,) + input_shape[2:])
         # broadcast first mask dimension:
-        yield make_tensor(
-            (1,) + input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg((1,) + input_shape[1:])
         # mask.ndim < input.ndim
-        yield make_tensor(
-            input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[1:])
         # mask.ndim == 1
-        yield make_tensor(
-            input_shape[-1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[-1:])
         # masks that require broadcasting of inputs (mask.ndim >
         # input.ndim) will not be supported, however, we may
         # reconsider this if there will be demand on this kind of
@@ -351,19 +337,16 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
     ]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for shape, input_masks, other_masks in zip(
         shapes, input_mask_lists, other_mask_lists
     ):
         for input_mask, other_mask in zip(input_masks, other_masks):
-            input = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
-            other = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
             yield SampleInput(
-                input.clone().requires_grad_(requires_grad),
-                args=(other.clone().requires_grad_(requires_grad),),
+                make_arg(shape),
+                args=(make_arg(shape),),
                 kwargs=dict(input_mask=input_mask, other_mask=other_mask),
             )
 
