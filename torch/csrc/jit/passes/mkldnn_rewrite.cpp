@@ -59,6 +59,7 @@ const std::map<std::string, PostOp>& fusion_rewrite_map() {
       {"relu", {zero_scalar_operand}},
       {"sigmoid", {zero_scalar_operand}},
       {"tanh", {zero_scalar_operand}},
+      {"hardswish", {zero_scalar_operand}},
 
       // For element-wise OP that has other scalar inputs:
       {"leaky_relu", {one_scalar_operand}},

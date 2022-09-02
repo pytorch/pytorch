@@ -33,7 +33,8 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
         m.eval()
-        with torch.no_grad(), torch.cpu.amp.autocast(enabled=bf16, cache_enabled=False):
+        with torch.no_grad(), torch.cpu.amp.autocast(enabled=bf16, cache_enabled=False), \
+                torch._jit_internal._disable_emit_hooks():
             if trace:
                 script = torch.jit.trace(m, x)
             else:
@@ -65,6 +66,7 @@ class TestMkldnnFusion(JitTestCase):
             [torch.relu, 'aten::relu'],
             [torch.sigmoid, 'aten::sigmoid'],
             [torch.tanh, 'aten::tanh'],
+            [nn.Hardswish(), 'aten::hardswish'],
             [nn.LeakyReLU(0.1, inplace=False), 'aten::leaky_relu'],
             [nn.Hardtanh(inplace=False), 'aten::hardtanh'],
             [nn.GELU(approximate="none"), 'aten::gelu'],

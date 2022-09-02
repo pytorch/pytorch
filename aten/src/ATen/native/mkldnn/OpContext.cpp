@@ -70,6 +70,7 @@ const std::map<std::string, AttrFunction>& fusion_attr_map() {
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
+      {"hardswish", ATTR_FUNC(hardswish)},
       {"leaky_relu", attr_func_leaky_relu},
       {"hardtanh", attr_func_hardtanh},
       {"gelu", attr_func_gelu},
