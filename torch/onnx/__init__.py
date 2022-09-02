@@ -135,13 +135,4 @@ def log(*args) -> None:
     _C._jit_onnx_log(*args)
 
 
-import pyinstrument
-
-profiler = pyinstrument.Profiler()
-
-profiler.start()
-
 _registration.discover_and_register_all_symbolic_opsets()
-
-profiler.stop()
-profiler.print()
