@@ -387,7 +387,7 @@ class TestPrims(TestCase):
         from torch._prims.executor import execute
 
         def _wrapper(t0, t1, cpu_scalar):
-           return t0 + t1 + cpu_scalar
+            return t0 + t1 + cpu_scalar
 
         make_arg = partial(make_tensor, device=device, dtype=dtype)
         a = make_arg((12, 1))

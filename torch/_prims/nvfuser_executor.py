@@ -30,7 +30,7 @@ class nvFuserTensorTemplate:
     size: tuple
     stride: tuple
     dtype: DataType
-    is_cpu: bool 
+    is_cpu: bool
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype), arg.is_cpu
+                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype), arg.device.type == "cpu"
             )
         elif isinstance(arg, Number):
             return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
