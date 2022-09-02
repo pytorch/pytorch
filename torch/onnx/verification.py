@@ -41,7 +41,7 @@ def _flatten_tuples(elem):
     return flattened
 
 
-@_beartype.beartype
+# TODO(justinchuby): Add type checking by narrowing down the return type when input is None
 def _to_numpy(elem) -> Union[list, np.ndarray]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
