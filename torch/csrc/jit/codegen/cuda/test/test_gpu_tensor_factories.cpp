@@ -43,6 +43,9 @@ TEST_F(NVFuserTest, FusionStandaloneFull_CUDA) {
   fusion->addInput(fill_val2);
   fusion->addInput(fill_val3);
   for (auto dtype : dtypes) {
+    if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+      continue;
+    }
     auto out_tv = full({size}, fill_val1, aten_to_data_type(dtype));
     fusion->addOutput(out_tv);
     out_tv = full({size, size}, fill_val2, aten_to_data_type(dtype));
@@ -57,6 +60,9 @@ TEST_F(NVFuserTest, FusionStandaloneFull_CUDA) {
     std::vector<at::Tensor> expect;
     expect.reserve(dtypes.size());
     for (auto dtype : dtypes) {
+      if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+        continue;
+      }
       const auto options =
           at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
       expect.emplace_back(at::full({size}, 11, options));
@@ -94,6 +100,9 @@ TEST_F(NVFuserTest, FusionStandaloneZeros_CUDA) {
   Val* size = IrBuilder::create<Int>();
   fusion->addInput(size);
   for (auto dtype : dtypes) {
+    if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+      continue;
+    }
     auto out_tv = zeros({size}, aten_to_data_type(dtype));
     fusion->addOutput(out_tv);
     out_tv = zeros({size, size}, aten_to_data_type(dtype));
@@ -108,6 +117,9 @@ TEST_F(NVFuserTest, FusionStandaloneZeros_CUDA) {
     std::vector<at::Tensor> expect;
     expect.reserve(dtypes.size());
     for (auto dtype : dtypes) {
+      if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+        continue;
+      }
       const auto options =
           at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
       expect.emplace_back(at::zeros({size}, options));
@@ -145,6 +157,9 @@ TEST_F(NVFuserTest, FusionStandaloneOnes_CUDA) {
   Val* size = IrBuilder::create<Int>();
   fusion->addInput(size);
   for (auto dtype : dtypes) {
+    if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+      continue;
+    }
     auto out_tv = ones({size}, aten_to_data_type(dtype));
     fusion->addOutput(out_tv);
     out_tv = ones({size, size}, aten_to_data_type(dtype));
@@ -159,6 +174,9 @@ TEST_F(NVFuserTest, FusionStandaloneOnes_CUDA) {
     std::vector<at::Tensor> expect;
     expect.reserve(dtypes.size());
     for (auto dtype : dtypes) {
+      if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+        continue;
+      }
       const auto options =
           at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
       expect.emplace_back(at::ones({size}, options));
@@ -183,6 +201,10 @@ TEST_F(NVFuserTest, FusionStandaloneARange_CUDA) {
   auto dtypes = {kFloat, kLong, kDouble};
 
   for (auto dtype : dtypes) {
+    if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
+      continue;
+    }
+
     auto fusion = std::make_unique<Fusion>();
     FusionGuard fg(fusion.get());
 

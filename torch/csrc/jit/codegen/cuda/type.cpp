@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <stdexcept>
 #include <unordered_map>
 
@@ -157,6 +159,17 @@ DataType getTypeFromComplexType(DataType dtype) {
       return DataType::Double;
     default:
       TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
+bool isSupportedTypeByDevice(DataType dtype) {
+  auto prop = at::cuda::getCurrentDeviceProperties();
+  auto major_ver = prop->major;
+  switch (dtype) {
+    case DataType::BFloat16:
+      return major_ver >= 8;
+    default:
+      return true;
   }
 }
 
