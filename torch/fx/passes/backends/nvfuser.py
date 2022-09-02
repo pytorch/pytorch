@@ -10,7 +10,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch._prims.executor import execute
-from torch.fx.experimental.proxy_tensor import DecompositionInterpreter
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch._decomp import decomposition_table
 
 import typing as t
@@ -240,24 +240,10 @@ class NvFuserBackend:
         self.prim_decomp_cache: Dict[GraphModule, GraphModule] = {}
 
     def lower_to_prims_and_execute(self, graph_module: GraphModule, *args, **kwargs):
-        # `graph_module` is an Aten-Fx graph
-        # "lowering to prims" and "trace execution" are grouped into this function, as they are both input dependent
-
-        if graph_module in self.prim_decomp_cache:
-            logging.debug("prim_decomp_cache hit!")
-            prim_module = self.prim_decomp_cache[graph_module]
-        else:
-            prim_graph = torch.fx.Graph()
-            DecompositionInterpreter(graph_module, prim_graph, decomposition_table=aten2prim_decomp).run(*args, **kwargs)
-            prim_module = torch.fx.GraphModule(graph_module, prim_graph)
-            self.prim_decomp_cache[graph_module] = prim_module
-
-            logging.debug("Lower to prims graph: ", prim_module.code)
-
         # invokes trace executor for running the prim graph
-        return execute(prim_module, *args, executor="nvfuser")
+        return execute(graph_module, *args, executor="nvfuser")
 
-    def compile(self, graph_module: GraphModule) -> GraphModule:
+    def compile(self, graph_module: GraphModule, args) -> GraphModule:
         # entry function for nvFuser backend
         logging.debug("Compiling graph_module: ", graph_module.code)
 
@@ -266,21 +252,24 @@ class NvFuserBackend:
             logging.debug("partitioner_cache hit!")
             fused_graph_module = self.partitioner_cache[graph_module]
         else:
+            # `graph_module` is an Aten-Fx graph
+            # "lowering to prims" and "trace execution" are grouped into this function, as they are both input dependent
+            prim_graph_module = make_fx(graph_module, decomposition_table=aten2aten_decomp)(*args)
             partitioner = CapabilityBasedPartitioner(
-                graph_module, self.supported_ops, allows_single_node_partition=False)
+                prim_graph_module, self.supported_ops, allows_single_node_partition=False)
             fused_graph_module = partitioner.partition_and_fuse()
 
             self.partitioner_cache[graph_module] = fused_graph_module
 
-        # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
-        for node in fused_graph_module.graph.nodes:
-            # TODO: use a better way to identify fused submodule
-            if node.op == "call_module" and "fused_" in node.name:
-                fused_module = getattr(fused_graph_module, node.name)
-                fused_module._wrapped_call = self.lower_to_prims_and_execute
+            # Overriding fused_module's __call__() function with lower_to_prims_and_execute()
+            for node in fused_graph_module.graph.nodes:
+                # TODO: use a better way to identify fused submodule
+                if node.op == "call_module" and "fused_" in node.name:
+                    fused_module = getattr(fused_graph_module, node.name)
+                    fused_module._wrapped_call = self.lower_to_prims_and_execute
 
         return fused_graph_module
 
-    def __call__(self, graph_module: GraphModule, _) -> GraphModule:
+    def __call__(self, graph_module: GraphModule, args) -> GraphModule:
         # wrap self.compile as __call__ function to fit the interface for AOTAutograd's fw_compiler
-        return self.compile(graph_module)
+        return self.compile(graph_module, args)
