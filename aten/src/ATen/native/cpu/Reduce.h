@@ -5,6 +5,8 @@
 #include <c10/util/TypeList.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
+#include <ATen/native/cpu/moments_utils.h>
+#include <ATen/native/SharedReduceOps.h>
 
 #include <sstream>
 
@@ -158,6 +160,27 @@ struct all_same : guts::conjunction<
   std::is_same<T, Args>...
 > {};
 
+template <typename T, typename acc_t, bool is_welford>
+struct welford_inner_reduce {
+  static inline void call(T * data, int64_t size, acc_t & acc) {}
+};
+
+template <typename T, typename acc_t>
+struct welford_inner_reduce<T, acc_t, true> {
+  static inline void call(T * data, int64_t size, acc_t & acc) {
+    double new_mean = 0, new_m2 = 0;
+    std::tie(new_mean, new_m2) = RowwiseMoments(data, size);
+    new_m2 = new_m2 * size;
+    double delta = new_mean - acc.mean;
+    double new_count = acc.nf + size;
+    double nb_over_n = double(size) / new_count;
+    acc.mean = acc.mean + delta * nb_over_n;
+    acc.m2 = acc.m2 + new_m2 + delta * delta * acc.nf * nb_over_n;
+    acc.n += size;
+    acc.nf += size;
+  }
+};
+
 // data_t is the input/output data type.
 // acc_t is a type that contains all the necessary data
 // to continue reducing.
@@ -216,9 +239,17 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
-        for (const auto i : c10::irange(size)) {
-          acc = ops.reduce(acc, c10::load<data_t>(in), begin + i);
-          in += stride;
+        // whether use RowwiseMoments for welford.
+        constexpr bool use_welford = std::is_same<data_t, at::BFloat16>::value &&
+          std::is_same<acc_t, at::native::WelfordData<double, int64_t, double>>::value;
+        // if use RowwiseMoments & dim 0 is contiguous
+        if (use_welford && stride == sizeof(data_t)) {
+          welford_inner_reduce<data_t, acc_t, use_welford>::call((data_t *)in, size, acc);
+        } else {
+          for (const auto i : c10::irange(size)) {
+            acc = ops.reduce(acc, c10::load<data_t>(in), begin + i);
+            in += stride;
+          }
         }
       }, {begin, end});
       return ops.translate_idx(acc, sub_iter.view_offsets()[0]);
