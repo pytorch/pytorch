@@ -533,8 +533,11 @@ def sample_inputs_linalg_norm(
         is_vector_norm = len(test_size) == 1
         is_matrix_norm = len(test_size) == 2
 
+        # IndexError: amax(): Expected reduction dim 0 to have non-zero size.
+        is_valid_for_p2 = is_vector_norm or (test_size[-1] != 0 and test_size[-2] != 0)
+
         for keepdim in [False, True]:
-            if not variant == "subgradient_at_zero":
+            if variant != "subgradient_at_zero" and is_valid_for_p2:
                 inputs.append(
                     SampleInput(
                         make_tensor(
@@ -555,6 +558,28 @@ def sample_inputs_linalg_norm(
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
+                if is_vector_norm and test_size[-1] == 0:
+                    if ord == np.inf or (ord is not None and ord < 0):
+                        # RuntimeError: linalg.vector_norm cannot compute the
+                        # {ord} norm on an empty tensor because the operation
+                        # does not have an identity
+                        continue
+                elif is_matrix_norm:
+                    dims_to_check = {
+                        None: (0,),
+                        np.inf: (0,),
+                        2: (0, 1),
+                        1: (1,),
+                        -1: (1,),
+                        -2: (0, 1),
+                        -np.inf: (0,),
+                    }.get(ord, ())
+
+                    if any(test_size[d] == 0 for d in dims_to_check):
+                        # IndexError: amax(): Expected reduction dim {dim} to
+                        # have non-zero size.
+                        continue
+
                 if variant == "subgradient_at_zero":
                     inputs.append(
                         SampleInput(
@@ -599,7 +624,7 @@ def sample_inputs_linalg_norm(
                             )
                         )
 
-        return inputs
+    return inputs
 
 
 def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
@@ -2264,6 +2289,27 @@ python_ref_db: List[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
+        skips=(
+            # RuntimeError: linalg.matrix_norm: Half precision dtypes not supported. Got torch.bfloat16
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_meta",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
