@@ -1,6 +1,6 @@
 import functools
-from itertools import product
 from enum import Enum
+from itertools import product
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -1520,8 +1520,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             length = _unsqueeze_to_dim(length, -dim)
             return vals, length
 
-    vals, length_h = maybe_mask(vals, length_h, range_max_h, adaptive=adaptive_h, dim=-2)
-    vals, length_w = maybe_mask(vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1)
+    vals, length_h = maybe_mask(
+        vals, length_h, range_max_h, adaptive=adaptive_h, dim=-2
+    )
+    vals, length_w = maybe_mask(
+        vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1
+    )
 
     # We unroll the sum as we assume that the kernels are going to be small
     ret = None
