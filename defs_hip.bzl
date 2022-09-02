@@ -21,9 +21,6 @@ caffe2_video_image_includes = [
     "video/*",
 ]
 
-gpu_file_extensions = [".cu", ".c", ".cc", ".cpp"]
-gpu_header_extensions = [".cuh", ".h", ".hpp"]
-
 hip_external_deps = [
     ("rocm", None, "amdhip64-lazy"),
     ("rocm", None, "MIOpen-lazy"),
