@@ -156,6 +156,8 @@ TORCH_CUDA_CU_API TensorView* arange(
     Val* end,
     Val* step,
     DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* eye(Val* size, DataType dtype);
+TORCH_CUDA_CU_API TensorView* eye(Val* rows, Val* cols, DataType dtype);
 
 // UNARY OPERATIONS
 // abs

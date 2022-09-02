@@ -166,6 +166,38 @@ TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand_CUDA) {
   testValidate(fusion, {out}, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand2_CUDA) {
+  auto dtype = kFloat;
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  Int* size1 = IrBuilder::create<Int>();
+  Int* size2 = IrBuilder::create<Int>();
+  Int* size3 = IrBuilder::create<Int>();
+  Int* size4 = IrBuilder::create<Int>();
+  fusion->addInput(size1);
+  fusion->addInput(size2);
+  fusion->addInput(size3);
+  fusion->addInput(size4);
+  TensorView* tv0 = rand({size1, size2, size3, size4}, DataType::Float);
+  fusion->addOutput(tv0);
+
+  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {10, 10, 10, 10});
+
+  at::manual_seed(0);
+  auto cg_outputs = fe.runFusion({10, 10, 10, 10});
+  auto out = cg_outputs[0];
+
+  at::manual_seed(0);
+  auto ref = generate_uniform(10000, dtype).view({10, 10, 10, 10});
+
+  testValidate(fusion, {out}, {10, 10, 10, 10}, {ref}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionBroadcastingRNG_CUDA) {
   for (auto dtype : {kFloat, kDouble}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();

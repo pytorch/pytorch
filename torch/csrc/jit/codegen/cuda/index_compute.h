@@ -62,6 +62,7 @@ namespace cuda {
 
 class ContigIDs;
 class LoopIndexing;
+struct IndexFromIdGraph;
 
 class IndexCompute : public BackwardVisitor {
  protected:
@@ -331,6 +332,15 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  // get the strides of a tensor used for the index lowering
+  static std::vector<Val*> getStrides(const TensorView* tv);
+
+  // get the root indices of a tensor used for the index lowering
+  static std::vector<Val*> getRootIndices(
+      const TensorView* tv,
+      const std::vector<kir::ForLoop*>& loops,
+      const IndexFromIdGraph& index_from_id_graph);
+
  public:
   // Indexing functions
   // Consumer = Producer
@@ -363,19 +373,28 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
-  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! Returns the logical index linearized from a multi-dimension address into a
+  //! linear memory address a consumer tensor. The returned index is intended to
+  //! be used for the computation of some tensor factories, such as: arange and
+  //! rand (for Philox pseudo random sequences)
+  static std::vector<Val*> getLinearLogicalIndex(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns a vector of logical indices mapped onto the (rfactor)
   //! root domain of a consumer tensor. The returned index is intended
-  //! to be used to index into arange or Philox pseudo random sequences
-  static std::vector<Val*> getLinearIndex(
+  //! to be used for the computation of some tensor factories, such as:
+  //! eye
+  static std::vector<Val*> getPerDimLogicalIndex(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops);
 
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
-  //! predicates, and a list of concrete roots they're associated with. It is
-  //! assumed that no predicate is required if index[i] is an index directly
-  //! from a for loop. This will not catch all cases if we actually have static
-  //! size information for example:
+  //! predicates, and a list of concrete roots they're associated with. It
+  //! is assumed that no predicate is required if index[i] is an index
+  //! directly from a for loop. This will not catch all cases if we actually
+  //! have static size information for example:
   //!
   //! TV[I].split(4)
   //! would produce the code:
@@ -384,14 +403,14 @@ class Index {
   //!     if( i * 4 + j < TV.size(0))
   //!       TV[i * 4 + j]...
   //!
-  //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
-  //! the predicate. This will be caught by canOmitPredicate in the predicate
-  //! lowering
+  //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't
+  //! need the predicate. This will be caught by canOmitPredicate in the
+  //! predicate lowering
   //!
-  //! unswitch_or_vec_loop is the for loop to start the unswitch like predicate,
-  //! this is not a bool value as if we have an unswitch loop with a vectorized
-  //! loop inside, we only want to base the "unswitch" like predicate on the
-  //! vectorized loop.
+  //! unswitch_or_vec_loop is the for loop to start the unswitch like
+  //! predicate, this is not a bool value as if we have an unswitch loop
+  //! with a vectorized loop inside, we only want to base the "unswitch"
+  //! like predicate on the vectorized loop.
   static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,

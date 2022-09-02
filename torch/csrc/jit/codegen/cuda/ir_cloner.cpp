@@ -96,6 +96,10 @@ void IrCloner::handle(const ARangeOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const EyeOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const UnaryOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }

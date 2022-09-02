@@ -1937,52 +1937,55 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   return strided_inds;
 }
 
-std::vector<Val*> Index::getLinearIndex(
-    TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
+template <typename func_t>
+auto evaluateWithOverridenContiguity(
+    TensorView* tv,
+    bool contiguity,
+    const func_t& functor) -> decltype(functor()) {
   // Use domain guard to ignore the contiguity of
   //  consumer tv.
-  TensorDomain* consumer_tv_no_contiguity_domain = nullptr;
-  auto contiguity_vector =
-      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), true);
-  if (consumer_tv->hasRFactor()) {
-    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
-        consumer_tv->getRootDomain(),
-        consumer_tv->getRFactorDomain(),
-        consumer_tv->domain()->domain(),
+  TensorDomain* domain_with_specified_contiguity = nullptr;
+  std::vector<bool> contiguity_vector(
+      tv->getMaybeRFactorDomain().size(), contiguity);
+  if (tv->hasRFactor()) {
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(),
+        tv->getRFactorDomain(),
+        tv->domain()->domain(),
         contiguity_vector);
   } else {
-    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
-        consumer_tv->getRootDomain(),
-        consumer_tv->domain()->domain(),
-        contiguity_vector);
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(), tv->domain()->domain(), contiguity_vector);
   }
 
-  ir_utils::TVDomainGuard domain_guard(
-      consumer_tv, consumer_tv_no_contiguity_domain);
+  ir_utils::TVDomainGuard domain_guard(tv, domain_with_specified_contiguity);
 
-  // TODO:
-  //  More optimization on the underlying tensor layout
-  //   will be done in a follow up.
-  return getGlobalConsumerStridedIndices(consumer_tv, loops);
+  return functor();
 }
 
-std::vector<Val*> Index::getGlobalConsumerStridedIndices(
-    const TensorView* consumer_tv,
+std::vector<Val*> Index::getLinearLogicalIndex(
+    TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalConsumerIndex");
+  return evaluateWithOverridenContiguity(consumer_tv, true, [&]() {
+    return getGlobalConsumerStridedIndices(consumer_tv, loops);
+  });
+}
 
-  auto gpu_lower = GpuLower::current();
+std::vector<Val*> Index::getPerDimLogicalIndex(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  return evaluateWithOverridenContiguity(consumer_tv, false, [&]() {
+    IndexFromIdGraph index_from_id_graph =
+        getTensorIndexFromIdGraph(loops, consumer_tv);
+    return getRootIndices(consumer_tv, loops, index_from_id_graph);
+  });
+}
 
-  auto index_from_id_graph = getTensorIndexFromIdGraph(loops, consumer_tv);
-
-  auto consumer_indexing = index_from_id_graph.index;
-
+std::vector<Val*> Index::getStrides(const TensorView* tv) {
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
-  auto root_dom = consumer_tv->getMaybeRFactorDomain();
+  auto root_dom = tv->getMaybeRFactorDomain();
 
-  // TODO: Abstract stride logic to reuse with producer indexing
   std::vector<Val*> strides(
       root_dom.size(), GpuLower::current()->kernel()->oneVal());
   {
@@ -1993,14 +1996,13 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
         continue;
       }
       std::stringstream ss;
-      ss << "T" << consumer_tv->name() << ".stride[" << stride_i++ << "]";
+      ss << "T" << tv->name() << ".stride[" << stride_i++ << "]";
       strides[i] =
           SimplifyingIrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
     }
   }
 
-  TORCH_INTERNAL_ASSERT(
-      root_dom.size() == consumer_tv->domain()->contiguity().size());
+  TORCH_INTERNAL_ASSERT(root_dom.size() == tv->domain()->contiguity().size());
   Val* cur_contig_stride = GpuLower::current()->kernel()->oneVal();
   for (const auto i : c10::irange(root_dom.size())) {
     auto dim = root_dom.size() - i - 1;
@@ -2008,24 +2010,7 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       continue;
     }
 
-    Val* root_ind = nullptr;
-    if (consumer_indexing.indexMap().find(root_dom[dim]) !=
-        consumer_indexing.indexMap().end()) {
-      root_ind = consumer_indexing.indexMap().at(root_dom[dim]);
-    } else if (root_dom[dim]->isBroadcast()) {
-      root_ind = GpuLower::current()->kernel()->zeroVal();
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        root_ind != nullptr,
-        "Couldn't find root mapping for ",
-        consumer_tv->toString(),
-        " dim: ",
-        dim,
-        " id: ",
-        root_dom[dim]->toString());
-
-    if (consumer_tv->domain()->contiguity()[dim]) {
+    if (tv->domain()->contiguity()[dim]) {
       // If contig, used the stored stride which may be the previous
       // dimensions stride * previous dimensions size
       strides[dim] = cur_contig_stride;
@@ -2041,12 +2026,18 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
           strides[dim], getHaloExtentOfRootAxis(root_dom[dim]));
     }
   }
+  return strides;
+}
 
-  auto vectorize_shift =
-      loops.empty() ? nullptr : loops.back()->vectorize_shift();
+std::vector<Val*> Index::getRootIndices(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const IndexFromIdGraph& index_from_id_graph) {
+  auto gpu_lower = GpuLower::current();
+  auto root_dom = tv->getMaybeRFactorDomain();
+  auto indexing = index_from_id_graph.index;
 
-  // Global striding
-  std::vector<Val*> strided_inds(
+  std::vector<Val*> root_inds(
       root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
@@ -2057,22 +2048,21 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     }
 
     TORCH_INTERNAL_ASSERT(
-        consumer_indexing.indexMap().find(root_dom[i]) !=
-            consumer_indexing.indexMap().end(),
+        indexing.indexMap().find(root_dom[i]) != indexing.indexMap().end(),
         "Couldn't find root mapping for ",
-        consumer_tv->toString(),
+        tv->toString(),
         " dim: ",
         i,
         " id: ",
         root_dom[i]->toString());
 
-    auto root_ind = consumer_indexing.indexMap().at(root_dom[i]);
+    auto root_ind = indexing.indexMap().at(root_dom[i]);
 
     // index hoist must be done before the adjustments for halo
     root_ind = hoistConsumerIndex(
         root_dom[i],
-        consumer_tv,
-        consumer_indexing,
+        tv,
+        indexing,
         index_from_id_graph.resolved_loop_domains,
         index_from_id_graph.initial_concrete_index_map,
         loops,
@@ -2080,12 +2070,33 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
 
     root_ind = SimplifyingIrBuilder::addExpr(
         root_ind, getGlobalConsumerOffsetWithPartialSplit(root_dom[i]));
+    root_inds[i] = root_ind;
+  }
+  return root_inds;
+}
 
-    if (root_ind->isZeroInt()) {
+std::vector<Val*> Index::getGlobalConsumerStridedIndices(
+    const TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalConsumerIndex");
+
+  auto index_from_id_graph = getTensorIndexFromIdGraph(loops, consumer_tv);
+  auto consumer_indexing = index_from_id_graph.index;
+  auto strides = getStrides(consumer_tv);
+  auto root_inds = getRootIndices(consumer_tv, loops, index_from_id_graph);
+
+  // Global striding
+  auto vectorize_shift =
+      loops.empty() ? nullptr : loops.back()->vectorize_shift();
+  std::vector<Val*> strided_inds(
+      root_inds.size(), GpuLower::current()->kernel()->zeroVal());
+  for (const auto i : c10::irange(root_inds.size())) {
+    if (root_inds[i]->isZeroInt()) {
       continue;
     } else {
-      auto strided_ind = SimplifyingIrBuilder::mulExpr(root_ind, strides[i]);
-      if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
+      auto strided_ind =
+          SimplifyingIrBuilder::mulExpr(root_inds[i], strides[i]);
+      if (i == strides.size() - 1 && vectorize_shift != nullptr) {
         strided_inds[i] =
             SimplifyingIrBuilder::addExpr(strided_ind, vectorize_shift);
       } else {

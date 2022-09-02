@@ -553,6 +553,23 @@ TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
   return out;
 }
 
+TensorView* eye(Val* rows, Val* cols, DataType dtype) {
+  TORCH_CHECK(rows->getDataType() == DataType::Int, "rows must have type Int");
+  TORCH_CHECK(cols->getDataType() == DataType::Int, "cols must have type Int");
+  auto out = TensorViewBuilder()
+                 .ndims(2)
+                 .dtype(dtype)
+                 .contiguity({true, true})
+                 .shape(std::vector<Val*>{rows, cols})
+                 .build();
+  IrBuilder::create<EyeOp>(out, dtype);
+  return out;
+}
+
+TensorView* eye(Val* size, DataType dtype) {
+  return eye(size, size, dtype);
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \

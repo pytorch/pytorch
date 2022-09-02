@@ -242,6 +242,58 @@ ARangeOp::ARangeOp(const ARangeOp* src, IrCloner* ir_cloner)
       step_(ir_cloner->clone(src->step_)),
       linear_index_(ir_cloner->clone(src->linear_index_)) {}
 
+EyeOp::EyeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    DataType dtype,
+    Val* index1,
+    Val* index2)
+    : Expr(passkey, ExprType::EyeOp),
+      dtype_(dtype),
+      index1_(index1),
+      index2_(index2) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+    if (out->as<TensorView>()->getRootDomain()[1] !=
+        out->as<TensorView>()->getRootDomain()[0]) {
+      addInput(out->as<TensorView>()->getRootDomain()[1]->extent());
+    }
+  }
+  addOutput(out);
+}
+
+EyeOp::EyeOp(const EyeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype_),
+      index1_(ir_cloner->clone(src->index1_)),
+      index2_(ir_cloner->clone(src->index2_)) {}
+
+bool EyeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<EyeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<EyeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if ((index1_ == nullptr) != (other_op->index1_ == nullptr)) {
+    return false;
+  }
+  if ((index2_ == nullptr) != (other_op->index2_ == nullptr)) {
+    return false;
+  }
+  if ((index1_ != nullptr) && !index1_->sameAs(other_op->index1_)) {
+    return false;
+  }
+  if ((index2_ != nullptr) && !index2_->sameAs(other_op->index2_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 bool ARangeOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -300,8 +352,9 @@ bool UnaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<UnaryOp>();
-  if (getUnaryOpType() != other_op->getUnaryOpType())
+  if (getUnaryOpType() != other_op->getUnaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -336,8 +389,9 @@ bool BinaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<BinaryOp>();
-  if (getBinaryOpType() != other_op->getBinaryOpType())
+  if (getBinaryOpType() != other_op->getBinaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -376,8 +430,9 @@ bool TernaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<TernaryOp>();
-  if (getTernaryOpType() != other_op->getTernaryOpType())
+  if (getTernaryOpType() != other_op->getTernaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 

@@ -427,6 +427,14 @@ void IrGraphGenerator::handle(const ARangeOp* aop) {
   addArc(aop, aop->output(0));
 }
 
+void IrGraphGenerator::handle(const EyeOp* eop) {
+  // node
+  printExpr(eop, "eye");
+
+  // inputs & outputs
+  addArc(eop, eop->output(0));
+}
+
 void IrGraphGenerator::handle(const UnaryOp* uop) {
   // node
   std::stringstream label;

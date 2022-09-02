@@ -208,7 +208,18 @@ struct SubstituteInExpr : public OptInDispatch {
         end,
         step,
         arange_expr->dtype(),
-        arange_expr->getLinearIndex());
+        arange_expr->getLinearLogicalIndex());
+  }
+
+  void handle(EyeOp* eye_expr) final {
+    auto out = reference_->sameAs(eye_expr->output(0)) ? substitute_
+                                                       : eye_expr->output(0);
+    expr_ = IrBuilder::create<EyeOp>(
+        eye_expr->container(),
+        out,
+        eye_expr->dtype(),
+        eye_expr->getIndex1(),
+        eye_expr->getIndex2());
   }
 
   void handle(UnaryOp* unary_expr) final {

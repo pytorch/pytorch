@@ -302,6 +302,27 @@ void IrPrinter::handle(const ARangeOp* aop) {
     os_ << ";\n";
 }
 
+void IrPrinter::handle(const EyeOp* eop) {
+  if (!print_inline_) {
+    indent();
+    os_ << eop->output(0) << "\n";
+    indent_size_++;
+    indent();
+    os_ << " = ";
+  } else {
+    checkInlineable(eop);
+  }
+
+  os_ << "eye(";
+  handle(eop->input(0));
+  os_ << ", " << eop->dtype() << ")";
+
+  indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
+}
+
 void IrPrinter::handle(const UnaryOp* uop) {
   bool istvop = ir_utils::isTvOp(uop);
   if (!print_inline_) {

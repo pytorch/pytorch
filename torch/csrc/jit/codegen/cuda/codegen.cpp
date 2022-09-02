@@ -566,10 +566,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const ARangeOp* aop) final {
-    auto index = genTensorIndex(aop->getLinearIndex()->as<kir::TensorIndex>());
+    auto index =
+        genTensorIndex(aop->getLinearLogicalIndex()->as<kir::TensorIndex>());
     indent() << gen(aop->output(0)) << " = arange<" << aop->dtype() << ">";
     code_ << "(" << index << ", " << gen(aop->start()) << ", "
           << gen(aop->step()) << ");\n";
+  }
+
+  void handle(const EyeOp* aop) final {
+    auto index1 = gen(aop->getIndex1());
+    auto index2 = gen(aop->getIndex2());
+    indent() << gen(aop->output(0)) << " = (" << aop->dtype() << ")";
+    code_ << "(" << index1 << " == " << index2 << ");\n";
   }
 
   void handle(const UnaryOp* uop) final {

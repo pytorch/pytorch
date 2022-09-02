@@ -101,7 +101,7 @@ struct IndexingParameters {
 };
 
 // Initial loop index map for global producer or consumer case.
-IndexingParameters getGlobalIndexParameters(
+IndexingParameters getLinearIndexParameters(
     const LoopIndexing& loop_indexing,
     bool index_producer = false) {
   IndexingParameters index_parameters;
@@ -797,7 +797,7 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
   }
 
   if (is_global) {
-    index_parameters = getGlobalIndexParameters(loop_indexing, index_producer);
+    index_parameters = getLinearIndexParameters(loop_indexing, index_producer);
   } else {
     index_parameters = getNonGlobalInitialIndexParameters(
         loop_indexing, consumer_tv, index_producer, producer_tv, p2c_map);

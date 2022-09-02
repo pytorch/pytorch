@@ -82,7 +82,7 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
     return step_;
   }
 
-  Val* getLinearIndex() const {
+  Val* getLinearLogicalIndex() const {
     return linear_index_;
   }
 
@@ -96,6 +96,63 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
   Val* end_;
   Val* step_;
   Val* linear_index_ = nullptr;
+};
+
+// Tensor factory for generating identity matrices like
+//
+// [[1, 0, 0],
+//  [0, 1, 0],
+//  [0, 0, 1]]
+//
+// or
+//
+// [[1, 0, 0],
+//  [0, 1, 0],
+//  [0, 0, 1],
+//  [0, 0, 0]]
+//
+// or
+//
+// [[1, 0, 0, 0],
+//  [0, 1, 0, 0],
+//  [0, 0, 1, 0]]
+class TORCH_CUDA_CU_API EyeOp : public Expr {
+ public:
+  EyeOp(
+      IrBuilderPasskey,
+      Val* out,
+      DataType dtype,
+      Val* index1 = nullptr,
+      Val* index2 = nullptr);
+
+  EyeOp(const EyeOp* src, IrCloner* ir_cloner);
+
+  bool sameAs(const Statement* other) const override;
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+  Val* getIndex1() const {
+    return index1_;
+  }
+
+  void setIndex1(Val* index) {
+    index1_ = index;
+  }
+
+  Val* getIndex2() const {
+    return index2_;
+  }
+
+  void setIndex2(Val* index) {
+    index2_ = index;
+  }
+
+ private:
+  const DataType dtype_;
+  Val* index1_ = nullptr;
+  Val* index2_ = nullptr;
 };
 
 //! A specialization for Unary operations. Unary operations take in a single

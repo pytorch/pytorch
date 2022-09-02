@@ -106,8 +106,9 @@ TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 
 enum class ExprType {
   Invalid,
-  ARangeOp,
   FullOp,
+  ARangeOp,
+  EyeOp,
   UnaryOp,
   BinaryOp,
   TernaryOp,

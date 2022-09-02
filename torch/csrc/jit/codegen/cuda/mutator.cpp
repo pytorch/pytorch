@@ -152,7 +152,19 @@ void OptOutMutator::mutate(ARangeOp* aop) {
       aop->end(),
       aop->step(),
       aop->dtype(),
-      aop->getLinearIndex());
+      aop->getLinearLogicalIndex());
+}
+
+void OptOutMutator::mutate(EyeOp* eop) {
+  Val* out = maybeMutated(eop->output(0));
+
+  if (out->sameAs(eop->output(0))) {
+    return;
+  }
+  auto container = eop->container();
+  container->removeExpr(eop);
+  IrBuilder::create<EyeOp>(
+      container, out, eop->dtype(), eop->getIndex1(), eop->getIndex2());
 }
 
 void OptOutMutator::mutate(UnaryOp* uop) {

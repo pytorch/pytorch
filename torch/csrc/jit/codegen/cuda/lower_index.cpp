@@ -100,7 +100,7 @@ void IndexLowering::handle(const RNGOp* rop) {
 
   // TensorIndex for philox subsequence and component.
   auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
 
   // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
@@ -135,17 +135,35 @@ void IndexLowering::handle(const ARangeOp* aop) {
   auto out_tv = dynamic_cast<TensorView*>(aop->output(0));
   TORCH_INTERNAL_ASSERT(out_tv != nullptr);
 
-  // TensorIndex for philox subsequence and component.
+  // linear index for computing arange output
   auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
 
-  // TensorIndex for writing rand_like output.
+  // TensorIndex for writing arange output.
   const auto out = lowerDstIndex(out_tv);
   auto lowered = IrBuilder::create<ARangeOp>(
       out, aop->start(), aop->end(), aop->step(), aop->dtype(), linear_index);
 
   pushBack(lowered);
   GpuLower::current()->propagateExprInfo(aop, back());
+}
+
+void IndexLowering::handle(const EyeOp* eop) {
+  auto out_tv = dynamic_cast<TensorView*>(eop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // linear index for computing eye output
+  auto indices = Index::getPerDimLogicalIndex(out_tv, for_loops_);
+  TORCH_INTERNAL_ASSERT(indices.size() == 2);
+  auto index1 = indices[0];
+  auto index2 = indices[1];
+
+  // TensorIndex for writing eye output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered = IrBuilder::create<EyeOp>(out, eop->dtype(), index1, index2);
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(eop, back());
 }
 
 void IndexLowering::handle(const UnaryOp* uop) {

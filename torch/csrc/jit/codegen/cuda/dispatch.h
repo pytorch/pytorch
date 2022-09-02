@@ -70,6 +70,7 @@ class NamedScalar;
 // Exprs
 class FullOp;
 class ARangeOp;
+class EyeOp;
 class UnaryOp;
 class BinaryOp;
 class TernaryOp;
@@ -147,6 +148,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   // Exprs
   virtual void handle(const FullOp* stmt);
   virtual void handle(const ARangeOp* stmt);
+  virtual void handle(const EyeOp* stmt);
   virtual void handle(const UnaryOp* stmt);
   virtual void handle(const BinaryOp* stmt);
   virtual void handle(const TernaryOp* stmt);
@@ -215,6 +217,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   // Exprs
   virtual void handle(FullOp* stmt);
   virtual void handle(ARangeOp* stmt);
+  virtual void handle(EyeOp* stmt);
   virtual void handle(UnaryOp* stmt);
   virtual void handle(BinaryOp* stmt);
   virtual void handle(TernaryOp* stmt);
@@ -324,6 +327,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   // Exprs
   virtual void mutate(FullOp*);
   virtual void mutate(ARangeOp*);
+  virtual void mutate(EyeOp*);
   virtual void mutate(UnaryOp*);
   virtual void mutate(BinaryOp*);
   virtual void mutate(TernaryOp*);

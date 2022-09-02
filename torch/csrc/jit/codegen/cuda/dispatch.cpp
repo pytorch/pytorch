@@ -101,6 +101,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::ARangeOp:
       ptr(handler)->handle(expr->as<ARangeOp>());
       return;
+    case ExprType::EyeOp:
+      ptr(handler)->handle(expr->as<EyeOp>());
+      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
       return;
@@ -289,6 +292,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::ARangeOp:
       ptr(handler)->handle(expr->as<ARangeOp>());
+      return;
+    case ExprType::EyeOp:
+      ptr(handler)->handle(expr->as<EyeOp>());
       return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
@@ -486,6 +492,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::ARangeOp:
       ptr(mutator)->mutate(expr->as<ARangeOp>());
+      return;
+    case ExprType::EyeOp:
+      ptr(mutator)->mutate(expr->as<EyeOp>());
       return;
     case ExprType::UnaryOp:
       ptr(mutator)->mutate(expr->as<UnaryOp>());
@@ -749,6 +758,9 @@ void OptOutConstDispatch::handle(const FullOp* stmt) {
 void OptOutConstDispatch::handle(const ARangeOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const EyeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const UnaryOp* stmt) {
   unhandled(stmt);
 }
@@ -906,6 +918,9 @@ void OptOutDispatch::handle(FullOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ARangeOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(EyeOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(UnaryOp* stmt) {
