@@ -21,19 +21,6 @@ caffe2_video_image_includes = [
     "video/*",
 ]
 
-pytorch_includes = [
-    "aten/src/ATen/cuda/*",
-    "aten/src/ATen/native/cuda/*",
-    "aten/src/ATen/native/cuda/linalg/*",
-    "aten/src/ATen/native/cudnn/*",
-    "aten/src/ATen/native/nested/cuda/*",
-    "aten/src/ATen/native/sparse/cuda/*",
-    "aten/src/ATen/native/transformers/cuda/*",
-    "aten/src/THC/*",
-    "aten/src/ATen/test/*",
-    "torch/*",
-]
-
 gpu_file_extensions = [".cu", ".c", ".cc", ".cpp"]
 gpu_header_extensions = [".cuh", ".h", ".hpp"]
 
