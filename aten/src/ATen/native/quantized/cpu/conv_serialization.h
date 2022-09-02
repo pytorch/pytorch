@@ -331,14 +331,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
   auto& ctx = at::globalContext();
 
-#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+#ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
-#if defined(USE_FBGEMM) && AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED()
     bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
     bool w_sym_quant =
         onednn_utils::is_weight_symmetric_quant(weight.value(), transpose);
     bool prefer_fbgemm = no_vnni || (groups > 100) || !w_sym_quant;
-    if (!fbgemm::fbgemmSupportedCPU()) prefer_fbgemm = false;
     if (prefer_fbgemm) {
       return PackedConvWeight<kSpatialDim>::prepack(
         weight.value(),
@@ -362,21 +361,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         transpose
       );
     }
-#elif defined(USE_FBGEMM)
-    if (fbgemm::fbgemmSupportedCPU()) {
-      return PackedConvWeight<kSpatialDim>::prepack(
-        weight.value(),
-        bias,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        groups,
-        transpose
-      );
-    }
 #else
-      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+      return PackedConvWeight<kSpatialDim>::prepack(
         weight.value(),
         bias,
         stride,

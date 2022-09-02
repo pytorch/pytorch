@@ -312,9 +312,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     }
 #endif
 
-#if AT_MKLDNN_ENABLED()
-    engines.push_back(at::kX86);
-#elif defined(USE_FBGEMM)
+// The X86 qengine is available if and only if FBGEMM is available
+#ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
     }

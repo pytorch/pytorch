@@ -287,25 +287,9 @@ class QLinearPackWeightInt8 final {
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
-#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::X86) {
-      // For linear, we prefer to use FBGEMM
 #ifdef USE_FBGEMM
-      if (fbgemm::fbgemmSupportedCPU()) {
-        return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
-      }
-#endif
-#if AT_MKLDNN_ENABLED()
-      bool w_sym_quant =
-          onednn_utils::is_weight_symmetric_quant(weight, /* is_transposed_conv */false);
-      if (w_sym_quant) {
-        return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
-      }
-#endif
-    } // x86
-#endif
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -333,25 +317,12 @@ class QLinearPackWeightFp16 final {
       at::Tensor weight,
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
-#if defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::X86) {
-      // For linear, we always use FBGEMM
-#ifdef USE_FBGEMM
-      if (fbgemm::fbgemmSupportedCPU()) {
-        return PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));
-      }
-#endif
-      TORCH_CHECK(
-          false,
-          "quantized::linear_prepack_fp16 is not supported by X86 backend"
-          " since FBGEMM is not available");
-    }
-#endif // USE_FBGEMM || AT_MKLDNN_ENABLED()
 #ifdef USE_FBGEMM
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }
