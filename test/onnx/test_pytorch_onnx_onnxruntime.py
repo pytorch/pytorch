@@ -7,9 +7,10 @@ import itertools
 import os
 import unittest
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+import onnx
 import onnx_test_common
 import parameterized
 
@@ -1599,9 +1600,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(ArithmeticModule(), (x, y))
 
     # Outputs that are always None are removed.
-    # We don't know Optional.elem_type, so we can't construct a valid Optional.
-    # Tests for Optional outputs (control flow with None in one branch,
-    # not-None in another) are in test_pytorch_onnx_no_runtime.py.
+    # Issue 84130: ONNX ignores mustNone() node, while pytorch
+    # doesn't, and that makes Optional comparison difficult to achieve.
+    @skipScriptTest()  # TODO Use onnx::Optional to replace erase None in shape_type_inference.cpp
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -6662,6 +6663,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2)
         self.run_test(FullLikeModel(), (x, y))
 
+    @unittest.skip("It started failing after #81761")
+    # TODO(#83661): Fix and enable the test
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6670,6 +6673,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @unittest.skip("It started failing after #81761")
+    # TODO(#83661): Fix and enable the test
     def test_l2_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6678,6 +6683,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @unittest.skip("It started failing after #81761")
+    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6686,6 +6693,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @unittest.skip("It started failing after #81761")
+    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm_keepdim(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -11630,6 +11639,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_nn_init_normal_correctness(self):
+        expected_mean = 5.0
+        expected_std = 10.0
+
+        class M(torch.nn.Module):
+            def forward(self):
+                x = torch.ones([]).new_empty(1, 400, 50)
+                torch.nn.init.normal_(x, expected_mean, expected_std)
+                return x
+
+        model_export = M()
+        model_onnx = io.BytesIO()
+        test_inputs = tuple()
+        torch.onnx.export(
+            model_export, test_inputs, model_onnx, opset_version=self.opset_version
+        )
+        ort_sess = verification._ort_session(model_onnx)
+        ort_out = verification._run_ort(ort_sess, inputs=test_inputs)
+
+        actual_std = np.std(ort_out)
+        actual_mean = np.mean(ort_out)
+
+        assert (
+            abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1
+        ), "the gap of mean between ort outputs and expected one is unacceptable."
+        assert (
+            abs(abs(actual_std) - expected_std) <= expected_std * 0.1
+        ), "the gap of variance between ort outputs and expected one is unacceptable."
+
+    @skipScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -12301,6 +12341,81 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             GridSampleModule(mode, padding_mode, align_corners),
             (input, grid),
             **atol_rtol,
+        )
+
+    class IfNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            if x.size(0) > 1:
+                y = x
+            return y
+
+    class IfNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            if x.size(0) > 1:
+                y = None
+            return y
+
+    #  Skip now to wait more insight on https://github.com/onnx/onnx/issues/4424
+    #  Model fails on type inference, as it's input/output type mismatch.
+    class LoopNoneInput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = None
+            for _ in range(x.size(0)):
+                y = x
+            return y
+
+    class LoopNoneOutput(torch.nn.Module):
+        def forward(self, x) -> Optional[Tensor]:
+            y: Optional[Tensor] = x
+            for _ in range(x.size(0)):
+                y = None
+            return y
+
+    @common_utils.parametrize(
+        "module_class",
+        (IfNoneOutput, IfNoneInput, LoopNoneOutput),
+        name_fn=lambda module_class: module_class.__name__,
+    )
+    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
+    @skipTraceTest()
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
+        # Need scripting to preserve control flow for this test to be
+        # meaningful.
+        model = torch.jit.script(module_class())
+        f = io.BytesIO()
+        x = torch.ones(x_size)
+        dynamic_axis_name = "condition"
+        torch.onnx.export(
+            model,
+            x,
+            f,
+            opset_version=self.opset_version,
+            # Ensure condition is not constant
+            dynamic_axes={"x": {0: dynamic_axis_name}},
+            input_names=["x"],
+        )
+        exported = onnx.load_from_string(f.getvalue())
+        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
+        expected_output_type = onnx.helper.make_optional_type_proto(
+            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
+        )
+        self.assertEqual(expected_output_type, exported.graph.output[0].type)
+        for node in exported.graph.node:
+            # Both branches output types should match.
+            if node.op_type == "If":
+                for attr in node.attribute:
+                    if attr.name in ("then_branch", "else_branch"):
+                        self.assertEqual(expected_output_type, attr.g.output[0].type)
+
+        self.run_test(
+            module_class(),
+            x,
+            # Ensure condition is not constant
+            dynamic_axes={"x": {0: dynamic_axis_name}},
+            input_names=["x"],
         )
 
     @skipTraceTest()

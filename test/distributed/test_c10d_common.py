@@ -1128,6 +1128,32 @@ class AbstractCommTest(object):
             dist.barrier(group=group)
             dist.broadcast(x, src=0, group=group)
 
+    def _test_rank_membership(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self.assertTrue(self.world_size > 1)
+
+        group = dist.new_group(ranks=[1])
+        self.assertEqual(dist.get_group_rank(group, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_group_rank(group, 0)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_group_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_global_rank(group, 0), 1)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_global_rank(group, 1)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
