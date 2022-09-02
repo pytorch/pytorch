@@ -626,6 +626,69 @@ def _log_softmax_backward_data(
     return grad_input
 
 
+@register_decomposition(aten.im2col)
+def im2col(
+    input: Tensor,
+    kernel_size: List[int],
+    dilation: List[int],
+    padding: List[int],
+    stride: List[int],
+) -> Tensor:
+    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
+    utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
+
+    batch_dim = input.size(0)
+    channel_dim = input.size(1)
+    input_h = input.size(2)
+    input_w = input.size(3)
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    def _get_im2col_indices_along_dim(
+        input_d, kernel_d, dilation_d, padding_d, stride_d
+    ):
+        blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
+
+        # Stride kernel over input and find starting indices along dim d
+        blocks_d_indices = torch.arange(
+            0, blocks_d, stride_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(0)
+        num_blocks = (blocks_d - 1) // stride_d + 1
+
+        # Apply dilation on kernel and find its indices along dim d
+        kernel_grid = torch.arange(
+            0, kernel_d * dilation_d, dilation_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(-1)
+
+        # Broadcast and add kernel staring positions (indices) with
+        # kernel_grid along dim d, to get block indices along dim d
+        block_mask = blocks_d_indices + kernel_grid
+
+        return block_mask, num_blocks
+
+    blocks_row_indices, num_blocks_row = _get_im2col_indices_along_dim(
+        input_h, kernel_h, dilation_h, padding_h, stride_h
+    )
+    blocks_col_indices, num_blocks_col = _get_im2col_indices_along_dim(
+        input_w, kernel_w, dilation_w, padding_w, stride_w
+    )
+
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+
+    blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
+    output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
+    output = output.permute(0, 1, 2, 4, 3, 5)
+    return output.reshape(
+        batch_dim, channel_dim * kernel_h * kernel_w, num_blocks_row * num_blocks_col
+    )
+
+
 # TODO: the type annotations on arguments are not quite right
 
 
