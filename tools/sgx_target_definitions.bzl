@@ -16,19 +16,23 @@ def add_sgx_torch_libs():
     if not is_sgx:
         return
 
-    libtorch_core_mobile_sources = sorted(core_sources_common + core_sources_full_mobile + core_trainer_sources)
+    _libtorch_core_mobile_sources = sorted(core_sources_common + core_sources_full_mobile + core_trainer_sources)
 
-    sgx_sources_to_exclude = [
+    _sgx_sources_to_exclude = [
         "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
         "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
         "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     ]
 
-    libtorch_sgx_sources = libtorch_generated_sources(":generate-code[{}]") + [i for i in libtorch_core_mobile_sources if i not in sgx_sources_to_exclude] + [i for i in libtorch_extra_sources if i not in sgx_sources_to_exclude]
+    _libtorch_sgx_sources = libtorch_generated_sources(":generate-code[{}]") + [
+        src
+        for src in _libtorch_core_mobile_sources + libtorch_extra_sources
+        if src not in _sgx_sources_to_exclude
+    ]
 
     cpp_library(
         name = "libtorch-sgx",
-        srcs = libtorch_sgx_sources + [
+        srcs = _libtorch_sgx_sources + [
             "fb/supported_mobile_models/SupportedMobileModels.cpp",
             "torch/csrc/jit/mobile/function.cpp",
             "torch/csrc/jit/mobile/import.cpp",
