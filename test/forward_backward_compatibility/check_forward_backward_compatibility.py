@@ -274,6 +274,8 @@ ALLOW_LIST = [
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
+    # Distributed c10d ops are all going to be updated
+    ("c10d::.*", datetime.date(2022, 10, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
