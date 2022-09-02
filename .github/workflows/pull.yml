@@ -176,8 +176,9 @@ jobs:
           { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
@@ -253,12 +254,12 @@ jobs:
       cuda-version: "11.6"
       sync-tag: win-cuda-build
 
-  linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
+  linux-bionic-cuda11_6-py3_10-gcc7-bazel-test:
+    name: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
   linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
     name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
