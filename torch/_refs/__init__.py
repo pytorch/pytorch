@@ -89,6 +89,7 @@ __all__ = [
     "signbit",
     "sin",
     "sinh",
+    "softmax",
     "sqrt",
     "square",
     "tan",

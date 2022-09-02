@@ -1627,6 +1627,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.softmax',
         '_refs.square',
         '_refs.tensor_split',
         '_refs.to',

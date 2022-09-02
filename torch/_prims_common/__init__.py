@@ -70,6 +70,8 @@ torch_function_passthrough = {
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_contiguous,
+    torch.Tensor.is_quantized.__get__,  # type: ignore[attr-defined]
 }
 
 
