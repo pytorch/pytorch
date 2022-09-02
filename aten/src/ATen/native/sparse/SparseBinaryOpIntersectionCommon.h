@@ -414,9 +414,18 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  // The algorithm implemented is source order-preserving,
-  // hence the result is coalesce as source is.
-  res._coalesced_(source.is_coalesced());
+  // Result is coalesced iff arguments are coalesced, conditioned on the fact
+  // that we do not check that intersection hash values are sorted and unique.
+  // <= : intersection contains only unique indices (or empty), and the algorithm's
+  // behavior is order-preserving. So, the result has only unique indices (or empty) which are sorted.
+  // => : proof by contraposition. The contrapositive statement reads
+  // `there is an uncoalesced argument => result is not coalesced`.
+  // If both arguments are uncoalesced, the result is clearly uncoalesced again
+  // thanks to the order-preserving behavior of the algorithm.
+  // Otherwise we have a coalesced argument `probably_coalesced` and an uncoalesced `source`.
+  // Since the matching beahavior of the algorithm respects the order of `source`, the result
+  // will be as coalesced as `source` is, which is uncoalesced.
+  res._coalesced_(source.is_coalesced() && probably_coalesced.is_coalesced());
 
   return res;
 }

@@ -4200,16 +4200,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-
-- func: _reshape_nested(Tensor self, int[] shape) -> Tensor
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _reshape_nested
-  autogen: _reshape_nested.out
-
-- func: _reshape_nested_backward(Tensor self, Tensor grad) -> Tensor
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _reshape_nested_backward
-  autogen: _reshape_nested_backward.out
+    CompositeImplicitAutograd: reshape
+    CompositeImplicitAutogradNestedTensor: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4233,6 +4226,9 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: reshape_as
+    CompositeImplicitAutogradNestedTensor: reshape_as_nested
 
 - func: round(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6889,6 +6885,7 @@
     Meta: view_meta
     ZeroTensor, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
     MkldnnCPU: mkldnn_view
+    NestedTensorCPU, NestedTensorCUDA: view_nested
 
 # Warning: If you want to change the name or overload name of this
 # operator, you might also want to change the `isBlockListedSchema`
