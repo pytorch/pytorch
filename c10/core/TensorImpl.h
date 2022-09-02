@@ -1477,11 +1477,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return numel() == 0;
   }
 
-  // if we are going to use sym sizes, we should be setting sym strides at the
-  // same time, otherwise it's very easy to misuse this API
   void set_sizes_and_strides(
       c10::SymIntArrayRef sizes,
-      c10::SymIntArrayRef strides);
+      c10::SymIntArrayRef strides,
+      c10::optional<c10::SymInt> storage_offset = c10::nullopt);
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
@@ -1541,17 +1540,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = storage_offset;
   }
 
-  void set_storage_offset(c10::SymInt storage_offset) {
-    TORCH_CHECK(
-        allow_tensor_metadata_change(),
-        "set_storage_offset ",
-        err_msg_tensor_metadata_change_not_allowed);
-    TORCH_CHECK(
-        has_symbolic_sizes_strides_,
-        "set_storage_offset(SymInt) called on tensor without symbolic shape")
-    extra_meta_->storage_offset_ = std::move(storage_offset);
-  }
-
   /**
    * Like set_sizes_and_strides but assumes contiguous strides.
    *
@@ -1580,7 +1568,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
    */
-  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
+  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride, c10::optional<int64_t> storage_offset = c10::nullopt) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "set_sizes_and_strides ",
@@ -1624,6 +1612,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
     refresh_numel();
     refresh_contiguous();
+
+    if (storage_offset.has_value())
+      storage_offset_ = *storage_offset;
   }
 
   /**

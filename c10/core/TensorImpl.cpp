@@ -887,19 +887,33 @@ void TensorImpl::ShareExternalPointer(
 
 void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef strides) {
+    c10::SymIntArrayRef strides,
+    c10::optional<c10::SymInt> storage_offset) {
+  auto int_sizes = asIntArrayRefSlowOpt(sizes);
+  auto int_strides = asIntArrayRefSlowOpt(strides);
+  if (int_sizes && int_strides && (!storage_offset.has_value() || !storage_offset->is_symbolic()) && !has_symbolic_sizes_strides_) {
+    set_sizes_and_strides(*int_sizes, *int_strides);
+    if (storage_offset.has_value())
+      set_storage_offset(storage_offset->as_int_unchecked());
+    return;
+  }
+
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_)
+  if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
+    if (!storage_offset.has_value())
+      extra_meta_->storage_offset_ = storage_offset_;
+  }
   extra_meta_->sizes_ = sizes;
   extra_meta_->strides_ = strides;
+  if (storage_offset.has_value())
+    extra_meta_->storage_offset_ = std::move(*storage_offset);
   SymInt numel = 1;
   for (const auto& s : sizes) {
     numel *= s;
   }
   extra_meta_->numel_ = numel;
-  // TODO: refresh the other entries
 }
 
 namespace impl {
