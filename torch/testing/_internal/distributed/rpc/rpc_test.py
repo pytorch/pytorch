@@ -3019,7 +3019,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(a.owner(), a.owner())
         self.assertEqual(a.owner(), b.owner())
         self.assertEqual(a.owner(), rpc.get_worker_info())
-        x = dict()
+        x = {}
         x[a.owner()] = a
         x[other_a.owner()] = other_a
         self.assertEqual(x[a.owner()], a)
