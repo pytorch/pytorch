@@ -1962,9 +1962,11 @@ class TestCase(expecttest.TestCase):
 
 
         if TEST_WITH_TORCHDYNAMO:
-            with torchdynamo.optimize("eager"):
-                super().run(result=result)
+            @torchdynamo.optimize("eager")
+            def fake_fn(*args, **kwargs):
+                super().run(*args, **kwargs)
 
+            fake_fn(result=result)
             # TODO - Reset for each test slows down testing significantly.
             # torchdynamo.reset()
         else:
