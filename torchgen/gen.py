@@ -37,7 +37,6 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
-    gen_symint_view_copy_kernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -160,6 +159,9 @@ def parse_native_yaml_struct(
             use_out_as_primary=True,
             external=False,
             device_guard=False,
+            # I'm actually not sure about this; undefined could be hit on
+            # empty TensorList, hypothetically that could have sizes in it
+            symint=False,
             index={},
         )
     )
@@ -174,6 +176,16 @@ def parse_native_yaml_struct(
             # Only cuda-like devices in tree require device guards
             device_guard=is_cuda_dispatch_key(k),
             index=v,
+            # Which dispatch keys natively support symint
+            # Note: DispatchKey.CompositeExplicitAutograd has to match out
+            # composites; I think there's some factoring problem here
+            symint=k
+            in [
+                DispatchKey.Meta,
+                DispatchKey.CompositeImplicitAutograd,
+                DispatchKey.CompositeExplicitAutograd,
+                DispatchKey.CompositeExplicitAutogradNonFunctional,
+            ],
         )
     return ParsedYaml(rs, indices)
 
@@ -298,6 +310,7 @@ def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
     else:
         return [backend.dispatch_key for backend in backends] + [
             DispatchKey.CompositeImplicitAutograd,
+            DispatchKey.CompositeImplicitAutogradNestedTensor,
             DispatchKey.CompositeExplicitAutograd,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]
@@ -318,6 +331,8 @@ def get_static_dispatch_backend(
         return DispatchKey.CompositeExplicitAutogradNonFunctional
     elif f.has_composite_implicit_autograd_kernel:
         return DispatchKey.CompositeImplicitAutograd
+    elif f.has_composite_implicit_autograd_nested_tensor_kernel:
+        return DispatchKey.CompositeImplicitAutogradNestedTensor
     return None
 
 
@@ -414,6 +429,8 @@ def generate_static_dispatch_fallback_call(
         return f"return {ns}::{DispatchKey.CompositeExplicitAutogradNonFunctional.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
+    elif f.has_composite_implicit_autograd_nested_tensor_kernel:
+        return f"return {ns}::{DispatchKey.CompositeImplicitAutogradNestedTensor.lower()}::{name}({exprs});"
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {name} for\
 {', '.join([str(index.dispatch_key)for index in backend_indices])} ");"""
@@ -611,29 +628,19 @@ class ComputeFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             # See Note [The ATen Operators API]
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
-
         return result
 
 
@@ -657,35 +664,27 @@ class ComputeTensorMethod:
         )
 
         if self.target is Target.DECLARATION:
-            result = f"{sig_group.signature.decl()} const;\n"
-            if sig_group.faithful_signature is not None:
-                result += f"{sig_group.faithful_signature.decl()} const;\n"
+            result = ""
+            for sig in sig_group.signatures():
+                result += f"{sig.decl()} const;\n"
             return result
 
         if self.target is not Target.DEFINITION:
             assert_never(self.target)
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
+        result = ""
 
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-
-        result = generate_defn(faithful=False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(faithful=True)
 
         return result
 
@@ -703,27 +702,18 @@ class ComputeRedispatchFunction:
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
 
-        def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-
+        result = ""
+        for sig in sig_group.signatures():
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join(["dispatchKeySet"] + [a.expr for a in exprs])
 
-            return f"""
+            result += f"""
 // aten::{f.func}
 inline {sig.decl(is_redispatching_fn=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
 }}
 """
-
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
 
         return result
 
@@ -889,7 +879,8 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature(f.func)
+        # BackendSelect can go to Meta, so it must preserve symints
+        native_sig = NativeSignature(f.func, symint=True)
 
         native_tensor_args = [
             a
@@ -993,7 +984,10 @@ def dynamic_type(t: Type) -> str:
     # also include Tensor[]
     if str(t) == "Tensor":
         return "at::Tensor"
-    return cpp.argumenttype_type(t, mutable=False, binds="__placeholder__").cpp_type()
+    # This is a legacy concept, so never report SymInt
+    return cpp.argumenttype_type(
+        t, mutable=False, binds="__placeholder__", symint=False
+    ).cpp_type()
 
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
@@ -1058,7 +1052,8 @@ def compute_returns_yaml(
         ret = {
             "dynamic_type": dynamic_type(r.type),
             "name": name,
-            "type": cpp.return_type(r).cpp_type(),
+            # legacy, report ints
+            "type": cpp.return_type(r, symint=False).cpp_type(),
         }
 
         if r.name:
@@ -1118,7 +1113,8 @@ def compute_argument_yaml(
         "dynamic_type": dynamic_type(a.type),
         "is_nullable": a.type.is_nullable(),
         "name": a.name,
-        "type": cpp.argument_type(a, binds="__placeholder__").cpp_type(),
+        # legacy, report ints
+        "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
         arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
@@ -1184,11 +1180,13 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
             method=False,
             cpp_no_default_args=set(),
             faithful=False,
+            symint=False,
             has_tensor_options=False,
         )
     ]
 
-    cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
+    # legacy, report ints
+    cpp_returns = cpp.returns_type(f.func.returns, symint=False).cpp_type()
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = (
@@ -1248,6 +1246,11 @@ def compute_registration_declarations(
         "dispatch": str(
             {k for k, v in backend_indices.items() if v.has_kernel(f)}
             != {DispatchKey.CompositeImplicitAutograd}
+            and {k for k, v in backend_indices.items() if v.has_kernel(f)}
+            != {
+                DispatchKey.CompositeImplicitAutograd,
+                DispatchKey.CompositeImplicitAutogradNestedTensor,
+            }
         ),
         "default": str(f.has_composite_kernel or has_autogenerated_composite_kernel(f)),
     }
@@ -1593,10 +1596,6 @@ def get_native_function_schema_registrations(
         if namespace == "aten":
             aten_schema_registrations = schema_registrations_body
         else:
-            assert custom_namespace is None or namespace == custom_namespace, (
-                "Only one custom namespace (other than 'aten') is currently supported, "
-                f" but getting {namespace} and {custom_namespace}"
-            )
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
@@ -2156,6 +2155,13 @@ def gen_source_files(
             ns_grouped_native_functions[namespace].append(grouped_native_function)
 
         dispatch_namespace = str(dispatch_key).lower()
+
+        # CompositeImplicitAutogradNestdTensor does not currently user the helpers generated
+        # compilation will fail when `-Werror=unused-function` flag is set
+        gen_dispatch_helpers: bool = (
+            dispatch_key != DispatchKey.CompositeImplicitAutogradNestedTensor
+        )
+
         dispatch_definitions = get_native_function_definitions(
             fm=fm,
             grouped_native_functions=grouped_native_functions,
@@ -2164,7 +2170,7 @@ def gen_source_files(
             selector=selector,
             rocm=rocm,
             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-            gen_dispatch_helpers=True,
+            gen_dispatch_helpers=gen_dispatch_helpers,
         )
         fm.write_with_template(
             f"Register{dispatch_key}.cpp",
@@ -2421,29 +2427,6 @@ def gen_source_files(
             )
         },
     )
-    view_copy_with_symint_pairs: List[Tuple[NativeFunction, NativeFunction]] = []
-    for g1 in view_groups:
-        for g2 in view_groups:
-            if g1.view_copy is None or g2.view_copy is None:
-                continue
-            # TODO: make this more first class in the data model
-            g1_base_name = str(g1.view_copy.func.name.name)
-            g2_base_name = str(g2.view_copy.func.name.name)
-
-            same_base_op = (
-                g1_base_name == g2_base_name
-                and g1.view_copy.func.arguments.symints_to_ints()
-                == g2.view_copy.func.arguments.symints_to_ints()
-            )
-            op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
-            op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
-            if same_base_op and op1_not_symint and op2_symint:
-                view_copy_with_symint_pairs.append(
-                    (
-                        g1.view_copy,
-                        g2.view_copy,
-                    )
-                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2483,12 +2466,6 @@ def gen_source_files(
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
-            ),
-            "SymIntViewCopyKernel_Definitions": list(
-                mapMaybe(
-                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
-                    view_copy_with_symint_pairs,
-                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
@@ -2676,6 +2653,7 @@ def main() -> None:
         DispatchKey.CPU,
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,

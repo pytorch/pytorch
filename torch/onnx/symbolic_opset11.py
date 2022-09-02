@@ -9,6 +9,7 @@ from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch.onnx import (
     _type_utils,
+    errors,
     symbolic_helper,
     symbolic_opset10 as opset10,
     symbolic_opset9 as opset9,
@@ -91,8 +92,9 @@ __all__ = [
 ]
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
-def hardtanh(g, self, min_val, max_val):
+def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     dtype = self.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -189,6 +191,7 @@ def relu6(g, input):
 
 
 # Opset 11 gather accepts negative indices
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
 def select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
@@ -210,8 +213,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":  # type: ignore[attr-defined]
-                # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+            if symbolic_helper._is_bool(indices_list[idx_]):
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -266,8 +268,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":  # type: ignore[attr-defined]
-            # TODO(justinchuby): Remove type ignore after #81112 is checked in.
+        if symbolic_helper._is_bool(bool_inp):
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -725,7 +726,7 @@ def pad(g, input, pad, mode, value):
     elif mode == "circular":
         return opset9._pad_circular(g, input, pad)
     else:
-        raise RuntimeError(f"Unrecognized padding mode {mode}")
+        raise errors.SymbolicValueError(f"Unrecognized padding mode {mode}", input)
 
 
 def linalg_det(g, self):
@@ -759,7 +760,7 @@ def arange(g, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        arange_tensor = g.op("Range", start_default, end, delta_default)
+        return g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
             # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
@@ -770,7 +771,7 @@ def arange(g, *args):
         _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
-        arange_tensor = g.op("Range", start, end, step)
+        return g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
@@ -781,12 +782,11 @@ def arange(g, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        arange_tensor = g.op("Range", start, end, delta_default)
+        return g.op("Range", start, end, delta_default)
     else:
-        raise NotImplementedError(
-            "Unknown aten::arange signature taking " + str(len(args)) + " arguments."
+        return symbolic_helper._unimplemented(
+            "aten::arange", f"with {len(args)} arguments"
         )
-    return arange_tensor
 
 
 @symbolic_helper.parse_args("v", "i")
@@ -881,7 +881,7 @@ def index(g, self, index):
     if len(indices) == 1:
         index = indices[0]
         if not symbolic_helper._is_none(index) and (
-            index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"
+            symbolic_helper._is_bool(index) or index.type().scalarType() == "Byte"
         ):
             index = opset9.nonzero(g, index)
             return g.op("GatherND", self, index)
@@ -1252,9 +1252,10 @@ def embedding_renorm(g, weight, indices, max_norm, norm_type):
     elif norm_type == 2:
         norm_type = "ReduceL2"
     else:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
-            "Only 1. and 2. are supported."
+            "Only 1. and 2. are supported.",
+            weight,
         )
     partial_weight_norm = g.op(norm_type, partial_weight, axes_i=[1], keepdims_i=1)
     # https://github.com/pytorch/pytorch/blob/0a07488ed2c47765e337e290bd138c0e6e459cbd/aten/src/ATen/native/Embedding.cpp#L177
@@ -1295,14 +1296,26 @@ def chunk(g, self, chunks, dim):
     return split(g, self, chunk_vec, dim)
 
 
-def normal(g, loc, scale, seed):
+def normal(
+    g,
+    mean,
+    std,
+    sizes=None,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
     # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
     # from a mean 0 and variance 1 distribution then
     #       σx+μ
     # is a sample with mean μ and variance σ's square.
-    result = opset9.mul(g, scale, g.op("RandomNormalLike", loc))
-    return add(g, result, loc)
+    if sizes is not None and not symbolic_helper._is_none(sizes):
+        mean = opset9.expand(g, mean, sizes, None)
+    result = opset9.mul(g, std, g.op("RandomNormalLike", mean))
+    return add(g, result, mean)
 
 
 class Prim:

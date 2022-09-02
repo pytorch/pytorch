@@ -33,7 +33,9 @@ std::vector<SourceLocation> GetPythonFrames() {
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
     PyFrameObject* frame = PyEval_GetFrame();
-    Py_INCREF(frame);
+    if (frame != nullptr) {
+      Py_INCREF(frame);
+    }
     while (frame != nullptr) {
       SourceLocation loc;
       auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));

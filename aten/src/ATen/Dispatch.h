@@ -8,6 +8,10 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
+#ifdef __CUDACC__
+#include <cuda.h> // For CUDA_VERSION
+#endif
+
 #ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
 #else
@@ -72,10 +76,20 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   })
 #endif
 
+// Workaround for C10_UNUSED because CUDA 10.2 and below fails to handle unused
+// attribute in the type aliasing context. Keep name long and verbose to avoid
+// macro collisions.
+#if defined(__CUDACC__) && CUDA_VERSION < 11000
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
+#else
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
+#endif
+
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
   case enum_type: {                                           \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);              \
-    using HINT = c10::impl::ScalarTypeToCPPTypeT<enum_type>;  \
+    using HINT C10_UNUSED_DISPATCH_CUDA_WORKAROUND =          \
+        c10::impl::ScalarTypeToCPPTypeT<enum_type>;           \
     return __VA_ARGS__();                                     \
   }
 
@@ -186,7 +200,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 //    conditionally compile fragments of the case statements such
 //    that the kernel functions are specialized only for the dtypes
 //    that are needed. The NAME parameter *must* be a build time
-//    cons char* (can't be std::string, etc...)
+//    const char* (can't be std::string, etc...)
 //
 // Please ensure that the NAME is unique for every implementation
 // or you run the risk of over-including code for the kernel

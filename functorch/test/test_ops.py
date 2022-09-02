@@ -31,7 +31,10 @@ from common_utils import (
     check_vmap_fallback,
     is_batch_norm_training,
     is_valid_inplace_sample_input,
+    loop2,
 )
+
+from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
@@ -580,6 +583,7 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -594,7 +598,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
-        xfail('stft'),  # calls as_strided
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
 
         # required rank 4 tensor to use channels_last format
@@ -662,6 +665,7 @@ class TestOperators(TestCase):
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -674,7 +678,7 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
-        xfail('as_strided'),  # as_strided too weird
+        skip('as_strided'),  # Test runner cannot handle this
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
@@ -684,16 +688,12 @@ class TestOperators(TestCase):
         skip('pca_lowrank', ''),  # randomness
         skip('svd_lowrank', ''),  # randomness
 
-        xfail('stft'),  # transpose_ fallback
-
         xfail('double'),  # required rank 4 tensor to use channels_last format
 
         # potential silent incorrectness
         skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
-
-        xfail('nn.functional.prelu'),  # Call Tensor.as_strided
 
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
@@ -736,6 +736,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
@@ -743,12 +744,10 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('cross'),
         xfail('linalg.pinv'),
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
-        xfail('linalg.eig'),
         xfail('complex'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('pinverse'),
@@ -757,11 +756,9 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('put'),
         xfail('take'),
-        xfail('linalg.eigvals'),
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
-        xfail('linalg.cross'),
         xfail('nanmean'),
         xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -823,6 +820,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
         xfail('complex'),
         xfail('copysign'),
@@ -837,15 +835,11 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('linalg.det'),
         xfail('linalg.eig'),
-        xfail('linalg.eigvals'),
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.pinv'),
         xfail('linalg.pinv', 'hermitian'),
-        xfail('linalg.slogdet'),
-        xfail('linalg.solve'),
-        xfail('logdet'),
         xfail('lu'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
@@ -868,8 +862,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('cross'),
-        xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
@@ -881,7 +873,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_pool3d'),
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('linalg.tensorsolve'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
@@ -911,7 +902,6 @@ class TestOperators(TestCase):
         xfail('chalf', ''),
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
-        xfail('linalg.solve_ex', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
@@ -956,6 +946,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -966,13 +957,13 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         xfail('column_stack', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
+        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),
@@ -1053,40 +1044,40 @@ class TestOperators(TestCase):
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
-        xfail('_masked.log_softmax', ''),
-        xfail('_masked.softmax', ''),
-        xfail('_masked.softmin', ''),
-        xfail('cdist', ''),
-        xfail('cholesky', ''),
-        xfail('eig', ''),
-        xfail('logcumsumexp', ''),
-        xfail('nn.functional.embedding_bag', ''),
-        xfail('nn.functional.grid_sample', ''),
-        xfail('nn.functional.hardsigmoid', ''),
-        xfail('nn.functional.huber_loss', ''),
-        xfail('nn.functional.instance_norm', ''),
-        xfail('nn.functional.logsigmoid', ''),
-        xfail('nn.functional.softmin', ''),
-        xfail('nn.functional.softmin', 'with_dtype'),
-        xfail('renorm', ''),
-        xfail('symeig', ''),
-        xfail('nn.functional.multilabel_margin_loss', ''),
-        xfail('nn.functional.multilabel_soft_margin_loss', ''),
-        xfail('scatter_reduce', 'amax'),
-        xfail('scatter_reduce', 'amin'),
-        xfail('nn.functional.soft_margin_loss', ''),
-        xfail('nn.functional.pdist', ''),
-        xfail('scatter_reduce', 'sum'),
-        xfail('nn.functional.multi_margin_loss', ''),
-        xfail('scatter_reduce', 'mean'),
-        xfail('scatter_reduce', 'prod'),
+        xfail('_masked.log_softmax', ''),  # NYI: forward-AD for _log_softmax_backward_data
+        xfail('_masked.softmax', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
+        xfail('cholesky', ''),  # NYI: forward-AD for cholesky
+        xfail('eig', ''),  # NYI: forward-AD for eig
+        xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
+        xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
+        xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
+        xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
+        xfail('nn.functional.instance_norm', ''),  # NYI: forward AD for native_batch_norm_backward
+        xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
+        xfail('nn.functional.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
+        xfail('nn.functional.softmin', 'with_dtype'),  # NYI: forward-AD for _softmax_backward_data
+        xfail('renorm', ''),  # NYI: forward AD for renorm
+        xfail('symeig', ''),  # NYI: forward AD for symeig
+        xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
+        xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
+        xfail('scatter_reduce', 'amax'),  # NYI: forward-AD for scatter_reduce
+        xfail('scatter_reduce', 'amin'),  # NYI: forward-AD for scatter_reduce
+        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
+        xfail('scatter_reduce', 'sum'),  # NYI: forward-AD for scatter_reduce
+        xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
+        xfail('scatter_reduce', 'mean'),  # NYI: forward-AD for scatter_reduce
+        xfail('scatter_reduce', 'prod'),  # NYI: forward-AD for scatter_reduce
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
-        xfail('native_layer_norm', ''),
-        xfail('sparse.sampled_addmm', ''),
+        xfail('native_layer_norm', ''),  # NYI: forward-AD for native_layer_norm_backward
+        xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         skip('as_strided_scatter', ''),  # seems flaky
-        xfail('segment_reduce', 'offsets'),
-        xfail('index_reduce', ''),
-        xfail('segment_reduce', 'lengths'),
+        xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
+        xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
+        xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1403,6 +1394,27 @@ class TestOperators(TestCase):
                 compute_grad, (cotangents,), {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
+
+    def test_vmapvmapjvp_linalg_solve(self):
+        ops = [op for op in op_db if op.name == "linalg.solve"]
+        assert len(ops) > 0
+
+        # this specializes a lot of code from the get_fallback_and_vmap_exhaustive test. If we need this more
+        # generally, this could go for a refactor
+
+        B0 = 2
+        B1 = 3
+
+        # we want to check the case where A will be seen as contiguous by jvp but during the vmap calls will become
+        # non-contiguous because vmap will expand. This will happen during both levels of vmap
+        A = torch.randn(4, 4)
+        k = torch.randn(4, 5, B1, B0)
+        fn, args = get_jvp_variant_primals_tangents(torch.linalg.solve, SampleInput(A, args=(k,)))
+
+        in_dims_all = (None, -1, None, -1)
+        batched_out = vmap(vmap(fn, in_dims=in_dims_all), in_dims=in_dims_all)(*args)
+        loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
+        self.assertEqual(loop_out, batched_out)
 
 
 only_for = ("cpu", "cuda")

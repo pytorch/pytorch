@@ -16,7 +16,9 @@
 
 #pragma once
 
+#ifdef __x86_64__
 #include <immintrin.h>
+#endif
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/conversions.h"

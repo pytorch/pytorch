@@ -20,13 +20,13 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       const caffe2::TypeMeta data_type,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
-      std::vector<int64_t> offsets);
+      std::vector<int64_t>&& offsets);
 
   explicit NestedTensorImpl(
       at::Tensor buffer,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
-      std::vector<int64_t> offsets);
+      std::vector<int64_t>&& offsets);
   // assume contiguous, `nested_stride_tensor` and `offsets`
   // can be infered from `nested_size_tensor`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);

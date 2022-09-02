@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     onlyCPU
 )
+from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
 from torch import nested_tensor
 
@@ -91,12 +92,6 @@ class TestNestedTensor(TestCase):
         self._test_unbind_case(
             torch.tensor([1]), torch.tensor([7]),
         )
-
-    # @torch.inference_mode()
-    # def test_unbind_2(self):
-    #     self._test_unbind_case(
-    #         torch.tensor(1), torch.tensor(7),
-    #     )
 
     @torch.inference_mode()
     def test_unbind_3(self):
@@ -235,11 +230,7 @@ class TestNestedTensor(TestCase):
 
         # Test non_contiguous case
         assert not nt_noncontiguous.is_contiguous()
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"clone_nested only supports memory format Preserve, but got Contiguous instead.",
-            lambda: nt_noncontiguous.contiguous()
-        )
+        self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
     @torch.inference_mode()
     def test_repr_string(self):
@@ -301,6 +292,35 @@ class TestNestedTensorDeviceType(TestCase):
             ts2.append(t2)
         return (torch.nested_tensor(ts1, device=device, dtype=dtype),
                 torch.nested_tensor(ts2, device=device, dtype=dtype))
+
+    @dtypes(*floating_types_and_half())
+    def test_detach(self, device, dtype):
+        a = torch.randn(2, 4, device=device, dtype=dtype, requires_grad=False)
+        b = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=False)
+        x = torch.nested_tensor([a, b]).requires_grad_()
+
+        x_detach = x.detach()
+
+        z = x_detach * 4
+        self.assertFalse(x_detach.requires_grad)
+        self.assertFalse(z.requires_grad)
+
+        a = torch.randn(2, 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=True)
+        x = torch.nested_tensor([a, b])
+
+        y = x * 2
+        y = y.detach()
+        self.assertFalse(y.requires_grad)
+        self.assertIsNone(y.grad_fn)
+
+        z = x + y
+        z.to_padded_tensor(0).sum().backward()
+        # This is an incorrect gradient, but we assume that's what the user
+        # wanted. detach() is an advanced option.
+        self.assertEqual(a.grad, torch.ones(2, 4, device=device, dtype=dtype))
+        self.assertEqual(b.grad, torch.ones(5, 4, device=device, dtype=dtype))
+
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_unbind_noncontiguous(self, device, dtype):
@@ -616,17 +636,31 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_sum_dim(self, device, dtype):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
 
-        def test_sum(nt, dim, keepdim=True):
+        def test_sum(device, dtype, ntensors, max_sizes, dim, keepdim=True):
+            nt = self.random_nt(device, dtype, ntensors, max_sizes)
             nt2 = nt.clone()
-            nt = nt.sum(dim=dim, keepdim=keepdim)
             ub2 = nt2.unbind()
-            ub2 = [t.sum(-1, keepdim=keepdim) for t in ub2]
-            nt2 = torch.nested_tensor(ub2)
-            self.assertEqual(nt, nt2)
+            nt.requires_grad_(True)
+            [t.requires_grad_(True) for t in ub2]
+            nt_sum = nt.sum(dim=dim, keepdim=keepdim)
+            ub2_sum = [t.sum(-1, keepdim=keepdim) for t in ub2]
+            self.assertEqual(nt_sum, torch.nested_tensor(ub2_sum))
+
+            # test backward
+            # generate gradient tensor that has the same size as the output
+            size = nt_sum._nested_tensor_size()
+            gt2 = []
+            for i in range(ntensors):
+                gt2.append(torch.randn(size[i].tolist(), device=device, dtype=dtype))
+            gt = torch.nested_tensor(gt2).clone()
+            nt_sum.backward(gt)
+            for t2, g2 in zip(ub2_sum, gt2):
+                t2.backward(g2)
+            self.assertEqual(nt.grad, torch.nested_tensor([t.grad for t in ub2]))
             return
 
         for ntensors, max_sizes in params:
-            test_sum(self.random_nt(device, dtype, ntensors, max_sizes), len(max_sizes))
+            test_sum(device, dtype, ntensors, max_sizes, len(max_sizes))
 
         # Test error inputs
         with self.assertRaisesRegex(RuntimeError, "NestedTensor can only be reduced across the last"):
@@ -641,7 +675,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
-    @torch.inference_mode()
     def test_clone(self, device, dtype):
         nt1 = self.random_nt(device, dtype, 4, (4, 4), (1, 1))
         nt2 = nt1.clone()
@@ -655,13 +688,12 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertNotEqual(ub1[i], ub2[i])
 
         nt1.clone(memory_format=torch.preserve_format)
-        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        msg = "Nested tensor clone supports Preserve and Contiguous memory formats, called clone with memory format: ChannelsLast"
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
-    @torch.inference_mode()
     def test_dropout(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
@@ -709,26 +741,19 @@ class TestNestedTensorDeviceType(TestCase):
         with freeze_rng_state():
             y1 = torch.nn.functional.dropout(nt, p)
         self.assertEqual(y0, y1)
-        # inplace
-        # in principle, since we have established the correctness of functional, we could simply compare inplace vs functional
-        # in practice, cuda functional has its own implementation to skip `bernoulli_`
-        # so cuda functional will differ from cuda inplace causing test failure
-        # in `test_dropout_cuda_float64 (__main__.TestNestedTensorDeviceTypeCUDA)`
-        # on `linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)`
-        expect = nt.clone()
-        torch.nn.functional.dropout(nt, p, inplace=True)
-        for i in range(ntensors):
-            actual_tensor = nt[i].view(-1)
-            expect_tensor = expect[i].view(-1)
-            for j in range(actual_tensor.shape[0]):
-                if actual_tensor[j].item() == 0.0:
-                    expect_tensor[j] = 0.0
-                else:
-                    expect_tensor[j] /= 1.0 - p
-        self.assertEqual(nt, expect)
 
-    # dropout works directly on the underlying buffer memory
-    # so contiguous / noncontiguous does not make any difference
+    @dtypes(torch.float, torch.double)
+    def test_dropout_noncontiguous(self, device, dtype):
+        ntensors = 4
+        nt0 = self.random_nt(device, dtype, ntensors, (4, 4))
+        nt1 = nt0.transpose(-1, -2)
+        p = 0.3
+        with freeze_rng_state():
+            dropouter = torch.nn.Dropout(p)
+            y0 = dropouter(nt0)
+        with freeze_rng_state():
+            y1 = torch.nn.functional.dropout(nt1, p).transpose(-1, -2)
+        self.assertEqual(y0, y1)
 
     # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
@@ -1075,7 +1100,6 @@ class TestNestedTensorDeviceType(TestCase):
         )
 
     @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
     def test_transpose(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
         # error case: transpose nested dimension
@@ -1120,7 +1144,74 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
+    def test_view(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # error case: empty shape
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[\]' is invalid for a nested tensor",
+            lambda: nt.view(())
+        )
+        # error case: empty nested tensor
+        nt_empty = torch.nested_tensor([])
+        self.assertRaisesRegex(
+            RuntimeError,
+            "empty nested tensor cannot be reshaped",
+            lambda: nt_empty.view(-1)
+        )
+        # error case: invalid proposed shape for underlying tensors
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"invalid shape dimension -2",
+            lambda: nt.view(-2, 2, 3)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for input of size [0-9]+",
+            lambda: nt.view(4, 2, 3)
+        )
+        # normal case
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(0.0)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"for now view cannot change the implicit batch dimension",
+            lambda: nt.transpose(-1, -2).view(40, -1)
+        )
+        # inherit only the ragged dimension
+        # (2, 20) -> (2, 5, 4)
+        # (3, 20) -> (3, 5, 4)
+        nt1 = nt.view(2, -1, 5, 4)
+        # (2, 3, 20) -> (2, 3, 5, 4) -> (2, 4, 5, 4)
+        pt1 = pt.view(2, -1, 5, 4)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt1), pt1)
+        # also inherit regular dimension
+        nt2 = nt1.view(2, -1, -1, 2, 2)
+        pt2 = pt1.view(2, -1, 5, 2, 2)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_view_inference_mode_interaction(self, device, dtype):
+        # Construct in default mode and view while in inference mode
+        nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))], device=device, dtype=dtype)
+        with torch.inference_mode():
+            ntT = nt.view(2, -1, 4, 5)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.view(2, -1, 4, 5)
+            self.assertEqual(ptT, ptT_from_ntT)
+        # Construct and view while in inference mode
+        with torch.inference_mode():
+            nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))], device=device, dtype=dtype)
+            ntT = nt.view(2, -1, 4, 5)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.view(2, -1, 4, 5)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_reshape(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
         # error case: empty shape
@@ -1361,6 +1452,13 @@ class TestNestedTensorAutograd(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
+
+    def test_dropout_backward(self):
+        nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))]).requires_grad_(True)
+        p = 0.2
+        y = torch.nn.functional.dropout(nt, p)
+        y.backward(nt.clone())
+        self.assertEqual(nt.grad, y)
 
     def test_nested_tensor_bmm_gradcheck(self):
         a = torch.randn(2, 6, requires_grad=True, dtype=torch.float64)
