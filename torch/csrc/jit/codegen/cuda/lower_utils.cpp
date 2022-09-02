@@ -36,13 +36,42 @@ kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite) {
 
 namespace ir_utils {
 
-TVDomainGuard::TVDomainGuard(TensorView* _tv, TensorDomain* td)
-    : tv_(_tv), prev_domain(tv_->domain()) {
+TVDomainGuard::TVDomainGuard(TensorView* tv, TensorDomain* td)
+    : tv_(tv), prev_domain_(tv_->domain()) {
   tv_->setDomain(td);
 }
 
+TVDomainGuard::TVDomainGuard(TVDomainGuard&& guard)
+    : tv_(nullptr), prev_domain_(guard.prev_domain_) {
+  std::swap(tv_, guard.tv_);
+}
+
 TVDomainGuard::~TVDomainGuard() {
-  tv_->setDomain(prev_domain);
+  if (tv_ != nullptr) {
+    tv_->setDomain(prev_domain_);
+  }
+}
+
+ir_utils::TVDomainGuard overrideContiguityGuard(
+    TensorView* tv,
+    bool contiguity) {
+  // Use domain guard to ignore the contiguity of
+  //  consumer tv.
+  TensorDomain* domain_with_specified_contiguity = nullptr;
+  std::vector<bool> contiguity_vector(
+      tv->getMaybeRFactorDomain().size(), contiguity);
+  if (tv->hasRFactor()) {
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(),
+        tv->getRFactorDomain(),
+        tv->domain()->domain(),
+        contiguity_vector);
+  } else {
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(), tv->domain()->domain(), contiguity_vector);
+  }
+
+  return ir_utils::TVDomainGuard(tv, domain_with_specified_contiguity);
 }
 
 std::vector<IterDomain*> iterDomainInputsOf(

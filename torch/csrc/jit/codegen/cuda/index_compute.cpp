@@ -1937,48 +1937,20 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   return strided_inds;
 }
 
-template <typename func_t>
-auto evaluateWithOverridenContiguity(
-    TensorView* tv,
-    bool contiguity,
-    const func_t& functor) -> decltype(functor()) {
-  // Use domain guard to ignore the contiguity of
-  //  consumer tv.
-  TensorDomain* domain_with_specified_contiguity = nullptr;
-  std::vector<bool> contiguity_vector(
-      tv->getMaybeRFactorDomain().size(), contiguity);
-  if (tv->hasRFactor()) {
-    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
-        tv->getRootDomain(),
-        tv->getRFactorDomain(),
-        tv->domain()->domain(),
-        contiguity_vector);
-  } else {
-    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
-        tv->getRootDomain(), tv->domain()->domain(), contiguity_vector);
-  }
-
-  ir_utils::TVDomainGuard domain_guard(tv, domain_with_specified_contiguity);
-
-  return functor();
-}
-
 std::vector<Val*> Index::getLinearLogicalIndex(
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  return evaluateWithOverridenContiguity(consumer_tv, true, [&]() {
-    return getGlobalConsumerStridedIndices(consumer_tv, loops);
-  });
+  auto guard = ir_utils::overrideContiguityGuard(consumer_tv, true);
+  return getGlobalConsumerStridedIndices(consumer_tv, loops);
 }
 
 std::vector<Val*> Index::getPerDimLogicalIndex(
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  return evaluateWithOverridenContiguity(consumer_tv, false, [&]() {
-    IndexFromIdGraph index_from_id_graph =
-        getTensorIndexFromIdGraph(loops, consumer_tv);
-    return getRootIndices(consumer_tv, loops, index_from_id_graph);
-  });
+  auto guard = ir_utils::overrideContiguityGuard(consumer_tv, false);
+  IndexFromIdGraph index_from_id_graph =
+      getTensorIndexFromIdGraph(loops, consumer_tv);
+  return getRootIndices(consumer_tv, loops, index_from_id_graph);
 }
 
 std::vector<Val*> Index::getStrides(const TensorView* tv) {

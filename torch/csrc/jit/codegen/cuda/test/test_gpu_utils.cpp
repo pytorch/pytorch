@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
@@ -50,6 +51,33 @@ TEST_F(NVFuserTest, FusionMergeDims_CUDA) {
   }
   std::vector<size_t> expect_dims{0, 1, 2, 2, 3, 4, 5, 2, 2, 2, 6};
   TORCH_CHECK(dims == expect_dims);
+}
+
+TEST_F(NVFuserTest, FusionTVDomainGuard_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<bool> all_true = {true, true};
+  std::vector<bool> all_false = {false, false};
+  std::vector<bool> false_true = {false, true};
+  auto tv = TensorViewBuilder().ndims(2).contiguity(false_true).build();
+  TORCH_CHECK(tv->domain()->contiguity() == false_true);
+  {
+    auto guard = ir_utils::overrideContiguityGuard(tv, true);
+    TORCH_CHECK(tv->domain()->contiguity() == all_true);
+  }
+  TORCH_CHECK(tv->domain()->contiguity() == false_true);
+  {
+    auto guard = ir_utils::overrideContiguityGuard(tv, false);
+    TORCH_CHECK(tv->domain()->contiguity() == all_false);
+  }
+  TORCH_CHECK(tv->domain()->contiguity() == false_true);
+  {
+    auto guard1 = ir_utils::overrideContiguityGuard(tv, true);
+    auto guard2 = std::move(guard1);
+    TORCH_CHECK(tv->domain()->contiguity() == all_true);
+  }
+  TORCH_CHECK(tv->domain()->contiguity() == false_true);
 }
 
 } // namespace jit

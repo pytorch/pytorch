@@ -39,23 +39,31 @@ namespace ir_utils {
 // producers with a consumer set of indices, so we need to view the producer
 // transformed like consumer while we index. This will set the tv with td for
 // the life of this context guard.
-class TVDomainGuard {
+class TORCH_CUDA_CU_API TVDomainGuard {
  private:
   TensorView* tv_;
-  TensorDomain* prev_domain;
+  TensorDomain* prev_domain_;
 
  public:
-  explicit TVDomainGuard(TensorView* _tv, TensorDomain* td);
+  explicit TVDomainGuard(TensorView* tv, TensorDomain* td);
+  TVDomainGuard(const TVDomainGuard&) = delete;
+  TVDomainGuard(TVDomainGuard&&);
 
   //! An utility to access the tensordomain before the temporary
   //!  view. This is used to retrieve information, like swizzle
   //!  information that can only be reliably kept at the original domain.
   const TensorDomain* prevDomain() const {
-    return prev_domain;
+    return prev_domain_;
   }
 
   ~TVDomainGuard();
 };
+
+// Create a TVDomainGuard that temporarily view a tensorview with specified
+// all-true or all-false contiguity.
+TORCH_CUDA_CU_API ir_utils::TVDomainGuard overrideContiguityGuard(
+    TensorView* tv,
+    bool contiguity);
 
 //! Return inputs of provided IterDomains that are IterDomains. A list
 //! of input IterDomain can be optionally given. Otherwise,
