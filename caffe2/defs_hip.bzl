@@ -30,7 +30,7 @@ def is_caffe2_gpu_file(filepath):
 
     return False
 
-caffe2_includes = [
+_caffe2_includes = [
     "operators/**/*",
     "operators/*",
     "sgd/*",
@@ -45,13 +45,13 @@ caffe2_includes = [
     "utils/**/*",
 ]
 
-caffe2_video_image_includes = [
+_caffe2_video_image_includes = [
     "image/*",
     "video/*",
 ]
 
 def get_caffe2_hip_srcs(
-        include_patterns = caffe2_includes,
+        include_patterns = _caffe2_includes,
         include_files = [],
         project_dir = "caffe2"):
     gpu_file_pattern = [
@@ -93,7 +93,7 @@ def get_caffe2_hip_srcs(
     return gpu_files, real_hip_files
 
 def get_caffe2_hip_headers(
-        include_patterns = caffe2_includes,
+        include_patterns = _caffe2_includes,
         include_files = [],
         project_dir = "caffe2"):
     header_pattern = [
@@ -125,10 +125,10 @@ def get_caffe2_hip_headers(
     return header_files, real_hip_headers
 
 def get_caffe2_hip_video_image_srcs():
-    return get_caffe2_hip_srcs(include_patterns = caffe2_video_image_includes)
+    return get_caffe2_hip_srcs(include_patterns = _caffe2_video_image_includes)
 
 def get_caffe2_hip_video_image_headers():
-    return get_caffe2_hip_headers(include_patterns = caffe2_video_image_includes)
+    return get_caffe2_hip_headers(include_patterns = _caffe2_video_image_includes)
 
 def get_caffe2_hip_test_files():
     test_includes = [
