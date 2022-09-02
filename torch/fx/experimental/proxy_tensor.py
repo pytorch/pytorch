@@ -50,11 +50,21 @@ def decompose(decomposition_table):
 # ensure we cannot collide with other properties
 proxy_slot = object()
 no_default = object()
+hacky_multi_mapping = dict()
 
-def set_proxy_slot(obj, tracer, proxy):
-    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
-    assert isinstance(d, weakref.WeakKeyDictionary)
-    d[tracer] = proxy
+def set_proxy_slot(obj, tracer, proxy, from_nested=False):
+    print("SET ID IS", id(obj))
+    if from_nested:
+        if id(obj) not in hacky_multi_mapping:
+            hacky_multi_mapping[id(obj)] = weakref.WeakKeyDictionary()
+        
+        hacky_multi_mapping[id(obj)][tracer] = proxy
+    else:
+        d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
+        assert isinstance(d, weakref.WeakKeyDictionary)
+        d[tracer] = proxy
+    # import pdb
+    # pdb.set_trace()
 
 def has_proxy_slot(obj, tracer):
     return get_proxy_slot(obj, tracer, False, lambda _: True)
@@ -65,9 +75,13 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     d = obj.__dict__.get(proxy_slot)
     if not d:
-        if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
-        return default
+        # Check the cursed mapping
+        if id(obj) in hacky_multi_mapping:
+            d = hacky_multi_mapping[id(obj)]
+        else:
+            if default is no_default:
+                raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+            return default
     assert isinstance(d, weakref.WeakKeyDictionary)
     if tracer not in d:
         if default is no_default:
@@ -104,12 +118,13 @@ def set_meta(proxy, val):
     return proxy
 
 
-def track_tensor(tensor, proxy, *, constant, tracer):
+def track_tensor(tensor, proxy, *, constant, tracer, from_nested=False):
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
+    # print("Tensor is", tensor)
     for i, s in enumerate(tensor.shape):
         if isinstance(s, SymInt):
             inner_s = s.get_pyobj()
@@ -119,15 +134,14 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             # use?  Maybe complicated and DCE is a better idea
             s_proxy = torch.ops.aten.sym_size(proxy, i)
             set_meta(s_proxy, inner_s)
-            set_proxy_slot(inner_s, tracer, s_proxy)
-
+            set_proxy_slot(inner_s, tracer, s_proxy, from_nested=from_nested)
         # TODO: also do stride/numel
-    set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
+    set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant), from_nested=from_nested)
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
-    def wrap_with_proxy(e, proxy, constant):
+    def wrap_with_proxy(e, proxy, constant, from_nested=False):
         if isinstance(e, torch.Tensor):
-            track_tensor(e, proxy, tracer=tracer, constant=constant)
+            track_tensor(e, proxy, tracer=tracer, constant=constant, from_nested=from_nested)
             set_meta(proxy, e)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
@@ -143,9 +157,13 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
-    if isinstance(inner_res, tuple) or isinstance(inner_res, list):
+    if isinstance(inner_res, tuple) or isinstance(inner_res, list) or inner_res.is_nested:
+        nested = False
+        if isinstance(inner_res, torch.Tensor):
+            nested = True
+
         for idx, e in enumerate(inner_res):
-            wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
+            wrap_with_proxy(e, proxy_res[idx], get_constant(idx), from_nested=True)
     elif isinstance(inner_res, torch.Tensor):
         wrap_with_proxy(inner_res, proxy_res, constant)
 
@@ -443,6 +461,14 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         out = proxy_call(self, func, args, kwargs)
 
         def assert_proxy_tensor(e):
+            if e.is_nested:
+                # import pdb
+                # pdb.set_trace()
+                for tensor in e:
+                    assert_proxy_tensor(tensor)
+                return
+            print("ASSERT ID IS", id(e))
+            print(f"DICT FOR {id(e)} - {e.__dict__}")
             assert has_proxy_slot(e, self.tracer), \
                 f"Internal Error: make_fx is incorrectly baking a tensor constant into the graph: {str(e)}"
 
