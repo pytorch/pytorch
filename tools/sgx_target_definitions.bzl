@@ -27,51 +27,9 @@ def add_sgx_torch_libs():
     if not is_sgx:
         return
 
-    compiler_flags_cpu = [
-        "-DNO_CUDNN_DESTROY_HANDLE",
-        "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
-        "-DTORCH_ENABLE_LLVM",
-        "-Wno-write-strings",
-        "-Wno-format",
-        "-Wno-strict-aliasing",
-        "-Wno-non-virtual-dtor",
-        "-Wno-shadow-compatible-local",
-        "-Wno-empty-body",
-        "-DUSE_XNNPACK",
-    ]
-
-    propagated_pp_flags_cpu = [
-        "-DSYMBOLICATE_MOBILE_DEBUG_HANDLE",
-        "-DC10_MOBILE",
-    ]
-
-    include_directories = [
-        "..",
-        ".",
-        "torch/csrc/api/include",
-        "torch/csrc",
-        "torch/csrc/nn",
-        "torch/lib",
-    ]
-
-    common_flags = {
-        "compiler_specific_flags": {
-            "clang": [
-                "-Wno-absolute-value",
-                "-Wno-expansion-to-defined",
-                "-Wno-pessimizing-move",
-                "-Wno-return-type-c-linkage",
-                "-Wno-unknown-pragmas",
-            ],
-        },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
-    }
-
-    _libtorch_sgx_sources = list(libtorch_sgx_sources())
-
     cpp_library(
         name = "libtorch-sgx",
-        srcs = _libtorch_sgx_sources + [
+        srcs = libtorch_sgx_sources() + [
             "fb/supported_mobile_models/SupportedMobileModels.cpp",
             "torch/csrc/jit/mobile/function.cpp",
             "torch/csrc/jit/mobile/import.cpp",
@@ -79,8 +37,18 @@ def add_sgx_torch_libs():
             "torch/csrc/jit/mobile/module.cpp",  # this is only needed to load the model from caffe2/test/cpp/lite_interpreter_runtime/delegate_test.ptl
         ],
         link_whole = True,
-        include_directories = include_directories,
-        propagated_pp_flags = propagated_pp_flags_cpu,
+        include_directories = [
+            "..",
+            ".",
+            "torch/csrc/api/include",
+            "torch/csrc",
+            "torch/csrc/nn",
+            "torch/lib",
+        ],
+        propagated_pp_flags = [
+            "-DSYMBOLICATE_MOBILE_DEBUG_HANDLE",
+            "-DC10_MOBILE",
+        ],
         exported_deps = [
             ":generated-autograd-headers",
             ":generated-version-header",
@@ -91,6 +59,26 @@ def add_sgx_torch_libs():
         exported_external_deps = [
             ("protobuf", None),
         ],
-        compiler_flags = compiler_flags_cpu,
-        **common_flags
+        compiler_flags = [
+            "-DNO_CUDNN_DESTROY_HANDLE",
+            "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
+            "-DTORCH_ENABLE_LLVM",
+            "-Wno-write-strings",
+            "-Wno-format",
+            "-Wno-strict-aliasing",
+            "-Wno-non-virtual-dtor",
+            "-Wno-shadow-compatible-local",
+            "-Wno-empty-body",
+            "-DUSE_XNNPACK",
+        ],
+        compiler_specific_flags = {
+            "clang": [
+                "-Wno-absolute-value",
+                "-Wno-expansion-to-defined",
+                "-Wno-pessimizing-move",
+                "-Wno-return-type-c-linkage",
+                "-Wno-unknown-pragmas",
+            ],
+        },
+        headers = native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
     )
