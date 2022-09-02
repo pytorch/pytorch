@@ -223,7 +223,6 @@ class TestPrims(TestCase):
             execute(gm, b, executor="strictly_nvfuser")
 
         # Should pass with partitioned executor
-        gm.graph.print_tabular()
         out = execute(gm, b, executor="nvfuser")
         self.assertEqual(out, gm(b))
 
