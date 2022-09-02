@@ -380,14 +380,15 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    def test_cpu_scalar(self, device):
+    @dtypes(torch.float32, torch.float16)
+    def test_cpu_scalar(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
         def _wrapper(t0, t1, cpu_scalar):
            return t0 + t1 + cpu_scalar
 
-        make_arg = partial(make_tensor, device=device)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
         a = make_arg((12, 1))
         b = make_arg((12, 12))
         c = torch.tensor(0.5)
