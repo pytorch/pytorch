@@ -27,33 +27,6 @@ _BASE_PATHS = (
     "utils/**/*",
 )
 
-_BASE_SGX_PATHS = (
-    "core/*",
-    "core/boxing/*",
-    "core/boxing/impl/*",
-    "core/dispatch/*",
-    "core/op_registration/*",
-    "cuda_rtc/*",
-    "db/*",
-    "experiments/operators/*",
-    "observers/*",
-    "onnx/**/*",
-    "operators/**/*",
-    "observers/*",
-    "predictor/*",
-    "queue/*",
-    "sgd/*",
-    "serialize/*",
-    "share/contrib/zstd/*",
-    "transforms/*",
-    "utils/**/*",
-)
-
-def get_sgx_patterns(ext):
-    if not is_list(ext):
-        ext = [ext]
-    return [path + e for path in _BASE_SGX_PATHS for e in ext]
-
 def get_patterns(ext):
     if not is_list(ext):
         ext = [ext]

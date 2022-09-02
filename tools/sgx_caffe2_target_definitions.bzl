@@ -1,5 +1,4 @@
 load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
-load("//caffe2/caffe2:defs.bzl", "get_sgx_patterns")
 load("//caffe2/tools:perf_kernel_defs.bzl", "define_perf_kernels")
 load("//caffe2/tools:sgx_target_definitions.bzl", "is_sgx")
 
@@ -123,17 +122,17 @@ def add_sgx_caffe_libs():
         "utils/proto_utils.cc",
     ]
 
-    test_file_patterns = get_sgx_patterns([
+    test_file_patterns = _get_patterns([
         "_test.cc",
         "_test.cpp",
     ])
 
-    gpu_file_patterns = get_sgx_patterns([
+    gpu_file_patterns = _get_patterns([
         "_gpu.cc",
         "_cudnn.cc",
     ])
 
-    cpu_file_patterns = get_sgx_patterns([
+    cpu_file_patterns = _get_patterns([
         ".cc",
         ".cpp",
     ])
@@ -253,3 +252,28 @@ def add_sgx_perf_kernel_libs():
         dependencies = dependencies,
         external_deps = external_deps,
     )
+
+def _get_patterns(ext):
+    _PATHS = (
+        "core/*",
+        "core/boxing/*",
+        "core/boxing/impl/*",
+        "core/dispatch/*",
+        "core/op_registration/*",
+        "cuda_rtc/*",
+        "db/*",
+        "experiments/operators/*",
+        "observers/*",
+        "onnx/**/*",
+        "operators/**/*",
+        "observers/*",
+        "predictor/*",
+        "queue/*",
+        "sgd/*",
+        "serialize/*",
+        "share/contrib/zstd/*",
+        "transforms/*",
+        "utils/**/*",
+    )
+
+    return [path + e for path in _PATHS for e in ext]
