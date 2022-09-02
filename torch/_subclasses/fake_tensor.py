@@ -621,6 +621,7 @@ class FakeTensorMode(TorchDispatchMode):
                 aten.as_strided.default,
                 aten.zeros.default,
                 aten.clone.default,
+                aten.detach.default,
             ]
             if func not in functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
