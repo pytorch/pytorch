@@ -5283,7 +5283,7 @@
 - func: _nested_tensor_size(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_get_nested_size_tensor
+    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_size
   autogen: _nested_tensor_size.out
 
 # _nested_from_padded is not usable from Python, so
