@@ -230,11 +230,7 @@ class TestNestedTensor(TestCase):
 
         # Test non_contiguous case
         assert not nt_noncontiguous.is_contiguous()
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"clone_nested only supports memory format Preserve, but got Contiguous instead.",
-            lambda: nt_noncontiguous.contiguous()
-        )
+        self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
     @torch.inference_mode()
     def test_repr_string(self):
@@ -679,7 +675,6 @@ class TestNestedTensorDeviceType(TestCase):
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
-    @torch.inference_mode()
     def test_clone(self, device, dtype):
         nt1 = self.random_nt(device, dtype, 4, (4, 4), (1, 1))
         nt2 = nt1.clone()
@@ -693,7 +688,7 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertNotEqual(ub1[i], ub2[i])
 
         nt1.clone(memory_format=torch.preserve_format)
-        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        msg = "Nested tensor clone supports Preserve and Contiguous memory formats, called clone with memory format: ChannelsLast"
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
@@ -1072,7 +1067,7 @@ class TestNestedTensorDeviceType(TestCase):
             torch.functional.F.linear(nt, weight1, bias)
 
         # inconsistent last dim of nested tensor
-        msg = r"all tensors in NestedTensor must have the same trailing dim"
+        msg = r"Expected all tensors in nested tensor to have the same trailing dimension, instead last dimension equals:"
         nt2 = torch.nested_tensor([torch.randn(1, 2, device=device, dtype=dtype),
                                   torch.randn(2, 3, device=device, dtype=dtype)])
         with self.assertRaisesRegex(RuntimeError, msg):
@@ -1105,7 +1100,6 @@ class TestNestedTensorDeviceType(TestCase):
         )
 
     @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
     def test_transpose(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
         # error case: transpose nested dimension
@@ -1150,7 +1144,74 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
-    @torch.inference_mode()
+    def test_view(self, device, dtype):
+        nt = self.random_nt(device, dtype, 4, (4, 4))
+        # error case: empty shape
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[\]' is invalid for a nested tensor",
+            lambda: nt.view(())
+        )
+        # error case: empty nested tensor
+        nt_empty = torch.nested_tensor([])
+        self.assertRaisesRegex(
+            RuntimeError,
+            "empty nested tensor cannot be reshaped",
+            lambda: nt_empty.view(-1)
+        )
+        # error case: invalid proposed shape for underlying tensors
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"invalid shape dimension -2",
+            lambda: nt.view(-2, 2, 3)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"shape '\[.*\]' is invalid for input of size [0-9]+",
+            lambda: nt.view(4, 2, 3)
+        )
+        # normal case
+        x0 = torch.randn((2, 20), device=device, dtype=dtype)
+        x1 = torch.randn((3, 20), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        pt = nt.to_padded_tensor(0.0)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"for now view cannot change the implicit batch dimension",
+            lambda: nt.transpose(-1, -2).view(40, -1)
+        )
+        # inherit only the ragged dimension
+        # (2, 20) -> (2, 5, 4)
+        # (3, 20) -> (3, 5, 4)
+        nt1 = nt.view(2, -1, 5, 4)
+        # (2, 3, 20) -> (2, 3, 5, 4) -> (2, 4, 5, 4)
+        pt1 = pt.view(2, -1, 5, 4)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt1), pt1)
+        # also inherit regular dimension
+        nt2 = nt1.view(2, -1, -1, 2, 2)
+        pt2 = pt1.view(2, -1, 5, 2, 2)
+        self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_view_inference_mode_interaction(self, device, dtype):
+        # Construct in default mode and view while in inference mode
+        nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))], device=device, dtype=dtype)
+        with torch.inference_mode():
+            ntT = nt.view(2, -1, 4, 5)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.view(2, -1, 4, 5)
+            self.assertEqual(ptT, ptT_from_ntT)
+        # Construct and view while in inference mode
+        with torch.inference_mode():
+            nt = torch.nested_tensor([torch.randn((2, 20)), torch.randn((3, 20))], device=device, dtype=dtype)
+            ntT = nt.view(2, -1, 4, 5)
+            ptT_from_ntT = noncontiguous_to_padded_tensor(ntT)
+            pt = nt.to_padded_tensor(0.0)
+            ptT = pt.view(2, -1, 4, 5)
+            self.assertEqual(ptT, ptT_from_ntT)
+
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_reshape(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
         # error case: empty shape
