@@ -10496,10 +10496,8 @@ op_db: List[OpInfo] = [
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
                    active_if=TEST_CUDNN),
                DecorateInfo(
-                   toleranceOverride({
-                       torch.float16: tol(atol=1e-04, rtol=2e-03),
-                       torch.float32: tol(atol=1e-04, rtol=2e-05), }),
-                   'TestTorchFunctionRedispatchOps', 'test_redispatch', device_type='cuda'),
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05)}),
+                   "TestTorchFunctionRedispatchOps", "test_redispatch", device_type="cuda"),
            ],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -10511,6 +10509,10 @@ op_db: List[OpInfo] = [
                             'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
                             active_if=(not TEST_CUDNN)),
+               DecorateInfo(
+                   unittest.skip("Skipped!"), "TestTorchFunctionRedispatchOps", "test_redispatch",
+                   device_type="cuda", active_if=TEST_CUDNN,
+                   dtypes=(torch.bfloat16, torch.float16)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
