@@ -3,8 +3,11 @@ from typing import List, Union
 import torch
 import warnings
 from torch._prims_common.wrappers import out_wrapper
+import torch._prims as prims
 
 # potentially primitives that can be used to implement indexing
+
+prim_gather = prims.gather
 
 # for each dimension specified apply the respective slice to that dimension
 # if the slice is an integer, this means selecting a single value from that dimension, resulting
@@ -31,33 +34,6 @@ def prim_slice(tensor: torch.Tensor, dims: List[int], slices: List[Union[slice, 
     r = tensor
     for i, a in enumerate(args):
         r = torch.ops.aten.slice.Tensor(r, i, a.start, a.stop, a.step if a.step is not None else 1)
-    return r
-
-
-# for each dimension specified, use the respective index to look up a value in that dimension
-# indices must be tensors of the same shape.
-# each index gathered from will be replaced with a dim of size 1 (to preserve the original)
-# ordering of the dimensions
-# the new shape will be [*indices[0].shape, *(1 if i in dims else tensor.size(i) if for i in range(tensor.dim))]
-# always creates a new tensor, never a view
-def prim_gather(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
-    # print(f"prim_gather {dims} {indices[0].shape}")
-    args = []
-    for i in range(tensor.ndim):
-        if i in dims:
-            idx = indices[dims.index(i)]
-            args.append(idx)
-            args.append(
-                None
-            )  # note: in addition to putting our vistigial 1 in place, this ensures
-            # that multiple dims will get moved to the front
-        else:
-            args.append(slice(None))
-    r = torch._C._TensorBase.__getitem__(tensor, tuple(args))
-    # if there was only 1 dim, we have to force it to the front
-    if len(indices) == 1:
-        for i in range(indices[0].ndim):
-            r = r.movedim(dims[0] + i, i)
     return r
 
 
@@ -212,8 +188,6 @@ def __getitem__(self_, index_):
     offset = 0
     seen_output_dims = 0
     gather_insert_point = None
-    # XXX: no handling of bool mask tensors yet
-    # XXX: no handling of non-tensor sequences yet
     for i, idx in enumerate(index):
         if idx is None:
             permute.append(None)
@@ -253,7 +227,9 @@ def __getitem__(self_, index_):
         self = prim_gather(self, gather_dims, gather_tensors)
         ndim = gather_tensors[0].ndim
         for i in range(len(permute)):
-            permute[i] += ndim
+            # TODO: ezyang: I'm not sure if this is right
+            if permute[i] is not None:
+                permute[i] += ndim
         gather_indices = list(range(ndim))
         permute[gather_insert_point:gather_insert_point] = gather_indices
 

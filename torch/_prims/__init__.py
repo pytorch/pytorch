@@ -2692,4 +2692,46 @@ fft_c2r = _make_prim(
     doc=_fft_c2r_doc,
 )
 
+
+# for each dimension specified, use the respective index to look up a value in that dimension
+# indices must be tensors of the same shape.
+# each index gathered from will be replaced with a dim of size 1 (to preserve the original)
+# ordering of the dimensions
+# the new shape will be [*indices[0].shape, *(1 if i in dims else tensor.size(i) if for i in range(tensor.dim))]
+# always creates a new tensor, never a view
+def _gather_meta(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
+    shape = [*indices[0].shape, *(1 if i in dims else tensor.size(i) for i in range(tensor.dim()))]
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=tensor.dtype, device=tensor.device)
+
+
+def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
+    # print(f"prim_gather {dims} {indices[0].shape}")
+    from builtins import slice
+    args = []
+    for i in range(tensor.ndim):
+        if i in dims:
+            idx = indices[dims.index(i)]
+            args.append(idx)
+            args.append(
+                None
+            )  # note: in addition to putting our vistigial 1 in place, this ensures
+            # that multiple dims will get moved to the front
+        else:
+            args.append(slice(None))
+    r = torch._C._TensorBase.__getitem__(tensor, tuple(args))
+    # if there was only 1 dim, we have to force it to the front
+    if len(indices) == 1:
+        for i in range(indices[0].ndim):
+            r = r.movedim(dims[0] + i, i)
+    return r.contiguous()  # TODO: don't contiguous here
+
+gather = _make_prim(
+    schema="gather(Tensor a, SymInt[] dims, Tensor[] indices) -> Tensor",
+    meta=_gather_meta,
+    impl_aten=_gather_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc="TODO",
+)
+
 register_nvprims()
