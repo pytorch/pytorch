@@ -888,7 +888,7 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias, maximi gze: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, t0=100, maximize=maximize),
                 constructor_accepts_maximize=True
