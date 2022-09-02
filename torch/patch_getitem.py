@@ -27,7 +27,11 @@ def prim_slice(tensor: torch.Tensor, dims: List[int], slices: List[Union[slice, 
                 s, s + 1
             )  # by taking integer at the primitive level, we avoid having to do
             # math on the numbers coming into the primtiive
-    return torch._C._TensorBase.__getitem__(tensor, tuple(args))
+    # return torch._C._TensorBase.__getitem__(tensor, tuple(args))
+    r = tensor
+    for i, a in enumerate(args):
+        r = torch.ops.aten.slice.Tensor(r, i, a.start, a.stop, a.step if a.step is not None else 1)
+    return r
 
 
 # for each dimension specified, use the respective index to look up a value in that dimension
@@ -340,3 +344,17 @@ def matmul(tensor1, tensor2):
 
 torch.matmul = matmul
 torch.Tensor.matmul = matmul
+
+if __name__ == '__main__':
+    t = torch.rand(3, 4, 5)
+    t2 = prim_slice(t, [0, 2], [slice(1, None), 3])
+    assert list(t2.shape) == [2, 4, 1]
+
+    i = torch.arange(4)[:, None].expand(4, 5)
+    j = torch.arange(5)[None, :].expand(4, 5)
+
+    assert list(prim_gather(t, [1], [i]).shape) == [4, 5, 3, 1, 5]
+    assert list(prim_gather(t, [1, 2], [i, j]).shape) == [4, 5, 3, 1, 1]
+
+    t = torch.rand(2, 1, 5, 3)
+    assert list(prim_reorder(t, [0, 3, 2, None]).shape) == [2, 3, 5, 1]
