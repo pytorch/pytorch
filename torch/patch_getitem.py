@@ -2,6 +2,7 @@ from torch.autograd.grad_mode import F
 from typing import List, Union
 import torch
 import warnings
+from torch._prims_common.wrappers import out_wrapper
 
 # potentially primitives that can be used to implement indexing
 
@@ -251,6 +252,7 @@ def __getitem__(self_, index_):
 
 torch.Tensor.__getitem__ = __getitem__
 
+@out_wrapper()
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
