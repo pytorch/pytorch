@@ -397,8 +397,8 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(_wrapper)(a, b, c)
 
-        expected = execute(gm, a.mT, executor="aten")
-        actual = execute(gm, a.mT, executor="nvfuser")
+        expected = execute(gm, a, b, c, executor="aten")
+        actual = execute(gm, a, b, c, executor="nvfuser")
         self.assertEqual(expected, actual)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
