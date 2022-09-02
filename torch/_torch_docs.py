@@ -8098,6 +8098,42 @@ Example::
 )
 
 add_docstr(
+    torch.narrow_copy,
+    r"""
+narrow_copy(input, dim, start, length, *, out=None) -> Tensor
+
+Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
+dimension :attr:`dim` is input from :attr:`start` to ``start + length``. The
+returned tensor allocates new memory.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dim (int): the dimension along which to narrow
+    start (int): the starting dimension
+    length (int): the distance to the ending dimension
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow_copy(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow_copy(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+
+.. seealso::
+
+        :func:`torch.narrow` for a non copy version
+
+""",
+)
+
+add_docstr(
     torch.nan_to_num,
     r"""
 nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
