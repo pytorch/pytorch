@@ -11,7 +11,11 @@ load(
 
 is_sgx = read_bool("fbcode", "sgx_mode", False)
 
-def libtorch_sgx_sources(gencode_pattern = ":generate-code[{}]"):
+def add_sgx_torch_libs():
+    # we do not need to define these targets if we are in not SGX mode
+    if not is_sgx:
+        return
+
     libtorch_core_mobile_sources = sorted(core_sources_common + core_sources_full_mobile + core_trainer_sources)
 
     sgx_sources_to_exclude = [
@@ -20,16 +24,11 @@ def libtorch_sgx_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     ]
 
-    return libtorch_generated_sources(gencode_pattern) + [i for i in libtorch_core_mobile_sources if i not in sgx_sources_to_exclude] + [i for i in libtorch_extra_sources if i not in sgx_sources_to_exclude]
-
-def add_sgx_torch_libs():
-    # we do not need to define these targets if we are in not SGX mode
-    if not is_sgx:
-        return
+    libtorch_sgx_sources = libtorch_generated_sources(":generate-code[{}]") + [i for i in libtorch_core_mobile_sources if i not in sgx_sources_to_exclude] + [i for i in libtorch_extra_sources if i not in sgx_sources_to_exclude]
 
     cpp_library(
         name = "libtorch-sgx",
-        srcs = libtorch_sgx_sources() + [
+        srcs = libtorch_sgx_sources + [
             "fb/supported_mobile_models/SupportedMobileModels.cpp",
             "torch/csrc/jit/mobile/function.cpp",
             "torch/csrc/jit/mobile/import.cpp",
