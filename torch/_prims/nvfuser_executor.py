@@ -30,6 +30,7 @@ class nvFuserTensorTemplate:
     size: tuple
     stride: tuple
     dtype: DataType
+    is_cpu: bool 
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
+                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype), arg.is_cpu
             )
         elif isinstance(arg, Number):
             return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
@@ -103,7 +104,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
+                x = fd.define_tensor(arg.size, arg.stride, arg.dtype, arg.is_cpu)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
