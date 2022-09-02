@@ -39,18 +39,14 @@ enum class C10_API_ENUM ActiveProfilerType {
 };
 
 struct TORCH_API ExperimentalConfig {
-  explicit ExperimentalConfig(
+  ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false)
-      : profiler_metrics(std::move(profiler_metrics)),
-        profiler_measure_per_kernel(profiler_measure_per_kernel) {}
+      bool profiler_measure_per_kernel = false);
   ~ExperimentalConfig() = default;
-  std::vector<std::string> profiler_metrics;
-  bool profiler_measure_per_kernel = false;
+  explicit operator bool() const;
 
-  bool hasOptions() const {
-    return profiler_metrics.size() > 0;
-  }
+  std::vector<std::string> profiler_metrics;
+  bool profiler_measure_per_kernel;
 };
 
 struct TORCH_API ProfilerConfig {
@@ -70,6 +66,10 @@ struct TORCH_API ProfilerConfig {
         with_flops(with_flops),
         with_modules(with_modules) {}
   ~ProfilerConfig() = default;
+
+  bool disabled() const;
+  bool global() const;
+
   ProfilerState state;
   ExperimentalConfig experimental_config;
   bool report_input_shapes;
@@ -88,9 +88,8 @@ struct TORCH_API ProfilerConfig {
 
 struct TORCH_API ProfilerThreadLocalStateBase
     : public c10::MemoryReportingInfoBase {
-  explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config)
-      : c10::MemoryReportingInfoBase(), config_(config) {}
-  ~ProfilerThreadLocalStateBase() override = default;
+  explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config);
+  ~ProfilerThreadLocalStateBase() override;
 
   static ProfilerThreadLocalStateBase* getTLS() {
     return static_cast<ProfilerThreadLocalStateBase*>(
@@ -101,17 +100,8 @@ struct TORCH_API ProfilerThreadLocalStateBase
     return config_;
   }
 
-  void setCallbackHandle(at::CallbackHandle handle) {
-    handle_ = handle;
-  }
-
-  at::CallbackHandle callbackHandle() const {
-    return handle_;
-  }
-
-  bool hasCallbackHandle() {
-    return handle_ > 0;
-  }
+  void setCallbackHandle(at::CallbackHandle handle);
+  void removeCallback();
 
   bool memoryProfilingEnabled() const override {
     return config_.profile_memory;
