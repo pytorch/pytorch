@@ -16271,6 +16271,11 @@ python_ref_db = [
         torch_opinfo_name="logit",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.special.softmax",
+        torch_opinfo_name="softmax",  # alias
+        supports_out=False,
+    ),
     #
     # Elementwise Unary nn.functional OpInfos
     #
