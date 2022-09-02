@@ -86,7 +86,9 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
             symbolics_schema.arguments = _symbolic_argument_count(
                 func_group.get(_constants.onnx_main_opset)
             )
-            symbolics_schema.opsets = list(range(func_group.get_min_supported(), +1))
+            symbolics_schema.opsets = list(
+                range(func_group.get_min_supported(), _constants.onnx_main_opset + 1)
+            )
         else:
             # Only support opset < 9
             func = func_group.get(7)
@@ -109,5 +111,12 @@ def onnx_supported_ops():
             opsets = symbolic_schemas[opname].opsets
             if schema not in supported_ops:
                 supported_ops.append(symbolic_schemas[opname])
-                onnx_supported.append((opname, " ".join(str(o) for o in opsets)))
+                onnx_supported.append(
+                    (
+                        opname,
+                        f"{opsets[0]}-{opsets[-1]}"
+                        if len(opsets) > 1
+                        else f"{opsets[0]}",
+                    )
+                )
     return sorted(onnx_supported, key=lambda x: x[0])
