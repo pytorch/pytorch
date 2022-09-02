@@ -149,13 +149,13 @@ class TestMkldnnFusion(JitTestCase):
                         iC = 3 * groups
                         oC = 10 * groups
                         m = M(iC,
-                            oC,
-                            bias,
-                            kernel_size=(kernel_size, kernel_size),
-                            stride=2,
-                            padding=1,
-                            dilation=dilation,
-                            groups=groups).to(memory_format=memory_format)
+                              oC,
+                              bias,
+                              kernel_size=(kernel_size, kernel_size),
+                              stride=2,
+                              padding=1,
+                              dilation=dilation,
+                              groups=groups).to(memory_format=memory_format)
                         x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
                         graph = self._check_model(m, x, trace, bf16)
                         conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
@@ -277,7 +277,7 @@ class TestMkldnnFusion(JitTestCase):
         iC = 2
         oC = 3
         for trace in [True, False]:
-            for bf16, enabled in[
+            for bf16, enabled in [
                 [True, True],
                 [False, False],
             ]:
@@ -313,7 +313,7 @@ class TestMkldnnFusion(JitTestCase):
             for bf16, enabled in [
                 [True, True],
                 [False, False],
-            ]:  
+            ]:
                 for eltwise_fn, op_name in self._eltwise_list():
                     for bias in [True, False]:
                         for x_shape in [
@@ -339,7 +339,7 @@ class TestMkldnnFusion(JitTestCase):
         oC = 3
         for trace in [True, False]:
             for M in modules:
-                for bf16, enabled in[
+                for bf16, enabled in [
                     [True, True],
                     [False, False],
                 ]:
