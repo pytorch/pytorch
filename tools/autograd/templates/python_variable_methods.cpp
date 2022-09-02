@@ -147,13 +147,21 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    return wrap(self_.stride(r.toInt64(0)));
+    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntArrayRef strides = self_.strides();
+    at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
-    return THPUtils_packInt64Array(strides.size(), strides.data());
+    // TODO: consider factoring this out
+    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    if (!tuple) throw python_error();
+    for (size_t i = 0; i != strides.size(); i++) {
+      PyObject* s = torch::toPyObject(strides[i]);
+      if (!s) throw python_error();
+      PyTuple_SET_ITEM(tuple.get(), i, s);
+    }
+    return tuple.release();
   }
   else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
@@ -912,6 +920,10 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
+  TORCH_CHECK(
+      !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map_ is not supported for tensor subclasses.");
+
   return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -937,6 +949,9 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }
+  TORCH_CHECK(
+      !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map2_ is not supported for tensor subclasses.");
   return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
   END_HANDLE_TH_ERRORS
 }
