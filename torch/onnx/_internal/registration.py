@@ -5,10 +5,9 @@ import importlib
 import inspect
 import itertools
 import warnings
-from typing import Callable, Collection, Dict, Optional, Sequence, Set
+from typing import Callable, Collection, Dict, Optional, Set
 
 from torch.onnx import _constants
-from torch.onnx._internal import _beartype
 
 OpsetVersion = int
 _BASE_OPSET_VERSION = 9
@@ -46,8 +45,12 @@ def _dispatch_opset_version(
         if target < version <= _BASE_OPSET_VERSION:
             return version
 
-    # The lowest supported opset is higher than the target opset.
-    assert not available_versions or available_versions[0] > target
+    print(available_versions, target)
+    assert (
+        not available_versions
+        or _BASE_OPSET_VERSION <= target < available_versions[0]
+        or available_versions[-1] < _BASE_OPSET_VERSION < target
+    )
     return None
 
 
