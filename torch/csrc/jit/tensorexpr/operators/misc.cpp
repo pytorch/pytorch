@@ -351,6 +351,81 @@ Tensor computeChunk(
       });
 }
 
+StmtPtr computeIndirectIndexing(
+    const BufHandle& idxingTarget,
+    const BufHandle& indices,
+    size_t dimOfIndirectIdxing,
+    const std::vector<ExprHandle>& outputShape,
+    const std::function<StmtPtr(const ExprPtr&, const std::vector<ExprPtr>&)>&
+        innerStmtFunc) {
+  auto outputRank = outputShape.size();
+  auto indicesRank = indices.node()->dims().size();
+  auto idxingTargetRank = idxingTarget.node()->dims().size();
+  auto dtypeIndirectIdxing =
+      idxingTarget.node()->dims().at(dimOfIndirectIdxing)->dtype();
+
+  // Generate loop-nest indices
+  std::vector<VarPtr> loopVars(outputRank);
+  std::vector<ExprPtr> loopIndices(outputRank);
+  for (size_t i = 0; i < outputRank; ++i) {
+    loopVars[i] = alloc<Var>("i_" + c10::to_string(i), outputShape[i].dtype());
+    loopIndices[i] = loopVars[i];
+  }
+
+  // Generate indirect-indexing load expr: indices[...]
+  std::vector<ExprPtr> indirectIdxLoadIndices(indicesRank);
+  for (size_t i = 0; i < indicesRank; ++i) {
+    indirectIdxLoadIndices[i] = loopIndices[i];
+  }
+  auto loadIndirectIdx = alloc<Load>(indices.node(), indirectIdxLoadIndices);
+
+  // Generate indirect-indexing var: x
+  auto indirectIdxVar = alloc<Var>("ind_idx", dtypeIndirectIdxing);
+
+  // Generate target load with indirect-indexing: idxingTarget[..., x, ...]
+  std::vector<ExprPtr> idxingTargetIndices;
+  for (size_t i = 0, idxLoopIndices = indicesRank; i < idxingTargetRank; ++i) {
+    idxingTargetIndices.push_back(
+        (i == dimOfIndirectIdxing) ? indirectIdxVar
+                                   : loopIndices[idxLoopIndices++]);
+  }
+  auto loadIdxingTarget = alloc<Load>(idxingTarget.node(), idxingTargetIndices);
+
+  // Generate stmt for the inner-most loop body
+  StmtPtr innerStmt = innerStmtFunc(loadIdxingTarget, loopIndices);
+
+  // Generate stmt for the idxingTarget scoped loops
+  for (size_t i = outputRank; i > indicesRank; --i) {
+    innerStmt = alloc<For>(
+        loopVars[i - 1],
+        immLike(outputShape[i - 1], 0),
+        outputShape[i - 1].node(),
+        innerStmt);
+  }
+
+  // Generate stmt for the indirect-indexing: x = indices[...]
+  StmtPtr loadIndirectIdxStmt = Let::make(
+      VarHandle(indirectIdxVar),
+      promoteToDtype(
+          ExprHandle(loadIndirectIdx), dtypeIndirectIdxing.scalar_type()));
+
+  // Merge the stmts of the idxing target scoped loops and the indirect-indexing
+  auto block = alloc<tensorexpr::Block>(
+      std::vector<StmtPtr>({loadIndirectIdxStmt, innerStmt}));
+
+  // Generate stmt for the indice scoped loops
+  StmtPtr outerStmt = IRSimplifier::simplify(block);
+  for (size_t i = indicesRank; i > 0; --i) {
+    outerStmt = alloc<For>(
+        loopVars[i - 1],
+        immLike(outputShape[i - 1], 0),
+        outputShape[i - 1].node(),
+        outerStmt);
+  }
+
+  return outerStmt;
+}
+
 Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -658,6 +733,38 @@ Tensor computeEmbedding(
     const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
+  const BufHandle& idxingTarget = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = c10::get<BufHandle>(inputs[1]);
+  Dtype outputDtype = outputType.has_value() ? Dtype(*outputType) : kFloat;
+  BufHandle outputBuf("embedding", outputShape, outputStrides, outputDtype);
+
+  // Set the indirect-indexing param
+  size_t dimOfIndirectIdxing = 0;
+
+  StmtPtr st = computeIndirectIndexing(
+      idxingTarget,
+      indices,
+      dimOfIndirectIdxing,
+      outputShape,
+      [&](const ExprPtr& loadIdxingTarget,
+          const std::vector<ExprPtr>& loopIndices) {
+        return alloc<Store>(
+            outputBuf.node(),
+            loopIndices,
+            promoteToDtype(
+                ExprHandle(loadIdxingTarget), outputDtype.scalar_type())
+                .node());
+      });
+
+  return Tensor(outputBuf.node(), st);
+}
+
+Tensor computeEmbeddingExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -670,6 +777,36 @@ Tensor computeEmbedding(
   StmtPtr s =
       ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
   return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeIndexSelect(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  const BufHandle& idxingTarget = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = c10::get<BufHandle>(inputs[2]);
+  size_t dimOfIndirectIdxing = static_cast<size_t>(c10::get<int64_t>(inputs[1]));
+  Dtype outputDtype = outputType.has_value() ? Dtype(*outputType) : kFloat;
+  BufHandle outputBuf("index_select", outputShape, outputStrides, outputDtype);
+
+  StmtPtr st = computeIndirectIndexing(
+      idxingTarget,
+      indices,
+      dimOfIndirectIdxing,
+      outputShape,
+      [&](const ExprPtr& loadIdxingTarget,
+          const std::vector<ExprPtr>& loopIndices) {
+        return alloc<Store>(
+            outputBuf.node(),
+            loopIndices,
+            promoteToDtype(
+                ExprHandle(loadIdxingTarget), outputDtype.scalar_type())
+                .node());
+      });
+
+  return Tensor(outputBuf.node(), st);
 }
 
 } // namespace tensorexpr

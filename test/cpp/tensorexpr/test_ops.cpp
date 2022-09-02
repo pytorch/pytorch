@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -75,4 +76,44 @@ TEST(Ops, ChannelsLastSum) {
 
     ASSERT_TRUE(at::allclose(bt, ref));
   }
+}
+
+TEST(Ops, Embedding) {
+  const auto graph_string = R"IR(
+    graph(%embedding_weight : Float(10000, 300, strides=[300, 1], device=cpu),
+          %indices : Long(2, 4, strides=[4, 1], device=cpu)):
+      %padding_idx : int = prim::Constant[value=-1]()
+      %1 : int = prim::Constant[value=1]()
+      %2 : bool = prim::Constant[value=0]()
+      %3 : Float(2, 4, 300, strides=[1200, 300, 1], requires_grad=0, device=cpu) = aten::embedding(%embedding_weight, %indices, %padding_idx, %2, %2)
+      %4 : Float(2, 4, 300, strides=[1200, 300, 1], requires_grad=0, device=cpu) = aten::add(%3, %3, %1)
+      %5 : Float(2, 4, 300, strides=[1200, 300, 1], requires_grad=0, device=cpu) = aten::mul(%4, %4)
+      return (%5))IR";
+
+  auto graph = std::make_shared<torch::jit::Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto indices =
+      at::randint(10, {2, 4}, at::TensorOptions(c10::kCPU).dtype(at::kLong));
+  auto embedding_weight =
+      at::rand({10000, 300}, at::TensorOptions(c10::kCPU).dtype(at::kFloat));
+  auto y_1 = at::embedding(embedding_weight, indices);
+  auto y_2 = at::add(y_1, y_1, 1);
+  auto y_expected = at::mul(y_2, y_2);
+
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {embedding_weight, indices};
+
+  std::vector<c10::IValue> stack = at::fmap<c10::IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "indices:\n" << indices << std::endl;
+    std::cout << "embedding_weight:\n" << embedding_weight << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  TORCH_CHECK_EQ(check, 1);
 }
