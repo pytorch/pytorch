@@ -5,9 +5,10 @@ import importlib
 import inspect
 import itertools
 import warnings
-from typing import Callable, Collection, Dict, Generic, Optional, Set, TypeVar
+from typing import Callable, Collection, Dict, Generic, Optional, Sequence, Set, TypeVar
 
 from torch.onnx import _constants, errors
+from torch.onnx._internal import _beartype
 
 OpsetVersion = int
 
@@ -38,7 +39,7 @@ def _dispatch_opset_version(
 
     for version in available_versions:
         # Count back up until _constants.ONNX_BASE_OPSET
-        if target < version <= _constants.ONNX_BASE_OPSET:
+        if target <= version <= _constants.ONNX_BASE_OPSET:
             return version
 
     assert (
@@ -158,8 +159,8 @@ class _SymbolicFunctionGroup:
         """
         if self._functions.in_base(opset):
             warnings.warn(
-                f"Symbolic function '{self._name}' already registered for opset {opset}."
-                f"Replacing the existing function with new function. This is unexpected."
+                f"Symbolic function '{self._name}' already registered for opset {opset}. "
+                f"Replacing the existing function with new function. This is unexpected. "
                 f"Please report it on {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
                 errors.OnnxExporterWarning,
             )

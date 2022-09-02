@@ -5,8 +5,6 @@ from torch import _C
 from torch.onnx import _constants
 from torch.onnx._internal import registration
 
-registration.discover_and_register_all_symbolic_opsets()
-
 
 class _TorchSchema:
     def __init__(self, schema: Union[_C.FunctionSchema, str]) -> None:
@@ -83,10 +81,17 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
         func_group = registration.registry.get_function_group(name)
         assert func_group is not None
         symbolics_schema = _TorchSchema(name)
-        symbolics_schema.arguments = _symbolic_argument_count(
-            func_group.get(_constants.onnx_main_opset)
-        )
-        symbolics_schema.opsets = list(range(func_group.get_min_supported(), +1))
+        func = func_group.get(_constants.onnx_main_opset)
+        if func is not None:
+            symbolics_schema.arguments = _symbolic_argument_count(
+                func_group.get(_constants.onnx_main_opset)
+            )
+            symbolics_schema.opsets = list(range(func_group.get_min_supported(), +1))
+        else:
+            # Only support opset < 9
+            func = func_group.get(7)
+            symbolics_schema.opsets = list(range(7, _constants.ONNX_BASE_OPSET))
+
         symbolics_schemas[name] = symbolics_schema
 
     return symbolics_schemas
