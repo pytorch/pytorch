@@ -162,12 +162,12 @@ struct all_same : guts::conjunction<
 > {};
 
 template <typename T, typename acc_t, bool is_welford>
-struct inner_reduce {
+struct welford_inner_reduce {
   static inline void call(T * data, int64_t size, acc_t & acc) {}
 };
 
 template <typename T, typename acc_t>
-struct inner_reduce<T, acc_t, true> {
+struct welford_inner_reduce<T, acc_t, true> {
   static inline void call(T * data, int64_t size, acc_t & acc) {
     double new_mean = 0, new_m2 = 0;
     std::tie(new_mean, new_m2) = RowwiseMoments(data, size);
@@ -243,9 +243,9 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         // whether use RowwiseMoments for welford.
         constexpr bool use_welford = std::is_same<data_t, at::BFloat16>::value &&
           std::is_same<acc_t, at::native::WelfordData<double, int64_t, double>>::value;
-        // if dim 0 is contiguous
+        // if use RowwiseMoments & dim 0 is contiguous
         if (use_welford && stride == sizeof(data_t)) {
-          inner_reduce<data_t, acc_t, use_welford>::call((data_t *)in, size, acc);
+          welford_inner_reduce<data_t, acc_t, use_welford>::call((data_t *)in, size, acc);
         } else {
           for (const auto i : c10::irange(size)) {
             acc = ops.reduce(acc, c10::load<data_t>(in), begin + i);
