@@ -42,7 +42,10 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype), arg.device.type == "cpu"
+                arg.size(),
+                arg.stride(),
+                getnvFuserDtype(arg.dtype),
+                arg.device.type == "cpu",
             )
         elif isinstance(arg, Number):
             return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
