@@ -388,6 +388,8 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
+    assert not isinstance(number, torch.SymIntNode), "NYI"
+    assert not isinstance(number, torch.SymFloatNode), "NYI"
     return TensorMeta(number)
 
 
