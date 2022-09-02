@@ -1396,10 +1396,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="cpu"
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",

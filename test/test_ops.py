@@ -674,6 +674,16 @@ class TestCommon(TestCase):
                 # assumes (see above) that out is an iterable of tensors
                 return tuple(map(fn, out))
 
+            # A wrapper around map that works with single tensors and always
+            #   instantiates the map. Used below to create an empty tensor or list
+            #   and iterable tensor outputs.
+            def _apply_empty_like(out):
+                if isinstance(out, torch.Tensor):
+                    return torch.empty_like(out)
+
+                # assumes (see above) that out is an iterable of tensors
+                return tuple(map(torch.empty_like, out))
+
             # Extracts strides from a tensor or iterable of tensors into a tuple
             def _extract_strides(out):
                 if isinstance(out, torch.Tensor):
@@ -696,7 +706,7 @@ class TestCommon(TestCase):
                 return tuple(map(lambda t: t.data_ptr(), out))
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
-                out = _apply_out_transform(transform, expected)
+                out = _apply_empty_like(expected)
                 original_strides = _extract_strides(out)
                 original_ptrs = _extract_data_ptrs(out)
 
