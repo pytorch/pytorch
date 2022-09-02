@@ -384,6 +384,7 @@ class TestPrims(TestCase):
     def test_cpu_scalar(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
 
         def _wrapper(t0, t1, cpu_scalar):
            return t0 + t1 + cpu_scalar
