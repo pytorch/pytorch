@@ -268,7 +268,7 @@ void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   //    add
   // Y = conv_output + alpha*Y
   auto conv_add_v1 = R"(
-    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[], 
+    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[],
           %attr_placeholder:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?):
         %packed_weight = mkldnn_prepacked::conv2d_prepack(%weight, %bias, %stride, %padding, %dilation, %groups, %input_size, %attr_placeholder, %scalars_placeholder, %algorithm_placeholder)
         %x = mkldnn_prepacked::conv2d_run(%input, %packed_weight)
@@ -280,7 +280,7 @@ void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   //    add
   // Y = Y + alpha*conv_output, alpha should be one.
   auto conv_add_v2 = R"(
-    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[], 
+    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[],
           %attr_placeholder:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?):
         %packed_weight = mkldnn_prepacked::conv2d_prepack(%weight, %bias, %stride, %padding, %dilation, %groups, %input_size, %attr_placeholder, %scalars_placeholder, %algorithm_placeholder)
         %x = mkldnn_prepacked::conv2d_run(%input, %packed_weight)
@@ -288,7 +288,7 @@ void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         return (%res))";
 
   auto conv_add_fused = R"(
-    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[], 
+    graph(%input, %weight, %bias, %accumu, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[],
           %attr_placeholder:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?):
         %attr: str = prim::Constant[value="sum"]()
         %scalars: Scalar?[] = prim::ListConstruct(%alpha)
@@ -297,7 +297,7 @@ void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         return (%res))";
 
   auto conv_add_relu = R"(
-    graph(%input, %weight, %bias, %accumu, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[], 
+    graph(%input, %weight, %bias, %accumu, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[],
           %attr:str, %scalars: Scalar?[], %algorithm_placeholder: str?):
         %packed_weight = mkldnn_prepacked::conv2d_prepack(%weight, %bias, %stride, %padding, %dilation, %groups, %input_size, %attr, %scalars, %algorithm_placeholder)
         %x = mkldnn_prepacked::conv2d_sum_run(%input, %accumu, %packed_weight)
@@ -305,7 +305,7 @@ void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         return (%res))";
 
   auto conv_add_relu_fused = R"(
-    graph(%input, %weight, %bias, %accumu, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[], 
+    graph(%input, %weight, %bias, %accumu, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %input_size:int[],
           %attr:str, %scalars: Scalar?[], %algorithm_placeholder: str?):
         %attr_new: str = prim::Constant[value="sum_relu"]()
         %packed_weight = mkldnn_prepacked::conv2d_prepack(%weight, %bias, %stride, %padding, %dilation, %groups, %input_size, %attr_new, %scalars, %algorithm_placeholder)
