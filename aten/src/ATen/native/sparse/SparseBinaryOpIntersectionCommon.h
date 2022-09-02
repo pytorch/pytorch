@@ -91,8 +91,40 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  const Tensor x = is_commutative ? x_ : x_.coalesce();
-  const Tensor y = is_commutative ? y_ : y_.coalesce();
+  // IMPORTANT NOTE
+  // The algorithm below is implemented to be efficient
+  // and not reliant on whether inputs are coalesced since
+  // `coalesce` is a fairly expensive operation.
+  // However, this efficiencly might bite the user in certain
+  // pathological cases resulting in out of memory issues.
+  // Example: consider x a 1D sparse tensor with
+  // x.indices = zeros(nnz),
+  // then (x * x).indices == zeros(nnz * nnz)
+  // (here each index intersects with all the indices).
+  // In general, if x and y are sparse tensors such that
+  // set((x * y).indices) == set(x.indices) or set(y.indices),
+  // and there is at least one non-unique index in either x or y,
+  // we have (x * y).nnz >= min(x.nnz, y.nnz), contrary to
+  // |A intersect B| = min(|A|, |B|) for some sets A and B
+  // if |A intersect B| = |A| or |B|.
+  // This behavior is new to the user, and we are not yet sure
+  // 1. How to communicate this information to the user.
+  // 2. Whether this behavior might cause issues on the user's end,
+  //    i.e. we do not know how likely it is for the "blow-up" to occur.
+  // Previous behavior of (x * y) made sure that the input's data is
+  // coalesced. This is not optimal performance-wise, but it sure
+  // prevents potential OOM issues.
+  // Until the points 1-2 are figured out, we follow the same solution,
+  // i.e. we coalesce albeit at a performance cost.
+  // NOTE: you understand the consequences and want better performance
+  // with uncoalesced inputs? Then comment the next 2 lines and uncomment
+  // the lines defining x and y.
+  const Tensor x = x_.coalesce();
+  const Tensor y = y_.coalesce();
+  // Read IMPORTANT NOTE from above BEFORE UNCOMMENTING anything!
+  // Uncomment next 2 lines for better performance with uncoalesced inputs
+  // const Tensor x = is_commutative ? x_ : x_.coalesce();
+  // const Tensor y = is_commutative ? y_ : y_.coalesce();
 
   Tensor probably_coalesced, source;
   std::tie(probably_coalesced, source) = [&]() -> std::tuple<Tensor, Tensor> {
