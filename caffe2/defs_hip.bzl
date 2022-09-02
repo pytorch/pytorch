@@ -1,10 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load(
-    "//caffe2:defs_hip.bzl",
-    "caffe2_includes",
-    "caffe2_video_image_includes",
-    "get_hip_file_path",
-)
+load("//caffe2:defs_hip.bzl", "get_hip_file_path")
 
 gpu_file_extensions = [".cu", ".c", ".cc", ".cpp"]
 gpu_header_extensions = [".cuh", ".h", ".hpp"]
@@ -34,6 +29,26 @@ def is_caffe2_gpu_file(filepath):
         return True
 
     return False
+
+caffe2_includes = [
+    "operators/**/*",
+    "operators/*",
+    "sgd/*",
+    "transforms/*",
+    # distributed folder is managed by its own TARGETS file
+    # "distributed/*",
+    "queue/*",
+    # "binaries/*",
+    "**/*_test*",
+    "core/*",
+    "db/*",
+    "utils/**/*",
+]
+
+caffe2_video_image_includes = [
+    "image/*",
+    "video/*",
+]
 
 def get_caffe2_hip_srcs(
         include_patterns = caffe2_includes,

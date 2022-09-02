@@ -1,26 +1,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@fbcode//tools/build/buck:rocm_flags.bzl", "get_rocm_arch_args")
 
-caffe2_includes = [
-    "operators/**/*",
-    "operators/*",
-    "sgd/*",
-    "transforms/*",
-    # distributed folder is managed by its own TARGETS file
-    # "distributed/*",
-    "queue/*",
-    # "binaries/*",
-    "**/*_test*",
-    "core/*",
-    "db/*",
-    "utils/**/*",
-]
-
-caffe2_video_image_includes = [
-    "image/*",
-    "video/*",
-]
-
 hip_external_deps = [
     ("rocm", None, "amdhip64-lazy"),
     ("rocm", None, "MIOpen-lazy"),
