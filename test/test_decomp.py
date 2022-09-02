@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
@@ -354,6 +355,7 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
             None,
@@ -392,8 +394,7 @@ class TestDecomp(TestCase):
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
-                    torch.ops.aten.new_empty.default,
-                    torch.ops.aten.new_empty.SymInt
+                    torch.ops.aten.new_empty.default
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
