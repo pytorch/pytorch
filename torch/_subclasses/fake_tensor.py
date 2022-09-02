@@ -13,7 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -404,7 +404,7 @@ class FakeTensor(torch.Tensor):
     def __repr__(self):
         with in_kernel_invocation_manager(self.fake_mode):
             self_repr = super().__repr__()
-        return f"FakeTensor({self.fake_mode}, {self_repr}, {self.fake_device})"
+        return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
         # torch.Tensor.new does not go through the normal dispatcher pattern
@@ -466,7 +466,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with enable_torch_dispatch_mode(fake_mode):
+        with fake_mode if not fake_mode else fake_mode.restore():
             return func(*args, **kwargs)
 
     @staticmethod
@@ -602,14 +602,14 @@ class FakeTensorMode(TorchDispatchMode):
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
-
-        if "prims::" in func._schema.name and len(flat_arg_tensors) != 0:
-            try:
-                torch._C._add_meta_to_tls_dispatch_include()
-                with no_dispatch():
-                    return func(*args, **kwargs)
-            finally:
-                torch._C._remove_meta_from_tls_dispatch_include()
+        # TODO - we should be use the prim aten impl
+        if (
+            "prims::" in func._schema.name
+            and len(flat_arg_tensors) != 0
+            and hasattr(func, "prim_meta_impl")
+        ):
+            with self.restore():
+                return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
             constructors = [aten.empty.memory_format]

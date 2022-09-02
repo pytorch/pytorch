@@ -1772,9 +1772,8 @@ def _wrap_torch_function(f):
         if isinstance(f, classmethod):
             raise RuntimeError("TorchFunctionMode's torch_function function " +
                                "should be a normal method not a class method")
-        inner = getattr(self, "inner", None)
 
-        with enable_torch_function_mode(inner):
+        with self._enable_inner_torch_function_mode():
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -1850,6 +1849,15 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
+    @contextlib.contextmanager
+    def _enable_inner_torch_function_mode(self) -> Iterator[None]:
+        """
+        Helper function for pushing during the wrapped torch function. Only staying around
+        until we do the mode stack update
+        """
+        inner = getattr(self, "inner", None)
+        return _enable_mode(inner, _TorchFunctionModeInfo())
+
     def __enter__(self):
         old = _get_torch_function_mode()
         if hasattr(self, "inner"):
@@ -1905,39 +1913,6 @@ class _TorchFunctionModeInfo(_ModeInfo):
 
     def set_mode(self, mode):
         return _set_torch_function_mode(mode)
-
-
-@contextlib.contextmanager
-def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
-    """
-    Context manager that sets the current :class:`TorchFunctionMode`; see the
-    class for more information on what modes are.  This function is
-    non-compositional; if there is already an existing mode, it will raise an
-    error; prefer using ``with MyMode():`` if your ``__torch_function__``
-    implementation can defer to an inner mode.
-
-    This function is safe to use inside a ``__torch_function__`` mode handler,
-    as the mode is guaranteed to be disabled in this context.  You can use
-    this context manager to reinstate the mode so that calls to overridable
-    APIs recursively call back into your mode handler (this can easily cause
-    infinite loops, so use with care!)
-
-    Args:
-        mode (:class:`TorchFunctionMode`, Tensor-like class or None): the
-            mode to set as current mode.  If you pass a Tensor-like class,
-            it will be treated as a non-compositional mode with no state,
-            which is convenient if you have an existing tensor subclass
-            that you'd like to apply globally in a quick and dirty way.
-            Passing None will disable the current mode.
-        replace (:class:`TorchFunctionMode` or Tensor-like class): the
-            mode to replace.  You can use this argument to change the mode in
-            a situation where you know what the current mode is (and you are
-            intentionally overwriting it.)  If you don't know what the current
-            mode is, use ``ignore_preexisting`` instead.
-        ignore_preexisting (bool): if True, ignore any preexisting mode
-            and overwrite it with the passed mode.
-    """
-    return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
 class enable_reentrant_dispatch():
     def __enter__(self):
