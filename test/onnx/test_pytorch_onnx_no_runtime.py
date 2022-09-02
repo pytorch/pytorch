@@ -507,13 +507,11 @@ class TestONNXExport(common_utils.TestCase):
             def forward(self, x):
                 return torch.clamp(x, min=-0.5, max=0.5)
 
-        def break_is_registered_op_api(name, version):
+        def break_is_registered_op_api(name):
             fake_missing_symbolics = {"aten::clamp"}
             if name in fake_missing_symbolics:
-                return False
-            return registration.registry.is_registered_op(
-                name, version
-            )
+                return None
+            return registration.registry.get_function_group(name)
 
         # Force missing symbolic for well-known op using a mock
         onnx_model = export_to_onnx(
@@ -521,7 +519,7 @@ class TestONNXExport(common_utils.TestCase):
             torch.randn(3, 4, requires_grad=True),
             mocks=[
                 unittest.mock.patch(
-                    "torch.onnx._internal.registration.registry.is_registered_op",
+                    "torch.onnx._internal.registration.registry.get_function_group",
                     side_effect=break_is_registered_op_api,
                 )
             ],
