@@ -9,6 +9,7 @@ from torch._C._onnx import (
     TensorProtoDataType,
     TrainingMode,
 )
+from torch.onnx._internal import registration as _registration
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
@@ -132,3 +133,15 @@ def log(*args) -> None:
             character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
+
+
+import pyinstrument
+
+profiler = pyinstrument.Profiler()
+
+profiler.start()
+
+_registration.discover_and_register_all_symbolic_opsets()
+
+profiler.stop()
+profiler.print()
