@@ -1624,6 +1624,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
         '_refs.nn.functional.poisson_nll_loss',
+        '_refs.nn.functional.softmax',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
