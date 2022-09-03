@@ -139,7 +139,6 @@ static void setup_vit_base_patch16_224_bcast5(Fusion* fusion, void* null) {
   auto t20 = sum(t37, {2});
   auto t24 = broadcast(t20, bcast_pattern1);
   auto d95 = castOp(DataType::Double, t2->axis(2)->extent());
-  auto d96 = mul(IrBuilder::create<Double>(1.0), d95);
   auto d105 = reciprocal(d95);
   auto t25 = mul(t24, d105);
   auto t26 = add(t25, IrBuilder::create<Double>(1e-6));
@@ -320,8 +319,6 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_norm_inner3(
 
   at::manual_seed(0);
   auto fp16_options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto fp32_options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   auto t0 = at::randn(input_shape, fp16_options);
 
