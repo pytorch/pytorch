@@ -1726,6 +1726,11 @@ op_db: List[OpInfo] = [
                 "test_comprehensive",
                 dtypes=(torch.float16, torch.bfloat16),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
         ),
     ),
     OpInfo(
@@ -1765,6 +1770,11 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestDecomp",
                 "test_comprehensive",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
                 dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
