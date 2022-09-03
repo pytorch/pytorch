@@ -33,6 +33,7 @@ __all__ = [
     "hardtanh",
     "hinge_embedding_loss",
     "l1_loss",
+    "log_softmax",
     "margin_ranking_loss",
     "mish",
     "mse_loss",
@@ -384,6 +385,19 @@ def l1_loss(
     _check_reduction_value(reduction)
     loss = torch.abs(input - target)
     return _apply_loss_reduction(loss, reduction)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    if dim is None:
+        dim = _get_softmax_dim(name="log_softmax", ndim=a.dim(), stacklevel=_stacklevel)
+
+    return torch._refs.log_softmax(a=a, dim=dim, dtype=dtype)
 
 
 @register_decomposition(torch.ops.aten.margin_ranking_loss)
