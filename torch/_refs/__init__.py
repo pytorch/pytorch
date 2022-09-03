@@ -79,6 +79,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "log_softmax",
     "nan_to_num",
     "neg",
     "positive",
