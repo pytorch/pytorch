@@ -50,21 +50,19 @@ def decompose(decomposition_table):
 # ensure we cannot collide with other properties
 proxy_slot = object()
 no_default = object()
-hacky_multi_mapping = dict()
+
+# We cannot use __dict__ on tensor for nested tensors
+nested_tensor_to_tracer_mapping = dict()
 
 def set_proxy_slot(obj, tracer, proxy, from_nested=False):
-    print("SET ID IS", id(obj))
     if from_nested:
-        if id(obj) not in hacky_multi_mapping:
-            hacky_multi_mapping[id(obj)] = weakref.WeakKeyDictionary()
-        
-        hacky_multi_mapping[id(obj)][tracer] = proxy
+        if id(obj) not in nested_tensor_to_tracer_mapping:
+            nested_tensor_to_tracer_mapping[id(obj)] = weakref.WeakKeyDictionary()
+        nested_tensor_to_tracer_mapping[id(obj)][tracer] = proxy
     else:
         d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
         assert isinstance(d, weakref.WeakKeyDictionary)
         d[tracer] = proxy
-    # import pdb
-    # pdb.set_trace()
 
 def has_proxy_slot(obj, tracer):
     return get_proxy_slot(obj, tracer, False, lambda _: True)
@@ -75,9 +73,8 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     d = obj.__dict__.get(proxy_slot)
     if not d:
-        # Check the cursed mapping
-        if id(obj) in hacky_multi_mapping:
-            d = hacky_multi_mapping[id(obj)]
+        if id(obj) in nested_tensor_to_tracer_mapping:
+            d = nested_tensor_to_tracer_mapping[id(obj)]
         else:
             if default is no_default:
                 raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
@@ -462,13 +459,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
         def assert_proxy_tensor(e):
             if e.is_nested:
-                # import pdb
-                # pdb.set_trace()
                 for tensor in e:
                     assert_proxy_tensor(tensor)
                 return
-            print("ASSERT ID IS", id(e))
-            print(f"DICT FOR {id(e)} - {e.__dict__}")
             assert has_proxy_slot(e, self.tracer), \
                 f"Internal Error: make_fx is incorrectly baking a tensor constant into the graph: {str(e)}"
 

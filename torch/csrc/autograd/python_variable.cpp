@@ -1881,7 +1881,6 @@ static PyObject* THPVariable_NewWithVar(
       " but the raw Tensor object is already associated to a python object ",
       "of type ",
       mb_obj.value()->ob_type->tp_name);
-  
 
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
