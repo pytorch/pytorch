@@ -1627,6 +1627,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.log_softmax',
         '_refs.nn.functional.poisson_nll_loss',
         '_refs.nn.functional.softmax',
+        '_refs.nn.functional.softmin',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',

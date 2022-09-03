@@ -16404,6 +16404,11 @@ python_ref_db = [
         torch_opinfo_name="softmax",  # alias
         supports_out=False,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.softmin",
+        torch_opinfo_name="nn.functional.softmin",
+        supports_out=False,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",

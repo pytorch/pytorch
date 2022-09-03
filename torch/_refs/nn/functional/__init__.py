@@ -43,6 +43,7 @@ __all__ = [
     "relu6",
     "selu",
     "softmax",
+    "softmin",
     "softplus",
     "softshrink",
     "tanhshrink",
@@ -261,6 +262,19 @@ def softmax(
         dim = _get_softmax_dim(name="softmax", ndim=a.dim(), stacklevel=_stacklevel)
 
     return torch._refs.softmax(a=a, dim=dim, dtype=dtype)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmin(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    if dim is None:
+        dim = _get_softmax_dim(name="softmin", ndim=a.dim(), stacklevel=_stacklevel)
+
+    return torch._refs.softmax(a=-a, dim=dim, dtype=dtype)
 
 
 # softplus is implemented specially because it has beta and threshold arguments
