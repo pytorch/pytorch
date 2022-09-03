@@ -16272,6 +16272,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.special.log_softmax",
+        torch_opinfo_name="log_softmax",  # alias
+        supports_out=False,
+    ),
+    PythonRefInfo(
         "_refs.special.softmax",
         torch_opinfo_name="softmax",  # alias
         supports_out=False,

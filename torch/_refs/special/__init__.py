@@ -20,6 +20,7 @@ __all__ = [
     "i1",
     "i1e",
     "logit",
+    "log_softmax",
     "softmax",
     "zeta",
 ]
@@ -59,6 +60,15 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     hi = 1 - eps
     self = torch.clamp(self, lo, hi)
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
+
+
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch._refs.log_softmax(a=a, dim=dim, dtype=dtype)
 
 
 # CompositeImplicitAutograd - don't register decomp

@@ -1631,6 +1631,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.ravel',
         '_refs.reshape',
         '_refs.softmax',
+        '_refs.special.log_softmax',
         '_refs.special.softmax',
         '_refs.square',
         '_refs.tensor_split',
