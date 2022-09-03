@@ -621,7 +621,6 @@ def log10(a):
 def log_softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
