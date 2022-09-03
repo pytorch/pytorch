@@ -1110,7 +1110,7 @@ class CrossEntropyLoss(_WeightedLoss):
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When :attr:`size_average` is
             ``True``, the loss is averaged over non-ignored targets. Note that
-            :attr:`ignore_index` is only applicable when the target contains class indices.
+            :attr:`ignore_index` is only applicable when the target contains class indices. Default: :math:`-100`.
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
