@@ -871,7 +871,7 @@ def saved_variables(
     # It is perfectly fine to remove these entries as long
     # as the corresponding entry is added to REPLACEMENTS above
     # and tested.
-    FORBIDEN = [
+    FORBIDDEN = [
         r"{}.strides\(\)",
         r"{}.sym_strides\(\)",
     ]
@@ -885,7 +885,7 @@ def saved_variables(
         )
         # First search the formula for forbidden expression and fail
         # if one is found:
-        for regex in FORBIDEN:
+        for regex in FORBIDDEN:
             if re.search(regex.format(name), formula):
                 raise RuntimeError(f"A new formula was added that uses {regex.format(name)} "
                                    "This is not allowed right now and the corresponding "
