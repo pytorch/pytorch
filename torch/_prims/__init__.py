@@ -2702,7 +2702,26 @@ fft_c2r = _make_prim(
 def _gather_meta(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
     shape = [*indices[0].shape, *(1 if i in dims else tensor.size(i) for i in range(tensor.dim()))]
     strides = utils.make_contiguous_strides_for(shape)
+    """
+    if len(indices) == 1:
+        for i in range(indices[0].ndim):
+            strides = move_strides(strides, dims[0] + i, i)
+    """
     return TensorMeta(shape=shape, strides=strides, dtype=tensor.dtype, device=tensor.device)
+
+
+# Stride modification from movedim
+def move_strides(arr, source, dest):
+    if source == dest:
+        return tuple(arr)
+    r = []
+    for i, a in enumerate(arr):
+        if i == source:
+            continue
+        if i == dest:
+            r.append(arr[source])
+        r.append(a)
+    return tuple(r)
 
 
 def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
@@ -2724,7 +2743,11 @@ def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tens
     if len(indices) == 1:
         for i in range(indices[0].ndim):
             r = r.movedim(dims[0] + i, i)
-    return r.contiguous()  # TODO: don't contiguous here
+    # TODO: returning contiguous here is necessary for the overall
+    # implementation of __getitem__ to return the correct strides,
+    # but it means the implementation of gather here is suboptimal;
+    # we're gathering into the wrong contiguity.
+    return r.contiguous()
 
 gather = _make_prim(
     schema="gather(Tensor a, SymInt[] dims, Tensor[] indices) -> Tensor",

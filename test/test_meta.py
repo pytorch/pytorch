@@ -4,7 +4,7 @@ import torch
 import os
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
 from torch.testing._internal.common_utils import (
@@ -200,7 +200,13 @@ class TestMetaConverter(TestCase):
         del m
         self.assertIs(ref(), None)
 
+CHECK_STRIDES = {
+    torch.Tensor.__getitem__,
+}
+
 def should_check_strides(func):
+    if func in CHECK_STRIDES:
+        return True
     if not isinstance(func, torch._ops.OpOverload):
         return False
     # Prims are expected to model strides correctly
@@ -348,6 +354,15 @@ def run_meta_crossref(
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
+        elif func is torch.Tensor.__getitem__:
+            # Ensure boolean tensors use original
+            assert len(args) == 2
+            flat_args, _ = tree_flatten(args[1])
+            flat_meta_args, spec = tree_flatten(meta_args[1])
+            flat_new_args = []
+            for a, ma in zip(flat_args, flat_meta_args):
+                flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.int8, torch.bool] else ma)
+            meta_args = (meta_args[0], tree_unflatten(flat_new_args, spec))
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args

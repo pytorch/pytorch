@@ -4,6 +4,7 @@ import torch
 import warnings
 from torch._prims_common.wrappers import out_wrapper
 import torch._prims as prims
+from torch.overrides import has_torch_function_unary, handle_torch_function
 
 # potentially primitives that can be used to implement indexing
 
@@ -132,6 +133,10 @@ def wrap_sequences(idx):
 
 
 def __getitem__(self_, index_):
+    # TODO: also check for torch function in index
+    if has_torch_function_unary(self_):
+        return handle_torch_function(__getitem__, (self_,), self_, index_)
+
     self = self_
 
     index = tuple(wrap_sequences(idx) for idx in wrap_tuple(index_))
@@ -165,7 +170,7 @@ def __getitem__(self_, index_):
                         f"mask size {idx.shape} does not match tensor dimensions {self.shape[i:i+idx.ndim]}"
                     )
                 i += idx.ndim
-            new_index.extend(idx.nonzero().unbind(dim=1))
+            new_index.extend(torch.nonzero(idx).unbind(dim=1))
         else:
             new_index.append(idx)
             if idx is not None:
