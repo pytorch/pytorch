@@ -201,23 +201,6 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
-@register_meta(aten._to_copy.default, False)
-def _to_copy(
-    self: torch.Tensor,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    memory_format=None,
-):
-    dtype = self.dtype if dtype is None else dtype
-    device = self.device if device is None else device
-    layout = self.layout if layout is None else layout
-    assert pin_memory is None
-    assert memory_format is None
-    return self.new_empty(self.shape, dtype=dtype, device=device, pin_memory=pin_memory)
-
-
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
@@ -737,6 +720,21 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
 @register_meta(aten.logical_not_.default)
 def meta_logical_not_(self):
     return self
+
+
+@register_meta(aten.repeat.default)
+def meta_repeat(self, repeats):
+    check(
+        len(repeats) >= self.dim(),
+        lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+    )
+    # Add new leading dimensions to the tensor if the
+    # number of target dimensions is larger than the
+    # number of source dimensions.
+    num_new_dimensions = len(repeats) - self.dim()
+    padded_size = (1,) * num_new_dimensions + tuple(self.shape)
+    target_size = [padded_size[i] * repeats[i] for i in range(len(repeats))]
+    return self.new_empty(target_size)
 
 
 # We must also trigger meta registrations from PrimTorch ref
