@@ -821,8 +821,7 @@ static at::TensorOptions TensorOptionsFromProto(
 
 std::unique_ptr<BaseContext> ContextFromProto(
     const TensorProto& tensor_proto) {
-  auto device = OptionToDevice(tensor_proto.device_detail());
-  return CreateContext(device);
+  return CreateContext(OptionToDevice(tensor_proto.device_detail()));
 }
 
 // === Local helper functions ===
