@@ -298,21 +298,6 @@ void parallelizeAllLike(
   }
 }
 
-void computeAtInputs(TensorView* consumer, int pos, ComputeAtMode mode) {
-  for (auto inp_tv : ir_utils::inputTvsOf(consumer)) {
-    inp_tv->computeAt(consumer, pos, mode);
-  }
-}
-
-void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
-  for (auto out_tv : ir_utils::outputTvsOf(producer)) {
-    if (out_tv == producer) {
-      continue;
-    }
-    producer->computeWith(out_tv, pos, mode);
-  }
-}
-
 namespace {
 
 // Find the resolution points of the persistent buffers in the provided

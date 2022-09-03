@@ -115,16 +115,6 @@ TORCH_CUDA_CU_API inline void parallelizeAllLike(
       propagate_padding);
 }
 
-TORCH_CUDA_CU_API void computeAtInputs(
-    TensorView* consumer,
-    int pos,
-    ComputeAtMode mode = ComputeAtMode::Standard);
-
-TORCH_CUDA_CU_API void computeWithOutputs(
-    TensorView* producer,
-    int pos,
-    ComputeAtMode mode = ComputeAtMode::Standard);
-
 struct PersistentBufferInfo {
   std::vector<TensorView*> persistent_buffers;
   std::unordered_set<IterDomain*> unmappable_dims;

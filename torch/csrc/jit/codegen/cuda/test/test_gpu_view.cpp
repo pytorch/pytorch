@@ -1205,7 +1205,7 @@ TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
   fusion.addOutput(t13);
 
   // Grab the trivial reduced tensor from t12's view.
-  auto tv11 = ir_utils::producerTvsOf({tv12})[0];
+  auto tv11 = ir_utils::producerTvsOf(tv12)[0];
 
   // Start from the exact iter domain graph of the fusion
   IterDomainGraph id_graph(&fusion);
