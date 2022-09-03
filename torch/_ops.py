@@ -69,6 +69,10 @@ class OpOverload:
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
+    @property
+    def namespace(self):
+        return self._schema.name.split("::")[0]
+
     def decompose(self, *args, **kwargs):
         dk = "CompositeImplicitAutograd"
         if torch._C._dispatch_has_kernel_for_dispatch_key(self.name, dk):
