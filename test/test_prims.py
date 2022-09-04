@@ -188,7 +188,6 @@ class TestPrims(TestCase):
 
         def func():
             return torch.sigmoid(a)
-            return (a, b, c)
 
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)()
@@ -197,7 +196,7 @@ class TestPrims(TestCase):
             execute(gm, executor="strictly_nvfuser")
 
         with self.assertRaisesRegex(AssertionError, "Number of placeholder nodes in the graph must match"):
-            execute(gm, a, a, a, executor="strictly_nvfuser")
+            execute(gm, a, executor="strictly_nvfuser")
 
         # Should pass with partitioned executor
         out = execute(gm, executor="nvfuser")
