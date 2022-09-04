@@ -36,8 +36,8 @@ def layer_norm(
 ):
     # normalized_shape: input shape from an expected input of size
     # axis: The first normalization dimension.
-    # layer_norm normalizes on the last D dimension,
-    # which D is the size of normalized_shape
+    # layer_norm normalizes on the last D dimensions,
+    # where D is the size of normalized_shape
     axis = -len(normalized_shape)
     return g.op(
         "LayerNormalization",
