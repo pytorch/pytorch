@@ -58,8 +58,7 @@ inline bool areAnyOptionalTensorSubclassLike(IOptTensorListRef tensors) {
     return true;
   return std::any_of(
       tensors.begin(), tensors.end(), [](const auto& opt_tensor) {
-        return (
-            opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+        return (opt_tensor.has_value() && isTensorSubclassLike(*opt_tensor));
       });
 }
 
