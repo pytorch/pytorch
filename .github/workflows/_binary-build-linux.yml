@@ -169,7 +169,7 @@ jobs:
       - name: Pull Docker image
         uses: ./pytorch/.github/actions/pull-docker-image
         with:
-          docker-image: ${{ input.DOCKER_IMAGE }}
+          docker-image: ${{ inputs.DOCKER_IMAGE }}
       - name: Build PyTorch binary
         run: |
           set -x
