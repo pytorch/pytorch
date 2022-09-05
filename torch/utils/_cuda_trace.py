@@ -48,7 +48,7 @@ CUDAMemoryDeallocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 CUDAStreamCreationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "CUDA stream creation"
 )
-CUDADeviceSynchronizationCallbacks: "CallbackRegistry[None]" = CallbackRegistry(
+CUDADeviceSynchronizationCallbacks: "CallbackRegistry[[]]" = CallbackRegistry(
     "CUDA device synchronization"
 )
 CUDAStreamSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
@@ -87,9 +87,7 @@ def register_callback_for_cuda_stream_creation(cb: Callable[[int], None]) -> Non
     CUDAStreamCreationCallbacks.add_callback(cb)
 
 
-def register_callback_for_cuda_device_synchronization(
-    cb: Callable[[None], None]
-) -> None:
+def register_callback_for_cuda_device_synchronization(cb: Callable[[], None]) -> None:
     CUDADeviceSynchronizationCallbacks.add_callback(cb)
 
 
