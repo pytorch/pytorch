@@ -255,5 +255,21 @@ inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
       });
 }
 
+inline Layout flip_compressed_layout(Layout layout) {
+  switch (layout) {
+    case kSparseCsr:
+      return kSparseCsc;
+    case kSparseCsc:
+      return kSparseCsr;
+    case kSparseBsr:
+      return kSparseBsc;
+    case kSparseBsc:
+      return kSparseBsr;
+    default:
+      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      return kSparseCsr;
+  }
+}
+
 } // namespace sparse_csr
 } // namespace at
