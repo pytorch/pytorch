@@ -28,6 +28,10 @@ COMMON_COPTS = [
 ] + if_cuda([
     "-DUSE_CUDA",
     "-DUSE_CUDNN",
+    # TODO: This should be passed only when building for CUDA-11.5 or newer
+    # use cub in a safe manner, see:
+    # https://github.com/pytorch/pytorch/pull/55292
+    "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
 ])
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
@@ -47,9 +51,13 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
+    "aten/src/ATen/RegisterSparseMeta.cpp",
+    "aten/src/ATen/RegisterQuantizedMeta.cpp",
+    "aten/src/ATen/RegisterNestedTensorMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
     "aten/src/ATen/CPUFunctions_inl.h",
@@ -59,6 +67,8 @@ generated_cpu_cpp = [
     "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradNestedTensorFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradNestedTensorFunctions_inl.h",
     "aten/src/ATen/CompositeViewCopyKernels.cpp",
     "aten/src/ATen/FunctionalInverses.h",
     "aten/src/ATen/Functions.h",
@@ -76,6 +86,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/MethodOperators.h",
     "aten/src/ATen/NativeMetaFunctions.h",
     "aten/src/ATen/RegistrationDeclarations.h",
+    "aten/src/ATen/VmapGeneratedPlumbing.h",
     "aten/src/ATen/core/aten_interned_strings.h",
     "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
@@ -1873,6 +1884,7 @@ test_suite(
         "aten/src/ATen/templates/LazyIr.h",
         "aten/src/ATen/templates/LazyNonNativeIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/templates/RegisterDispatchDefinitions.ini",
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
         "aten/src/ATen/native/ts_native_functions.yaml",

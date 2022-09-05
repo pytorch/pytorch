@@ -15,36 +15,56 @@ if(NOT __NCCL_INCLUDED)
     # this second replacement is needed when there are multiple archs
     string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
+    if("${CMAKE_GENERATOR}" MATCHES "Make")
+      # Recursive make with jobserver for parallelism
+      set(MAKE_COMMAND "$(MAKE)")
+    else()
+      if(DEFINED ENV{MAX_JOBS})
+        set(MAX_JOBS "$ENV{MAX_JOBS}")
+      else()
+        include(ProcessorCount)
+        ProcessorCount(NUM_HARDWARE_THREADS)
+        # Assume 2 hardware threads per cpu core
+        math(EXPR MAX_JOBS "${NUM_HARDWARE_THREADS} / 2")
+        # ProcessorCount might return 0, set to a positive number
+        if(MAX_JOBS LESS 2)
+            set(MAX_JOBS 2)
+        endif()
+      endif()
+
+      # Parallel build with CPU load limit to avoid oversubscription
+      set(MAKE_COMMAND "make" "-j${MAX_JOBS}" "-l${MAX_JOBS}")
+    endif()
+
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
-        env
-        # TODO: remove these flags when
-        # https://github.com/pytorch/pytorch/issues/13362 is fixed
-        "CCACHE_DISABLE=1"
-        "SCCACHE_DISABLE=1"
-        make
+        ${MAKE_COMMAND}
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
         "NVCC_GENCODE=${NVCC_GENCODE}"
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
-        "-j"
-        $ENV{MAX_JOBS}
-        BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
+      BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )
 
     # Detect objcopy version
     execute_process(COMMAND "${CMAKE_OBJCOPY}" "--version" OUTPUT_VARIABLE OBJCOPY_VERSION_STR)
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
-    string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
+    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
 
-    if((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
+    # TODO: Replace me with SKIP_NCCL_SLIMMING option (and investigate why it does not work on newer compilers)
+    if("$ENV{BUILD_ENVIRONMENT}" MATCHES ".*-libtorch-cxx11-abi$")
+      # See https://github.com/pytorch/pytorch/issues/83887
+      message(WARNING "Skip NCCL library slimming for cxx11-abi builds")
+      set(__NCCL_LIBRARY_DEP nccl_external)
+      set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
+    elseif((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
       message(WARNING "Enabling NCCL library slimming")
       add_custom_command(
         OUTPUT "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a"
@@ -53,7 +73,9 @@ if(NOT __NCCL_INCLUDED)
         COMMAND cd objects
         COMMAND "${CMAKE_AR}" x "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
         COMMAND for obj in all_gather_* all_reduce_* broadcast_* reduce_*.o$<SEMICOLON> do "${CMAKE_OBJCOPY}" --remove-relocations .nvFatBinSegment --remove-section __nv_relfatbin $$obj$<SEMICOLON> done
-       COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
+        COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
+        COMMAND "${CMAKE_AR}" xN 1 "${__NCCL_BUILD_DIR}/lib/libnccl_static.a" net.o
+        COMMAND "${CMAKE_AR}" q "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" net.o
         COMMAND cd -
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${__NCCL_BUILD_DIR}/objects"
         WORKING_DIRECTORY "${__NCCL_BUILD_DIR}"

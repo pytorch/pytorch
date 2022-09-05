@@ -1,8 +1,28 @@
 #include <torch/csrc/profiler/api.h>
 
+#include <torch/csrc/profiler/util.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
+
+ExperimentalConfig::ExperimentalConfig(
+    std::vector<std::string> profiler_metrics,
+    bool profiler_measure_per_kernel)
+    : profiler_metrics{profiler_metrics},
+      profiler_measure_per_kernel{profiler_measure_per_kernel} {}
+
+/*explicit*/ ExperimentalConfig::operator bool() const {
+  return !profiler_metrics.empty();
+}
+
+bool ProfilerConfig::disabled() const {
+  return state == torch::profiler::impl::ProfilerState::Disabled;
+}
+
+bool ProfilerConfig::global() const {
+  return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
+}
 
 namespace {
 enum ProfilerIValueIdx {
@@ -40,11 +60,41 @@ ProfilerConfig ProfilerConfig::fromIValue(
       ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
 }
 
+/*explicit*/ ProfilerThreadLocalStateBase::ProfilerThreadLocalStateBase(
+    const ProfilerConfig& config)
+    : c10::MemoryReportingInfoBase(), config_(config) {}
+
+ProfilerThreadLocalStateBase::~ProfilerThreadLocalStateBase() {
+  if (handle_) {
+    auto handle = handle_;
+    removeCallback();
+    SOFT_ASSERT(false, "Leaked callback handle: ", handle);
+  }
+}
+
+void ProfilerThreadLocalStateBase::setCallbackHandle(
+    at::CallbackHandle handle) {
+  if (handle_) {
+    at::removeCallback(handle_);
+    SOFT_ASSERT(
+        false,
+        "ProfilerStateBase already has a registered callback. "
+        "Removing to avoid leaked callback.");
+  }
+
+  handle_ = handle;
+}
+
+void ProfilerThreadLocalStateBase::removeCallback() {
+  if (handle_) {
+    at::removeCallback(handle_);
+    handle_ = 0;
+  }
+}
+
 bool profilerEnabled() {
   auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
-  return state_ptr &&
-      state_ptr->config().state !=
-      torch::profiler::impl::ProfilerState::Disabled;
+  return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {

@@ -12,6 +12,7 @@ from .api import (
     _CUSTOM_SHARDED_OPS,
     _SHARDED_OPS,
     Shard,
+    ShardedTensorBase,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
@@ -362,22 +363,24 @@ def init_from_local_shards(
 
 
     Examples:
-      Suppose we want construct a sharded tensor on two ranks, global size = (10, 5),
-      each shard have a (5, 5) local tensor, we can do it like below:
+        Suppose we want construct a sharded tensor on two ranks, global size = (10, 5),
+        each shard have a (5, 5) local tensor, we can do it like below:
 
-      on rank 0:
+        on rank 0:
+        >>> # xdoctest: +SKIP("not distributed")
         >>> local_shard_metadata = ShardMetadata(
-        >>>     shard_offsets=[0, 0]
-        >>>     shard_lengths=[5, 5]
+        >>>     shard_offsets=[0, 0],
+        >>>     shard_lengths=[5, 5],
         >>>     placement="rank:0/cuda:0"
         >>> )
         >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
         >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
 
-      on rank 1:
+        on rank 1:
+        >>> # xdoctest: +SKIP("not distributed")
         >>> local_shard_metadata = ShardMetadata(
-        >>>     shard_offsets=[5, 0]
-        >>>     shard_lengths=[5, 5]
+        >>>     shard_offsets=[5, 0],
+        >>>     shard_lengths=[5, 5],
         >>>     placement="rank:1/cuda:1"
         >>> )
         >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
@@ -426,8 +429,8 @@ def custom_sharded_op_impl(func):
     Example::
         >>> @custom_sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
-        >>>   ....
-        >>>
+        >>>     ...
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> input = torch.rand(10, 32)
         >>> weight = sharded_tensor.rand(32, 16)
         >>> bias = torch.rand(16)
