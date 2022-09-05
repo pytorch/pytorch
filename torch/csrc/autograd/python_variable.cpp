@@ -1296,7 +1296,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
 
 PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject*)self)) {
+  if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_cpu");
   }
   auto& self_ = THPVariable_Unpack(self);
