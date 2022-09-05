@@ -7,7 +7,7 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -177,6 +177,7 @@ class TestPrims(TestCase):
         out = execute(gm, a, a, a, executor="nvfuser")
         self.assertEqual(out, (a, a, a))
 
+    @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_no_args(self, device):
@@ -188,7 +189,6 @@ class TestPrims(TestCase):
 
         def func():
             return torch.sigmoid(a)
-            return (a, b, c)
 
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)()
@@ -197,7 +197,7 @@ class TestPrims(TestCase):
             execute(gm, executor="strictly_nvfuser")
 
         with self.assertRaisesRegex(AssertionError, "Number of placeholder nodes in the graph must match"):
-            execute(gm, a, a, a, executor="strictly_nvfuser")
+            execute(gm, a, executor="strictly_nvfuser")
 
         # Should pass with partitioned executor
         out = execute(gm, executor="nvfuser")
@@ -223,7 +223,6 @@ class TestPrims(TestCase):
             execute(gm, b, executor="strictly_nvfuser")
 
         # Should pass with partitioned executor
-        gm.graph.print_tabular()
         out = execute(gm, b, executor="nvfuser")
         self.assertEqual(out, gm(b))
 
