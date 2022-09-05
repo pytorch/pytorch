@@ -7,7 +7,7 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -177,6 +177,7 @@ class TestPrims(TestCase):
         out = execute(gm, a, a, a, executor="nvfuser")
         self.assertEqual(out, (a, a, a))
 
+    @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_no_args(self, device):
