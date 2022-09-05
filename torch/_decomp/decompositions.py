@@ -1,5 +1,6 @@
 import functools
 from enum import Enum
+from itertools import product
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -541,6 +542,32 @@ def binary_cross_entropy_backward(
     return result
 
 
+@register_decomposition(aten.soft_margin_loss)
+@out_wrapper()
+@pw_cast_for_opmath
+def soft_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    loss = torch.log1p(torch.exp(-input * target))
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.soft_margin_loss_backward)
+@pw_cast_for_opmath
+def soft_margin_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    grad_input = target * grad_output * (torch.sigmoid(target * self) - 1)
+    if reduction == Reduction.MEAN.value:
+        grad_input = grad_input / self.numel()
+    return grad_input
+
+
 @register_decomposition(aten._euclidean_dist)
 def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
     x1_norm = x1.pow(2).sum(-1, True)
@@ -598,6 +625,69 @@ def _log_softmax_backward_data(
         grad_output, dim=dim, keepdim=True
     )
     return grad_input
+
+
+@register_decomposition(aten.im2col)
+def im2col(
+    input: Tensor,
+    kernel_size: List[int],
+    dilation: List[int],
+    padding: List[int],
+    stride: List[int],
+) -> Tensor:
+    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
+    utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
+
+    batch_dim = input.size(0)
+    channel_dim = input.size(1)
+    input_h = input.size(2)
+    input_w = input.size(3)
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    def _get_im2col_indices_along_dim(
+        input_d, kernel_d, dilation_d, padding_d, stride_d
+    ):
+        blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
+
+        # Stride kernel over input and find starting indices along dim d
+        blocks_d_indices = torch.arange(
+            0, blocks_d, stride_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(0)
+        num_blocks = (blocks_d - 1) // stride_d + 1
+
+        # Apply dilation on kernel and find its indices along dim d
+        kernel_grid = torch.arange(
+            0, kernel_d * dilation_d, dilation_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(-1)
+
+        # Broadcast and add kernel staring positions (indices) with
+        # kernel_grid along dim d, to get block indices along dim d
+        block_mask = blocks_d_indices + kernel_grid
+
+        return block_mask, num_blocks
+
+    blocks_row_indices, num_blocks_row = _get_im2col_indices_along_dim(
+        input_h, kernel_h, dilation_h, padding_h, stride_h
+    )
+    blocks_col_indices, num_blocks_col = _get_im2col_indices_along_dim(
+        input_w, kernel_w, dilation_w, padding_w, stride_w
+    )
+
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+
+    blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
+    output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
+    output = output.permute(0, 1, 2, 4, 3, 5)
+    return output.reshape(
+        batch_dim, channel_dim * kernel_h * kernel_w, num_blocks_row * num_blocks_col
+    )
 
 
 # TODO: the type annotations on arguments are not quite right
@@ -1088,6 +1178,36 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+@register_decomposition(aten._to_copy)
+def _to_copy(
+    x: Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout=None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    non_blocking: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    assert not layout or layout == torch.strided, "TODO"
+    assert not pin_memory, "TODO"
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype_converted = False
+    if device is not None and device != x.get_device():
+        # avoid conversions on cpu
+        if dtype is not None and device.type == "cpu":
+            x = torch._prims.convert_element_type(x, dtype)
+            dtype_converted = True
+        x = torch._prims.device_put(x, device)
+    if dtype is not None and not dtype_converted:
+        x = torch._prims.convert_element_type(x, dtype)
+    if memory_format is not None:  # no ref/prim for memory format
+        out = torch.empty_like(x, memory_format=memory_format)
+        out.copy_(x)
+        return out  # type: ignore[call-overload]
+    return x
+
+
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1311,6 +1431,110 @@ def cudnn_batch_norm_backward(
         epsilon,
         [True, True, True],
     )
+
+
+@register_decomposition(aten._adaptive_avg_pool2d, disable_meta=True)
+@pw_cast_for_opmath
+def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
+    # Preconditions
+    device = input.device
+    shape = input.shape
+    ndim = len(shape)
+    utils.check(
+        ndim in (3, 4),
+        lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
+    )
+    for d in input.shape[-2:]:
+        utils.check(
+            d != 0,
+            lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
+            f"non-batch dimensions, but input has shape {tuple(shape)}.",
+        )
+
+    # Optimisation (we should also do this in the kernel implementation)
+    if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
+        stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
+        kernel = tuple(
+            i - (o - 1) * s for i, o, s in zip(shape[-2:], output_size, stride)
+        )
+        return torch.nn.functional.avg_pool2d(input, kernel, stride)
+
+    def start_index(a, b, c):
+        return torch.div(a * c, b, rounding_mode="trunc")
+
+    def end_index(a, b, c):
+        return torch.div((a + 1) * c + b - 1, b, rounding_mode="trunc")
+
+    def compute_idx(in_size, out_size):
+        orange = torch.arange(out_size, device=device, dtype=torch.int64)
+        i0 = start_index(orange, out_size, in_size)
+        # Let length = end_index - start_index, i.e. the length of the pooling kernels
+        # length.max() can be computed analytically as follows:
+        maxlength = in_size // out_size + 1
+        in_size_mod = in_size % out_size
+        # adaptive = True iff there are kernels with different lengths
+        adaptive = not (in_size_mod == 0 or out_size % in_size_mod == 0)
+        if adaptive:
+            maxlength += 1
+        elif in_size_mod == 0:
+            maxlength -= 1
+
+        range_max = torch.arange(maxlength, device=device, dtype=torch.int64)
+        idx = i0.unsqueeze(-1) + range_max
+        if adaptive:
+            # Need to clamp to avoid accesing out-of-bounds memory
+            # TODO make minimum accept scalars
+            maxval = torch.scalar_tensor(
+                in_size - 1, dtype=idx.dtype, device=idx.device
+            )
+            idx = torch.minimum(idx, maxval)
+
+            # Compute the lenghts
+            i1 = end_index(orange, out_size, in_size)
+            length = i1 - i0
+        else:
+            length = maxlength
+        return idx, length, range_max, adaptive
+
+    # length is not None if it's constant, otherwise we'll need to compute it
+    idxh, length_h, range_max_h, adaptive_h = compute_idx(shape[-2], output_size[-2])
+    idxw, length_w, range_max_w, adaptive_w = compute_idx(shape[-1], output_size[-1])
+
+    vals = input[..., _unsqueeze_to_dim(idxh, 4), idxw]
+    # Shortcut for the simpler case
+    if not adaptive_h and not adaptive_w:
+        return torch.mean(vals, dim=(-3, -1))
+
+    def maybe_mask(vals, length, range_max, adaptive, dim):
+        if isinstance(length, int):
+            return vals, length
+        else:
+            # zero-out the things we didn't really want to select
+            assert dim < 0
+            # hack
+            mask = range_max >= length.unsqueeze(-1)
+            if dim == -2:
+                mask = _unsqueeze_to_dim(mask, 4)
+            vals = torch.masked_fill(vals, mask, 0.0)
+            # Compute the length of each window
+            length = _unsqueeze_to_dim(length, -dim)
+            return vals, length
+
+    vals, length_h = maybe_mask(
+        vals, length_h, range_max_h, adaptive=adaptive_h, dim=-2
+    )
+    vals, length_w = maybe_mask(
+        vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1
+    )
+
+    # We unroll the sum as we assume that the kernels are going to be small
+    ret = None
+    for i, j in product(range(vals.shape[-3]), range(vals.shape[-1])):
+        if ret is None:
+            ret = vals[..., i, :, j]
+        else:
+            ret = ret + vals[..., i, :, j]
+    return ret / (length_h * length_w)
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
