@@ -3934,6 +3934,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@register_decomposition(torch.ops.aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

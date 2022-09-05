@@ -1571,21 +1571,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     return min - torch.log1p(z), buffer
 
 
-@register_decomposition(aten.norm)
-@out_wrapper()
-@reduction_complex_to_real
-def norm(
-    self: Tensor,
-    p: Optional[float] = None,
-    dim: List[int] = None,
-    keepdim: bool = False,
-    dtype: Optional[torch.dtype] = None,
-):
-    if p is None:
-        p = 2.0
-    return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
-
-
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
 @pw_cast_for_opmath
 def upsample_bilinear2d_vec(
