@@ -8,7 +8,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -19,23 +19,6 @@ Tensor map_nt(const Tensor& nt, Func f) {
   auto* nt_impl = get_nested_tensor_impl(nt);
   const auto& sizes = nt_impl->get_nested_size_tensor();
   return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
-}
-
-c10::optional<int64_t> maybe_get_consistent_last_dim_of_nested_tensor(
-    const NestedTensorImpl& nt) {
-  const auto& sizes = nt.get_nested_size_tensor();
-  // The last entry in every row of sizes must be the same.
-  const auto& last_dims = sizes.select(1, -1);
-  const auto last_dims_accessor = last_dims.packed_accessor64<int64_t, 1>();
-  // REVIEW: this can't be the most efficient and concise way to
-  // write this check, can it?
-  const auto last_dim_value = last_dims_accessor[0];
-  for (const auto i : c10::irange(1, last_dims.numel())) {
-    if (last_dims_accessor[i] != last_dim_value) {
-      return c10::nullopt;
-    }
-  }
-  return last_dim_value;
 }
 
 int64_t num_bytes(IntArrayRef sizes) {
@@ -51,26 +34,6 @@ int64_t num_bytes(IntArrayRef sizes) {
     stride *= sizes[ii];
   }
   return result;
-}
-
-std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(const Tensor& sizes) {
-  if (sizes.dim() == 0) {
-    return {};
-  }
-  const auto sizes_ptr = sizes.data_ptr<int64_t>();
-  const auto sizes_size_0 = sizes.sizes()[0];
-  const auto sizes_size_1 = sizes.sizes()[1];
-  TORCH_INTERNAL_ASSERT(sizes_size_1 > 0);
-  std::vector<int64_t> results(sizes_size_1, 0);
-  for (const auto ii : c10::irange(sizes_size_0)) {
-    for (const auto jj : c10::irange(sizes_size_1)) {
-      auto val = sizes_ptr[ii * sizes_size_1 + jj];
-      if (results[jj] < val) {
-        results[jj] = val;
-      }
-    }
-  }
-  return results;
 }
 
 Tensor pad_tensor_to_shape(
@@ -229,18 +192,6 @@ Tensor nested_tensor(
       pin_memory);
 }
 
-int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
-  auto result = maybe_get_consistent_last_dim_of_nested_tensor(nt);
-  TORCH_CHECK(
-      result.has_value(),
-      "all tensors in NestedTensor must have the same trailing dim for Matmul but got ",
-      nt.get_nested_size_tensor().select(1, -1));
-  return *result;
-}
-
-std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
-  return NestedTensor_get_max_size_from_size_tensor(nt.get_nested_size_tensor());
-}
 
 Tensor NestedTensor_layer_norm(
     const Tensor& input,
@@ -720,10 +671,6 @@ Tensor clone_nested(
         "Nested tensor clone supports Preserve and Contiguous memory formats, called clone with memory format: ",
         memory_format);
   }
-}
-
-at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
-  return get_nested_size_tensor(self);
 }
 
 std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
