@@ -8,7 +8,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at {
 namespace native {
