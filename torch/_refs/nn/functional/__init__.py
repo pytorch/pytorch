@@ -166,6 +166,7 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.where(torch.le(a, 0), 0, a)
 
 
+# CompositeImplicitAutograd - don't register decomp
 def layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,

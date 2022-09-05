@@ -627,6 +627,7 @@ def log10(a):
     return prims.log10(a)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def log_softmax(
     a: TensorLikeType,
@@ -2787,6 +2788,7 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def softmax(
     a: TensorLikeType,
