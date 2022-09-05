@@ -114,6 +114,82 @@ class TestPrims(TestCase):
             self.assertTrue(result.is_contiguous)
             self.assertEqual(_wrapper(a), result)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_copy_to(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        def func1(a, b):
+            return (a.copy_(b),)
+
+        def func2(a, b):
+            b_sin = b.sin()
+            return (a.copy_(b_sin),)
+
+        def func3(a, b):
+            return (a.copy_(b), b)
+
+        def func4(a, b):
+            b_sin = b.sin()
+            return (a.copy_(b_sin), b_sin)
+
+        def func5(a, b):
+            b_sin = b.sin()
+            a1 = a.copy_(b_sin)
+            a1_sin = a1.sin()
+            a2 = a1.copy_(a1_sin)
+            return (a2, b_sin, a1_sin)
+
+        for func in (func1, func3, func2, func3, func4, func5):
+            a = torch.empty(3, 3, device=device, dtype=dtype)
+            b = torch.randn(3, 3, device=device, dtype=dtype)
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(a, b)
+
+            a = torch.empty(3, 3, device='cuda')
+            out = execute(gm, a, b, executor="strictly_nvfuser")
+            self.assertEqual(out[0], a)
+
+            a = torch.empty(3, 3, device='cuda')
+            self.assertEqual(out[0], func(a, b)[0])
+
+    # TODO: Combine this with test_copy_to once it passes
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_copy_to_failing(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        # like func5 but a1_sin is not returned
+        # and second copy_ is ignored for some reason
+        def func6(a, b):
+            b_sin = b.sin()
+            a1 = a.copy_(b_sin)
+            a1_sin = a1.sin()
+            a2 = a1.copy_(a1_sin)
+            return (a2, b_sin)
+
+        for func in (func6,):
+            a = torch.empty(3, 3, device=device, dtype=dtype)
+            b = torch.randn(3, 3, device=device, dtype=dtype)
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(a, b)
+
+            a = torch.empty(3, 3, device='cuda')
+            out = execute(gm, a, b, executor="strictly_nvfuser")
+            self.assertEqual(out[0], a)
+
+            a = torch.empty(3, 3, device='cuda')
+            self.assertEqual(out[0], func(a, b)[0])
+
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float64, torch.long)
     def test_cbrt_prim(self, device, dtype):
