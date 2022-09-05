@@ -3,7 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+
 #include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
 
