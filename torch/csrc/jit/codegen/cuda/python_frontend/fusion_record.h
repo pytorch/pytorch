@@ -458,9 +458,13 @@ struct CopyToOpRecord : RecordFunctor {
 
     if (dest->isFusionInput()) {
       fd.fusionPtr()->aliasOutputToInput(source, dest);
+    } else {
+      dest = torch::jit::fuser::cuda::set(source);
+      // aliasOutputToInput implicitly adds the output to the fusion
+      // adding it in this path simplifies the logic upstream
+      fd.addOutput(source);
     }
 
-    dest = torch::jit::fuser::cuda::set(source);
     fd.setFusionState(outputs.at(0), dest);
   }
 };
