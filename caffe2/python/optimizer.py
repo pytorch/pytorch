@@ -596,7 +596,7 @@ class AdagradOptimizer(Optimizer):
         self.lars = lars
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
-        self.counter_halflife = counter_halflife
+        self.counter_halflife = int(counter_halflife)
         self.init_kwargs = kwargs
         self.weight_scale = weight_scale
 
