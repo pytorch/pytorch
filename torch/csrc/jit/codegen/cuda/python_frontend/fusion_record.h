@@ -282,11 +282,39 @@ struct OutputRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto input = fd.getFusionState(args.at(0));
 
+    TORCH_CHECK(
+        !input->isFusionOutput(),
+        "Cannot set the same tensor as an output twice.");
+
     // With C++17, this statement should be "if constexpr"
     if (std::is_same<OutputType, NvfTensorView>::value) {
       fd.addOutput(input->template as<NvfTensorView>());
     } else {
       fd.addOutput(input);
+    }
+  }
+};
+
+//! Specialized Record Functor for recording removing of outputs.
+
+template <class OutputType>
+struct RemoveOutputRecord : RecordFunctor {
+  RemoveOutputRecord(std::vector<size_t> _args)
+      : RecordFunctor(std::move(_args), {}) {}
+  virtual ~RemoveOutputRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto input = fd.getFusionState(args.at(0));
+
+    TORCH_CHECK(
+        input->isFusionOutput(),
+        "This tensor was not marked as output before.");
+
+    // With C++17, this statement should be "if constexpr"
+    if (std::is_same<OutputType, NvfTensorView>::value) {
+      fd.removeOutput(input->template as<NvfTensorView>());
+    } else {
+      fd.removeOutput(input);
     }
   }
 };
