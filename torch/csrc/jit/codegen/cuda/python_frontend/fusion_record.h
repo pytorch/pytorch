@@ -447,4 +447,22 @@ struct VarianceMeanOpRecord : RecordFunctor {
   bool keepdim_;
 };
 
+struct CopyToOpRecord : RecordFunctor {
+  CopyToOpRecord(std::vector<size_t> _args, std::vector<size_t> _outputs)
+      : RecordFunctor(std::move(_args), std::move(_outputs)) {}
+  virtual ~CopyToOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto dest = fd.getFusionState(args.at(0))->as<NvfTensorView>();
+    auto source = fd.getFusionState(args.at(1))->as<NvfTensorView>();
+
+    if (dest->isFusionInput()) {
+      fd.fusionPtr()->aliasOutputToInput(source, dest);
+    }
+
+    dest = torch::jit::fuser::cuda::set(source);
+    fd.setFusionState(outputs.at(0), dest);
+  }
+};
+
 } // namespace nvfuser
