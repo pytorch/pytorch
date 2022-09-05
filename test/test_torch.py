@@ -34,7 +34,8 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
+    skipIfNotRegistered)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2455,6 +2456,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             do_test(torch.tensor([[1, 2]]).data)
             do_test(torch.tensor([[1, 2]]).detach())
 
+        @skipIfNotRegistered("LayerNorm", "Skipping as LayerNorm is not registered")
         def test_c10_layer_norm(self):
             # test that we can call c10 ops and they return a reasonable result
             X = torch.rand(5, 5, dtype=torch.float)

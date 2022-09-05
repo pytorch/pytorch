@@ -665,16 +665,19 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name):
+def _check_module_exists(name: str) -> bool:
     r"""Returns if a top-level module with :attr:`name` exists *without**
     importing it. This is generally safer than try-catch block around a
     `import X`. It avoids third party libraries breaking assumptions of some of
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib.util
-    spec = importlib.util.find_spec(name)
-    return spec is not None
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec(name)
+        return spec is not None
+    except ImportError:
+        return False
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -684,6 +687,8 @@ TEST_NUMBA = _check_module_exists('numba')
 TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
+
+BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -930,6 +935,8 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
+    if not BUILD_WITH_CAFFE2:
+        return unittest.skip("Pytorch is compiled without Caffe2")
     try:
         from caffe2.python import core
         skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
