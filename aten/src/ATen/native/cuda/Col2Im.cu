@@ -105,8 +105,6 @@ void col2im_out_cuda_template(
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "col2im_out_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-
     Tensor input_n;
     Tensor output_n;
 
@@ -119,28 +117,24 @@ void col2im_out_cuda_template(
             stride_width +
         1;
 
-    for (int64_t elt = 0; elt < batch_size; elt++) {
-      input_n = input.select(0, elt);
-      output_n = output.select(0, elt);
-
-      col2im<scalar_t, accscalar_t>(
-          at::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
-          n_output_plane,
-          output_height,
-          output_width,
-          height_col,
-          width_col,
-          kernel_height,
-          kernel_width,
-          pad_height,
-          pad_width,
-          stride_height,
-          stride_width,
-          dilation_height,
-          dilation_width,
-          output_n.data_ptr<scalar_t>());
-    }
+    col2im_batched(
+        at::cuda::getCurrentCUDAStream(),
+        input.data_ptr<scalar_t>(),
+        batch_size,
+        n_output_plane,
+        output_height,
+        output_width,
+        height_col,
+        width_col,
+        kernel_height,
+        kernel_width,
+        pad_height,
+        pad_width,
+        stride_height,
+        stride_width,
+        dilation_height,
+        dilation_width,
+        output.data_ptr<scalar_t>());
 
     if (!batched_input) {
       output.resize_({n_output_plane, output_height, output_width});
