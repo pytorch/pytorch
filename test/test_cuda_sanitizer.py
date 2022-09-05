@@ -2,6 +2,7 @@
 
 import sys
 import textwrap
+import traceback
 from typing import List
 
 import torch
@@ -391,7 +392,9 @@ class TestMessages(TestCase):
             stream=stream_id(1),
             operator="schema",
             names=["b"],
-            stack_trace=["  stack\n    trace b\n"],
+            stack_trace=traceback.StackSummary.from_list(
+                [("file", 0, "name", "trace a")]
+            ),
         )
         previous_access = csan.Access(
             type=csan.AccessType.READ,
@@ -399,11 +402,15 @@ class TestMessages(TestCase):
             stream=stream_id(0),
             operator="schema",
             names=["a"],
-            stack_trace=["  stack\n    trace a\n"],
+            stack_trace=traceback.StackSummary.from_list(
+                [("file", 0, "name", "trace b")]
+            ),
         )
         error = csan.UnsynchronizedAccessError(
             data_ptr=tensor_id(1),
-            allocation_stack_trace=["  alloc\n    trace\n"],
+            allocation_stack_trace=traceback.StackSummary.from_list(
+                [("file", 0, "name", "alloc")]
+            ),
             current_access=current_access,
             previous_access=previous_access,
         )
@@ -417,19 +424,19 @@ class TestMessages(TestCase):
                 schema
                 writing to argument: b
                 With stack trace:
-                  stack
-                    trace b
+                  File "file", line 0, in name
+                    trace a
 
                 Previous access by stream 1000 during kernel:
                 schema
                 reading from argument: a
                 With stack trace:
-                  stack
-                    trace a
+                  File "file", line 0, in name
+                    trace b
 
                 Tensor was allocated with stack trace:
-                  alloc
-                    trace
+                  File "file", line 0, in name
+                    alloc
                 """
             ),
         )
