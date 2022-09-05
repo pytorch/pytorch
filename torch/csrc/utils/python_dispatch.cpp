@@ -332,13 +332,13 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_tls_set_dispatch_key_excluded",
-      [](const char* dispatch_key, bool desired_state) {
+      [](c10::DispatchKey dispatch_key, bool desired_state) {
         c10::impl::tls_set_dispatch_key_excluded(
-            c10::parseDispatchKey(dispatch_key), desired_state);
+            dispatch_key, desired_state);
       });
-  m.def("_dispatch_tls_is_dispatch_key_excluded", [](const char* dispatch_key) {
+  m.def("_dispatch_tls_is_dispatch_key_excluded", [](c10::DispatchKey dispatch_key) {
     return c10::impl::tls_is_dispatch_key_excluded(
-        c10::parseDispatchKey(dispatch_key));
+        dispatch_key);
   });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
@@ -353,17 +353,24 @@ void initDispatchBindings(PyObject* module) {
 
   py::enum_<c10::DispatchKey>(m, "DispatchKey")
       .value("Undefined", c10::DispatchKey::Undefined)
-      .value("Dense", c10::DispatchKey::Dense)
       .value("BackendSelect", c10::DispatchKey::BackendSelect)
-      .value("CPU", c10::DispatchKey::CPU)
-      .value("CUDA", c10::DispatchKey::CUDA)
-      .value("AutocastCPU", c10::DispatchKey::AutocastCPU)
-      .value("AutocastCUDA", c10::DispatchKey::AutocastCUDA)
-      .value("AutogradCPU", c10::DispatchKey::AutogradCPU)
       .value("ADInplaceOrView", c10::DispatchKey::ADInplaceOrView)
-      .value("AutogradCUDA", c10::DispatchKey::AutogradCUDA)
       .value("PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot)
-      .value("Python", c10::DispatchKey::Python);
+      .value("Python", c10::DispatchKey::Python)
+
+#define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
+
+#define DEF_MULTIPLE(fullname, prefix) \
+  DEF_SINGLE(, fullname) \
+  DEF_SINGLE(, StartOf##fullname##Backends) \
+  C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
+  DEF_SINGLE(, EndOf##fullname##Backends)
+
+  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+
+#undef DEF_MULTIPLE
+#undef DEF_SINGLE
+      ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
