@@ -1,4 +1,3 @@
-import warnings
 from typing import Optional, Union
 
 import torch
@@ -237,30 +236,13 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
-# copy from torch.nn.functional
-def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
-    warnings.warn(
-        "Implicit dimension choice for {} has been deprecated. "
-        "Change the call to include dim=X as an argument.".format(name),
-        stacklevel=stacklevel,
-    )
-    if ndim == 0 or ndim == 1 or ndim == 3:
-        ret = 0
-    else:
-        ret = 1
-    return ret
-
-
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
-    if dim is None:
-        dim = _get_softmax_dim(name="softmax", ndim=a.dim(), stacklevel=_stacklevel)
-
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch._refs.softmax(a=a, dim=dim, dtype=dtype)
 
 
@@ -268,12 +250,9 @@ def softmax(
 def softmin(
     a: TensorLikeType,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
-    if dim is None:
-        dim = _get_softmax_dim(name="softmin", ndim=a.dim(), stacklevel=_stacklevel)
-
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch._refs.softmax(a=-a, dim=dim, dtype=dtype)
 
 
@@ -405,12 +384,9 @@ def l1_loss(
 def log_softmax(
     a: TensorLikeType,
     dim: Optional[int] = None,
-    _stacklevel: int = 3,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
-    if dim is None:
-        dim = _get_softmax_dim(name="log_softmax", ndim=a.dim(), stacklevel=_stacklevel)
-
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch._refs.log_softmax(a=a, dim=dim, dtype=dtype)
 
 
