@@ -190,6 +190,45 @@ class TestPrims(TestCase):
             a = torch.empty(3, 3, device='cuda')
             self.assertEqual(out[0], func(a, b)[0])
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float16)
+    def test_batch_norm_forward_nvprims(self, device, dtype):
+        # This test verifies that the forward pass of batch norm is correctly decomposed into nvprims
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+
+        samples_iter = sample_inputs_batch_norm(None, device, dtype, requires_grad=True)
+        sample = next(samples_iter)
+
+        def func(input, weight, bias, rm, rv, train, momentum, eps):
+            return torch.ops.aten.native_batch_norm.default(
+                input, weight, bias, rm, rv, train, momentum, eps
+            )
+
+        args = sample.args
+        kwargs = sample.kwargs
+        all_args = [sample.input, args[2], args[3], args[0], args[1], kwargs['training'], kwargs['momentum'], kwargs['eps']]
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(*all_args)
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_batch_norm = any(
+            torch.ops.aten.native_batch_norm.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_batch_norm)
+
+        # But without context manager, it should include batch norm
+        gm = make_fx(func)(*all_args)
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_batch_norm = any(
+            torch.ops.aten.native_batch_norm.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertTrue(includes_batch_norm)
+
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float64, torch.long)
     def test_cbrt_prim(self, device, dtype):
