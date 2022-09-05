@@ -7,7 +7,7 @@ PyTorch uses modules to represent neural networks. Modules are:
 
 * **Building blocks of stateful computation.**
   PyTorch provides a robust library of modules and makes it simple to define new custom modules, allowing for
-  easy construction of elaborate, multi-layer neural networks.
+  easy construction to elaborate, multi-layer neural networks.
 * **Tightly integrated with PyTorch's**
   `autograd <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_
   **system.** Modules make it simple to specify learnable parameters for PyTorch's Optimizers to update.
