@@ -1311,9 +1311,10 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                if stream != torch.cuda.current_stream:
+                sync_stream = torch.cuda.current_stream()
+                if stream != sync_stream:
                     event = torch.cuda.Event()
-                    event.record(torch.cuda.current_stream())
+                    event.record(sync_stream)
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 
