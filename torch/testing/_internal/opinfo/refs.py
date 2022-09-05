@@ -113,6 +113,23 @@ class PythonRefInfo(OpInfo):
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
 
+        def test_ref_export(name):
+            # make sure name is exported via __all__
+            import torch
+
+            lst = name.split(".")
+            mod_name = lst[:-1]
+            func_name = lst[-1]
+
+            mod = torch
+            for i in range(len(mod_name)):
+                mod = getattr(mod, mod_name[i])
+
+            if hasattr(mod, "__all__"):
+                assert func_name in mod.__all__, f"missing ref export: {name}"
+
+        test_ref_export(name)
+
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
         super(PythonRefInfo, self).__init__(**ukwargs)
