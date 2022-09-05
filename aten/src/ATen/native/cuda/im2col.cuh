@@ -307,11 +307,16 @@ void col2im_batched(
     const int64_t dilation_height,
     const int64_t dilation_width,
     dt* data_im) {
-  int64_t num_kernels = channels * height * width;
+  const int64_t num_kernels = channels * height * width;
+  const int64_t output_numel = nbatch * num_kernels;
+  if (output_numel == 0) {
+    return;  // No work to do
+  }
+
   // To avoid involving atomic operations, we will launch one kernel per
   // bottom dimension, and then in the kernel add up the top dimensions.
   // CUDA_NUM_THREADS = 1024
-  col2im_batched_kernel<<<GET_BLOCKS(nbatch * num_kernels, 512), 512, 0, stream>>>(
+  col2im_batched_kernel<<<GET_BLOCKS(output_numel, 512), 512, 0, stream>>>(
           num_kernels,
           data_col,
           nbatch,
