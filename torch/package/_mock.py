@@ -89,7 +89,7 @@ class MockedObject:
         # construct instances of MockedObject to hand out to people looking up
         # module attributes.
 
-        # Any other attempt to construct a MockedOject instance (say, in the
+        # Any other attempt to construct a MockedObject instance (say, in the
         # unpickling process) should give an error.
         if not kwargs.get("_suppress_err"):
             raise NotImplementedError(
