@@ -57,14 +57,14 @@ class Access:
         operator: the schema of the launched kernel, which lists the
             arguments and return type.
         names: the arguments in the schema this access corresponds to.
-        stack_trace: the captured stack trace of the access.
+        stack_trace: the stack summary object captured during access.
     """
     type: AccessType
     seq_num: SeqNum
     stream: StreamId
     operator: str
     names: List[str]
-    stack_trace: List[str]
+    stack_trace: traceback.StackSummary
 
 
 class SynchronizationError(Exception):
@@ -77,7 +77,7 @@ class UnsynchronizedAccessError(SynchronizationError):
     def __init__(
         self,
         data_ptr: DataPtr,
-        allocation_stack_trace: Optional[List[str]],
+        allocation_stack_trace: Optional[traceback.StackSummary],
         current_access: Access,
         previous_access: Access,
     ):
@@ -94,7 +94,7 @@ class UnsynchronizedAccessError(SynchronizationError):
                     """
                 )
             )
-            message.write(f"{''.join(current_access.stack_trace)}\n")
+            message.write(f"{''.join(current_access.stack_trace.format())}\n")
             message.write(
                 textwrap.dedent(
                     f"""\
@@ -105,11 +105,11 @@ class UnsynchronizedAccessError(SynchronizationError):
                     """
                 )
             )
-            message.write(f"{''.join(previous_access.stack_trace)}\n")
+            message.write(f"{''.join(previous_access.stack_trace.format())}\n")
             if allocation_stack_trace:
                 message.write(
                     "Tensor was allocated with stack trace:\n"
-                    f"{''.join(allocation_stack_trace)}"
+                    f"{''.join(allocation_stack_trace.format())}"
                 )
             else:
                 message.write("Trace for tensor allocation not found.")
@@ -125,13 +125,13 @@ class TensorInfo:
     r"""Stores information about a single tensor and recent accesses to it.
 
     Args:
-        allocation_stack_trace: the captured stack trace of the tensor's allocation.
-            Can be ``None`` if the allocation wasn't caught by CSAN.
+        allocation_stack_trace: the stack summary object captured during tensor
+            allocation. Can be ``None`` if the allocation wasn't caught by CSAN.
         reads: list of read accesses to the tensor that were performed since
             the last write.
         write: the last write access to the tensor.
     """
-    allocation_stack_trace: Optional[List[str]]
+    allocation_stack_trace: Optional[traceback.StackSummary]
     reads: List[Access] = field(default_factory=list)
     write: Optional[Access] = None
 
@@ -168,7 +168,7 @@ class _TensorsAccessed:
             self.delete_tensor(data_ptr)
 
     def create_tensor(
-        self, data_ptr: DataPtr, stack_trace: Optional[List[str]]
+        self, data_ptr: DataPtr, stack_trace: Optional[traceback.StackSummary]
     ) -> None:
         self.accesses[data_ptr] = TensorInfo(stack_trace)
 
@@ -178,7 +178,9 @@ class _TensorsAccessed:
     def were_there_reads_since_last_write(self, data_ptr: DataPtr) -> bool:
         return True if self.accesses[data_ptr].reads else False
 
-    def get_allocation_stack_trace(self, data_ptr: DataPtr) -> Optional[List[str]]:
+    def get_allocation_stack_trace(
+        self, data_ptr: DataPtr
+    ) -> Optional[traceback.StackSummary]:
         return self.accesses[data_ptr].allocation_stack_trace
 
     def get_write(self, data_ptr: DataPtr) -> Optional[Access]:
@@ -328,7 +330,9 @@ class EventHandler:
         error_list: List[SynchronizationError] = []
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
-        stack_trace = traceback.format_stack()
+        stack_trace = traceback.StackSummary.extract(
+            traceback.walk_stack(None), lookup_lines=False
+        )
 
         for data_ptr in read_only:
             self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -380,7 +384,12 @@ class EventHandler:
 
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
-        self.tensors_accessed.create_tensor(data_ptr, traceback.format_stack())
+        self.tensors_accessed.create_tensor(
+            data_ptr,
+            traceback.StackSummary.extract(
+                traceback.walk_stack(None), lookup_lines=False
+            ),
+        )
 
     def _handle_memory_deallocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_exists(data_ptr)
