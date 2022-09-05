@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
+    freeze_rng_state,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
@@ -485,7 +486,10 @@ class TestDecomp(TestCase):
                     check_decomposed(aten_name)
 
                 if op.aten_backward_name in decomposition_names or run_all:
-                    cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
+                    # Freeze rng since if samples is a generator, the samples
+                    # will be effected by changes to the RNG state
+                    with freeze_rng_state():
+                        cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
                     with enable_torch_dispatch_mode(DecompCrossRefMode):
