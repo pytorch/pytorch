@@ -4201,7 +4201,11 @@ class TestVisionTracing(JitTestCase):
     def generate_video_tests(cls):
         for k in torchvision_models.list_models(module=torchvision_models.video):
             test_name = 'test_torchvision_models_video_' + k
-            x = torch.rand(1, 3, 4, 112, 112) if k not in {'mvit_v1_b', 'mvit_v2_s'} else torch.rand(1, 3, 16, 224, 224)
+            x = (
+                torch.rand(1, 3, 4, 112, 112)
+                if k not in {"mvit_v1_b", "mvit_v2_s", "s3d"}
+                else torch.rand(1, 3, 16, 224, 224)
+            )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)
