@@ -178,6 +178,18 @@ static bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
+// Check if onednn is preferred w.r.t fbgemm
+static bool preferred(
+    const at::Tensor& weight,
+    bool is_transposed_conv,
+    int groups) {
+  bool vnni_available =
+      cpuinfo_has_x86_avx512vnni() || cpuinfo_has_x86_avx512_4vnniw();
+  bool w_sym_quant =
+      is_weight_symmetric_quant(weight, is_transposed_conv);
+  return vnni_available && (groups <= 100) && w_sym_quant;
+}
+
 } // onednn_utils
 
 #endif // #if AT_MKLDNN_ENABLED()

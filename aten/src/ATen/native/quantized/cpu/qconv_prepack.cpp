@@ -524,21 +524,14 @@ class QConvPackWeightInt8 final {
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
-    bool no_vnni = !cpuinfo_has_x86_avx512vnni() && !cpuinfo_has_x86_avx512_4vnniw();
-    bool w_sym_quant =
-        onednn_utils::is_weight_symmetric_quant(weight, transpose);
-    bool prefer_fbgemm = no_vnni || (groups > 100) || !w_sym_quant;
-    if (prefer_fbgemm) {
-      return PackedConvWeight<kSpatialDim>::prepack(
-          weight, bias, stride, padding, output_padding, dilation, groups, transpose);
-    } else if (w_sym_quant) {
+    bool prefer_onednn = onednn_utils::preferred(weight, transpose, groups);
+    if (prefer_onednn) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups, transpose);
     }
-#else
+#endif
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups, transpose);
-#endif
   } // x86
 #endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
 
