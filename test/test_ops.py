@@ -227,17 +227,28 @@ class TestCommon(TestCase):
                 )
             ):
                 continue
+
+            ref_results = []
+            torch_results = []
+            # Note: this deliberately uses 'op.torch_opinfo' in both cases
+            # because 'op.aliases' is empty.  When the aliases are executed
+            # within the context, they will behave as refs.  This is done to
+            # check for compatibility between all APIs.
+            aliases = op.torch_opinfo.aliases
             with ctx():
-                ref_result = op(sample.input, *sample.args, **sample.kwargs)
-            torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
+                for ref_result in [op] + list(aliases):
+                    ref_results.append(ref_result(sample.input, *sample.args, **sample.kwargs))
+            for torch_result in [op.torch_opinfo] + list(aliases):
+                torch_results.append(torch_result(sample.input, *sample.args, **sample.kwargs))
 
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
-                if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
-                    prims.utils.compare_tensor_meta(a, b)
-                    if getattr(op, 'validate_view_consistency', True):
-                        self.assertEqual(a._is_view(), b._is_view())
+            for ref_result, torch_result in zip(ref_results, torch_results):
+                for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
+                    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+                        prims.utils.compare_tensor_meta(a, b)
+                        if getattr(op, 'validate_view_consistency', True):
+                            self.assertEqual(a._is_view(), b._is_view())
 
-            # Computes the dtype the more precise computatino would occur in
+            # Computes the dtype the more precise computation would occur in
             precise_dtype = torch.bool
             if prims.utils.is_integer_dtype(dtype):
                 # Note: bool and integer dtypes do not have more
@@ -250,14 +261,15 @@ class TestCommon(TestCase):
 
             # Checks if the results are close
             try:
-                self.assertEqual(
-                    ref_result,
-                    torch_result,
-                    exact_stride=False,
-                    exact_device=True,
-                    exact_layout=True,
-                    exact_is_coalesced=True,
-                )
+                for ref_result, torch_result in zip(ref_results, torch_results):
+                    self.assertEqual(
+                        ref_result,
+                        torch_result,
+                        exact_stride=False,
+                        exact_device=True,
+                        exact_layout=True,
+                        exact_is_coalesced=True,
+                    )
             except AssertionError as e:
                 # Raises the error if the precise dtype comparison wouldn't be
                 # different
@@ -296,18 +308,19 @@ class TestCommon(TestCase):
                 actual_error = torch.where(same, 0, torch.abs(a - b)).sum()
                 return actual_error
 
-            ref_distance = 0
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
-                ref_distance = ref_distance + _distance(a, b)
+            for ref_result, torch_result in zip(ref_results, torch_results):
+                ref_distance = 0
+                for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
+                    ref_distance = ref_distance + _distance(a, b)
 
-            torch_distance = 0
-            for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
-                torch_distance = torch_distance + _distance(a, b)
+                torch_distance = 0
+                for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
+                    torch_distance = torch_distance + _distance(a, b)
 
-            # TODO: consider adding some tolerance to this comparison
-            msg = f"Reference result was farther ({ref_distance}) from the precise " \
-                  f"computation than the torch result was ({torch_distance})!"
-            self.assertTrue(ref_distance <= torch_distance, msg=msg)
+                # TODO: consider adding some tolerance to this comparison
+                msg = f"Reference result was farther ({ref_distance}) from the precise " \
+                    f"computation than the torch result was ({torch_distance})!"
+                self.assertTrue(ref_distance <= torch_distance, msg=msg)
 
         # Reports numerical accuracy discrepancies
         if ex is not None:
@@ -316,7 +329,7 @@ class TestCommon(TestCase):
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
-    # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
+    # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
