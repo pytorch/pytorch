@@ -935,6 +935,117 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
+
+def template_sample_inputs_bmm(self, input_layout, device, dtype, requires_grad, **kwargs):
+    for sample_input in sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
+        yield SampleInput(
+            torch.sparse._to_layout(sample_input.input.detach(), input_layout).requires_grad_(requires_grad),
+            args=(sample_input.args[0].detach().requires_grad_(requires_grad),) + sample_input.args[1:],
+            kwargs=sample_input.kwargs)
+
+
+def sample_inputs_sparse_coo_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse COO reference inputs to bmm with various levels of sparsity.
+    """
+    for sample_input in template_sample_inputs_bmm(self, torch.sparse_coo, device, dtype, requires_grad, **kwargs):
+        yield sample_input
+        yield SampleInput(sample_input.input.detach()._coalesced_(False).requires_grad_(requires_grad),
+                          args=sample_input.args, kwargs=sample_input.kwargs)
+
+
+def sample_inputs_sparse_csr_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse CSR reference inputs to bmm with various levels of sparsity.
+    """
+    yield from template_sample_inputs_bmm(self, torch.sparse_csr, device, dtype, requires_grad, **kwargs)
+
+
+def sample_inputs_sparse_csc_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse CSC reference inputs to bmm with various levels of sparsity.
+    """
+    yield from template_sample_inputs_bmm(self, torch.sparse_csc, device, dtype, requires_grad, **kwargs)
+
+
+def reference_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate strided reference inputs to bmm with various shapes.
+
+    The bmm input consists of a pair of 3-D tensors (a, b) that
+    satisfy the following invariants:
+
+      - equality of batch dimensions: a.shape[0] == b.shape[0]
+      - equality of inner dimensions: a.shape[2] == b.shape[1]
+      - all elements of a and b are non-zeros
+    """
+    batch_ndim = S
+    for dim_i, dim_j, dim_k in [(M, 10 * M, 10 * M - 1),
+                                (M, 10 * M, 2 * M),
+                                (M, 100 * M, 3 * M),
+                                (0, 10 * M, 10 * M - 1),
+                                (M, 0, 10 * M),
+                                (M, 10 * M, 0)]:
+        # To control the number of zeros in sparse reference inputs,
+        # we exclude zeros.
+        a = make_tensor((batch_ndim, dim_i, dim_j), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+        b = make_tensor((batch_ndim, dim_j, dim_k), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+        yield SampleInput(a, args=(b,))
+
+def template_reference_inputs_bmm_sparse(self, input_layout, device, dtype, requires_grad, **kwargs):
+    """Generate strided reference inputs to bmm with various levels of sparsity.
+    """
+    for sample_input in reference_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
+        a = sample_input.input.detach()
+        assert len(sample_input.args) == 1
+        b = sample_input.args[0].detach()
+        a_numel = a.shape[1] * a.shape[2]
+        b_numel = b.shape[1] * b.shape[2]
+        for a_nnz in sorted(set([a_numel, int(0.1 * a_numel), 0])):
+            a_sparse = a.clone()
+            for i in range(a_sparse.shape[0]):
+                a_sparse[i].flatten()[torch.randperm(a_numel)[:a_numel - a_nnz]] = 0
+            assert (a_sparse == 0).sum() == (a_numel - a_nnz) * a_sparse.shape[0]
+
+            a_sparse = torch.sparse._to_layout(a_sparse, input_layout)
+
+            for b_nnz in sorted(set([b_numel, int(0.1 * b_numel), 0])):
+                b_sparse = b.clone()
+                for i in range(b_sparse.shape[0]):
+                    b_sparse[i].flatten()[torch.randperm(b_numel)[:b_numel - b_nnz]] = 0
+                assert (b_sparse == 0).sum() == (b_numel - b_nnz) * b_sparse.shape[0]
+                yield SampleInput(a_sparse.detach().requires_grad_(requires_grad),
+                                  args=(b_sparse.detach().requires_grad_(requires_grad),),
+                                  kwargs=sample_input.kwargs)
+
+    a = make_tensor((2 * S, S + 2, S + 3), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+    a[0].fill_(0)
+    a[2].fill_(0)
+    a[3, 1].fill_(0)
+    a[4, :, 1].fill_(0)
+    b = make_tensor((2 * S, S + 3, S + 1), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+    b[1].fill_(0)
+    b[2].fill_(0)
+    b[3, 2].fill_(0)
+    b[4, :, 2].fill_(0)
+    yield SampleInput(torch.sparse._to_layout(a, input_layout), args=(b,))
+
+def reference_inputs_sparse_coo_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse COO reference inputs to bmm with various levels of sparsity.
+    """
+    for sample_input in template_reference_inputs_bmm_sparse(self, torch.sparse_coo, device, dtype, requires_grad, **kwargs):
+        yield sample_input
+        yield SampleInput(sample_input.input.detach()._coalesced_(False).requires_grad_(requires_grad),
+                          args=sample_input.args, kwargs=sample_input.kwargs)
+
+def reference_inputs_sparse_csr_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse CSR reference inputs to bmm with various levels of sparsity.
+    """
+    yield from template_reference_inputs_bmm_sparse(self, torch.sparse_csr, device, dtype, requires_grad, **kwargs)
+
+
+def reference_inputs_sparse_csc_bmm(self, device, dtype, requires_grad, **kwargs):
+    """Generate sparse CSR reference inputs to bmm with various levels of sparsity.
+    """
+    yield from template_reference_inputs_bmm_sparse(self, torch.sparse_csc, device, dtype, requires_grad, **kwargs)
+
+
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8244,13 +8355,23 @@ op_db: List[OpInfo] = [
                                                        if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
+           supports_sparse=True,
+           supports_sparse_csr=True,
+           supports_sparse_csc=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
            ),
-           sample_inputs_func=sample_inputs_bmm),
+           sample_inputs_func=sample_inputs_bmm,
+           sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_bmm,
+           sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_bmm,
+           sample_inputs_sparse_csc_func=sample_inputs_sparse_csc_bmm,
+           reference_inputs_func=reference_inputs_bmm,
+           reference_inputs_sparse_coo_func=reference_inputs_sparse_coo_bmm,
+           reference_inputs_sparse_csr_func=reference_inputs_sparse_csr_bmm,
+           reference_inputs_sparse_csc_func=reference_inputs_sparse_csc_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,

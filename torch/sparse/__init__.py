@@ -4,6 +4,7 @@ from typing import Optional, Tuple, List, Union
 import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
+from torch import layout as Layout
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -357,3 +358,166 @@ Specifying a positive offset::
             [0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0]])
 """)
+
+
+def _to_sparse_csr(input: Tensor):
+    """Convert a tensor to compressed row storage format (CSR). Input
+    tensor must be at least 2D tensor with no dense dimensions.
+    """
+    # TODO: move this implementation to aten to_sparse_csr
+    if input.ndim < 2:
+        raise RuntimeError('RuntimeError: Only 2D or higher dimensional tensors can be'
+                           f' converted to the SparseCsr layout but got shape: {input.shape}')
+
+    if input.layout == torch.sparse_csr:
+        return input
+
+    batchsize = input.shape[:-2]
+    if len(batchsize) == 0:
+        return input.to_sparse_csr()
+
+    if input.layout == torch.sparse_csc:
+        return input.transpose(-2, -1)
+
+    if input.layout == torch.sparse_coo:
+        index_dtype = input._indices().dtype
+    else:
+        index_dtype = torch.int64
+    device = input.device
+    dtype = input.dtype
+
+    import itertools
+
+    nrows, ncols = input.shape[-2:]
+    nse_batches = (input != 0).sum((-2, -1))
+    nse = int(nse_batches.max())
+
+    crow_indices = torch.zeros((*batchsize, nrows + 1), dtype=index_dtype, device=device)
+    col_indices = torch.zeros((*batchsize, nse), dtype=index_dtype, device=device)
+    values = torch.zeros((*batchsize, nse), dtype=dtype, device=device)
+
+    for batch_index in itertools.product(*(map(list, map(range, batchsize)))):
+
+        if nse_batches[batch_index] == nse:
+            csr = input[batch_index].to_sparse_csr()
+            b_crow_indices = csr.crow_indices()
+            b_col_indices = csr.col_indices()
+            b_values = csr.values()
+        elif nse_batches[batch_index] == 0:
+            b_crow_indices = torch.arange(0, nse + 1, ncols, dtype=index_dtype, device=device)
+            b_col_indices = torch.arange(0, ncols, dtype=index_dtype, device=device).repeat(nrows)
+            b_values = torch.zeros((nse,), dtype=dtype, device=device)
+        else:            
+            # extend the batch with zero values to meet the nse
+            # equality in between all batches
+            b = input[batch_index].to_sparse()
+
+            b_nse, b_indices, b_values = b._nnz(), b._indices(), b._values()
+            assert b_nse < nse
+
+            flat_indices = b_indices[0] * ncols + b_indices[1]
+            combined = torch.cat((torch.arange(ncols * nrows, dtype=index_dtype, device=device), flat_indices))
+            uniques, counts = combined.unique(return_counts=True)
+            extra_flat_indices = uniques[counts == 1][:nse - b_nse]
+            extra_indices = torch.ones((nrows, ncols), dtype=index_dtype, device=device).nonzero()[extra_flat_indices]
+            full_indices = torch.cat((b_indices.T, extra_indices)).T  # unordered
+
+            full_values = torch.zeros((nse,), dtype=dtype, device=device)
+            full_values[:b_values.numel()] = b_values
+
+            # sort unordered full_indices:
+            csr = torch._sparse_coo_tensor_unsafe(full_indices, torch.arange(1, nse + 1, dtype=index_dtype, device=device),
+                                                  (nrows, ncols)).to_sparse_csr()
+
+            b_crow_indices = csr.crow_indices()
+            b_col_indices = csr.col_indices()
+            b_values = full_values[csr.values() - 1]
+
+        crow_indices[batch_index] = b_crow_indices
+        col_indices[batch_index] = b_col_indices
+        values[batch_index] = b_values
+
+    return torch.sparse_csr_tensor(crow_indices, col_indices, values, input.shape)
+
+
+def _transpose_copy(input: Tensor, dim0: int, dim1: int):
+    """Return input.transpose(dim0, dim1) where input dimensionality is 2
+    or greater.
+    """
+    batchsize = input.shape[:-2]
+    if input.layout in {torch.strided, torch.sparse_coo} or len(batchsize) == 0:
+        return input.transpose(dim0, dim1)
+    if dim0 < 0:
+        dim0 = dim0 + len(input.shape)
+    if dim1 < 0:
+        dim1 = dim1 + len(input.shape)
+    if dim0 == dim1:
+        return input
+    dim0 -= len(batchsize)
+    dim1 -= len(batchsize)
+
+    # transpose columns and rows of batches
+    # TODO: move this implementation to aten transpose
+    assert {dim0, dim1} == {0, 1}, (dim0, dim1)
+    nrows, ncols = input.shape[-2:]
+    shape = (*batchsize, ncols, nrows)
+    dtype, device = input.dtype, input.device
+    import itertools
+    if input.layout == torch.sparse_csr:
+        nse = input.values().shape[len(batchsize)]
+        index_dtype = input.crow_indices().dtype
+        crow_indices = torch.zeros((*batchsize, ncols + 1), dtype=index_dtype, device=device)
+        col_indices = torch.zeros((*batchsize, nse), dtype=index_dtype, device=device)
+        values = torch.zeros((*batchsize, nse), dtype=dtype, device=device)
+        for batch_index in itertools.product(*(map(list, map(range, batchsize)))):
+            b = input[batch_index].transpose(dim0, dim1).to_sparse_csr()
+            crow_indices[batch_index] = b.crow_indices()
+            col_indices[batch_index] = b.col_indices()
+            values[batch_index] = b.values()
+        return torch.sparse_csr_tensor(crow_indices, col_indices, values, shape)
+    elif input.layout == torch.sparse_csc:
+        nse = input.values().shape[len(batchsize)]
+        index_dtype = input.ccol_indices().dtype
+        ccol_indices = torch.zeros((*batchsize, nrows + 1), dtype=index_dtype, device=device)
+        row_indices = torch.zeros((*batchsize, nse), dtype=index_dtype, device=device)
+        values = torch.zeros((*batchsize, nse), dtype=dtype, device=device)
+        for batch_index in itertools.product(*(map(list, map(range, batchsize)))):
+            # workaround RuntimeError: Conversion from SparseCsr to SparseCsc is currently not supported:
+            csr = input[batch_index].transpose(dim0, dim1)
+            csr = torch.sparse_csc_tensor(csr.crow_indices(), csr.col_indices(), csr.values(), (nrows, ncols)).to_sparse_csr()
+            b = torch.sparse_csc_tensor(csr.crow_indices(), csr.col_indices(), csr.values(), (ncols, nrows))
+            ccol_indices[batch_index] = b.ccol_indices()
+            row_indices[batch_index] = b.row_indices()
+            values[batch_index] = b.values()
+        return torch.sparse_csc_tensor(ccol_indices, row_indices, values, shape)
+    else:
+        raise NotImplementedError(f'_transpose_copy for input {input.layout} layout')
+
+
+def _to_sparse_csc(input: Tensor):
+    """Convert a tensor to compressed column storage format (CSC). Input
+    tensor must be at least 2D tensor with no dense dimensions.
+    """
+    # TODO: move this implementation to aten to_sparse_csc
+    csr_transposed = _to_sparse_csr(_transpose_copy(input, -2, -1))
+    ccol_indices = csr_transposed.crow_indices()
+    row_indices = csr_transposed.col_indices()
+    values = csr_transposed.values()
+    return torch.sparse_csc_tensor(ccol_indices, row_indices, values, input.shape)
+
+
+def _to_layout(input: Tensor, layout: Layout):
+    """Convert a tensor to a specified layout.
+    """
+    if input.layout == layout:
+        return input
+    elif layout == torch.strided:
+        return input.to_dense()
+    elif layout == torch.sparse_coo:
+        return input.to_sparse()
+    elif layout == torch.sparse_csr:
+        return _to_sparse_csr(input)
+    elif layout == torch.sparse_csc:
+        return _to_sparse_csc(input)
+    else:
+        raise NotImplementedError(f'_to_layout: support for {layout} is not implemented yet')
