@@ -3822,7 +3822,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     }
   } else {
     for (const auto b C10_UNUSED : c10::irange(batches)) {
-      for (const auto c : c10::irange(channels)) {
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         uint32_t e = 0;
         const int16x8_t vzero_point = vdupq_n_s16(zero_points_int16t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);
