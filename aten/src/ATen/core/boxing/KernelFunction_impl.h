@@ -8,20 +8,27 @@ namespace c10 {
 inline KernelFunction::KernelFunction()
     : boxed_kernel_func_()
     , unboxed_kernel_func_(nullptr)
+    , sym_unboxed_kernel_func_(nullptr)
 {}
 
-inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, void* sym_unboxed_kernel_func = nullptr)
   : boxed_kernel_func_(std::move(functor), boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
+  , sym_unboxed_kernel_func_(sym_unboxed_kernel_func)
 {}
 
-inline KernelFunction::KernelFunction(BoxedKernel boxed_fn, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(BoxedKernel boxed_fn, void* unboxed_kernel_func, void* sym_unboxed_kernel_func = nullptr)
   : boxed_kernel_func_(std::move(boxed_fn))
   , unboxed_kernel_func_(unboxed_kernel_func)
+  , sym_unboxed_kernel_func_(sym_unboxed_kernel_func)
 {}
 
 inline bool KernelFunction::isValidUnboxed() const {
   return unboxed_kernel_func_ != nullptr;
+}
+
+inline bool KernelFunction::isValidSymUnboxed() const {
+  return sym_unboxed_kernel_func_ != nullptr;
 }
 
 inline bool KernelFunction::isValid() const {
@@ -43,7 +50,44 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
     return (*func)(functor, dispatchKeySet, std::forward<Args>(args)...);
 }
 
-template<class Return, class... Args>
+template <typename T>
+inline T unpackSymInt(T x) { return x; }
+
+inline int64_t unpackSymInt(c10::SymInt x) {
+  return x.expect_int();
+}
+
+inline c10::IntArrayRef unpackSymInt(c10::SymIntArrayRef x) {
+  return c10::asIntArrayRefSlow(x);
+}
+
+inline c10::optional<int64_t> unpackSymInt(c10::optional<c10::SymInt> x) {
+  return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
+}
+
+template<class Return, class... Args, typename std::enable_if<guts::disjunction<has_symint<Args>...>::value>::type*>
+C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
+    if (sym_unboxed_kernel_func_ != nullptr) {
+      auto *functor = boxed_kernel_func_.getFunctor();
+      return callUnboxedKernelFunction<Return, Args...>(
+          sym_unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(args)...);
+    }
+
+    if (unboxed_kernel_func_ != nullptr) {
+      auto *functor = boxed_kernel_func_.getFunctor();
+      return callUnboxedKernelFunction<Return, Args...>(
+          unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(unpackSymInt<Args>(args))...);
+    }
+
+    return impl::BoxedKernelWrapper<Return(Args...)>::call(
+        boxed_kernel_func_,
+        opHandle,
+        dispatchKeySet,
+        std::forward<Args>(args)...
+    );
+}
+
+template<class Return, class... Args, typename std::enable_if<!guts::disjunction<has_symint<Args>...>::value>::type*>
 C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
@@ -102,10 +146,13 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
 #endif
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
+    auto* unboxed_fn = &impl::wrap_kernel_functor_unboxed<KernelFunctor>::call;
+    void* void_unboxed_fn = reinterpret_cast<void*>(unboxed_fn);
     return KernelFunction(
         std::move(kernelFunctor),
         &impl::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        reinterpret_cast<void*>(&impl::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+        void_unboxed_fn,
+        guts::typelist::true_for_any_type<has_symint, typename guts::infer_function_traits<decltype(unboxed_fn)>::type::parameter_types>::value ? void_unboxed_fn : nullptr
     );
 }
 
