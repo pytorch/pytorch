@@ -1,5 +1,4 @@
 import contextlib
-from typing import Iterator, Set
 import functools
 
 import warnings

@@ -1,5 +1,5 @@
 import torch
-from typing import Iterator, TypeVar
+from typing import TypeVar
 from dataclasses import dataclass
 from contextlib import contextmanager
 
