@@ -1174,11 +1174,16 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor arg,
          std::vector<int64_t>& original_shape,
          int64_t dim) -> nvfuser::Tensor {
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::SqueezeOpRecord(
-            {arg->index}, {output->index}, original_shape, dim));
+        FUSER_PERF_SCOPE("Operators.squeeze");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::SqueezeOpRecord(
+            {fd->recordingState(arg())}, {fd->recordingState(output())}, original_shape, dim));
         return output;
       },
+      py::arg("arg"),
+      py::arg("original_shape"),
+      py::arg("dim"),
       py::return_value_policy::reference);
   nvf_ops.def(
       "var",
