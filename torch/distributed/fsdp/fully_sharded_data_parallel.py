@@ -753,7 +753,6 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_graph_order: List[FullyShardedDataParallel] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
         self._pre_backward_hook_full_params_prefetched: bool = False
-        self._forward_full_params_prefetched: bool = False
         self._init_reshard_after_forward()
         self._exec_order_data = _ExecOrderData()
         # Used for `BACKWARD_POST` prefetching
@@ -1483,7 +1482,6 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_graph_order: List[nn.Module] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
         self._pre_backward_hook_full_params_prefetched: bool = False
-        self._forward_full_params_prefetched: bool = False
 
         for p in self.params:
             if hasattr(p, "_local_shard"):
@@ -2345,23 +2343,9 @@ class FullyShardedDataParallel(nn.Module):
                     input_dtype, *args, **kwargs
                 )
 
-            # Only rebuilding full params when the params are not prefetched in previous layers
-            if not self._forward_full_params_prefetched:
-                self._rebuild_full_params()
-            self._forward_full_params_prefetched = False
+            self._rebuild_full_params()    
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Prefetch next layer's full params in forward pass
-            if self._need_prefetch_full_params(self.training_state):
-                # This guarantees that pre-fetching is initialized only after all
-                # previous computations are finished. Therefore, all gather next layer's
-                # parameters will only overlap with this layer's computation. This
-                # prevents over-prefetching, where multiple layer's parameters are prefetched
-                # before the computation.
-                self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._rebuild_full_params()
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._forward_full_params_prefetched = True
 
             # Register backward hooks to reshard params and reduce-scatter grads.
             # These need to be re-registered every forward pass in some cases where grad_fn
