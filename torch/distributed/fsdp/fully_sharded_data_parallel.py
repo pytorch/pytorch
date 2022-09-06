@@ -153,15 +153,14 @@ class ShardingStrategy(Enum):
               ``DistributedDataParallel`` API. The gradients are synchronized
               via all-reduce after the backward computation. The unsharded
               optimizer states are updated locally.
-    HYBRID_SHARD(future support): Apply ``FULL_SHARD`` intra-node and
+    HYBRID_SHARD: Apply ``FULL_SHARD`` intra-node and
                                   ``NO_SHARD`` inter-node.
 
     """
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-    # TODO
-    # HYBRID_SHARD = auto()
+    HYBRID_SHARD = auto()
 
 
 @dataclass
@@ -527,11 +526,14 @@ class FullyShardedDataParallel(nn.Module):
         module (nn.Module):
             module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
-            process group for sharding
+            process group over which to shard wrapped module over.
         sharding_strategy (Optional[ShardingStrategy]):
             Config sharding algorithm, different sharding algorithm has trade
             off between memory saving and communication overhead. ``FULL_SHARD``
-            will be chosen if sharding_strategy is not specified.
+            will be chosen if sharding_strategy is not specified. Note that if
+            ``HYBRID_SHARD`` is specified, user is expected to pass in a process
+            group over which to shard over, usually a process group over a
+            single node, which can be generated via ``dist.new_subgroups()``.
         cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
@@ -737,6 +739,26 @@ class FullyShardedDataParallel(nn.Module):
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
+        # strategies that need resharding after forward pass
+        self._reshard_after_forward_strategies = [
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.HYBRID_SHARD,
+        ]
+        self.mixed_precision = mixed_precision
+        # Original buffer type (mapping since all buffers may not be of same type). In
+        # the case of mixed precision training, this is used to restore buffers
+        # to their original type (which may not be the same as that of the
+        # parameters in the model) when checkpointing.
+        self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
+
+        # Only handle params which are not already sharded. This enables
+        # sharding individual layers of a Module, with an outer wrapper to
+        # shard any leftover parameters.
+        params = [
+            p for p in module.parameters()
+            if p not in ignored_params and not isinstance(p, FlatParameter)
+        ]
+
         if sync_module_states:
             self._sync_module_states(module, params_to_flatten)
 
@@ -801,6 +823,161 @@ class FullyShardedDataParallel(nn.Module):
             StateDictType.LOCAL_STATE_DICT: self._local_post_load_state_dict_hook,
             StateDictType.SHARDED_STATE_DICT: self._sharded_post_load_state_dict_hook,
         }
+
+        # Flag to guard against preparing gradients multiple times per backward pass.
+        self._pre_backward_hook_has_run = False
+        # Used for prefetching all gather full params in post backward hook
+        self._need_rebuild_full_params = False
+
+        # If specified, offload parameter shard to CPU.
+        if self.cpu_offload.offload_params:
+            for p in self.params:
+                self._offload_to_cpu(p)
+
+        # For validating execution order across ranks
+        self._exec_order_data = _ExecOrderData()
+
+        # Setting communication hook to a default:
+        # ``reduce_scatter`` for shareded strategies and
+        # ``all_reduce`` for ``NO_SHARD``
+        self._communication_hook = self._get_default_comm_hook()
+        self._communication_hook_state = self._get_default_comm_hook_state()
+        self._hook_registered = False
+
+    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
+        auto_wrap_policy = kwargs["auto_wrap_policy"]
+        module = kwargs["module"]
+        assert hasattr(auto_wrap_policy, "tracing_config")
+        if not _TORCH_FX_AVAIL:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should be None when torch.fx is not enabled"
+        elif isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            tracer = auto_wrap_policy.tracing_config.tracer
+            execution_info = _init_execution_info(module)
+
+            for m in module.modules():
+                assert not isinstance(
+                    m, FullyShardedDataParallel
+                ), "The input module of _patch_tracer should not contain FSDP modules"
+
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
+        else:
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
+        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
+        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
+        self.__init__(*args, **kwargs)
+        self._param_exec_order_policy: bool = True
+        # self._param_exec_order_prep_stage is set to True before we get the execution order
+        self._param_exec_order_prep_stage: bool = True
+        # A list that stores the flatten parameters and its name based on the parameter execution order
+        self._fsdp_params_exec_order: List[FlatParameter] = []
+        if _TORCH_FX_AVAIL and isinstance(
+            auto_wrap_policy.tracing_config,
+            TracingConfig
+        ):
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = {}
+            for wrap in self.fsdp_modules(self):
+                module_to_fsdp[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
+            for m in execution_info.module_forward_order:
+                if m in module_to_fsdp:
+                    for flat_param in module_to_fsdp[m].params:
+                        self._fsdp_params_exec_order.append(flat_param)
+            self._param_exec_order_prep_stage = False
+
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                # Assignment by reference, so each children FSDP wrap has access to
+                # the _fsdp_params_exec_order of the root module
+                m._fsdp_params_exec_order = self._fsdp_params_exec_order
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
+
+    def _move_module_if_needed(self, module) -> None:
+        """
+        Moves module if module is on CPU and device_id is specified.
+        If device_id is not specified and module is on CPU, we log a
+        warning to user mentioning to use ``device_id`` argument to speed
+        up initialization performance.
+        """
+        # Move module to device specified. Note that this is done prior to
+        # setting compute_device to ensure that they align.
+        if self.device_id is not None:
+            param = None
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    module = module.to(self.device_id)
+            except StopIteration:
+                # this FSDP instance manages no parameters.
+                pass
+
+            # For GPU modules, module device should match device_id.
+            if (
+                param is not None
+                and not isinstance(param, FlatParameter)
+                and param.device != self.device_id
+            ):
+                raise RuntimeError(
+                    f"Module on rank {self.rank} is given device_id argument "
+                    f"{self.device_id}, but is on {param.device}. "
+                    " Either move module before FSDP init or omit device_id argument."
+                )
+        else:
+            # device_id argument is not specified
+            # If module is on CPU, log a warning asking user to use `device_id` for faster
+            # GPU init.
+            try:
+                # Get the next unflat param
+                param_gen = module.parameters()
+                while True:
+                    param = next(param_gen)
+                    if not isinstance(param, FlatParameter):
+                        break
+
+                if param.device == torch.device("cpu"):
+                    warnings.warn(
+                        "Module is put on CPU and will thus have flattening and sharding"
+                        " run on CPU, which is less efficient than on GPU. We recommend passing in "
+                        "`device_id` argument which will enable FSDP to put module on GPU device,"
+                        " module must also be on GPU device to work with `sync_module_states=True` flag"
+                        " which requires GPU communication."
+                    )
+            except StopIteration:
+                # this FSDP instance manages no parameters
+                pass
+
+    def _init_reshard_after_forward(self):
+        self.reshard_after_forward = (
+            self.sharding_strategy in self._reshard_after_forward_strategies
+        )
 
     def _get_ignored_modules(
         self,
@@ -1509,23 +1686,6 @@ class FullyShardedDataParallel(nn.Module):
         # set 'self.reshard_after_forward' flag based on self.sharding_strategy
         self._init_reshard_after_forward()
 
-    def _init_reshard_after_forward(self):
-        if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
-            # Free full params and keep shard only after forward
-            self.reshard_after_forward = True
-        elif self.sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
-            # Keep full params in the GPU memory until backward
-            # computation is done
-            self.reshard_after_forward = False
-        elif self.sharding_strategy == ShardingStrategy.NO_SHARD:
-            # self.reshard_after_forward is not used when NO_SHARD
-            # is set, just setting it as False here
-            self.reshard_after_forward = False
-        else:
-            raise RuntimeError(
-                "sharding_strategy only supports FULL_SHARD, SHARD_GRAD_OP and NO_SHARD right now."
-            )
-
     def _lazy_init(self) -> None:
         """
         Performs initialization lazily, typically right before the first
@@ -1554,6 +1714,38 @@ class FullyShardedDataParallel(nn.Module):
         # pass gradient computation (though this may not be true)
         self.reshard_after_forward = False
         self._exec_order_data.init(self)
+
+        # Initialize inter-node process group for hybrid shard comm. We assume
+        # passed in process group is the process group over which the model is
+        # sharded, and initialize the iter-node PG here for shard replication.
+        if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+            assert self._is_root
+            sharding_backend = dist.get_backend(self.process_group)
+            # TODO - we are using the overall world size here, but user may wish
+            # to tune this.
+            world_size = dist.get_world_size()
+            # Assuming fully homogeneous setup
+            num_devices = torch.cuda.device_count()
+            num_distinct_nodes = world_size // num_devices
+            my_local_rank = (dist.get_rank() % num_devices)
+            for local_rank in range(num_devices):
+                ranks_for_inter_group = [
+                    local_rank + (i * num_devices) for i in range(num_distinct_nodes)
+                ]
+                # every rank always needs to call dist.new_group
+                grp = dist.new_group(
+                    ranks=ranks_for_inter_group, backend=sharding_backend
+                )
+                if local_rank == my_local_rank:
+                    self._inter_node_pg = grp
+                    print(
+                        f"Global rank {dist.get_rank()} with local_rank {local_rank} assigned to inter-group with ranks {ranks_for_inter_group} "
+                    )
+                    self._default_allreduce_averaging_state = default_hooks.DefaultState(
+                        process_group=self._inter_node_pg
+                    )
+        else:
+            print(" --- not using hybrid shard --")
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances (e.g. streams for overlapping)
         for fsdp_module in self.fsdp_modules(self):
@@ -1566,6 +1758,13 @@ class FullyShardedDataParallel(nn.Module):
                     "set yet or should have been set to `False`"
                 )
                 fsdp_module._is_root = False
+                if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+                    assert hasattr(self, '_inter_node_pg')
+                    assert hasattr(self, '_default_allreduce_averaging_state')
+                    fsdp_module._inter_node_pg = self._inter_node_pg
+                    fsdp_module._default_allreduce_averaging_state = default_hooks.DefaultState(
+                        process_group=fsdp_module._inter_node_pg,
+                    )
                 fsdp_module._streams = self._streams
                 fsdp_module._fsdp_graph_order = self._fsdp_graph_order
                 fsdp_module._exec_order_data = self._exec_order_data
@@ -2923,11 +3122,19 @@ class FullyShardedDataParallel(nn.Module):
                     # happen in arbitrary order, though we tolerate this due to the
                     # (approximate) commutativity of floating-point addition.
                     param.grad = None
+
                     grad_flatten = torch.flatten(grad)
                     chunks = list(grad_flatten.chunk(self.world_size))
                     num_pad = self.world_size * chunks[0].numel() - grad.numel()
                     input_flattened = F.pad(grad_flatten, [0, num_pad])
                     output = torch.zeros_like(chunks[0])
+                    # allreduce first with the inter-node PGs
+                    if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+                        default_hooks.allreduce_hook(
+                            state=self._default_allreduce_averaging_state,
+                            grad=input_flattened,
+                        )
+
                     self._communication_hook(self._communication_hook_state, input_flattened, output)
 
                     self._cast_grad_to_param_dtype(output, param)
@@ -3462,7 +3669,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _should_free_full_params(self):
         return (
-            self.sharding_strategy == ShardingStrategy.FULL_SHARD
+            self.sharding_strategy in self._reshard_after_forward_strategies
             # Optimization where we don't reshard if running Zero-2
             # in no_sync().
             or self._sync_gradients
