@@ -39,7 +39,6 @@ def register_meta(op, register_dispatcher=True):
 
     return wrapper
 
-
 def toRealValueType(dtype):
     from_complex = {
         torch.complex32: torch.half,
@@ -47,6 +46,67 @@ def toRealValueType(dtype):
         torch.cdouble: torch.double,
     }
     return from_complex.get(dtype, dtype)
+
+def infer_size_dv(shape, numel):
+
+    # TODO: smarter way to copy? copy.deepcopy?
+    # can I just use list(shape)?
+    res = list(shape)
+
+    newsize = 1
+    infer_dim = None
+    ndim = len(shape)
+    for dim in range(ndim):
+        if shape[dim] == -1:
+            if infer_dim:
+                raise RuntimeError("only one dimension can be inferred")
+            infer_dim = dim
+        elif shape[dim] >= 0:
+            newsize *= shape[dim]
+        else:
+            raise RuntimeError(f"invalid shape dimension {shape[dim]}")
+
+    if numel == newsize or (infer_dim and newsize > 0 and numel % newsize == 0):
+        if infer_dim:
+            if newsize == 0:
+                raise RuntimeError(f"cannot reshape tensor of 0 elements into shape {shape}" +
+                                   "because the unspecified dimension size -1 can be any" +
+                                   "value and is ambiguous")
+            res[infer_dim] = numel // newsize
+
+        return res
+
+    raise RuntimeError(f"{shape} is invalid for input of size {numel}")
+
+
+def computeStride(sizes, strides, shape):
+    pass
+
+@register_meta([aten.reshape.default], register_dispatcher=False)
+def reshape(self, proposed_shape):
+  if self.is_sparse:
+    # TODO: not sure what else to do here?
+    raise RuntimeError("reshape is not implemented for sparse tensors")
+
+  shape = infer_size_dv(proposed_shape, self.numel())
+
+  if self.device.type == 'mkldnn':
+    # TODO: is this what we should be doing?
+    raise RuntimeError("reshape is not implemented for sparse tensors")
+
+
+  stride = computeStride(self.sizes(), self.strides(), shape)
+
+  if stride:
+    # TODO: we should probably keep these device checks? 
+    if (not self.device.type == 'xla' and  not self.device.type == 'lazy' and  not self.device.type == 'ipu'):
+      # this already has a decomp
+      return self._reshape_alias(shape, stride.value())
+    else:
+      return self.view(shape)
+
+  # TODO: do we need to meta/decomp unsafe_view as well?
+  return self._unsafe_view(self.clone(torch.contiguous_format), shape)
 
 
 @register_meta(aten._fft_c2c.default)
