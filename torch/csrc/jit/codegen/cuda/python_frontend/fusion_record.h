@@ -23,6 +23,7 @@ enum class RecordType {
   Output,
   ReductionOp,
   Scalar,
+  SqueezeOp,
   Start,
   VarianceOp,
   VarianceMeanOp,
@@ -275,21 +276,81 @@ struct OpRecord : RecordFunctor {
 
 struct SqueezeOpRecord : RecordFunctor {
   SqueezeOpRecord(
-      std::vector<size_t> _args,
-      std::vector<size_t> _outputs,
+      std::vector<State> _args,
+      std::vector<State> _outputs,
       std::vector<int64_t>& original_shape,
       int64_t dim)
-      : RecordFunctor(std::move(_args), std::move(_outputs)),
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "squeeze",
+            RecordType::SqueezeOp),
         original_shape_(std::move(original_shape)),
         dim_(dim) {}
   virtual ~SqueezeOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new SqueezeOpRecord(*this);
+  }
+  
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -------------- 16 | 15 --------------  0 |
+  //! | Squeeze Dim hash     | original_shape hash  |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t original_shape_hash = 0;
+    for (auto shape : original_shape_) {
+      original_shape_hash ^= static_cast<size_t>(shape);
+    }
+    size_t squeeze_dim_hash = static_cast<size_t>(dim_);;
+    squeeze_dim_hash = (squeeze_dim_hash & 0xffff) << 16;
+    return result | squeeze_dim_hash | (original_shape_hash & 0xffff);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const SqueezeOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = (original_shape_.size() == child_ptr->original_shape_.size());
+        if (result) {
+          result = (dim_ == child_ptr->dim_);
+        }
+        if (result) {
+          for (size_t i = 0; i < original_shape_.size(); ++i) {
+            if (original_shape_[i] != child_ptr->original_shape_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto output = Nvf::squeeze(arg, original_shape_, dim_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
 
-    auto output = torch::jit::fuser::cuda::squeeze(arg, original_shape_, dim_);
-
-    fd.setFusionState(outputs.at(0), output);
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", original_shape=[";
+    bool first_arg = true;
+    for (auto shape : original_shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << shape;
+    }
+    os << "]";
+    os << ", dim=" << dim_;
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
