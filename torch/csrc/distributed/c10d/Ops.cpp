@@ -6,17 +6,22 @@
 
 namespace c10d {
 namespace {
-c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+broadcast_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  return process_group->broadcast(
+  auto work = process_group->broadcast(
       tensor_vec,
       BroadcastOptions{
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+
+  return std::
+      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+          std::move(tensor_vec), work);
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
@@ -212,7 +217,9 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast(
     const BroadcastOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::broadcast_", "")
-                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                       .typed<std::tuple<
+                           std::vector<at::Tensor>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,
@@ -221,12 +228,12 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast(
   // It's awakward to unbox the opts here and box them again in the custom C++
   // op. But it's also complicated to make opts as a CustomClassHolder. Leave it
   // as it is now.
-  return op.call(
+  return std::get<1>(op.call(
       tensors,
       process_group,
       opts.rootRank,
       opts.rootTensor,
-      opts.timeout.count());
+      opts.timeout.count()));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> allreduce(
