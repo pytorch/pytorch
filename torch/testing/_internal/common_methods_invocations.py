@@ -755,10 +755,11 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
     samples = (
-        (make_arg((S, S), dtype=dtype, device=device), 0, 1),
+        ((S, S), 0, 1),
+        ((M,), 0, 1),
     )
-    for t, hi, lo in samples:
-        yield SampleInput(t, args=(hi, lo))
+    for shape, hi, lo in samples:
+        yield SampleInput(make_arg(shape), args=(hi, lo))
 
 
 def error_inputs_uniform(op, device, **kwargs):
@@ -8051,7 +8052,7 @@ op_db: List[OpInfo] = [
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
            method_variant=None,
-           inplace_variant=torch.Tensor.resize_,
+           inplace_variant=torch.Tensor.uniform_,
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            supports_out=False,
            supports_autograd=False,
