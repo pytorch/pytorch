@@ -5,6 +5,7 @@ on:
     workflows: [pull, trunk, periodic]
     types:
       - completed
+  pull_request:
 
 jobs:
   # the conclusion field in the github context is sometimes null
