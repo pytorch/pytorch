@@ -7,7 +7,7 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -156,6 +156,75 @@ class TestPrims(TestCase):
             len(ops_without_nvfuser_impl) == 0
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
             "while there exists nvfuser implementations for them.")
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_empty_fusion(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a, b, c):
+            return (a, b, c)
+
+        gm = make_fx(func)(a, a, a)
+
+        with self.assertRaisesRegex(AssertionError, "Graph must contain at least one call_function node"):
+            execute(gm, a, a, a, executor="strictly_nvfuser")
+
+        # Should pass with partitioned executor
+        out = execute(gm, a, a, a, executor="nvfuser")
+        self.assertEqual(out, (a, a, a))
+
+    @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_no_args(self, device):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func():
+            return torch.sigmoid(a)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)()
+
+        with self.assertRaisesRegex(AssertionError, "There must be at least one argument"):
+            execute(gm, executor="strictly_nvfuser")
+
+        with self.assertRaisesRegex(AssertionError, "Number of placeholder nodes in the graph must match"):
+            execute(gm, a, executor="strictly_nvfuser")
+
+        # Should pass with partitioned executor
+        out = execute(gm, executor="nvfuser")
+        self.assertEqual(out, func())
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_constant_tensors(self, device):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+        b = torch.randn(3, 3, device=device)
+
+        def func(b):
+            return a + b
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(b)
+
+        with self.assertRaisesRegex(AssertionError, "not supported yet"):
+            execute(gm, b, executor="strictly_nvfuser")
+
+        # Should pass with partitioned executor
+        out = execute(gm, b, executor="nvfuser")
+        self.assertEqual(out, gm(b))
 
     @onlyCUDA
     @skipCUDAIfRocm
