@@ -5,7 +5,7 @@ from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number
+from torch._prims_common import getnvFuserDtype, Number, number_type
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -48,7 +48,7 @@ def to_nvfuser_template_args(args):
                 arg.device.type == "cpu",
             )
         elif isinstance(arg, Number):
-            return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
+            return nvFuserScalarTemplate(getnvFuserDtype(number_type(arg)))
         else:
             return arg
 
