@@ -564,6 +564,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
+  c10::SymInt sym_numel() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_numel_custom();
+    }
+    return sym_numel_default();
+  }
+
+  inline c10::SymInt sym_numel_default() const {
+    return c10::SymInt(numel_);
+  }
+
+  virtual c10::SymInt sym_numel_custom() const;
+
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -1812,9 +1827,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           false,
           "cannot access PyObject for Tensor on interpreter ",
-          self_interpreter->name(),
+          (*self_interpreter)->name(),
           " that has already been used by another torch deploy interpreter ",
-          pyobj_interpreter_.load()->name());
+          (*pyobj_interpreter_.load())->name());
     }
   }
 
@@ -1833,7 +1848,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_;
   }
 
-  impl::PyInterpreter* load_pyobj_interpreter() const;
+  impl::PyInterpreter& load_pyobj_interpreter() const;
 
  public:
   /**

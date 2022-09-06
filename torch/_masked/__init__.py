@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
+from torch.masked import is_masked_tensor, MaskedTensor
 from . import _docs
 
 if TYPE_CHECKING:
@@ -894,7 +895,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             f"_input_mask expects strided or sparse COO or sparse CSR tensor but got {input.layout}"
         )
 
-    mask = kwargs.get("mask")
+    mask = input.get_mask() if is_masked_tensor(input) else kwargs.get("mask")
 
     # default mask
     if mask is None:
@@ -988,31 +989,31 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
 
 
 def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
+    def helper(input, mask):
+        if mask is None:
+            return input
+        canonical_mask = _input_mask(input, mask=mask)
+        if callable(op):
+            fill_value = _reduction_identity(op.__name__, input, *args)
+            return _where(canonical_mask, input, fill_value)
+        else:
+            raise ValueError(
+                f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
+            )
+
     class Combine(torch.autograd.Function):
         @staticmethod
         def forward(ctx, input, mask):
             """Return input with masked-out elements eliminated for the given operations."""
-            ctx.mark_non_differentiable(mask)
             ctx.save_for_backward(mask)
 
-            if mask is None:
-                return input
+            if mask is not None:
+                ctx.mark_non_differentiable(mask)
 
-            canonical_mask = _input_mask(input, mask=mask)
-            if callable(op):
-                fill_value = _reduction_identity(op.__name__, input, *args)
-                result = _where(canonical_mask, input, fill_value)
-            else:
-                raise ValueError(
-                    f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
-                )
-
-            return result
+            return helper(input, mask)
 
         @staticmethod
         def backward(ctx, grad_output):
-            from torch.masked import is_masked_tensor, MaskedTensor
-
             (mask,) = ctx.saved_tensors
             grad_data = (
                 grad_output.get_data() if is_masked_tensor(grad_output) else grad_output
@@ -1020,7 +1021,7 @@ def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
             result = MaskedTensor.from_values(grad_data, mask)
             return result, None
 
-    return Combine.apply(input, mask)
+    return Combine.apply(input.get_data(), input.get_mask()) if is_masked_tensor(input) else helper(input, mask)
 
 
 @_apply_docstring_templates
@@ -1267,9 +1268,9 @@ def amin(
 
     mask_input = _combine_input_and_mask(amin, input, mask)
     dim_ = _canonical_dim(dim, mask_input.ndim)
-    if input.layout == torch.strided:
+    if mask_input.layout == torch.strided:
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
-    elif input.layout == torch.sparse_coo:
+    elif mask_input.layout == torch.sparse_coo:
         if mask is None:
             # See comment in the sparse_csr branch of prod, a similar issue arises here
             # where unspecified elements along a dimension may need to be reduced with the result
@@ -1279,7 +1280,7 @@ def amin(
         return _sparse_coo_scatter_reduction_helper(
             torch.amin, mask_input, dim_, bool(keepdim), dtype
         )
-    elif input.layout == torch.sparse_csr:
+    elif mask_input.layout == torch.sparse_csr:
         if mask is None:
             raise ValueError(
                 "masked amin expects explicit mask for sparse_csr tensor input"
@@ -1289,7 +1290,7 @@ def amin(
         )
     else:
         raise ValueError(
-            f"masked amin expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)"
+            f"masked amin expects strided, sparse_coo or sparse_csr tensor (got {mask_input.layout} tensor)"
         )
 
 
