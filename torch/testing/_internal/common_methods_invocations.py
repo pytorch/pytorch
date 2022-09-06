@@ -755,8 +755,9 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
     samples = (
+        ((M,), -100, 100),
         ((S, S), 0, 1),
-        ((M,), 0, 1),
+        ((S, S, S), 1, 2),
     )
     for shape, hi, lo in samples:
         yield SampleInput(make_arg(shape), args=(hi, lo))
@@ -8060,29 +8061,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_uniform,
            error_inputs_func=error_inputs_uniform,
            skips=(
-               # https://github.com/pytorch/pytorch/issues/81774
+               # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # Tests that assume input is a tensor or sequence of tensors
+               # Tests that assume input tensor has a meningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-               # Lazy tensor failures
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-               # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
-               # Argument types: bool, bool, bool, int, int, Device, boo
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
-               # Captured graph does not contain aten::arange (succeeds on complex!)
-               # g: graph():
-               #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-               #   return (%25)
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', dtypes=(torch.float32,)),
-               DecorateInfo(unittest.expectedFailure,
-                            'TestVmapOperatorsOpInfo', 'vmap_exhaustive_uniform', dtypes=(torch.float32,)),
+               # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     BinaryUfuncInfo('clamp_max',
