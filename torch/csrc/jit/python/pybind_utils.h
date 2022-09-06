@@ -646,7 +646,7 @@ inline IValue argumentToIValue(
     py::handle object) {
   const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.type(), argument.N());
+    return toIValue(object, argument.real_type(), argument.N());
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
@@ -706,6 +706,10 @@ inline py::object toPyObject(IValue ivalue) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      auto py_tensor = py::cast(tensor);
+      if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
+        return py_tensor.attr("_wrapped_number");
+      }
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
@@ -731,6 +735,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());
+  } else if (ivalue.isGenerator()) {
+    return py::cast(ivalue.toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -850,8 +856,7 @@ inline py::object toPyObject(IValue ivalue) {
 #endif
   } else if (ivalue.isSymInt()) {
     auto si = ivalue.toSymInt();
-    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
-                            : py::cast(si.expect_int());
+    return py::cast(si);
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -1188,13 +1193,18 @@ inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    const py::kwargs& kwargs) {
+    const py::kwargs& kwargs,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
   auto opWithStack = getOpWithStack(operations, args, kwargs);
   std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(stack);
+    if (dk) {
+      found_op->getOperationForDispatchKey (*dk)(stack);
+    } else {
+      found_op->getOperation()(stack);
+    }
   }
 
   return createPyObjectForStack(std::move(stack));
@@ -1205,7 +1215,8 @@ inline py::object _get_operation_for_overload_or_packet(
     Symbol symbol,
     py::args args,
     const py::kwargs& kwargs,
-    bool is_overload) {
+    bool is_overload,
+    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
@@ -1232,13 +1243,6 @@ inline py::object _get_operation_for_overload_or_packet(
   }
   if (overloaded_args.size() > 0 ||
       at::impl::PythonTorchFunctionTLS::get_mode()) {
-    std::vector<py::object> overloaded_types;
-    overloaded_types.reserve(overloaded_args.size());
-    for (auto& oarg : overloaded_args) {
-      overloaded_types.push_back(
-          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
-    }
-    py::tuple py_types = py::cast(overloaded_types);
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();
@@ -1265,7 +1269,7 @@ inline py::object _get_operation_for_overload_or_packet(
             self_func.ptr(),
             module_name.c_str()));
   }
-  return invokeOperatorFromPython(operations, args, kwargs);
+  return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
 } // namespace jit

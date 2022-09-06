@@ -11,9 +11,15 @@
 #include <Metal/Metal.h>
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 typedef id<MTLDevice> MTLDevice_t;
+typedef id<MTLLibrary> MTLLibrary_t;
+typedef id<MTLFunction> MTLFunction_t;
+typedef MTLFunctionConstantValues* MTLFunctionConstantValues_t;
 #else
 typedef void* MTLDevice;
 typedef void* MTLDevice_t;
+typedef void* MTLLibrary_t;
+typedef void* MTLFunction_t;
+typedef void* MTLFunctionConstantValues_t;
 #endif
 
 using namespace std;
@@ -48,11 +54,14 @@ class TORCH_API MPSDevice {
     return _mtl_device;
   }
 
+  MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
+
   ~MPSDevice();
 
  private:
   static MPSDevice* _device;
   MTLDevice_t _mtl_device;
+  MTLLibrary_t _mtl_indexing_library;
   MPSDevice();
 };
 

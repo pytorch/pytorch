@@ -34,6 +34,7 @@ class LKJCholesky(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> l = LKJCholesky(3, 0.5)
         >>> l.sample()  # l @ l.T is a sample of a correlation 3x3 matrix
         tensor([[ 1.0000,  0.0000,  0.0000],

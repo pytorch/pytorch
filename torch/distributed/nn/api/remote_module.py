@@ -72,6 +72,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "forward",
 )
 
+
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
     instantiator.instantiate_scriptable_remote_module_template(
@@ -193,6 +194,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -499,6 +501,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -620,6 +623,7 @@ class RemoteModule(_RemoteModule):
     Example::
         Run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc

@@ -1116,9 +1116,12 @@ API Reference
 .. rendered doc.
 .. py:module:: torch.fx.passes
 .. py:module:: torch.fx.passes.infra
+.. py:module:: torch.fx.passes.backends
 .. py:module:: torch.fx.passes.utils
 .. py:module:: torch.fx.passes.tests
 .. py:module:: torch.fx.experimental
 .. py:module:: torch.fx.experimental.unification
 .. py:module:: torch.fx.experimental.unification.multipledispatch
 .. py:module:: torch.fx.experimental.migrate_gradual_types
+.. py:module:: torch.fx.passes.dialect
+.. py:module:: torch.fx.passes.dialect.common

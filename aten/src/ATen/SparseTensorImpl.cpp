@@ -7,15 +7,10 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::SparseCPU)) {
-      return kCPU;
-    } else if (key_set.has(DispatchKey::SparseXPU)) {
-      return kXPU;
-    } else if (key_set.has(DispatchKey::SparseCUDA)) {
-      return kCUDA;
-    } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
-    }
+    auto k = c10::highestPriorityBackendTypeId(key_set);
+    TORCH_CHECK(c10::toFunctionalityKey(k) == DispatchKey::Sparse,
+      "cannot create sparse tensor with non sparse dispatch key ", k);
+    return c10::dispatchKeyToDeviceType(k);
   }
 }
 
@@ -114,7 +109,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = false;
+  coalesced_ = nnz() < 2;
 }
 
 

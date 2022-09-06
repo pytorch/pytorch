@@ -4,9 +4,10 @@
 // i.e. how to make a vector<IValue> from a set of concrete arguments.
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <c10/core/TensorOptions.h>
 
-#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
 
@@ -217,14 +218,13 @@ struct BoxedKernelWrapper<
   >
 > {
   static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     Args... args
   ) {
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
@@ -258,14 +258,13 @@ struct BoxedKernelWrapper<
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
   static at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(outArg, std::forward<OtherArgs>(otherArgs)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -285,14 +284,13 @@ struct BoxedKernelWrapper<
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
   static const at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     const at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -323,14 +321,13 @@ struct BoxedKernelWrapper<
   >
 > {
   static at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     FirstArg firstArg, RestArgs... restArgs
   ) {
     torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -360,8 +357,7 @@ struct BoxedKernelWrapper<
   >
 > {
   static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     Args... args
@@ -370,7 +366,7 @@ struct BoxedKernelWrapper<
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
       "Boxed kernel was expected to return ", RetCount, " values on the stack, ",

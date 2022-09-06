@@ -102,7 +102,9 @@ class TORCH_API LazyGraphExecutor {
   // use it in other cases where `GetIrValueForXXXScalar` is used, as well
   // In order to do that, we need to untangle the cases where we don't need
   // `expand` and where we don't expect a scalar tensor
-  Value GetIrValueForScalarFromCodegen(const at::Scalar& value);
+  Value GetIrValueForScalarFromCodegen(
+      const at::Scalar& value,
+      const BackendDevice& device);
   Value GetIrValueForExpandedScalar(
       const at::Scalar& value,
       const Shape& shape,

@@ -43,12 +43,16 @@ namespace lazy {
 
 class TORCH_API DimensionNode {
  public:
-  virtual bool isDynamic() const {
+  virtual bool isSymbolic() const {
     return false;
+  };
+  virtual int64_t getDynamicValue() const {
+    TORCH_CHECK(false, "NYI");
   };
   virtual int64_t getStaticValue() const {
     TORCH_CHECK(false, "NYI");
   };
+  virtual ~DimensionNode() = default;
 };
 
 } // namespace lazy

@@ -1,8 +1,28 @@
 #include <torch/csrc/profiler/api.h>
 
+#include <torch/csrc/profiler/util.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
+
+ExperimentalConfig::ExperimentalConfig(
+    std::vector<std::string> profiler_metrics,
+    bool profiler_measure_per_kernel)
+    : profiler_metrics{profiler_metrics},
+      profiler_measure_per_kernel{profiler_measure_per_kernel} {}
+
+/*explicit*/ ExperimentalConfig::operator bool() const {
+  return !profiler_metrics.empty();
+}
+
+bool ProfilerConfig::disabled() const {
+  return state == torch::profiler::impl::ProfilerState::Disabled;
+}
+
+bool ProfilerConfig::global() const {
+  return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
+}
 
 namespace {
 enum ProfilerIValueIdx {
@@ -40,11 +60,41 @@ ProfilerConfig ProfilerConfig::fromIValue(
       ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
 }
 
+/*explicit*/ ProfilerThreadLocalStateBase::ProfilerThreadLocalStateBase(
+    const ProfilerConfig& config)
+    : c10::MemoryReportingInfoBase(), config_(config) {}
+
+ProfilerThreadLocalStateBase::~ProfilerThreadLocalStateBase() {
+  if (handle_) {
+    auto handle = handle_;
+    removeCallback();
+    SOFT_ASSERT(false, "Leaked callback handle: ", handle);
+  }
+}
+
+void ProfilerThreadLocalStateBase::setCallbackHandle(
+    at::CallbackHandle handle) {
+  if (handle_) {
+    at::removeCallback(handle_);
+    SOFT_ASSERT(
+        false,
+        "ProfilerStateBase already has a registered callback. "
+        "Removing to avoid leaked callback.");
+  }
+
+  handle_ = handle;
+}
+
+void ProfilerThreadLocalStateBase::removeCallback() {
+  if (handle_) {
+    at::removeCallback(handle_);
+    handle_ = 0;
+  }
+}
+
 bool profilerEnabled() {
   auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
-  return state_ptr &&
-      state_ptr->config().state !=
-      torch::profiler::impl::ProfilerState::Disabled;
+  return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {
@@ -61,26 +111,29 @@ torch::profiler::impl::ProfilerConfig getProfilerConfig() {
   return state_ptr->config();
 }
 
-CUDAStubs::~CUDAStubs() = default;
+ProfilerStubs::~ProfilerStubs() = default;
 
 namespace {
-struct DefaultCUDAStubs : public CUDAStubs {
-  void record(int* /*device*/, CUDAEventStub* /*event*/, int64_t* /*cpu_ns*/)
-      const override {
+struct DefaultCUDAStubs : public ProfilerStubs {
+  void record(
+      int* /*device*/,
+      ProfilerEventStub* /*event*/,
+      int64_t* /*cpu_ns*/) const override {
     fail();
   }
-  float elapsed(const CUDAEventStub* /*event*/, const CUDAEventStub* /*event2*/)
-      const override {
+  float elapsed(
+      const ProfilerEventStub* /*event*/,
+      const ProfilerEventStub* /*event2*/) const override {
     fail();
     return 0.f;
   }
-  void nvtxMarkA(const char* /*name*/) const override {
+  void mark(const char* /*name*/) const override {
     fail();
   }
-  void nvtxRangePushA(const char* /*name*/) const override {
+  void rangePush(const char* /*name*/) const override {
     fail();
   }
-  void nvtxRangePop() const override {
+  void rangePop() const override {
     fail();
   }
   bool enabled() const override {
@@ -100,23 +153,80 @@ struct DefaultCUDAStubs : public CUDAStubs {
   }
 };
 
-const DefaultCUDAStubs default_stubs;
-constexpr const DefaultCUDAStubs* default_stubs_addr = &default_stubs;
+const DefaultCUDAStubs default_cuda_stubs;
+constexpr const DefaultCUDAStubs* default_cuda_stubs_addr = &default_cuda_stubs;
 // Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
-inline const CUDAStubs*& cuda_stubs() {
-  static const CUDAStubs* stubs_ =
-      static_cast<const CUDAStubs*>(default_stubs_addr);
+inline const ProfilerStubs*& cuda_stubs() {
+  static const ProfilerStubs* stubs_ =
+      static_cast<const ProfilerStubs*>(default_cuda_stubs_addr);
+  return stubs_;
+}
+
+struct DefaultITTStubs : public ProfilerStubs {
+  void record(
+      int* /*device*/,
+      ProfilerEventStub* /*event*/,
+      int64_t* /*cpu_ns*/) const override {
+    fail();
+  }
+  float elapsed(
+      const ProfilerEventStub* /*event*/,
+      const ProfilerEventStub* /*event2*/) const override {
+    fail();
+    return 0.f;
+  }
+  void mark(const char* /*name*/) const override {
+    fail();
+  }
+  void rangePush(const char* /*name*/) const override {
+    fail();
+  }
+  void rangePop() const override {
+    fail();
+  }
+  bool enabled() const override {
+    return false;
+  }
+  void onEachDevice(std::function<void(int)> /*op*/) const override {
+    fail();
+  }
+  void synchronize() const override {
+    fail();
+  }
+  ~DefaultITTStubs() override = default;
+
+ private:
+  void fail() const {
+    AT_ERROR("ITT used in profiler but not enabled.");
+  }
+};
+
+const DefaultITTStubs default_itt_stubs;
+constexpr const DefaultITTStubs* default_itt_stubs_addr = &default_itt_stubs;
+// Constant initialization, so it is guaranteed to be initialized before
+// static initialization calls which may invoke registerITTMethods
+inline const ProfilerStubs*& itt_stubs() {
+  static const ProfilerStubs* stubs_ =
+      static_cast<const ProfilerStubs*>(default_itt_stubs_addr);
   return stubs_;
 }
 } // namespace
 
-const CUDAStubs* cudaStubs() {
+const ProfilerStubs* cudaStubs() {
   return cuda_stubs();
 }
 
-void registerCUDAMethods(CUDAStubs* stubs) {
+void registerCUDAMethods(ProfilerStubs* stubs) {
   cuda_stubs() = stubs;
+}
+
+const ProfilerStubs* ittStubs() {
+  return itt_stubs();
+}
+
+void registerITTMethods(ProfilerStubs* stubs) {
+  itt_stubs() = stubs;
 }
 
 } // namespace impl

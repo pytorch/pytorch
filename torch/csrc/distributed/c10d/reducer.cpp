@@ -554,6 +554,37 @@ void Reducer::delay_all_reduce() {
     }
   }
 
+  // To avoid confusion around why static graph is picking up
+  // some parameters as unused on a rank vs not, we log
+  // unused parameter names for each rank for better
+  // debugability when TORCH_DISTRIBUTED_DEBUG is set to
+  // INFO or DETAIL
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
+    // construct one string to output
+    std::ostringstream unused_params_stream;
+
+    for (const auto& unused_index : unused_parameters_) {
+      auto param_name = param_names_.find(unused_index);
+      TORCH_INTERNAL_ASSERT(
+          param_name != param_names_.end(),
+          "Expected to find parameter name from unused parameters map in debug mode.");
+      // Add the param_name
+      unused_params_stream << "{" << param_name->second << "," << unused_index
+                           << "}";
+    }
+
+    // Each rank prints out all the unused parameters detected
+    if (unused_parameters_.size() > 0) {
+      LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                << "Parameter(s) (in the format of {param_name, index}): "
+                << unused_params_stream.str()
+                << " is(are) unused during first iteration. Since"
+                << " static_graph=True is enabled for DDP, we expect"
+                << " this set of unused parameters to remain consistent"
+                << " on this rank throughout the training.";
+    }
+  }
+
   // launch all reduces for all buckets
   for (auto& bucket : buckets_) {
     all_reduce_bucket(bucket);
@@ -846,7 +877,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
+    _AllReduceBySumCommHook allreduce_hook(process_group_);
     return allreduce_hook.runHook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
@@ -1729,13 +1760,11 @@ void Reducer::register_builtin_comm_hook(
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
-      comm_hook_ =
-          std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::AllReduceCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
       break;
     case c10d::BuiltinCommHookType::FP16_COMPRESS:
-      comm_hook_ =
-          std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::FP16CompressCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
       break;
     default:

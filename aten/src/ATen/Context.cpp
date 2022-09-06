@@ -125,7 +125,11 @@ bool Context::checkCuBLASConfigDeterministic() {
 
 void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
+  if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
+    return;
+  }
+
+  auto msg = c10::str(
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
     "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
     "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
@@ -134,6 +138,12 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
     "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
   );
+
+  if (deterministicAlgorithmsWarnOnly()) {
+    TORCH_WARN(msg);
+  } else {
+    TORCH_CHECK(false, msg);
+  }
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -142,6 +152,14 @@ bool Context::benchmarkCuDNN() const {
 
 void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
+}
+
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
 }
 
 bool Context::allowTF32CuBLAS() const {

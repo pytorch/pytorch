@@ -43,14 +43,15 @@ class BaseSparsifier(abc.ABC):
 
     Example::
 
-        >>> config = [{'tensor_fqn': 'layer1.weight', {'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
+        >>> # xdoctest: +SKIP("Can't instantiate abstract class BaseSparsifier with abstract method update_mask")
+        >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
-        self.defaults: Dict[str, Any] = defaults or dict()
+        self.defaults: Dict[str, Any] = defaults or {}
 
         self.state: Dict[str, Dict] = defaultdict(dict)
         self.groups: List[Dict[str, Any]] = []
@@ -233,6 +234,7 @@ class BaseSparsifier(abc.ABC):
                             to save in the `sparse_params`
 
         Examples:
+            >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
             >>> sparsifier.squash_mask()
             >>> hasattr(model.submodule1, 'sparse_params')
@@ -273,7 +275,7 @@ class BaseSparsifier(abc.ABC):
             tensor_name = config['tensor_name']
             parametrize.remove_parametrizations(module, tensor_name,
                                                 leave_parametrized=True)
-            sparse_params = dict()
+            sparse_params = {}
             if params_to_keep is not None:
                 global_params = {k: config[k] for k in params_to_keep}
                 sparse_params.update(global_params)
