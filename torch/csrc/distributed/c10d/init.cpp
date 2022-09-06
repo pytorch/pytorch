@@ -365,6 +365,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_reset_grads",
+          &::c10d::Reducer::set_reset_grads,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
           py::call_guard<py::gil_scoped_release>())

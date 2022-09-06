@@ -1461,7 +1461,7 @@ class DistributedDataParallel(Module, Joinable):
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
-    def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
+    def _register_fused_optim(self, optim: Type, *args, optim_params=None, set_grads_to_none=False, **kwargs):
         r"""
         Registers an optimizer with DDP such that the optimization for a
         parameter will run immediately when that parameter's gradient is
@@ -1482,6 +1482,13 @@ class DistributedDataParallel(Module, Joinable):
             to optimize, similar to `params` argument of traditional `torch.optim`
             Optimizers. If this is omitted, all DDP model parameters will be
             optimized.
+            set_grads_to_none (Optional[bool]): Whether to set grads to None
+            after optimizer runs as hook. Note that if this is ``True``,
+            parameter gradient field will not be populated after control returns
+            back to user after ``backward`` call and there will be no supported
+            way to retrieve the parameter gradient. This option can help save
+            peak memory by setting grads to None throughout the backwards,
+            instead of holding all grads in memory at once.
             **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim_cls`.
 
     .. warning ::
@@ -1523,13 +1530,25 @@ class DistributedDataParallel(Module, Joinable):
         # import as optimizer_overlap module needs to import DistributedDataParallel.
         from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
 
-        overlapped_optim = _as_overlapped_optim(optim, optim_params, *args, **kwargs)
+#        set_grads_to_none=False
+        overlapped_optim = _as_overlapped_optim(
+            optim,
+            optim_params,
+            *args,
+            set_grads_to_none=set_grads_to_none,
+            **kwargs
+        )
         try:
-            overlapped_optim.register_ddp(self)
+            overlapped_optim.register_ddp(
+                self
+            )
         except NotImplementedError:
             raise RuntimeError(
                 f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
             )
+
+        if set_grads_to_none:
+            self.reducer._set_reset_grads()
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0

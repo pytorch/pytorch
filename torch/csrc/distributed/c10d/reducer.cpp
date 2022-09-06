@@ -1320,6 +1320,10 @@ void Reducer::search_unused_parameters(
   }
 }
 
+void Reducer::set_reset_grads() {
+  reset_grads_ = true;
+}
+
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -1442,6 +1446,14 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       }
     }
 
+    if (reset_grads_) {
+      runGradCallbackForVariable(variable, [&](auto& grad) {
+        grad.reset();
+        return false;
+      });
+      continue;
+    }
+
     if (!gradient_as_bucket_view_) {
       RECORD_FUNCTION(
           "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1503,15 +1515,17 @@ void Reducer::finalize_backward() {
         "Expected bucket.future_work not to be null. "
         "This may indicate that communication hook was not properly installed.");
     bucket.future_work->wait();
-    auto future_result = comm_hook_ == nullptr
-        ? detail::parseCppCommHookResult(bucket.future_work->value())
-        : comm_hook_->parseHookResult(bucket.future_work->value());
-    if (bucket.expect_sparse_gradient) {
-      bucket.gradients.copy_(future_result);
-    } else {
-      // Reinitialize only `bucket_views_out` with the future_result by
-      // following the same logic in `initialize_buckets`.
-      populate_bucket_views_out(bucket, future_result);
+    if (!reset_grads_) {
+      auto future_result = comm_hook_ == nullptr
+          ? detail::parseCppCommHookResult(bucket.future_work->value())
+          : comm_hook_->parseHookResult(bucket.future_work->value());
+      if (bucket.expect_sparse_gradient) {
+        bucket.gradients.copy_(future_result);
+      } else {
+        // Reinitialize only `bucket_views_out` with the future_result by
+        // following the same logic in `initialize_buckets`.
+        populate_bucket_views_out(bucket, future_result);
+      }
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass

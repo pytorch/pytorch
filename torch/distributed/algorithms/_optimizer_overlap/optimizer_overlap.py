@@ -32,12 +32,13 @@ def register_overlapped(optim_cls):
 
 
 class OverlappedOptimizer(ABC):
-    def __init__(self, optim_cls: Type) -> None:
+    def __init__(self, optim_cls: Type, set_grads_to_none: bool = False) -> None:
         """
         OverlappedOptimizer is a base class that child classes can implement to
         specify how different optimizers will register themselves with DDP.
         """
         self.optim_cls = optim_cls
+        self.set_grads_to_none = set_grads_to_none
 
     def register_ddp(self, ddp: DistributedDataParallel) -> None:
         """Registers the overlapped optimizer with DDP."""
@@ -56,10 +57,10 @@ class OverlappedOptimizer(ABC):
 class _OverlappedStandardOptimizer(OverlappedOptimizer):
     """Overlaps a regular ``Optimizer``."""
 
-    def __init__(self, optim_cls: Type, params, *optim_args, **optim_kwargs) -> None:
-        super().__init__(optim_cls)
+    def __init__(self, optim_cls: Type, params, *optim_args, set_grads_to_none=False, **optim_kwargs) -> None:
+        super().__init__(optim_cls, set_grads_to_none=set_grads_to_none)
         f_optim = as_functional_optim(self.optim_cls, *optim_args, **optim_kwargs)
-        self._opt_hook_state = _OptimizerHookState(f_optim, params)
+        self._opt_hook_state = _OptimizerHookState(f_optim, params, set_grads_to_none=set_grads_to_none)
 
     def register_ddp(self, ddp_inst: DistributedDataParallel):
         # NOTE: using a custom communication hook and fused optimizer is not
@@ -72,16 +73,16 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
     # TODO: register_fsdp once FSDP supports communication hook.
 
 
-def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
+def _as_overlapped_optim(optim_cls: Type, params, *args, set_grads_to_none=False, **kwargs):
     """
     Returns a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
     """
     for clz in inspect.getmro(optim_cls):
         try:
-            return _registered_overlapped_optims[clz](optim_cls, params, *args, **kwargs)
+            return _registered_overlapped_optims[clz](optim_cls, params, *args, set_grads_to_none=set_grads_to_none, **kwargs)
         except KeyError:
             pass
 
     # Fallback to standard overlapped optimizer, which will raise errors if user
     # is attempting to use an unsupported optimizer.
-    return _OverlappedStandardOptimizer(optim_cls, params, *args, **kwargs)
+    return _OverlappedStandardOptimizer(optim_cls, params, *args, set_grads_to_none=set_grads_to_none, **kwargs)

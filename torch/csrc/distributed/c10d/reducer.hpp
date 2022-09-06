@@ -77,6 +77,8 @@ class TORCH_API Reducer {
   // right now it caputures the starting time of forward in each iteration.
   void prepare_for_forward();
 
+  void set_reset_grads();
+
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The
   // vector is for parameters for a single model replica.
@@ -399,6 +401,8 @@ class TORCH_API Reducer {
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   std::vector<int64_t> backward_stats_;
+
+  bool reset_grads_{false};
 
   bool should_collect_runtime_stats();
   void record_forward_compute_start_time();

@@ -4208,7 +4208,7 @@ class DistributedTest:
 
         def _test_ddp_hook_with_optimizer_parity(
             self, grad_as_bucket_view, static_graph, optim_cls,
-            optimize_subset, *functional_optim_args, **functional_optim_kwargs
+            optimize_subset, set_grads_to_none, *functional_optim_args, **functional_optim_kwargs
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -4262,6 +4262,7 @@ class DistributedTest:
                             optim_cls,
                             *functional_optim_args,
                             optim_params=hook_params,
+                            set_grads_to_none=True,
                             **functional_optim_kwargs,
                         )
                     else:
@@ -4269,6 +4270,7 @@ class DistributedTest:
                         ddp_model_with_optimizer_hook._register_fused_optim(
                             optim_cls,
                             *functional_optim_args,
+                            set_grads_to_none=True,
                             **functional_optim_kwargs,
                         )
 
@@ -4292,16 +4294,25 @@ class DistributedTest:
 
                     # Run optimizer with hook model.
                     for i in range(6):
-                        ddp_model_with_optimizer_hook.zero_grad()
+                        if not set_grads_to_none:
+                            ddp_model_with_optimizer_hook.zero_grad()
                         out = ddp_model_with_optimizer_hook(inp)
                         loss = out.sum()
                         loss.backward()
+                        if not optimize_subset and set_grads_to_none:
+                            for x in ddp_model_with_optimizer_hook.parameters():
+                                self.assertTrue(x.grad is None)
 
                     dist.barrier()
+                    torch.cuda.synchronize()
+                    # print(f"allocated: {torch.cuda.max_memory_allocated()} reserved: {torch.cuda.max_memory_reserved()}")
+                    # return
 
                     # Run regular model.
                     for i in range(6):
-                        ddp_model_with_no_hook.zero_grad()
+                        # For equivalence, specify zero_grad according to
+                        # set_grads_to_none
+                        ddp_model_with_no_hook.zero_grad(set_to_none=set_grads_to_none)
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
                         loss.backward()
@@ -4314,6 +4325,7 @@ class DistributedTest:
                         ddp_model_with_optimizer_hook.parameters(),
                         ddp_model_with_no_hook.parameters(),
                     ):
+                        print(" --- ASSERTING PARAM EQUAL ---")
                         self.assertEqual(hook_param, allreduce_param)
 
                     # Verify optimizer modified appropriate parameter set,
@@ -4335,19 +4347,21 @@ class DistributedTest:
                         )
                     dist.barrier()
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl",
-            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
-        )
+        # @sandcastle_skip_if(
+        #     BACKEND == "nccl",
+        #     "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
+        # )
         @skip_if_lt_x_gpu(2)
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])
         @parametrize("optimize_subset", [True, False])
+        @parametrize("set_grads_to_none", [True, False])
         def test_ddp_hook_with_optimizer_parity_adamw(
             self,
             grad_as_bucket_view,
             static_graph,
             optimize_subset,
+            set_grads_to_none,
         ):
             adamw_lr = 1e-2
             adamw_betas = (0.9, 0.99)
@@ -4357,6 +4371,7 @@ class DistributedTest:
                 static_graph,
                 torch.optim.AdamW,
                 optimize_subset,
+                set_grads_to_none,
                 adamw_lr,
                 betas=adamw_betas,
                 eps=adamw_eps,
@@ -4368,7 +4383,8 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
-        def test_ddp_hook_with_optimizer_parity_adam(self, optimize_subset):
+        @parametrize("set_grads_to_none", [True, False])
+        def test_ddp_hook_with_optimizer_parity_adam(self, optimize_subset, set_grads_to_none):
             adam_lr = 1e-2
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
@@ -4377,6 +4393,7 @@ class DistributedTest:
                 False,  # static graph
                 torch.optim.Adam,
                 optimize_subset,
+                set_grads_to_none,
                 adam_lr,
                 betas=adam_betas,
                 eps=adam_eps,
@@ -4388,7 +4405,8 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
-        def test_ddp_hook_with_optimizer_parity_sgd(self, optimize_subset):
+        @parametrize("set_grads_to_none", [True, False])
+        def test_ddp_hook_with_optimizer_parity_sgd(self, optimize_subset, set_grads_to_none):
             sgd_lr = 1e-2
             sgd_momentum = 0.9
             sgd_weight_decay = 0.01
@@ -4399,6 +4417,7 @@ class DistributedTest:
                 False,  # static_graph
                 torch.optim.SGD,
                 optimize_subset,
+                set_grads_to_none,
                 sgd_lr,
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
