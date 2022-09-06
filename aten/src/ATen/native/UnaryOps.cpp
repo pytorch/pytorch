@@ -611,9 +611,9 @@ Tensor& arctanh_out(const Tensor& self, Tensor& result) { return at::atanh_out(r
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
-Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
-Tensor square(const Tensor& self) { return at::pow(self, 2); }
-Tensor& square_(Tensor& self) { return self.pow_(2); }
+Tensor& square_out(const Tensor& self, Tensor& result) { return at::mul_out(result, self, self); }
+Tensor square(const Tensor& self) { return at::mul(self, self); }
+Tensor& square_(Tensor& self) { return self.mul_(self); }
 
 Tensor& logit_out(const Tensor& self,
     c10::optional<double> eps,
