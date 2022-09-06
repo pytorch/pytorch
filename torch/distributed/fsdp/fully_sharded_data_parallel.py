@@ -158,7 +158,13 @@ class ShardingStrategy(Enum):
               via all-reduce after the backward computation. The unsharded
               optimizer states are updated locally.
     HYBRID_SHARD: Apply ``FULL_SHARD`` intra-node and
-                                  ``NO_SHARD`` inter-node.
+                  ``NO_SHARD`` inter-node. Note that if this strategy is
+                  selected, user is expected to pass in the process group
+                  over which to shard over as ``process_group`` argument into
+                  FSDP, usually a group over a single node, which can be generated
+                  via ``dist.new_subgroups()``. Internally, FSDP will create the
+                  appropriate inter-node process groups over which to replicate
+                  the sharded model.
 
     """
     FULL_SHARD = auto()
