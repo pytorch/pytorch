@@ -103,7 +103,7 @@ def is_inplace(func):
 
 
 def generate_cct_and_mode(enable_recursive_torch_dispatch=False,
-                 autograd_view_consistency=True):
+                          autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
 
@@ -170,12 +170,12 @@ def generate_cct_and_mode(enable_recursive_torch_dispatch=False,
             return f"CompositeCompliantTensor({self.elem})"
 
         @classmethod
-        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
             all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
-            with modes[0].restore():
+            with modes[0]:
                 return func(*args, **kwargs)
 
     class CompositeCompliantTensorMode(TorchDispatchMode):

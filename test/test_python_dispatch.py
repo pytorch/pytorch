@@ -793,6 +793,60 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         self.assertEqual(logs1, logs2)
 
+    def test_torch_dispatch_mode_subclass_priority(self) -> None:
+        class ErrorA(RuntimeError):
+            pass
+
+        class ErrorB(RuntimeError):
+            pass
+
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with AMode():
+                    raise ErrorA
+
+        class B(A):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with BMode():
+                    func(*args, **kwargs)
+
+        class AMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class BMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorB
+
+        a = A(torch.empty(1))
+        b = B(torch.empty(1))
+        with self.assertRaises(ErrorA):
+            a + a
+        with self.assertRaises(ErrorB):
+            a + b
+
+        # B has precedence over A due to the subclass relationship yet
+        # modes take precedence over arguments
+        with self.assertRaises(ErrorA):
+            with AMode():
+                b + b
+        with self.assertRaises(ErrorB):
+            with BMode():
+                a + a
+        with self.assertRaises(ErrorB):
+            with BMode():
+                a + b
+
     def test_torch_dispatch_mode_respects_no_dispatch(self) -> None:
         with capture_logs(is_mode=True) as logs1:
             with LoggingTensorMode():
