@@ -3227,6 +3227,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -3289,6 +3290,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
         xfail('eig'),
@@ -3830,6 +3832,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
+        # throws in vmap on CUDA
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
+        # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
+        # but it passes locally
+        skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
@@ -4428,7 +4435,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:

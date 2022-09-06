@@ -393,7 +393,8 @@ atol_rtol_tensor_batch_rule(
   TORCH_CHECK(input_logical_rank >= 2,
             op_name, ": The input tensor input must have at least 2 dimensions.");
 
-  // atol and rtol's dims must match the number of batch dims of input, which is its dim - 2 (for the matrix dimensions)
+  // atol and rtol's dims must be broadcastable to the number of batch dims of input
+  // which is input's dim - 2 (input represents a batch of matrices, so 2 is for the matrix dimensions)
   const auto input_logical_num_bdims = input_logical_rank - 2;
   const int64_t atol_logical_num_bdims = atol.has_value() ? rankWithoutBatchDim(*atol, atol_bdim) : 0;
   const int64_t rtol_logical_num_bdims = rtol.has_value() ? rankWithoutBatchDim(*rtol, rtol_bdim) : 0;
@@ -403,6 +404,7 @@ atol_rtol_tensor_batch_rule(
   auto atol_ = atol.has_value() ? moveBatchDimToFront(*atol, atol_bdim) : atol;
   auto rtol_ = rtol.has_value() ? moveBatchDimToFront(*rtol, rtol_bdim) : rtol;
 
+  // pad all inputs to have the same number of (non-vmap) batch dimensions
   input_ = maybePadToLogicalRank(input_, input_bdim, max_logical_bdims + 2);
   atol_ = atol_.has_value() ? maybePadToLogicalRank(*atol_, atol_bdim, max_logical_bdims) : atol_;
   rtol_ = rtol_.has_value() ? maybePadToLogicalRank(*rtol_, rtol_bdim, max_logical_bdims) : rtol_;

@@ -33,7 +33,7 @@ template<> inline cudaDataType getCudaDataType<c10::complex<double>>() {
 }
 
 // HIP doesn't define integral types
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
 template<> inline cudaDataType getCudaDataType<uint8_t>() {
   return CUDA_R_8U;
 }
@@ -45,7 +45,7 @@ template<> inline cudaDataType getCudaDataType<int>() {
 }
 #endif
 
-#if !defined(__HIP_PLATFORM_HCC__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template<> inline cudaDataType getCudaDataType<int16_t>() {
   return CUDA_R_16I;
 }
@@ -60,7 +60,7 @@ template<> inline cudaDataType getCudaDataType<at::BFloat16>() {
 inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type) {
   switch (scalar_type) {
 // HIP doesn't define integral types
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
     case c10::ScalarType::Byte:
       return CUDA_R_8U;
     case c10::ScalarType::Char:
@@ -80,7 +80,7 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_C_32F;
     case c10::ScalarType::ComplexDouble:
       return CUDA_C_64F;
-#if !defined(__HIP_PLATFORM_HCC__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     case c10::ScalarType::Short:
       return CUDA_R_16I;
     case c10::ScalarType::Long:

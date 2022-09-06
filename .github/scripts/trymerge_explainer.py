@@ -141,6 +141,6 @@ def get_land_check_troubleshooting_message() -> str:
         " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`"
         + " (optionally with the `ciflow/trunk` to get land checks)"
         + ' or use `@pytorchbot merge -f "some reason here"`.'
-        + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}). \n"
+        + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}). \n\n"
         + CONTACT_US
     )

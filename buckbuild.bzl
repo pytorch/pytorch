@@ -249,6 +249,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -307,6 +308,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -327,6 +329,8 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
@@ -364,7 +368,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -1083,6 +1087,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
