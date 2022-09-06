@@ -173,7 +173,7 @@ def _communicate_optim_state(
             if (
                 fsdp_module.world_size == 1
                 or fsdp_module.sharding_strategy == FSDP.ShardingStrategy.NO_SHARD
-            ):  # TODO (awgu): refactor this once optim state dict uses handles
+            ):
                 tensor_state[state_name] = value.cpu()
                 continue
             if tensor_buffer is None:
