@@ -45,17 +45,15 @@ def _get_masked_fn(fn):
 def _torch_reduce_all(fn):
     def reduce_all(self):
         masked_fn = _get_masked_fn(fn)
-        if self.is_sparse():
-            data = self.get_data().values()
-            mask = self.get_mask().values()
-        else:
-            data = self.get_data()
-            mask = self.get_mask()
+        mask = self.get_mask().values() if self.is_sparse() else self.get_mask()
         # When reduction is "all", then torch.argmin/torch.argmax needs to return the index of the
         # element corresponding to the min/max, but this operation isn't supported correctly for sparse layouts.
         # Therefore, this implementation calculates it using the strides.
-        if fn in {"argmin", "argmax"} and self.is_sparse():
-            sparse_idx = masked_fn(data, mask=mask).to(dtype=torch.int)
+        if fn == "all":
+            result_data = masked_fn(self.get_data(), mask=mask)
+
+        elif fn in {"argmin", "argmax"} and self.is_sparse():
+            sparse_idx = masked_fn(self, mask=mask).to(dtype=torch.int)
             indices = (
                 self.get_data().to_sparse_coo().indices()
                 if not self.is_sparse_coo()
@@ -65,10 +63,12 @@ def _torch_reduce_all(fn):
             stride = self.get_data().size().numel() / torch.tensor(
                 self.get_data().size()
             ).cumprod(0)
+            result_data = torch.sum(idx * stride)
 
-            return MaskedTensor.from_values(torch.sum(idx * stride), torch.any(mask))
-
-        return MaskedTensor.from_values(masked_fn(data, mask=mask), torch.any(mask))
+        else:
+            result_data = masked_fn(self, mask=mask)
+        
+        return MaskedTensor.from_values(result_data, torch.any(mask))
 
     return reduce_all
 
@@ -95,7 +95,7 @@ def _torch_reduce_dim(fn):
             result_data = masked_fn(data, dim=dim, keepdim=keepdim, mask=mask)
         else:
             result_data = masked_fn(
-                data, dim=dim, keepdim=keepdim, dtype=dtype, mask=mask
+                self, dim=dim, keepdim=keepdim, dtype=dtype, mask=self.get_mask()
             )
         return MaskedTensor.from_values(result_data, _multidim_any(mask, dim, keepdim))
 
