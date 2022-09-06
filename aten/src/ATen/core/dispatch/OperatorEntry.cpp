@@ -36,7 +36,10 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 namespace {
   void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
     // TODO: figure out if we can just directly save real schema at def time
-    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def.cloneWithRealTypes(), inferred);
+    c10::optional<std::string> schema_difference = findSchemaDifferences(
+      from_def.cloneWithRealTypes(),
+      inferred.cloneWithRealTypes()
+    );
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
@@ -304,6 +307,21 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+
+  // If the dispatch key is included in CompositeImplicitAutogradNestedTensor,
+  // then we register it to nested-tensor kernel rather than
+  // regular-tensor CompositeImplicitAutograd kernel.
+  // We have no intention to change the behavior of Undefined,
+  // so this nested-tensor branch requires `dispatch_key != DispatchKey::Undefined`
+  // to let the original CompositeImplicitAutograd handle Undefined
+  if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+    if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+      if (!has_backend_kernel) {
+        return {*nested_registration, "nested kernel"};
+      }
+    }
+  }
+
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
