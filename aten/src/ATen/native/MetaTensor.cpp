@@ -29,7 +29,7 @@ Tensor empty_meta_symint(
       size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty_strided_meta(
+Tensor empty_strided_meta_symint(
   SymIntArrayRef size,
   SymIntArrayRef stride,
   c10::optional<ScalarType> dtype_opt,

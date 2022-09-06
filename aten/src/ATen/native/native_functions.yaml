@@ -785,7 +785,7 @@
   variants: function, method
   dispatch:
     ZeroTensor, CPU, CUDA: as_strided_tensorimpl
-    Meta: as_strided_tensorimpl_meta
+    Meta: as_strided_tensorimpl_meta_symint
     MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
@@ -1790,7 +1790,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: diagonal_backward
+    CompositeExplicitAutograd: diagonal_backward_symint
   autogen: diagonal_backward.out
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
@@ -2072,7 +2072,7 @@
 - func: new_empty_strided(Tensor self, SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutogradNonFunctional: new_empty_strided
+    CompositeExplicitAutogradNonFunctional: new_empty_strided_symint
   autogen: new_empty_strided.out
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2165,7 +2165,7 @@
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
     MPS: empty_strided_mps
-    Meta: empty_strided_meta
+    Meta: empty_strided_meta_symint
     QuantizedCPU, QuantizedCUDA: empty_strided_unknown_quantized
   autogen: empty_strided.out
 
@@ -4694,7 +4694,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: as_strided_scatter
+    CompositeExplicitAutograd: as_strided_scatter_symint
   autogen: as_strided_scatter.out
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -7532,6 +7532,8 @@
   variants: function
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: diag_backward_symint
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -12913,7 +12915,7 @@
 - func: as_strided_copy.out(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: as_strided_copy_out
+    CompositeExplicitAutograd: as_strided_copy_out_symint
 
 
 - func: _sparse_broadcast_to_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)

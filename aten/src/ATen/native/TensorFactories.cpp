@@ -398,7 +398,7 @@ Tensor new_empty_symint(
   return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-Tensor new_empty_strided(
+Tensor new_empty_strided_symint(
     const Tensor& self,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride,
