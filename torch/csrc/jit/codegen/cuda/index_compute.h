@@ -130,6 +130,13 @@ class IndexCompute : public BackwardVisitor {
   // map rather than the actual IDs used in the ID expressions.
   bool concrete_id_pass_ = false;
 
+  // Mode of swizzle that are activated in this index compute
+  //  instance. Will treat swizzles of different mode as no-op.
+  // Currently data mode swizzles are handled same as before in IndexSwizzle
+  //  pass, while loop mode swizzles are handled early on in concrete indexing
+  //  pass. See also [Note on swizzle mode]
+  SwizzleMode swizzle_mode_ = SwizzleMode::NoSwizzle;
+
  public:
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
     return index_map_;
@@ -334,6 +341,15 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! root domain of a consumer tensor. The returned index is intended
+  //! to be used to index into Philox pseudo random sequences so that
+  //! inlined multivisit to the same element in a random tensor returns
+  //! consistent values.
+  static std::vector<Val*> getRandomTensorStridedIndices(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops);
+
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is
@@ -361,18 +377,6 @@ class Index {
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
-
-  // Determine if we may run into over reuse of predicates or registers in the
-  // compiler. If the loop can be unrolled and the index and domain are not
-  // "simple" we likely want the loop protected.
-  //
-  // Magic zero protection should only be done for global memory and predicates.
-  // We should avoid use on registers. Shared memory does not require it, but
-  // likely wouldn't hurt.
-  static bool protectWithMagicZero(
-      kir::ForLoop* loop,
-      IterDomain* reference_domain = nullptr,
-      Val* ind = nullptr);
 };
 
 // Used for local and shared index mapping. Returns a map from loops

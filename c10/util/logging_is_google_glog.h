@@ -50,13 +50,14 @@ INSTANTIATE_FOR_CONTAINER(set)
 #include <glog/logging.h>
 
 // Additional macros on top of glog
-#ifndef NDEBUG
 #define TORCH_CHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
 #define TORCH_CHECK_NE(val1, val2) CHECK_NE(val1, val2)
 #define TORCH_CHECK_LE(val1, val2) CHECK_LE(val1, val2)
 #define TORCH_CHECK_LT(val1, val2) CHECK_LT(val1, val2)
 #define TORCH_CHECK_GE(val1, val2) CHECK_GE(val1, val2)
 #define TORCH_CHECK_GT(val1, val2) CHECK_GT(val1, val2)
+
+#ifndef NDEBUG
 #define TORCH_DCHECK_EQ(val1, val2) DCHECK_EQ(val1, val2)
 #define TORCH_DCHECK_NE(val1, val2) DCHECK_NE(val1, val2)
 #define TORCH_DCHECK_LE(val1, val2) DCHECK_LE(val1, val2)
@@ -65,24 +66,6 @@ INSTANTIATE_FOR_CONTAINER(set)
 #define TORCH_DCHECK_GT(val1, val2) DCHECK_GT(val1, val2)
 #else // !NDEBUG
 // These versions generate no code in optimized mode.
-#define TORCH_CHECK_EQ(val1, val2) \
-  while (false)                    \
-  CHECK_EQ(val1, val2)
-#define TORCH_CHECK_NE(val1, val2) \
-  while (false)                    \
-  CHECK_NE(val1, val2)
-#define TORCH_CHECK_LE(val1, val2) \
-  while (false)                    \
-  CHECK_LE(val1, val2)
-#define TORCH_CHECK_LT(val1, val2) \
-  while (false)                    \
-  CHECK_LT(val1, val2)
-#define TORCH_CHECK_GE(val1, val2) \
-  while (false)                    \
-  CHECK_GE(val1, val2)
-#define TORCH_CHECK_GT(val1, val2) \
-  while (false)                    \
-  CHECK_GT(val1, val2)
 #define TORCH_DCHECK_EQ(val1, val2) \
   while (false)                     \
   DCHECK_EQ(val1, val2)

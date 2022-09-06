@@ -1,5 +1,7 @@
 # Owner(s): ["module: onnx"]
 
+import numpy as np
+
 import torch
 from torch.onnx import _experimental, verification
 from torch.testing._internal import common_utils
@@ -78,3 +80,36 @@ class TestVerification(common_utils.TestCase):
             SupportedModel(), test_input_groups
         )
         self.assertEqual(results, "")
+
+    def test_compare_ort_pytorch_outputs_no_raise_with_acceptable_error_percentage(
+        self,
+    ):
+        ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
+        pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
+        verification._compare_ort_pytorch_outputs(
+            ort_outs,
+            pytorch_outs,
+            rtol=1e-5,
+            atol=1e-6,
+            check_shape=True,
+            check_dtype=False,
+            ignore_none=True,
+            acceptable_error_percentage=0.3,
+        )
+
+    def test_compare_ort_pytorch_outputs_raise_without_acceptable_error_percentage(
+        self,
+    ):
+        ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
+        pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
+        with self.assertRaises(AssertionError):
+            verification._compare_ort_pytorch_outputs(
+                ort_outs,
+                pytorch_outs,
+                rtol=1e-5,
+                atol=1e-6,
+                check_shape=True,
+                check_dtype=False,
+                ignore_none=True,
+                acceptable_error_percentage=None,
+            )

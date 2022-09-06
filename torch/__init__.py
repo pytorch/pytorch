@@ -14,7 +14,6 @@ import sys
 import platform
 import textwrap
 import ctypes
-import warnings
 import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -172,20 +171,11 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     # you load consistently use the same libstdc++, or you may have
     # mysterious segfaults.
     #
-    import os as _dl_flags
-    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
-        try:
-            # next try if DLFCN exists
-            import DLFCN as _dl_flags  # type: ignore[import, no-redef]
-        except ImportError:
-            # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags  # type: ignore[import, no-redef]
     old_flags = sys.getdlopenflags()
-    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
     from torch._C import *  # noqa: F403
     sys.setdlopenflags(old_flags)
     del old_flags
-    del _dl_flags
 
 else:
     # Easy way.  You want this most of the time, because it will prevent
@@ -319,6 +309,7 @@ def set_default_tensor_type(t):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
         torch.float32
         >>> torch.set_default_tensor_type(torch.DoubleTensor)
@@ -355,6 +346,7 @@ def set_default_dtype(d):
                                   Either torch.float32 or torch.float64.
 
     Example:
+        >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
         >>> # initial default for floating point is torch.float32
         >>> # Python floats are interpreted as float32
         >>> torch.tensor([1.2, 3]).dtype
@@ -455,6 +447,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -493,6 +486,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
+        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
@@ -882,10 +876,11 @@ from torch import profiler as profiler
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
 import torch.nn.intrinsic
+from torch import ao as ao
+# nn.quant* depends on ao -- so should be after those.
 import torch.nn.quantizable
 import torch.nn.quantized
-# AO depends on nn, as well as quantized stuff -- so should be after those.
-from torch import ao as ao
+import torch.nn.qat
 
 _C._init_names(list(torch._storage_classes))
 

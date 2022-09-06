@@ -392,7 +392,7 @@ std::vector<Shape> compute_shape_std(const at::Tensor& self, bool unbiased) {
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool unbiased,
     bool keepdim) {
   return compute_shape_std(self, dim, c10::nullopt, keepdim);
@@ -452,22 +452,22 @@ std::vector<Shape> compute_shape_expand(
   for (const auto idx : c10::irange(_sizes.size())) {
     if (_sizes[idx].is_symbolic()) {
       c10::SymIntNode symbolicIntNode = _sizes[idx].toSymIntNodeImpl();
-      auto lazySymIntNode =
-          std::dynamic_pointer_cast<torch::lazy::SymIntNodeImpl>(
-              symbolicIntNode);
+      auto* lazySymIntNode =
+          dynamic_cast<torch::lazy::SymIntNodeImpl*>(symbolicIntNode.get());
+      TORCH_INTERNAL_ASSERT(lazySymIntNode);
       auto size_node = lazySymIntNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();
       target_size[idx] = static_value;
     } else {
-      target_size[idx] = _sizes[idx].data();
-      if (_sizes[idx].data() == -1) {
+      target_size[idx] = _sizes[idx].as_int_unchecked();
+      if (_sizes[idx].as_int_unchecked() == -1) {
         // -1 can't be specified for non-existing dimensions
         TORCH_CHECK(idx >= num_new_dimensions);
         target_size[idx] = padded_self[idx];
       } else {
-        target_size[idx] = _sizes[idx].data();
+        target_size[idx] = _sizes[idx].as_int_unchecked();
       }
     }
   }
@@ -518,6 +518,12 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
       "Size overflow");
   out_shape[dim] = extended_dim_shape;
   return {Shape(tensors[0].scalar_type(), out_shape)};
+}
+
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
+    const at::Tensor& self,
+    bool upper) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
@@ -730,6 +736,12 @@ std::vector<Shape> compute_shape_sum(
 
 std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_take(
+    const at::Tensor& self,
+    const at::Tensor& index) {
+  return {Shape(self.scalar_type(), index.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_trace(const at::Tensor& self) {

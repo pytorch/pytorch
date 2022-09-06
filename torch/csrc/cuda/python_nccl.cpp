@@ -8,6 +8,7 @@
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>

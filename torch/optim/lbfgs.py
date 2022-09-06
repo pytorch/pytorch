@@ -285,7 +285,7 @@ class LBFGS(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable): A closure that reevaluates the model
+            closure (Callable): A closure that reevaluates the model
                 and returns the loss.
         """
         assert len(self.param_groups) == 1

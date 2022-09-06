@@ -16,6 +16,11 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
+      run-doxygen:
+        required: false
+        type: boolean
+        default: false
+        description: If set, will enable C++ API doc generation using doxygen / breathe / exhale.
       sync-tag:
         required: false
         type: string
@@ -33,10 +38,16 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: [self-hosted, linux.4xlarge]
     strategy:
       matrix:
-        docs_type: [cpp, python]
+        include:
+          - docs_type: cpp
+            # Nightly cpp docs take about 150m to finish, and the number is stable
+            timeout-minutes: 180
+          - docs_type: python
+            # It takes less than 30m to finish python docs unless there are issues
+            timeout-minutes: 30
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -71,10 +82,13 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        timeout-minutes: ${{ matrix.timeout-minutes }}
+        id: build-docs
         env:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
+          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
@@ -91,6 +105,7 @@ jobs:
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
+            -e RUN_DOXYGEN \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -111,7 +126,7 @@ jobs:
 
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           s3-bucket: doc-previews
@@ -121,7 +136,7 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           if-no-files-found: error

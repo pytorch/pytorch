@@ -468,7 +468,7 @@ def pack_sequence(sequences: List[Tensor], enforce_sorted: bool = True) -> Packe
         >>> b = torch.tensor([4,5])
         >>> c = torch.tensor([6])
         >>> pack_sequence([a, b, c])
-        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
 
 
     Args:
@@ -496,11 +496,14 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
         >>> b = torch.tensor([4,5])
         >>> c = torch.tensor([6])
         >>> sequences = [a, b, c]
-        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> print(sequences)
+        [tensor([1, 2, 3]), tensor([4, 5]), tensor([6])]
         >>> packed_sequences = pack_sequence(sequences)
-        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        >>> print(packed_sequences)
+        PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
         >>> unpacked_sequences = unpack_sequence(packed_sequences)
-        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> print(unpacked_sequences)
+        [tensor([1, 2, 3]), tensor([4, 5]), tensor([6])]
 
 
     Args:

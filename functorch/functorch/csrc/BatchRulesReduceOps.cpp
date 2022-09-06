@@ -20,10 +20,6 @@ Tensor sum_decomp(
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
-Tensor sum_symint_decomp(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 Tensor mean_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
@@ -172,7 +168,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 #define REDUCTION_BOXED_ARGS(op, dim_pos) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_reduction_batch_rule<dim_pos>>());
 
-// Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
+// Skipping all/any since they don't have opinfo tests right now :P
 
 Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
   return at::norm((self - other), p);
@@ -391,6 +387,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2);
+  REDUCTION_BOXED_ARGS(linalg_matrix_norm, 2);
   REDUCTION_BOXED(log_softmax.int);
   REDUCTION_BOXED(logcumsumexp);
   REDUCTION_BOXED(logsumexp);
@@ -426,7 +423,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(_log_softmax);
   REDUCTION_BOXED_ARGS(rot90, 2);
   VMAP_SUPPORT(aminmax, aminmax_batching_rule);
-  m.impl("sum.SymInt", sum_symint_decomp);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
 }

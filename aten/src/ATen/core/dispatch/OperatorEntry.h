@@ -206,6 +206,12 @@ public:
   bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
+  // Retrieves the kernel entry at a particular key.  Symmetric with
+  // hasKernelForDispatchKey.  To get the AnnotatedKernel, see
+  // getKernelForDispatchKey (private)
+  const KernelFunction& kernelForDispatchKey(DispatchKey k) const;
+  // Returns true if the "computed table" has an entry for a particular key.
+  bool hasComputedKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
 
