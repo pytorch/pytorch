@@ -170,6 +170,12 @@
     CPU: _assert_async_cpu
     CUDA: _assert_async_cuda
 
+
+# - func: _assert_true(bool a) -> ()
+
+# - func: _tensor_equal(Tensor a, Tensor b, Dimname[] names) -> bool
+
+
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
