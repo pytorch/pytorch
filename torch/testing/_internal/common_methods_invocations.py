@@ -8082,6 +8082,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', dtypes=(torch.float32,)),
                DecorateInfo(unittest.expectedFailure,
                             'TestVmapOperatorsOpInfo', 'vmap_exhaustive_uniform', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
