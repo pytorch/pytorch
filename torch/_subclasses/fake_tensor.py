@@ -539,7 +539,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with contextlib.nullcontext if not fake_mode else fake_mode.restore():
+        with contextlib.nullcontext() if not fake_mode else fake_mode.restore():
             return func(*args, **kwargs)
 
     @staticmethod
