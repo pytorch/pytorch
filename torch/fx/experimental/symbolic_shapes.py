@@ -13,7 +13,7 @@ aten = torch.ops.aten
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
-    "SymDispatchMode"
+    "SymDispatchMode", "PySymFloat", "sym_float"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -88,11 +88,6 @@ def handle_symbolic_op(func, args, kwargs):
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
-    # TODO: hack, we don't currently support symbolic strides properly
-    # NB: this results in goop in the trace, it will be fixed when we have
-    # proper support
-    if func == torch.ops.aten.stride.default:
-        return create_contiguous(args[0].shape)
 
 def _handle_sym_dispatch(func, args, kwargs):
     global SYM_FUNCTION_MODE
@@ -105,6 +100,11 @@ def _handle_sym_dispatch(func, args, kwargs):
         return mode.__sym_dispatch__(func, types, args, kwargs)
     finally:
         SYM_FUNCTION_MODE = mode
+
+def sym_float(a):
+    if hasattr(a, '__sym_float__'):
+        return a.__sym_float__()
+    return float(a)
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -124,15 +124,39 @@ class PySymInt(object):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def __str__(self):
-        return f"PySymInt({self.expr})"
+        return f"{self.expr}"
+
+    def __repr__(self):
+        return f"{self.expr}"
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     # In the future we'll probably need some explicit way of allowing this
     def __int__(self):
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
+    def __sym_float__(self):
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(sym_float, (self,), {})
+        # TODO: consider constant prop here
+        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
+        # not?
+        return PySymFloat(self.expr, self.shape_env)
+
     def __bool__(self):
         return bool(self.shape_env.evaluate_expr(self.expr))
+
+class PySymFloat:
+    def __init__(self, expr, shape_env, constant=None):
+        self.expr = expr
+        self.shape_env = shape_env
+        self.constant = constant
+
+    def wrap(self, num):
+        return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
+
+    def __str__(self):
+        return f"{self.expr}"
+
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -161,6 +185,7 @@ for method, _func in magic_methods.items():
                 return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
             if isinstance(other, PySymInt):
                 other = other.expr
+            # TODO: consider constant prop here
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
@@ -183,7 +208,7 @@ class ShapeEnv(object):
         # Currently we don't put 0/1 specialization in guards but perhaps we should
         if val == 0 or val == 1:
             return val
-        sympy_expr = sympy.Symbol(name, positive=True)
+        sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         shape_env[sympy_expr] = val
@@ -191,7 +216,10 @@ class ShapeEnv(object):
 
     def try_constantify(self, expr):
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
-        new_shape_env = {k: sympy.Symbol(f'shape_{idx}', positive=True) + 1 for idx, k in enumerate(self.shape_env.keys())}
+        new_shape_env = {
+            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
+            for idx, k in enumerate(self.shape_env.keys())
+        }
         new_expr = expr.subs(new_shape_env)
         new_expr = new_expr.simplify()
         if len(list(new_expr.free_symbols)) == 0:
@@ -225,5 +253,12 @@ class ShapeEnv(object):
 
         expr = expr.simplify()
         concrete_val = expr.subs(self.shape_env)
+
+        # Uncomment this to see what code triggered this guard.
+        # TODO: Save this to the guard representation so you can look
+        # at it later
+        # import traceback
+        # traceback.print_stack()
+
         self.guards.append((expr, concrete_val))
         return concrete_val
