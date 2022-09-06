@@ -341,6 +341,15 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! root domain of a consumer tensor. The returned index is intended
+  //! to be used to index into Philox pseudo random sequences so that
+  //! inlined multivisit to the same element in a random tensor returns
+  //! consistent values.
+  static std::vector<Val*> getRandomTensorStridedIndices(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops);
+
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is

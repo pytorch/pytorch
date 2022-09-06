@@ -557,7 +557,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
-  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "Kind")
+  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::RedOpType::PRODUCT)
@@ -1068,16 +1068,6 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  const ::c10d::AllreduceOptions& opts) {
-                if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    std::vector<at::Tensor> non_const_tensors = tensors;
-                    return self->allreduce(non_const_tensors, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::allreduce(self, tensors, opts);
               },
               py::arg("tensors"),
@@ -1091,15 +1081,6 @@ Arguments:
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    return self->allreduce(xs, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::allreduce(self, xs, opts);
               },
               py::arg("tensors"),
@@ -1114,15 +1095,6 @@ Arguments:
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    return self->allreduce(xs, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::allreduce(self, xs, opts);
               },
               py::arg("tensor"),
@@ -1145,16 +1117,6 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  const ::c10d::ReduceOptions& opts) {
-                if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    std::vector<at::Tensor> non_const_tensors = tensors;
-                    return self->reduce(non_const_tensors, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::reduce(self, tensors, opts);
               },
               py::arg("tensors"),
@@ -1171,15 +1133,6 @@ Arguments:
                 opts.reduceOp = op;
                 opts.rootRank = rootRank;
                 std::vector<at::Tensor> xs = {x};
-                if (op.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    return self->reduce(xs, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::reduce(self, xs, opts);
               },
               py::arg("tensor"),
@@ -1299,22 +1252,6 @@ Arguments:
                  const std::vector<at::Tensor>& output_tensors,
                  const std::vector<std::vector<at::Tensor>>& input_tensors,
                  const ::c10d::ReduceScatterOptions& opts) {
-                if (opts.reduceOp.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    std::vector<at::Tensor> non_const_output_tensors =
-                        output_tensors;
-                    std::vector<std::vector<at::Tensor>>
-                        non_const_input_tensors = input_tensors;
-                    return self->reduce_scatter(
-                        non_const_output_tensors,
-                        non_const_input_tensors,
-                        opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::reduce_scatter(
                     self, output_tensors, input_tensors, opts);
               },
@@ -1333,15 +1270,6 @@ Arguments:
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
-                if (op.op_ == ::c10d::ReduceOp::PREMUL_SUM) {
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
-                  if (self->getBackendName() == "nccl") {
-                    return self->reduce_scatter(outputs, inputs, opts);
-                  }
-#endif
-                  TORCH_CHECK(
-                      false, "ReduceOp.PREMUL_SUM requires NCCL>=2.11.1");
-                }
                 return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
               },
               py::arg("output_tensors"),

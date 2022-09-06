@@ -3,7 +3,7 @@ from typing import Iterator, Set
 import functools
 
 import warnings
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
@@ -104,8 +104,6 @@ class TorchDispatchModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_dispatch__' in dct:
             dct['__torch_dispatch__'] = _wrap_torch_dispatch(dct['__torch_dispatch__'])
         return super().__new__(metacls, name, bases, dct)
