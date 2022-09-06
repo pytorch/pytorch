@@ -243,7 +243,7 @@ def softmax(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
-    return torch._refs.softmax(a=a, dim=dim, dtype=dtype)
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -253,7 +253,7 @@ def softmin(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
-    return torch._refs.softmax(a=-a, dim=dim, dtype=dtype)
+    return torch.softmax(a=-a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 # softplus is implemented specially because it has beta and threshold arguments
@@ -387,7 +387,7 @@ def log_softmax(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
-    return torch._refs.log_softmax(a=a, dim=dim, dtype=dtype)
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 @register_decomposition(torch.ops.aten.margin_ranking_loss)

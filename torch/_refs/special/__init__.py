@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
@@ -68,7 +67,7 @@ def log_softmax(
     dim: int,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
-    return torch._refs.log_softmax(a=a, dim=dim, dtype=dtype)
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -77,7 +76,7 @@ def softmax(
     dim: int,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
-    return torch._refs.softmax(a=a, dim=dim, dtype=dtype)
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 zeta = _make_elementwise_binary_reference(
