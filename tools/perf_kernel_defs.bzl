@@ -1,4 +1,5 @@
 load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+load("@fbsource//tools/build_defs/buck2:is_buck2.bzl", "is_buck2")
 
 is_dbg_build = native.read_config("fbcode", "build_mode", "").find("dbg") != -1
 is_sanitizer = native.read_config("fbcode", "sanitizer", "") != ""
@@ -18,9 +19,14 @@ def define_perf_kernels(
     ] if not is_dbg_build and not is_sanitizer else [])
 
     compiler_specific_flags = {
-        "clang": vectorize_flags,
+        "clang": [],
         "gcc": [],
     }
+
+    compiler_specific_flags["clang"] += vectorize_flags if not is_buck2() else select({
+        "DEFAULT": vectorize_flags,
+        "ovr_config//cpu:arm64": [],
+    })
 
     compiler_specific_flags["clang"] += ["-Wno-pass-failed"]
 
