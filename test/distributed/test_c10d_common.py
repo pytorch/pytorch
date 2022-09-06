@@ -53,7 +53,6 @@ from torch.utils._pytree import (
     tree_flatten,
     tree_map,
     tree_map_only,
-    tree_unflatten
 )
 from torch.utils.checkpoint import checkpoint
 
