@@ -16866,12 +16866,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
