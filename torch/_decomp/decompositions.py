@@ -541,6 +541,32 @@ def binary_cross_entropy_backward(
     return result
 
 
+@register_decomposition(aten.soft_margin_loss)
+@out_wrapper()
+@pw_cast_for_opmath
+def soft_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    loss = torch.log1p(torch.exp(-input * target))
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.soft_margin_loss_backward)
+@pw_cast_for_opmath
+def soft_margin_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    grad_input = target * grad_output * (torch.sigmoid(target * self) - 1)
+    if reduction == Reduction.MEAN.value:
+        grad_input = grad_input / self.numel()
+    return grad_input
+
+
 @register_decomposition(aten._euclidean_dist)
 def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
     x1_norm = x1.pow(2).sum(-1, True)
@@ -598,6 +624,69 @@ def _log_softmax_backward_data(
         grad_output, dim=dim, keepdim=True
     )
     return grad_input
+
+
+@register_decomposition(aten.im2col)
+def im2col(
+    input: Tensor,
+    kernel_size: List[int],
+    dilation: List[int],
+    padding: List[int],
+    stride: List[int],
+) -> Tensor:
+    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
+    utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
+
+    batch_dim = input.size(0)
+    channel_dim = input.size(1)
+    input_h = input.size(2)
+    input_w = input.size(3)
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    def _get_im2col_indices_along_dim(
+        input_d, kernel_d, dilation_d, padding_d, stride_d
+    ):
+        blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
+
+        # Stride kernel over input and find starting indices along dim d
+        blocks_d_indices = torch.arange(
+            0, blocks_d, stride_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(0)
+        num_blocks = (blocks_d - 1) // stride_d + 1
+
+        # Apply dilation on kernel and find its indices along dim d
+        kernel_grid = torch.arange(
+            0, kernel_d * dilation_d, dilation_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(-1)
+
+        # Broadcast and add kernel staring positions (indices) with
+        # kernel_grid along dim d, to get block indices along dim d
+        block_mask = blocks_d_indices + kernel_grid
+
+        return block_mask, num_blocks
+
+    blocks_row_indices, num_blocks_row = _get_im2col_indices_along_dim(
+        input_h, kernel_h, dilation_h, padding_h, stride_h
+    )
+    blocks_col_indices, num_blocks_col = _get_im2col_indices_along_dim(
+        input_w, kernel_w, dilation_w, padding_w, stride_w
+    )
+
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+
+    blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
+    output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
+    output = output.permute(0, 1, 2, 4, 3, 5)
+    return output.reshape(
+        batch_dim, channel_dim * kernel_h * kernel_w, num_blocks_row * num_blocks_col
+    )
 
 
 # TODO: the type annotations on arguments are not quite right
@@ -845,6 +934,94 @@ def native_group_norm(
     mean = mean.to(dtype=input.dtype)
     rstd = rstd.to(dtype=input.dtype)
     return (out, mean, rstd)
+
+
+@register_decomposition(aten.native_group_norm_backward)
+@pw_cast_for_opmath
+def native_group_norm_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    utils.check_same_device(
+        grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
+    )
+    utils.check_same_shape(input, grad_output, allow_cpu_scalar_tensors=False)
+    utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
+    utils.check(
+        input.numel() == N * C * HxW,
+        lambda: f"Expect input to have { N * C * HxW} elements",
+    )
+    utils.check(
+        mean.shape == (N, group),
+        lambda: f"Expect mean to have shape ({N}, {group}, but got {mean.shape}",
+    )
+    utils.check(
+        gamma is None or gamma.numel() == C,
+        lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
+    )
+
+    cpg, _rem = divmod(C, group)
+    utils.check(
+        _rem == 0,
+        lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
+    )
+
+    # Compute Internal gradients
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
+    db = grad_output.view(N, C, HxW).sum(dim=[2])
+
+    d_input: Optional[Tensor] = None
+    d_gamma: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
+    if output_mask[0]:
+        s = 1.0 / (HxW * cpg)
+        if gamma is not None:
+            ds_val = torch.mul(ds, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            db_val = torch.mul(db, gamma.unsqueeze(0)).reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                gamma.reshape(1, group, cpg),
+            )
+        else:
+            ds_val = ds.reshape(N, group, cpg).sum(2)
+            db_val = db.reshape(N, group, cpg).sum(2)
+            c1 = torch.mul(
+                rstd.unsqueeze(-1),
+                torch.ones((1, group, cpg), device=rstd.device),
+            )
+        c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
+        c3 = -c2 * mean - db_val * rstd * s
+
+        c1 = c1.unsqueeze(-1)
+        c2 = _unsqueeze_to_dim(c2, 4)
+        c3 = _unsqueeze_to_dim(c3, 4)
+        d_input = (
+            torch.mul(grad_output.reshape(N, group, cpg, HxW), c1)
+            + torch.mul(input.reshape(N, group, cpg, HxW), c2)
+            + c3
+        )
+        d_input = d_input.reshape(input.shape).to(input.dtype)
+    if output_mask[1]:
+        d_gamma = (
+            (
+                (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
+                * rstd.unsqueeze(-1)
+            )
+            .sum(dim=[0])
+            .reshape(C)
+        )
+    if output_mask[2]:
+        d_bias = db.sum(dim=[0])
+
+    return (d_input, d_gamma, d_bias)
 
 
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
