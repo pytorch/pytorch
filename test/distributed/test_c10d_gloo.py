@@ -2352,7 +2352,13 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     def _get_default_group(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        return c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
 
     def test_allreduce_work_wait_cpu(self):
         self._test_allreduce_work_wait(torch.ones(2, 2) * self.rank)
@@ -2369,6 +2375,15 @@ class CompilerTest(test_c10d_common.CompilerTest):
     @skip_if_lt_x_gpu(2)
     def test_allgather_work_wait_gpu(self):
         self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_broadcast_work_wait_cpu(self):
+        self._test_broadcast_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_work_wait_gpu(self):
+        self._test_broadcast_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
