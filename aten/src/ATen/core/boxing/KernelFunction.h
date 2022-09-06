@@ -82,10 +82,7 @@ public:
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
-  template<class Return, class... Args, typename std::enable_if<guts::disjunction<has_symint<Args>...>::value>::type* = nullptr>
-  Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
-
-  template<class Return, class... Args, typename std::enable_if<!guts::disjunction<has_symint<Args>...>::value>::type* = nullptr>
+  template<class Return, class... Args>
   Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
 
   /**
