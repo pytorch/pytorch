@@ -401,6 +401,35 @@ class TestPrims(TestCase):
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
 
+    @dtypes(torch.float32, torch.float16)
+    def test_batch_norm_backward_nvprims(self, device, dtype):
+        # This test verifies that the backward pass of batch norm is correctly decomposed into nvprims
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+
+        samples_iter = sample_inputs_batch_norm(None, device, dtype, requires_grad=True)
+        sample = next(samples_iter)
+        grad = torch.randn_like(sample.input)
+
+        def func(grad, input, weight, rm, rv, eps, train):
+            return torch.ops.aten.native_batch_norm_backward.default(
+                grad, input, weight, rm, rv, rm, rv, train, eps, [True, True, True]
+            )
+
+        args = sample.args
+        kwargs = sample.kwargs
+        all_args = [grad, sample.input, args[2], args[0], args[1], kwargs['eps'], kwargs['training']]
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(*all_args)
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_batch_norm_backward = any(
+            torch.ops.aten.native_batch_norm_backward.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_batch_norm_backward)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
