@@ -29,11 +29,8 @@ class TestPrims(TestCase):
     @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
-        # nvfuser is not currently capable of realizing a broadcasted tensor
-        # when the broadcast is the only operation.  Another op is needed.
         def _wrapper(a, b, broadcast_dimensions):
-            a_bc = prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
-            return prims.add(a_bc, b)
+            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
 
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
