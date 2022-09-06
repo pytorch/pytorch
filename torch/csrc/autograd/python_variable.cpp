@@ -2498,7 +2498,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
   at::impl::MaybeSetTLSOnEntryGuard guard;
   auto out = torchDispatchFromTensorImpl(
       self,
-      func_name,
+      "sym_numel",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
@@ -2508,10 +2508,6 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
       "torch.ops.aten");
 
   if (out == Py_None) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        std::string("Cannot call ") + func_name +
-            " on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
   return torch::is_symint_node(out)
@@ -2525,7 +2521,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
   at::impl::MaybeSetTLSOnEntryGuard guard;
   auto out = torchDispatchFromTensorImpl(
       self,
-      func_name,
+      "sym_storage_offset",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
@@ -2535,10 +2531,6 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
       "torch.ops.aten");
 
   if (out == Py_None) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        std::string("Cannot call ") + func_name +
-            " on a tensor with symbolic shapes/strides");
     return self->sym_storage_offset_default();
   }
   return torch::is_symint_node(out)
