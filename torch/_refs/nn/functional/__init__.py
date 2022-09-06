@@ -240,6 +240,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 def softmax(
     a: TensorLikeType,
     dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
@@ -250,6 +251,7 @@ def softmax(
 def softmin(
     a: TensorLikeType,
     dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
@@ -384,6 +386,7 @@ def l1_loss(
 def log_softmax(
     a: TensorLikeType,
     dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
