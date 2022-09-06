@@ -7,7 +7,6 @@ from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils._mode_utils import no_dispatch
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
