@@ -3,7 +3,6 @@
 import warnings
 
 import torch
-from torch._masked import _sparse_coo_where, _sparse_csr_where
 from torch.overrides import get_default_nowrap_functions
 
 
@@ -171,10 +170,10 @@ class _MaskedToDense(torch.autograd.Function):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToDense forward: input must be a MaskedTensor.")
 
-        if input.layout() == torch.strided:
+        if input.layout == torch.strided:
             return input
 
-        ctx.layout = input.layout()
+        ctx.layout = input.layout
         data = input.get_data()
         mask = input.get_mask()
 
@@ -200,7 +199,7 @@ class _MaskedToSparse(torch.autograd.Function):
             raise ValueError("MaskedToSparse forward: input must be a MaskedTensor.")
 
         # Following the convention from sparse tensors that to_sparse always means that we convert to sparse_coo
-        if input.layout() == torch.sparse_coo:
+        if input.layout == torch.sparse_coo:
             return input
 
         data = input.get_data()
@@ -224,7 +223,7 @@ class _MaskedToSparseCsr(torch.autograd.Function):
         if input._masked_data.ndim != 2:
             raise ValueError(f"Only 2D tensors can be converted to the SparseCsr layout but got shape: {input._masked_data.size()}")
 
-        if input.layout() == torch.sparse_csr:
+        if input.layout == torch.sparse_csr:
             return input
 
         data = input.get_data()
@@ -281,6 +280,8 @@ class MaskedTensor(torch.Tensor):
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 
     def _preprocess_data(self, data, mask):
+        from torch._masked import _sparse_coo_where, _sparse_csr_where
+
         if data.layout != mask.layout:
             raise TypeError("data and mask must have the same layout.")
         if data.layout == torch.sparse_coo:
@@ -310,7 +311,7 @@ class MaskedTensor(torch.Tensor):
             if not _tensors_match(
                 data.crow_indices(), mask.crow_indices(), exact=True
             ) or not _tensors_match(data.col_indices(), mask.col_indices(), exact=True):
-                raise ValueError("data and mask are both spares CSR tensors but do not share either crow or col indices.")
+                raise ValueError("data and mask are both sparse CSR tensors but do not share either crow or col indices.")
         if mask.dtype != torch.bool:
             raise TypeError("mask must have dtype bool.")
         if not (
@@ -323,7 +324,7 @@ class MaskedTensor(torch.Tensor):
             or data.dtype == torch.int32
             or data.dtype == torch.int64
         ):
-            raise TypeError("{data.dtype} is not supported in MaskedTensor.")
+            raise TypeError(f"{data.dtype} is not supported in MaskedTensor.")
         if data.dim() != mask.dim():
             raise ValueError("data.dim() must equal mask.dim()")
         if data.size() != mask.size():
@@ -618,14 +619,11 @@ class MaskedTensor(torch.Tensor):
     def get_mask(self):
         return self._masked_mask
 
-    def layout(self):
-        return self.get_data().layout
-
     def is_sparse_coo(self):
-        return self.layout() == torch.sparse_coo
+        return self.layout == torch.sparse_coo
 
     def is_sparse_csr(self):
-        return self.layout() == torch.sparse_csr
+        return self.layout == torch.sparse_csr
 
     # Update later to support more sparse layouts
     def is_sparse(self):

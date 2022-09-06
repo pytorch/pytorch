@@ -4,13 +4,13 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 import unittest
 import torch
 import operator
 import itertools
 from torch.utils._pytree import tree_map
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
 
 aten = torch.ops.aten
 
@@ -137,6 +137,7 @@ def create_symbolic_tensor(name, arg, shape_env):
 CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
 
 
+@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
     @skipIfNoSympy
@@ -287,6 +288,13 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
+
+    @skipIfNoSympy
+    def test_int_to_float(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        r = sym_float(x.shape[0])
+        self.assertTrue(isinstance(r, torch.SymFloatNode))
 
     @skipIfNoSympy
     def test_aten_ops(self):
