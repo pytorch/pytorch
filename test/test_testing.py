@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable, Iterator, List, Tuple, Generator, Sequence
 
 import torch
 
@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -1813,6 +1813,22 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
+
+
+class TestOpInfoSampleFunctions(TestCase):
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_opinfo_sample_generators(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        if isinstance(samples, Sequence):
+            msg = (
+                "Only short sample sequences are allowed to return lists"
+                ", use a coroutine which yields samples instead")
+            self.assertTrue(len(samples) < 4, msg=msg)
+        else:
+            self.assertTrue(isinstance(samples, Generator))
+
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 
 
 if __name__ == '__main__':
