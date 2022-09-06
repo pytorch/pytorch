@@ -839,7 +839,7 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
-def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, randomness: str = "error"):
+def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using forward-mode autodiff
@@ -856,7 +856,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, random
             auxiliary objects that will not be differentiated.
             Default: False.
         randomness(str): Flag indicating what type of randomness to use.
-            See :func:`vmap`. Allowed: "different", "same", "error".
+            See :func:`vmap` for more detail. Allowed: "different", "same", "error".
             Default: "error"
 
     Returns:
