@@ -3,8 +3,8 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
@@ -156,8 +157,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -189,6 +190,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # This exceeds default tolerances only on CPU, on CUDA it's fine
+        (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -280,6 +283,7 @@ CROSS_REF_EXCLUDE_SET = {
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
     (None, None, "meshgrid"),
+    (None, None, "norm"),
 }
 
 all_decomposed = set()
@@ -354,6 +358,7 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
             None,
@@ -373,14 +378,8 @@ class TestDecomp(TestCase):
         saved_precision = self.precision
         saved_rel_tol = self.rel_tol
 
-        class DecompCrossRefMode(torch.Tensor):
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                with no_dispatch():
-                    return cls._torch_dispatch(func, types, args, kwargs)
-
-            @classmethod
-            def _torch_dispatch(cls, func, types, args=(), kwargs=None):
+        class DecompCrossRefMode(TorchDispatchMode):
+            def _torch_dispatch(self, func, types, args=(), kwargs=None):
                 self.precision = saved_precision
                 self.rel_tol = saved_rel_tol
 
@@ -476,7 +475,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with DecompCrossRefMode():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -485,7 +484,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode):
+                    with DecompCrossRefMode():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -494,7 +493,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with DecompCrossRefMode():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)

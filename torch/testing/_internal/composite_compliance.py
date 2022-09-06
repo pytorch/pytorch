@@ -6,7 +6,7 @@ import itertools
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
-from torch.utils._mode_utils import no_dispatch, all_same_mode, find_outermost_mode
+from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
 from typing import Callable
@@ -103,7 +103,7 @@ def is_inplace(func):
 
 
 def generate_cct_and_mode(enable_recursive_torch_dispatch=False,
-                 autograd_view_consistency=True):
+                          autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
 
@@ -170,7 +170,7 @@ def generate_cct_and_mode(enable_recursive_torch_dispatch=False,
             return f"CompositeCompliantTensor({self.elem})"
 
         @classmethod
-        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
             all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):

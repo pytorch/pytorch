@@ -1,3 +1,4 @@
+#include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/UCCForNCCL.hpp>
 #include <sstream>
@@ -32,31 +33,13 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-// RAII helper class to manage NCCL group API and CUDA free mutex.
-// The destructor is allowed to throw since this helper class only
-// manages group and lock lifetimes.
-struct AutoNcclGroup {
-  AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
-#endif
-  }
-  ~AutoNcclGroup() noexcept(false) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-#endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-  }
-};
-
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
 #define NCCL_HAS_AVG 1
 #endif
 
 // NCCL op mapping
-const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
+const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
@@ -91,7 +74,37 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
   return it->second;
 }
 
-ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
+template <typename T, ncclDataType_t dataType>
+ncclRedOpRAII unpackPreMulSum(
+    const ReduceOp& reduceOp,
+    const ncclComm_t& comm,
+    int dev_in_group) {
+  const auto* preMulSupplement =
+      reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
+  ncclRedOp_t preMulSum;
+  bool has_tensor = !preMulSupplement->tensor_factors.empty();
+  auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
+  T* ptr_factor = has_tensor
+      ? preMulSupplement->tensor_factors[dev_in_group].data_ptr<T>()
+      : nullptr;
+  T scalar_factor = T(preMulSupplement->double_factor);
+  ncclRedOpCreatePreMulSum(
+      &preMulSum,
+      has_tensor ? ptr_factor : &scalar_factor,
+      dataType,
+      residence,
+      comm);
+  return ncclRedOpRAII(preMulSum, comm);
+}
+#endif
+
+ncclRedOpRAII getNcclReduceOp(
+    const ReduceOp& reduceOp,
+    at::Tensor& input,
+    const ncclDataType_t& dataType,
+    const ncclComm_t& comm,
+    int dev_in_group) {
   try {
     if (input.scalar_type() == at::kBool) {
       if (reduceOp == ReduceOp::SUM) {
@@ -104,6 +117,28 @@ ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
       if (reduceOp == ReduceOp::AVG) {
         TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
       }
+#endif
+    }
+    if (reduceOp == ReduceOp::PREMUL_SUM) {
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
+      switch (dataType) {
+        case ncclHalf:
+          return unpackPreMulSum<at::Half, ncclHalf>(
+              reduceOp, comm, dev_in_group);
+        case ncclFloat:
+          return unpackPreMulSum<float, ncclFloat>(
+              reduceOp, comm, dev_in_group);
+        case ncclDouble:
+          return unpackPreMulSum<double, ncclDouble>(
+              reduceOp, comm, dev_in_group);
+        default:
+          TORCH_CHECK(
+              false, "PreMulSum Data type must be half, float, or double");
+          ncclRedOp_t unused;
+          return unused;
+      }
+#else
+      TORCH_CHECK(false, "PreMulSum requires NCCL>=2.11.1");
 #endif
     }
     return ncclOp.at(reduceOp);
@@ -1543,7 +1578,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   pre(ncclStreams);
 
   {
-    AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
     for (const auto i : c10::irange(inputs.size())) {
       if (!inputs_same_dev || (inputs_same_dev && i == 0)) {
         gpuGuard.set_index(devices[i].index());
@@ -1686,7 +1721,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   }
 
   {
-    AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
     for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
@@ -1772,6 +1807,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  int dev_in_group = 0;
   return collective(
       tensors,
       tensors,
@@ -1779,12 +1815,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
-            getNcclDataType(input.scalar_type()),
-            getNcclReduceOp(opts.reduceOp, input),
+            ncclDataType,
+            ncclReduceOp,
             comm,
             stream.stream());
       },
@@ -1934,6 +1973,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
 
+  int dev_in_group = 0;
   return collective(
       tensors,
       tensors,
@@ -1942,12 +1982,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
-            getNcclDataType(input.scalar_type()),
-            getNcclReduceOp(opts.reduceOp, input),
+            ncclDataType,
+            ncclReduceOp,
             root,
             comm,
             stream.stream());
@@ -1987,6 +2030,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_oop(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
 
+  int dev_in_group{0};
   return collective(
       inputTensors,
       outputTensors,
@@ -1995,12 +2039,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_oop(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * inputTensors.size() + opts.rootTensor;
+        const auto ncclDataType = getNcclDataType(input.scalar_type());
+        const auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
-            getNcclDataType(input.scalar_type()),
-            getNcclReduceOp(opts.reduceOp, input),
+            ncclDataType,
+            ncclReduceOp,
             (int)root,
             comm,
             stream.stream());
@@ -2124,6 +2171,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>()); // outSplitSizes
 
+    int dev_in_group{0};
     auto inputFlattened =
         flatten_for_scatter_gather(inputTensors, outputTensors, size_);
     check_gpu_tensors_different_devices(inputFlattened);
@@ -2137,12 +2185,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
             at::cuda::CUDAStream& stream) {
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
+          const auto ncclDataType = getNcclDataType(input.scalar_type());
+          const auto ncclReduceOp = getNcclReduceOp(
+              opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
           return ncclReduceScatter(
               input.data_ptr(),
               output.data_ptr(),
               output.numel(),
-              getNcclDataType(input.scalar_type()),
-              getNcclReduceOp(opts.reduceOp, input),
+              ncclDataType,
+              ncclReduceOp,
               comm,
               stream.stream());
         },
@@ -2221,6 +2272,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
   auto inputs = std::vector<at::Tensor>{inputTensor};
   auto outputs = std::vector<at::Tensor>{outputTensor};
 
+  int dev_in_group = 0;
   return collective(
       inputs,
       outputs,
@@ -2230,12 +2282,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
-            getNcclDataType(input.scalar_type()),
-            getNcclReduceOp(opts.reduceOp, input),
+            ncclDataType,
+            ncclReduceOp,
             comm,
             stream.stream());
       },
