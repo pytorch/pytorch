@@ -903,12 +903,11 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, rand_a, rand_b)
             self.assertLastGraphAllFused()
 
-            _atol = 2e-3
+            _atol = 5e-3 if data_type is torch.bfloat16 else 2e-3
             _rtol = 1e-5
             if data_type is torch.bfloat16 and torch_fn not in gpu_only_fns:
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 y = y.bfloat16()
-                _atol = 4e-3
             else:
                 y = torch_fn(rand_a, rand_b)
 
