@@ -1,17 +1,31 @@
-import torch
-from torch import Tensor
-import torch._decomp
-from typing import Tuple, List, Optional
+import inspect
+from typing import Callable, Dict, List, Optional, Tuple
 
-aten = torch.ops.aten
+import torch
+import torch._decomp
+from torch import Tensor
 
 decomposition_table = torch._decomp.decomposition_table
+decomposition_table_for_jvp: Dict[torch._ops.OpOverload, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
-get_decompositions = torch._decomp.get_decompositions
+aten = torch.ops.aten
 
-# Decompositions have been ported to torch._decomp inside of PyTorch core.
-# The only decompositions here are temporary or hacks.
-# Please submit your contributions to PyTorch core!
+# NOTE: [forward-mode AD decompositions hack]
+#
+# The mechanism is in VariableType,
+#   IF any inputs have forward grad
+#      AND there is no forward AD formula implemented
+#      AND the functions is actually differentiable
+#   run the decomposition
+#      See run_jit_decomposition_with_args_for_jvp
+#      We currently use python decompositions that we torchscript.
+#
+# Note that we would be building the backward graph at the decomposed level
+# too, but that is OK, because we would've errored out otherwise anyway.
+#
+# TODO: what if jit decompositions exists, should we just use it?
+#       or do we want to have an explicit white list like functorch had
+#       using special JVP_DECOMP DynamicLayerFront kernel
 
 
 def maybe_register_decomposition(op):
@@ -20,6 +34,7 @@ def maybe_register_decomposition(op):
             return register_decomposition(op)(f)
         except Exception:
             return f
+
     return decorator
 
 
@@ -33,6 +48,39 @@ def register_decomposition_for_jvp(fn):
     return register_decomposition(fn, registry=decomposition_table_for_jvp)
 
 
+def _register_jit_decomposition_for_jvp(decomp, use_python=False):
+    if decomp in decomposition_table_for_jvp:
+        decomposition_table_used = decomposition_table_for_jvp
+    elif decomp in decomposition_table:
+        decomposition_table_used = decomposition_table
+    else:
+        raise RuntimeError(f"could not find decomposition for {decomp}")
+    decomp_fn = decomposition_table_used[decomp]
+    if use_python:
+        decomp_fn = torch.jit.ignore(decomp_fn)
+        sig = inspect.signature(decomp_fn)
+
+        # Create a string wrapping the function from the signature
+        # example output:
+        # def wrapped_decomp(x: torch.Tensor, y: int, z: int):
+        #   return decomp_fn(x, y, z)
+        # Thanks copilot!
+        def get_function_def(sig):
+            param_def = [f"{param_str}" for param_str in sig.parameters.values()]
+            param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
+
+            return f"def wrapped_decomp({', '.join(param_def)}):\n  return decomp_fn({', '.join(param_use)})\n"
+
+        f_str = get_function_def(sig)
+        graph = torch.jit.CompilationUnit(f_str).wrapped_decomp.graph
+    else:
+        graph = torch.jit.script(decomp_fn).graph
+    torch.jit._register_decomposition(decomp, graph)
+
+
+# The only decompositions here are temporary or hacks for the purposes of jvp
+
+# TODO: do these also belong here?
 @maybe_register_decomposition(aten.trace.default)
 def trace(self: Tensor) -> Tensor:
     return torch.sum(torch.diag(self))
@@ -49,7 +97,9 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     return min - torch.log1p(z), buffer
 
 
-def recompute_mean_var(input: Tensor, rstd: Tensor, inner_dim_indices: List[int], keepdim: bool):
+def recompute_mean_var(
+    input: Tensor, rstd: Tensor, inner_dim_indices: List[int], keepdim: bool
+):
     # for most norm decompositions, it will be the same as the core version except for here.
     # We recompute the mean and variance so that they track gradients through input
 
@@ -145,7 +195,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition_for_jvp(aten.native_batch_norm_backward)  # @register_decomposition_for_jvp after in core
+@register_decomposition_for_jvp(aten.native_batch_norm_backward)
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -163,11 +213,13 @@ def native_batch_norm_backward(
     assert input_rank >= 2, "rank of the input must be at least 2"
 
     axis = 1
-    num_features = prod(input_shape) / input_shape[axis]
+    num_features = prod(input_shape) / input_shape[axis]  # type: ignore[arg-type]
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert save_mean is not None and save_invstd is not None, "when train=True, save_mean and save_invstd are required"
+        assert (
+            save_mean is not None and save_invstd is not None
+        ), "when train=True, save_mean and save_invstd are required"
 
         reduciton_dims = [0] + list(range(2, input.dim()))
         assert invstd is not None  # for typing
@@ -176,6 +228,8 @@ def native_batch_norm_backward(
         assert running_mean is not None and running_var is not None
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
+
+    assert invstd is not None and mean is not None
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
@@ -207,13 +261,28 @@ def native_batch_norm_backward(
     if output_mask[1]:
         grad_weight = dot_p * invstd
     elif weight is not None:
-        grad_weight = torch.zeros_like(weight)  # should be None but doesn't work with vjp
+        grad_weight = torch.zeros_like(
+            weight
+        )  # should be None but doesn't work with vjp
     else:
         grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
 
     if output_mask[2]:
         grad_bias = grad_output_sum
     else:
-        grad_bias = torch.zeros_like(grad_output_sum)  # should be None but doesn't work with vjp
+        grad_bias = torch.zeros_like(
+            grad_output_sum
+        )  # should be None but doesn't work with vjp
 
     return (grad_input, grad_weight, grad_bias)
+
+
+_register_jit_decomposition_for_jvp(torch.ops.aten.trace.default, use_python=True)
+_register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss2d_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten._log_softmax_backward_data.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten._softmax_backward_data.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.log_sigmoid_forward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.native_layer_norm_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.native_batch_norm_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.cudnn_batch_norm_backward.default)
