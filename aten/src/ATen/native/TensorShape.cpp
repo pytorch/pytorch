@@ -876,9 +876,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
-  // TODO: properly support SymInt expand
-  auto size = asIntArrayRefSlow(sym_size);
+Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -969,9 +967,8 @@ const Tensor &as_strided_(const Tensor& self, SymIntArrayRef sym_size, SymIntArr
   return self;
 }
 
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
-  // TODO: properly support SymInt narrow_copy
-  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -3248,12 +3245,6 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view_meta(const Tensor& self,
-            at::SymIntArrayRef size) {
-  // TODO: Properly support SymInt view
-  return view_impl(self, c10::asIntArrayRefSlow(size));
-}
-
 Tensor view(const Tensor& self,
             at::IntArrayRef size) {
   return view_impl(self, size);
@@ -3637,7 +3628,7 @@ at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef 
 }
 
 
-at::Tensor& expand_copy_out(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+at::Tensor& expand_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
   auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
@@ -3793,7 +3784,7 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
 }
 
 
-at::Tensor& view_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
+at::Tensor& view_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
   auto tmp = self.view_symint(size);
   out.copy_(tmp);
   return out;

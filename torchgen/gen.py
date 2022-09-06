@@ -161,7 +161,6 @@ def parse_native_yaml_struct(
             device_guard=False,
             # I'm actually not sure about this; undefined could be hit on
             # empty TensorList, hypothetically that could have sizes in it
-            symint=False,
             index={},
         )
     )
@@ -176,16 +175,6 @@ def parse_native_yaml_struct(
             # Only cuda-like devices in tree require device guards
             device_guard=is_cuda_dispatch_key(k),
             index=v,
-            # Which dispatch keys natively support symint
-            # Note: DispatchKey.CompositeExplicitAutograd has to match out
-            # composites; I think there's some factoring problem here
-            symint=k
-            in [
-                DispatchKey.Meta,
-                DispatchKey.CompositeImplicitAutograd,
-                DispatchKey.CompositeExplicitAutograd,
-                DispatchKey.CompositeExplicitAutogradNonFunctional,
-            ],
         )
     return ParsedYaml(rs, indices)
 
