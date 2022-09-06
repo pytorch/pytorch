@@ -10671,8 +10671,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            active_if=TEST_WITH_ROCM)
+               # DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+               #              active_if=TEST_WITH_ROCM)
            ],
            sample_inputs_func=sample_inputs_instance_norm,
            supports_expanded_weight=True,),
