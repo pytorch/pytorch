@@ -35,12 +35,6 @@ TEST(SymIntTest, SelfAssignment) {
   EXPECT_TRUE(copy.is_symbolic());
   copy = copy;
   EXPECT_TRUE(copy.is_symbolic());
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wself-move"
-#pragma GCC diagnostic ignored "-Wself-assign-overloaded"
-  copy = std::move(copy);
-#pragma GCC diagnostic pop
-  EXPECT_TRUE(copy.is_symbolic());
 }
 
 TEST(SymIntTest, CheckRange) {
