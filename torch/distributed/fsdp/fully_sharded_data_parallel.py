@@ -543,7 +543,11 @@ class FullyShardedDataParallel(nn.Module):
             will be chosen if sharding_strategy is not specified. Note that if
             ``HYBRID_SHARD`` is specified, user is expected to pass in a process
             group over which to shard over, usually a process group over a
-            single node, which can be generated via ``dist.new_subgroups()``.
+            single node, which can be generated via ``dist.new_subgroups()``. In
+            addition, if ``HYBRID_SHARD`` is specified it must be consistent across
+            all FSDP instances that belong to the same root, i.e. mixing and matching
+            sharding strategies including ``HYBRID_SHARD`` is unsupported at the
+            moment.
         cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
