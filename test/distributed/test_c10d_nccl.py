@@ -2492,6 +2492,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # been aborted by watchdog.
             self._wait_for_comm_abort(process_group, failed_collective_timeout)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nncl_rank_membership(self):
+        self._test_rank_membership(backend="nccl")
+
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
