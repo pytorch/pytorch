@@ -551,6 +551,9 @@ def _optimize_graph(
     input_names=None,
     module=None,
 ):
+    if params_dict is None:
+        params_dict = {}
+
     # Inline everything
     _C._jit_pass_inline(graph)
 
