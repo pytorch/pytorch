@@ -807,7 +807,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                raise ErrorA
+                with AMode():
+                    raise ErrorA
 
         class B(A):
             @staticmethod
@@ -816,6 +817,15 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with BMode():
+                    func(*args, **kwargs)
+
+        class AMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        class BMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 raise ErrorB
 
         a = A(torch.empty(1))
@@ -828,13 +838,13 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         # B has precedence over A due to the subclass relationship yet
         # modes take precedence over arguments
         with self.assertRaises(ErrorA):
-            with A():
+            with AMode():
                 b + b
         with self.assertRaises(ErrorB):
-            with B():
+            with BMode():
                 a + a
         with self.assertRaises(ErrorB):
-            with B():
+            with BMode():
                 a + b
 
     def test_torch_dispatch_mode_respects_no_dispatch(self) -> None:
