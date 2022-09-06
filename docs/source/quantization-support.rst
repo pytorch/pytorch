@@ -68,6 +68,22 @@ This module contains FX graph mode quantization APIs (prototype).
     convert_fx
     fuse_fx
 
+torch.quantization.qconfig_mapping
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module contains QConfigMapping for configuring FX graph mode quantization.
+
+.. currentmodule:: torch.quantization.qconfig_mapping
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    QConfigMapping
+    get_default_qconfig_mapping
+    get_default_qat_qconfig_mapping
+
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

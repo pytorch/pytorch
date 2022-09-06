@@ -116,12 +116,23 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
 def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     """
     Return the default QConfigMapping for post training quantization.
+
+    Args:
+      * `backend`: the quantization backend for the default qconfig mapping, should be
+         one of ["fbgemm", "qnnpack"]
+      * `version`: the version for the default qconfig mapping
     """
+    # TODO: add assert for backend choices
     return _get_default_qconfig_mapping(False, backend, version)
 
 def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMapping:
     """
     Return the default QConfigMapping for quantization aware training.
+
+    Args:
+      * `backend`: the quantization backend for the default qconfig mapping, should be
+         one of ["fbgemm", "qnnpack"]
+      * `version`: the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
