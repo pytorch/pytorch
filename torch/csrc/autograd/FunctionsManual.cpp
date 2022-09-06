@@ -5218,20 +5218,21 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       }
     }
 
-    // zero gradients for the inputs not indexed by `k`.
-    if (k < input.size(-1)) {
-      for (const auto i : c10::irange(input.size(-1) - k)) {
-        std::ignore = i;
-        input_grads.push_back(
-            at::zeros({}, input_.options()).expand_as(input_.select(-1, 0)));
-      }
-    }
-
     input_grad = at::stack(input_grads, -1);
     tau_grad = at::stack(tau_grads, -1);
+
+    // Only first k columns are active in forward.
+    // zero gradients for the inactive input.
+    if (k < input.size(-1)) {
+      auto input_sizes = input_.sizes();
+      at::DimVector new_sizes(input_sizes);
+      new_sizes[input_.dim() - 1] = input.size(-1) - k;
+      auto zeros = at::zeros(new_sizes, input_.options());
+      input_grad = at::cat({input_grad, zeros}, -1);
+    }
   } else {
-    input_grad = input_.new_zeros(input_.sizes());
-    tau_grad = tau.new_zeros(tau.sizes());
+    input_grad = at::zeros_like(input_);
+    tau_grad = at::zeros_like(tau);
     for (const auto i : c10::irange(k)) {
       // NOTE: narrow will unsqueeze(-1)
       auto v_i = input.narrow(-1, i, 1);
@@ -5341,16 +5342,17 @@ Tensor householder_product_jvp(
 
     H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
 
-    auto intermediate = H_minus.matmul(
+    // `H_minus_dH_i_H_plus` = H_1 * ... * H_{i-1} dH_i * H_{i+1} * ...
+    auto H_minus_dH_i_H_plus = H_minus.matmul(
         apply_simple_product(v_i, v_i, dtau_i, H_plus) +
         apply_simple_product(dv_i, v_i, tau_i, H_plus) +
         apply_simple_product(v_i, dv_i, tau_i, H_plus));
     // For Composite Compliance, if `intermediate` is a Tensor-Subclass,
     // we use out-of-place variant of add.
-    if (at::isTensorSubclassLike(intermediate)) {
-      dprod = dprod.add(intermediate);
+    if (at::isTensorSubclassLike(H_minus_dH_i_H_plus)) {
+      dprod = dprod.add(H_minus_dH_i_H_plus);
     } else {
-      dprod.add_(intermediate);
+      dprod.add_(H_minus_dH_i_H_plus);
     }
 
     H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
