@@ -2343,7 +2343,7 @@ class FullyShardedDataParallel(nn.Module):
                     input_dtype, *args, **kwargs
                 )
 
-            self._rebuild_full_params()    
+            self._rebuild_full_params()
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
