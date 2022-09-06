@@ -68,12 +68,14 @@ class Access:
 
 
 class SynchronizationError(Exception):
-    """Base class for errors detected by CSAN."""
+    """Base class for errors detected by CUDA Sanitizer."""
 
     pass
 
 
 class UnsynchronizedAccessError(SynchronizationError):
+    """Stores information about two unsynchronized accesses to one data pointer."""
+
     def __init__(
         self,
         data_ptr: DataPtr,
@@ -81,39 +83,55 @@ class UnsynchronizedAccessError(SynchronizationError):
         current_access: Access,
         previous_access: Access,
     ):
+        self.data_ptr = data_ptr
+        self.allocation_stack_trace = allocation_stack_trace
+        self.current_access = current_access
+        self.previous_access = previous_access
+
+    def __str__(self):
         with io.StringIO() as message:
             message.write(
                 textwrap.dedent(
                     f"""\
                     ============================
-                    CSAN detected a possible data race on tensor with data pointer {data_ptr}
-                    Access by stream {current_access.stream} during kernel:
-                    {current_access.operator}
-                    {current_access.type} argument: {', '.join(current_access.names)}
+                    CSAN detected a possible data race on tensor with data pointer {self.data_ptr}
+                    Access by stream {self.current_access.stream} during kernel:
+                    {self.current_access.operator}
+                    {self.current_access.type} argument: {', '.join(self.current_access.names)}
                     With stack trace:
                     """
                 )
             )
-            message.write(f"{''.join(current_access.stack_trace.format())}\n")
+            message.write(f"{''.join(self.current_access.stack_trace.format())}\n")
             message.write(
                 textwrap.dedent(
                     f"""\
-                    Previous access by stream {previous_access.stream} during kernel:
-                    {previous_access.operator}
-                    {previous_access.type} argument: {', '.join(previous_access.names)}
+                    Previous access by stream {self.previous_access.stream} during kernel:
+                    {self.previous_access.operator}
+                    {self.previous_access.type} argument: {', '.join(self.previous_access.names)}
                     With stack trace:
                     """
                 )
             )
-            message.write(f"{''.join(previous_access.stack_trace.format())}\n")
-            if allocation_stack_trace:
+            message.write(f"{''.join(self.previous_access.stack_trace.format())}\n")
+            if self.allocation_stack_trace:
                 message.write(
                     "Tensor was allocated with stack trace:\n"
-                    f"{''.join(allocation_stack_trace.format())}"
+                    f"{''.join(self.allocation_stack_trace.format())}"
                 )
             else:
                 message.write("Trace for tensor allocation not found.")
-            super().__init__(message.getvalue())
+            return message.getvalue()
+
+
+class CUDASanitizerErrors(Exception):
+    """Wrapper class for errors reported by CUDA Sanitizer."""
+
+    def __init__(self, errors: List[SynchronizationError]):
+        self.errors = errors
+
+    def __str__(self):
+        return f"detected {len(self.errors)} errors"
 
 
 def format_log_message(message: str) -> str:
@@ -502,7 +520,7 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         if errors:
             for error in errors:
                 print(error, file=sys.stderr)
-            raise RuntimeError(errors)
+            raise CUDASanitizerErrors(errors)
 
         return outputs
 
