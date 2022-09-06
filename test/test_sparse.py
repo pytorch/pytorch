@@ -2256,6 +2256,8 @@ class TestSparse(TestSparseBase):
                 device=device,
                 dtype=dtype
             )
+            # empty tensors are coalesced at creation (nnz < 2) we must force the uncoalesced state
+            input_uncoalesced._coalesced_(False)
             self._test_log1p_tensor(input_uncoalesced, coalesced)
 
     def _test_neg_negative(self, sparse_tensor):
@@ -2399,6 +2401,8 @@ class TestSparse(TestSparseBase):
                 dtype=dtype,
                 device=device
             )
+            # empty tensors are coalesced at creation (nnz < 2) we must force the uncoalesced state
+            input_uncoalesced._coalesced_(False)
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
@@ -3763,6 +3767,16 @@ class TestSparse(TestSparseBase):
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
 
+    def test_small_nnz_coalesced(self):
+        # creating a coo tensor with nnz == 0 is always coalesced
+        self.assertTrue(torch.sparse_coo_tensor([[], []], [], (2, 2)).is_coalesced())
+        # same for a coo tensor with only 1 nnz
+        self.assertTrue(torch.sparse_coo_tensor([[0], [0]], [1], (2, 2)).is_coalesced())
+        # two or more nnz coalesced is false as it can't be verified without an expensive check
+        self.assertFalse(torch.sparse_coo_tensor([[0, 0], [0, 0]], [1, 2], (2, 2)).is_coalesced())
+        # even if there are no duplicates
+        self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
+
 
 
 class TestSparseOneOff(TestCase):
@@ -3978,16 +3992,20 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.dense_dim(), 1)
         self.assertEqual(r._dimV(), 1)
         self.assertEqual(r._nnz(), 0)
-        # TODO: nnz zero sparse tensors should always be coalesced...
-        self.assertEqual(r.is_coalesced(), False)
-        r._coalesced_(True)
+        # nnz zero sparse tensors should always be coalesced at creation
         self.assertEqual(r.is_coalesced(), True)
+        # but we can force them into the uncoalesed state
+        r._coalesced_(False)
+        self.assertEqual(r.is_coalesced(), False)
+        # return the coalesced state for indices/values access
+        r._coalesced_(True)
         # TODO: this sort of aliasing will need to be handled by
         # functionalization
         self.assertEqual(r._indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r._values(), torch.empty(0, 4, device='meta'))
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
+
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
