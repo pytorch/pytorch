@@ -276,6 +276,7 @@ ALLOW_LIST = [
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
     # Distributed c10d ops are all going to be updated
     ("c10d::.*", datetime.date(2022, 10, 31)),
+    ("c10d::allgather_", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

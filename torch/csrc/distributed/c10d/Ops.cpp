@@ -38,15 +38,24 @@ allreduce_(
           std::move(tensor_vec), work);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> allgather_(
+std::tuple<
+    std::vector<std::vector<at::Tensor>>,
+    c10::intrusive_ptr<ProcessGroup::Work>>
+allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
-  return process_group->allgather(
+  auto work = process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
       const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllgatherOptions{std::chrono::milliseconds(timeout)});
+
+  // Copy output tensors (not storage) so that this can be used in a functional
+  // manner
+  return std::tuple<
+      std::vector<std::vector<at::Tensor>>,
+      c10::intrusive_ptr<ProcessGroup::Work>>(output_tensors, work);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
@@ -243,13 +252,15 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather(
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
-                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                       .typed<std::tuple<
+                           std::vector<std::vector<at::Tensor>>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
                            const std::vector<std::vector<at::Tensor>>&,
                            const std::vector<at::Tensor>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
-  return op.call(
-      output_tensors, input_tensors, process_group, opts.timeout.count());
+  return std::get<1>(op.call(
+      output_tensors, input_tensors, process_group, opts.timeout.count()));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
