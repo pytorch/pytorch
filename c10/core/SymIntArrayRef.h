@@ -79,11 +79,15 @@ class SymIntArrayRef final {
   /* implicit */ constexpr SymIntArrayRef(const c10::SymInt (&Arr)[N])
       : wrapped_symint_array_ref(Arr) {}
 
-  // This constructor is appropriate to use if you know that all the
-  // members of the IntArrayRef are positive
+  // Prefer using a more semantic constructor, like
+  // fromIntArrayRefKnownNonNegative
   static SymIntArrayRef fromIntArrayRefUnchecked(IntArrayRef array_ref) {
     return SymIntArrayRef(
         reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
+  }
+
+  static SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
+    return fromIntArrayRefUnchecked(array_ref);
   }
 
   static SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {

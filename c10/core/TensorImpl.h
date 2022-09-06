@@ -234,15 +234,22 @@ struct C10_API ExtraMeta {
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
+  ExtraMeta(SymDimVector sizes, SymDimVector strides, SymInt numel, SymInt storage_offset, std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
+    : sizes_(std::move(sizes))
+    , strides_(std::move(strides))
+    , numel_(std::move(numel))
+    , storage_offset_(std::move(storage_offset)
+    , named_tensor_meta_(std::move(named_tensor_meta))
+  {}
+
   std::unique_ptr<ExtraMeta> clone() const {
-    auto r = std::make_unique<ExtraMeta>();
-    r->sizes_ = sizes_;
-    r->strides_ = strides_;
-    r->numel_ = numel_;
-    r->storage_offset_ = storage_offset_;
-    r->named_tensor_meta_ =
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr;
-    return r;
+    return std::make_unique<ExtraMeta>(
+      sizes_,
+      strides_,
+      numel_,
+      storage_offset_,
+      named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr
+    );
   }
 };
 
@@ -631,8 +638,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->strides_;
     } else {
-      // strides guaranteed to be non-negative, so unchecked cast is OK
-      return c10::SymIntArrayRef::fromIntArrayRefUnchecked(strides_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(strides_default());
     }
   }
 
@@ -742,8 +748,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->sizes_;
     } else {
-      // sizes guaranteed to be non-negative, so unchecked cast is OK
-      return c10::SymIntArrayRef::fromIntArrayRefUnchecked(sizes_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(sizes_default());
     }
   }
 
@@ -1619,20 +1624,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the pointer to named tensor metadata.
    */
   const c10::NamedTensorMetaInterface* named_tensor_meta() const {
-    if (!extra_meta_)
+    if (!extra_meta_) {
       return nullptr;
+    }
     return extra_meta_->named_tensor_meta_.get();
   }
 
   c10::NamedTensorMetaInterface* named_tensor_meta() {
-    if (!extra_meta_)
+    if (!extra_meta_) {
       return nullptr;
+    }
     return extra_meta_->named_tensor_meta_.get();
   }
 
   bool has_named_tensor_meta() const {
-    if (!extra_meta_)
+    if (!extra_meta_) {
       return false;
+    }
     return extra_meta_->named_tensor_meta_ != nullptr;
   }
 
@@ -1864,9 +1872,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           false,
           "cannot access PyObject for Tensor on interpreter ",
-          self_interpreter->name(),
+          (*self_interpreter)->name(),
           " that has already been used by another torch deploy interpreter ",
-          pyobj_interpreter_.load()->name());
+          (*pyobj_interpreter_.load())->name());
     }
   }
 
@@ -1885,7 +1893,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_;
   }
 
-  impl::PyInterpreter* load_pyobj_interpreter() const;
+  impl::PyInterpreter& load_pyobj_interpreter() const;
 
  public:
   /**
