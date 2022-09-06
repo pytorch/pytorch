@@ -67,7 +67,7 @@ def _torch_reduce_all(fn):
 
         else:
             result_data = masked_fn(self, mask=mask)
-        
+
         return MaskedTensor.from_values(result_data, torch.any(mask))
 
     return reduce_all
