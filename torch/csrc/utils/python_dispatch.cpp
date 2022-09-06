@@ -295,11 +295,20 @@ void initDispatchBindings(PyObject* module) {
       // Returns whether or not a direct kernel registration exists
       // for this <op_name, dispatch_key> pair.
       "_dispatch_has_kernel_for_dispatch_key",
-      [](const char* name, const char* dispatch) -> bool {
+      [](const char* name, c10::DispatchKey dispatch) -> bool {
         auto op =
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
         TORCH_CHECK(op, "operator ", name, " does not exist");
-        return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
+        return op->hasKernelForDispatchKey(dispatch);
+      });
+
+  m.def(
+      "_dispatch_has_kernel_for_any_dispatch_key",
+      [](const char* name, c10::DispatchKeySet ks) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->hasKernelForAnyDispatchKey(ks);
       });
 
   m.def(
@@ -351,15 +360,22 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
+#define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
+
   py::enum_<c10::DispatchKey>(m, "DispatchKey")
-      .value("Undefined", c10::DispatchKey::Undefined)
-      .value("BackendSelect", c10::DispatchKey::BackendSelect)
-      .value("ADInplaceOrView", c10::DispatchKey::ADInplaceOrView)
-      .value("PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot)
-      .value("Python", c10::DispatchKey::Python)
+      DEF_ONE(Undefined)
+      DEF_ONE(CompositeExplicitAutogradNonFunctional)
+      DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+      DEF_ONE(CompositeImplicitAutograd)
+      DEF_ONE(AutogradOther)
+      DEF_ONE(Autograd)
+      DEF_ONE(BackendSelect)
+      DEF_ONE(ADInplaceOrView)
+      DEF_ONE(PythonTLSSnapshot)
+      DEF_ONE(Python)
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
-
 #define DEF_MULTIPLE(fullname, prefix) \
   DEF_SINGLE(, fullname) \
   DEF_SINGLE(, StartOf##fullname##Backends) \
@@ -378,7 +394,12 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
-      .def("has", &c10::DispatchKeySet::has);
+      .def("has", &c10::DispatchKeySet::has)
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+
+  m.attr("_dispatch_autogradother_backends") = py::cast(c10::autogradother_backends);
+
+  m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) { return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t); });
 
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
@@ -387,6 +408,8 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);
   });
+
+  m.def("_dispatch_get_backend_keyset_from_autograd", getBackendKeySetFromAutograd);
 
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
@@ -398,6 +421,7 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
   });
+  m.def("_dispatch_is_included_in_alias", c10::isIncludedInAlias);
   py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
       .def(py::init<c10::DispatchKeySet>());
 

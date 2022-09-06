@@ -1835,7 +1835,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
-        x = torch.randn(2)
+        x = torch.randn(2, requires_grad=True)
         r = torch._C._EnablePythonDispatcher()
         torch.add(x, x)
 

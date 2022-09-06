@@ -139,12 +139,14 @@ struct type_caster<at::Device> {
 template <>
 struct type_caster<c10::DispatchKey> : public type_caster_base<c10::DispatchKey> {
   using base = type_caster_base<c10::DispatchKey>;
+  c10::DispatchKey tmp;
  public:
   bool load(handle src, bool convert) {
     if (base::load(src, convert)) {
       return true;
     } else if (py::isinstance(src, py::module_::import("builtins").attr("str"))) {
-      value = new c10::DispatchKey(c10::parseDispatchKey(py::cast<std::string>(src)));
+      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
+      value = &tmp;
       return true;
     }
     return false;
