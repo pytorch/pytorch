@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import weakref
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
-from torch._subclasses import FakeTensor
+from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
@@ -93,7 +93,7 @@ def get_proxy(obj):
 def has_proxy(obj):
     return get_proxy(obj) is not None
 
-def set_meta(proxy, val):
+def set_meta(proxy, val, meta_factory=None):
     if isinstance(val, FakeTensor):
         proxy.node.meta['val'] = val
     elif isinstance(val, PySymInt):
@@ -101,6 +101,8 @@ def set_meta(proxy, val):
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+        if meta_factory:
+            proxy.node.meta['val'] = meta_factory(val)
     return proxy
 
 
@@ -124,11 +126,11 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         # TODO: also do stride/numel
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
-def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
+def track_tensor_tree(inner_res, proxy_res, *, constant, tracer, meta_factory=None):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
-            set_meta(proxy, e)
+            set_meta(proxy, e, meta_factory=meta_factory)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
@@ -400,7 +402,18 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+        fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True, allow_meta=True)
+
+        def meta_factory(tensor):
+            if isinstance(tensor, torch.nn.Parameter):
+                return NotImplementedError("torch.nn.Parameter")
+            try:
+                return fake_tensor_mode.from_tensor(tensor)
+            except UnsupportedFakeTensorException as e:
+                return e
+        track_tensor_tree(
+            flat_tensors, flat_proxies, constant=None, tracer=tracer,
+            meta_factory=meta_factory)
 
         out = f(*tensors)
         return pytree.tree_map_only(

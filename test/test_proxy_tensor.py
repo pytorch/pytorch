@@ -707,7 +707,20 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    pass
+    def test_placeholder_metadata(self):
+        def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, y, z])
+
+        gm = make_fx(f, tracing_mode="real")(
+            torch.ones(2, 2), torch.ones(3, 2), torch.ones(1, 2)
+        )
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        self.assertEqual(len(placeholders), 3)
+        self.assertTrue(all("val" in node.meta for node in placeholders))
+        self.assertEqual(placeholders[0].meta["val"].shape, torch.Size([2, 2]))
+        self.assertEqual(placeholders[1].meta["val"].shape, torch.Size([3, 2]))
+        self.assertEqual(placeholders[2].meta["val"].shape, torch.Size([1, 2]))
+
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
