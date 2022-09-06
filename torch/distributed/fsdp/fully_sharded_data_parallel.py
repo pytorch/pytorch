@@ -2968,12 +2968,11 @@ class FullyShardedDataParallel(nn.Module):
             self._post_backward_callback_queued = False  # only defined on the root
 
         handles_key = tuple(handles)
-        if not handles_key:
-            return outputs  # no handles to prepare for backward computation
-        # Since these handles' `FlatParameter`s participated in a forward,
-        # we conservatively assume that they will be used in the backward
-        self._needs_pre_backward_unshard[handles_key] = False
-        self._ran_pre_backward_hook[handles_key] = False
+        if handles_key:
+            # Since these handles' `FlatParameter`s participated in a forward,
+            # we conservatively assume that they will be used in the backward
+            self._needs_pre_backward_unshard[handles_key] = False
+            self._ran_pre_backward_hook[handles_key] = False
 
         def _pre_backward_hook(_handles: List[FlatParamHandle], *unused: Any) -> None:
             """Prepares ``_handles`` 's ``FlatParameter`` s for gradient
@@ -2981,7 +2980,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if self._ran_pre_backward_hook[_handles_key]:
+            if _handles_key and self._ran_pre_backward_hook[_handles_key]:
                 return
 
             with torch.autograd.profiler.record_function(
@@ -2995,6 +2994,11 @@ class FullyShardedDataParallel(nn.Module):
 
                 self._assert_state([TrainingState_.IDLE])
                 self.training_state = TrainingState_.BACKWARD_PRE
+                # Queueing the post-backward callback is the only logic that is
+                # not per-handle in the pre-backward hook, so we can return
+                # early here if there are no handles.
+                if not _handles_key:
+                    return
                 for handle in _handles:
                     handle._training_state = HandleTrainingState.PRE_BACKWARD
 
