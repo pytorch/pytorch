@@ -1,12 +1,12 @@
 Quantization API Reference
 -------------------------------
 
-torch.quantization
+torch.ao.quantization
 ~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
 
-.. currentmodule:: torch.quantization
+.. currentmodule:: torch.ao.quantization
 
 Top level APIs
 ^^^^^^^^^^^^^^
@@ -51,12 +51,12 @@ Utility functions
     default_eval_fn
     get_observer_dict
 
-torch.quantization.quantize_fx
+torch.ao.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
 
-.. currentmodule:: torch.quantization.quantize_fx
+.. currentmodule:: torch.ao.quantization.quantize_fx
 
 .. autosummary::
     :toctree: generated
@@ -68,12 +68,12 @@ This module contains FX graph mode quantization APIs (prototype).
     convert_fx
     fuse_fx
 
-torch.quantization.qconfig_mapping
+torch.ao.quantization.qconfig_mapping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains QConfigMapping for configuring FX graph mode quantization.
 
-.. currentmodule:: torch.quantization.qconfig_mapping
+.. currentmodule:: torch.ao.quantization.qconfig_mapping
 
 .. autosummary::
     :toctree: generated
@@ -83,6 +83,24 @@ This module contains QConfigMapping for configuring FX graph mode quantization.
     QConfigMapping
     get_default_qconfig_mapping
     get_default_qat_qconfig_mapping
+
+torch.ao.quantization.backend_config.BackendConfig
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module contains BackendConfig, a config object that defines how quantization is supported
+in a backend. Currently only used by FX Graph Mode Quantization, but we may extend Eager Mode
+Quantization to work with this as well.
+
+.. currentmodule:: torch.ao.quantization.qconfig_mapping
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    BackendConfig
+    BackendPatternConfig
+    DTypeConfig
+    ObservationType
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -142,13 +160,13 @@ regular full-precision tensor.
     topk
 
 
-torch.quantization.observer
+torch.ao.quantization.observer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 
-.. currentmodule:: torch.quantization.observer
+.. currentmodule:: torch.ao.quantization.observer
 
 .. autosummary::
     :toctree: generated
@@ -175,13 +193,13 @@ the values observed during calibration (PTQ) or training (QAT).
     default_dynamic_quant_observer
     default_float_qparams_observer
 
-torch.quantization.fake_quantize
+torch.ao.quantization.fake_quantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
 during QAT.
 
-.. currentmodule:: torch.quantization.fake_quantize
+.. currentmodule:: torch.ao.quantization.fake_quantize
 
 .. autosummary::
     :toctree: generated
@@ -204,13 +222,13 @@ during QAT.
     disable_observer
     enable_observer
 
-torch.quantization.qconfig
+torch.ao.quantization.qconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
 
-.. currentmodule:: torch.quantization.qconfig
+.. currentmodule:: torch.ao.quantization.qconfig
 
 .. autosummary::
     :toctree: generated
