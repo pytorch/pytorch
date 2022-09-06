@@ -266,7 +266,7 @@ class TestPrims(TestCase):
             return torch.digamma(a)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
+            gm = make_fx(func)(a)
 
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
@@ -286,7 +286,7 @@ class TestPrims(TestCase):
             return torch.sigmoid(torch.digamma(a))
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
+            gm = make_fx(func)(a)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_sigmoid = any(
@@ -400,6 +400,35 @@ class TestPrims(TestCase):
                 self.assertTrue(node.target == torch.ops.nvprims.add.default)
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
+
+    @dtypes(torch.float32, torch.float16)
+    def test_batch_norm_backward_nvprims(self, device, dtype):
+        # This test verifies that the backward pass of batch norm is correctly decomposed into nvprims
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+
+        samples_iter = sample_inputs_batch_norm(None, device, dtype, requires_grad=True)
+        sample = next(samples_iter)
+        grad = torch.randn_like(sample.input)
+
+        def func(grad, input, weight, rm, rv, eps, train):
+            return torch.ops.aten.native_batch_norm_backward.default(
+                grad, input, weight, rm, rv, rm, rv, train, eps, [True, True, True]
+            )
+
+        args = sample.args
+        kwargs = sample.kwargs
+        all_args = [grad, sample.input, args[2], args[0], args[1], kwargs['eps'], kwargs['training']]
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(*all_args)
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_batch_norm_backward = any(
+            torch.ops.aten.native_batch_norm_backward.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_batch_norm_backward)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -627,8 +656,16 @@ class TestDecomp(TestCase):
         with TorchRefsNvfuserCapabilityMode() as mode:
             self.assertFalse(fn0(x, y, 0.3, False))
 
+            # Autocast context has C++ level ATen calls that are hidden from
+            # TorchRefsNvfuserCapabilityMode that works only on Python level.
+            # The first call to make_fx records autocast C++ calls directly and
+            # doesn't have the chance to translate to nvprims. After the first
+            # call, "gm" contains explicit calls to torch.ops.aten and nothing
+            # is hidden, so the second call to make_fx actually translates
+            # recorded autocast dtype conversions to nvprims.
             with torch.autocast("cuda"):
-                gm = make_fx(fn1, decomposition_table=torch._prims.context.nvfuser_decomp_table())(x)
+                gm = make_fx(fn1)(x)
+            gm = make_fx(gm)(x)
             call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
             includes_aten_to_copy = any(
                 torch.ops.aten._to_copy.default == node.target
