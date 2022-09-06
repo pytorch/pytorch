@@ -234,22 +234,27 @@ struct C10_API ExtraMeta {
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
-  ExtraMeta(SymDimVector sizes, SymDimVector strides, SymInt numel, SymInt storage_offset, std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
-    : sizes_(std::move(sizes))
-    , strides_(std::move(strides))
-    , numel_(std::move(numel))
-    , storage_offset_(std::move(storage_offset)
-    , named_tensor_meta_(std::move(named_tensor_meta))
-  {}
+  ExtraMeta() {}
+
+  ExtraMeta(
+      SymDimVector sizes,
+      SymDimVector strides,
+      SymInt numel,
+      SymInt storage_offset,
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
+      : sizes_(std::move(sizes)),
+        strides_(std::move(strides)),
+        numel_(std::move(numel)),
+        storage_offset_(std::move(storage_offset)),
+        named_tensor_meta_(std::move(named_tensor_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(
-      sizes_,
-      strides_,
-      numel_,
-      storage_offset_,
-      named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr
-    );
+        sizes_,
+        strides_,
+        numel_,
+        storage_offset_,
+        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
   }
 };
 
@@ -638,7 +643,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->strides_;
     } else {
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(strides_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          strides_default());
     }
   }
 
@@ -748,7 +754,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->sizes_;
     } else {
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(sizes_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          sizes_default());
     }
   }
 
