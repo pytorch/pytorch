@@ -94,6 +94,13 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   const Tensor x = is_commutative ? x_ : x_.coalesce();
   const Tensor y = is_commutative ? y_ : y_.coalesce();
 
+  // Given sparse tensors x and y we decide which one is source, and which one
+  // is probably_coalesced. The indices of both source and probably_coalesced are
+  // hashed and then the hash values of the source's indices are binary-searched
+  // into the hash values of the probably_coalesced's indices.
+  // If probably_coalesce is coalesced, by the property of the hashing method
+  // (see below), the hash values are already sorted and we can avoid any
+  // explicit sorting routines.
   Tensor probably_coalesced, source;
   std::tie(probably_coalesced, source) = [&]() -> std::tuple<Tensor, Tensor> {
     // Case 1: either x or y is coalesced.
@@ -124,6 +131,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       // If nnz > prod(larger.shape[:sparse_dim]), by the pidgeonhole principle,
       // there is at least one bucket with nnz / prod(larger.shape[:sparse_dim]) elements.
       // It provides a lower bound for the max count in the intersection.
+      // This condition is very conservative as we do not check whether such an event
+      // actually occurred, although it is very likely under a uniform distribution,
+      // the distribution with the highest uncertainty (maximizes entropy).
       const auto max_count_lower_bound = larger._nnz() / sparse_dim_numel;
       constexpr int64_t MAX_COPIES_PER_THREAD = 50;
       return max_count_lower_bound > MAX_COPIES_PER_THREAD
@@ -132,6 +142,17 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     }
   }();
 
+  // The employed hash function maps a d-dim index to a linear offset
+  // into a contiguous memory that is sufficient to fit a dense tensor
+  // of shape broadcasted_shape(x.shape, y.shape), i.e.
+  // idx -> \sum_{i = 0}^d idx[i] * hash_coeffs[i], where
+  // hash_coeffs are the strides of a contiguous tensor of shape
+  // broadcasted_shape(x.shape, y.shape).
+  // Assuming the following order on the dimensions, i.e. the right-most dim is the
+  // fastest-changing dim, and the left-most is the slowest-changing dim,
+  // which is implicit in the definition of hash_coeffs,
+  // it could be shown that the hash function is actually bijective and, hence,
+  // is a perfect hash function (no collisions ever).
   const auto kHash = std::is_same<hash_t, int64_t>::value ? kLong : kInt;
   const auto hash_coeffs = [&]() -> Tensor {
     const auto broadcasted_sparse_dim_shape = std::vector<int64_t> {
@@ -156,6 +177,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   auto sparse_dim = probably_coalesced.sparse_dim();
   // non-const because of gcc-5/clang-5 issues
   auto sdim = static_cast<uint32_t>(sparse_dim);
+
+  // Apply the hash function to probably_coalesced.indices
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
@@ -197,6 +220,9 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     return hash;
   }();
 
+  // Now that we have hash values of probably_coalesced.indices,
+  // we need to decide whether they need to get sorted.
+  // The sort is not requires if probably_coalesced is coalesced.
   Tensor sorted_hash, argsort_hash;
   std::tie(sorted_hash, argsort_hash) = [&]() -> std::tuple<Tensor, Tensor> {
     if (probably_coalesced.is_coalesced()) {
@@ -215,7 +241,17 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     }
   }();
 
-  // Perform hash intersection
+  // Perform hash intersection.
+  // Let  s_hash = hash(source.indices),
+  //     pc_hash = hash(probably_coalesced.indices), then
+  // for i = 0, ..., len(s_hash) - 1:
+  //     lb = <index of a value in pc_hash[argsort_hash] which is a lower bound for s_hash[i]>,
+  //     up = <index of a value in pc_hash[argsort_hash] which is an upper bound for s_hash[i]>,
+  //     intersection_count[i] = up - lb
+  //     intersection_first_idx[i] = lb.
+  //
+  // intersection_count and intersection_first_idx are used to form indices at which
+  // intersection values are selected.
   Tensor intersection_count, intersection_first_idx;
   std::tie(intersection_count, intersection_first_idx) = [&]() -> std::tuple<Tensor, Tensor> {
     const auto source_nnz = source._nnz();
@@ -287,6 +323,13 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     return std::make_tuple(intersection_count, intersection_first_idx);
   }();
 
+  // Using intersection_count and intersection_first_idx,
+  // form indices selected_source and selected_probably_coalesced such that
+  // res.values = op(
+  //  source.values.index_select(0, selected_source),
+  //  probably_coalesced.values.index_select(0, selected_probably_coalesced)) and
+  // res.indices = selected_source_sparse_indices, which is also equivalent to
+  // res.indices = source.indices.index_select(1, selected_source).
   Tensor selected_source, selected_source_sparse_indices, selected_probably_coalesced;
   std::tie(selected_source, selected_source_sparse_indices, selected_probably_coalesced)
     = [&]() -> std::tuple<Tensor, Tensor, Tensor> {
