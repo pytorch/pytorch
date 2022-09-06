@@ -157,35 +157,30 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     """
     make_arg = partial(
         make_tensor,
-        dtype=dtype,
         device=device,
+        dtype=dtype,
         requires_grad=requires_grad,
         low=-2,
         high=2,
     )
-
     # Each column of the matrix is getting multiplied many times leading to very large values for
     # the Jacobian matrix entries and making the finite-difference result of grad check less accurate.
     # That's why gradcheck with the default range [-9, 9] fails and [-2, 2] is used here.
-    samples = (
-        SampleInput(make_arg((S, S)), args=(make_arg((S,)),)),
-        SampleInput(make_arg((S + 1, S)), args=(make_arg((S,)),)),
-        SampleInput(make_arg((2, 1, S, S)), args=(make_arg((2, 1, S)),)),
-        SampleInput(make_arg((2, 1, S + 1, S)), args=(make_arg((2, 1, S)),)),
-        SampleInput(
-            make_arg((0, 0), low=None, high=None),
-            args=(make_arg((0,), low=None, high=None),),
-        ),
-        SampleInput(make_arg((S, S)), args=(make_arg((0,), low=None, high=None),)),
-        # m = n = S, k = S - 2
-        SampleInput(make_arg((S, S)), args=(make_arg((S - 2,), low=None, high=None),)),
-        # m = S, n = S -1, k = S - 2
-        SampleInput(
-            make_arg((S, S - 1)), args=(make_arg((S - 2,), low=None, high=None),)
-        ),
+    yield SampleInput(make_arg((S, S)), args=(make_arg((S,)),))
+    yield SampleInput(make_arg((S + 1, S)), args=(make_arg((S,)),))
+    yield SampleInput(make_arg((2, 1, S, S)), args=(make_arg((2, 1, S)),))
+    yield SampleInput(make_arg((2, 1, S + 1, S)), args=(make_arg((2, 1, S)),))
+    yield SampleInput(
+        make_arg((0, 0), low=None, high=None),
+        args=(make_arg((0,), low=None, high=None),),
     )
-
-    return samples
+    yield SampleInput(make_arg((S, S)), args=(make_arg((0,), low=None, high=None),))
+    # m = n = S, k = S - 2
+    yield SampleInput(make_arg((S, S)), args=(make_arg((S - 2,), low=None, high=None),))
+    # m = S, n = S -1, k = S - 2
+    yield SampleInput(
+        make_arg((S, S - 1)), args=(make_arg((S - 2,), low=None, high=None),)
+    )
 
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
