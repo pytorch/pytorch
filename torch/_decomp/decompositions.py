@@ -1,12 +1,14 @@
 import functools
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from itertools import product
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import torch
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
+from torch._prims_common import TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -541,6 +543,32 @@ def binary_cross_entropy_backward(
     return result
 
 
+@register_decomposition(aten.soft_margin_loss)
+@out_wrapper()
+@pw_cast_for_opmath
+def soft_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    loss = torch.log1p(torch.exp(-input * target))
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.soft_margin_loss_backward)
+@pw_cast_for_opmath
+def soft_margin_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    grad_input = target * grad_output * (torch.sigmoid(target * self) - 1)
+    if reduction == Reduction.MEAN.value:
+        grad_input = grad_input / self.numel()
+    return grad_input
+
+
 @register_decomposition(aten._euclidean_dist)
 def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
     x1_norm = x1.pow(2).sum(-1, True)
@@ -598,6 +626,69 @@ def _log_softmax_backward_data(
         grad_output, dim=dim, keepdim=True
     )
     return grad_input
+
+
+@register_decomposition(aten.im2col)
+def im2col(
+    input: Tensor,
+    kernel_size: List[int],
+    dilation: List[int],
+    padding: List[int],
+    stride: List[int],
+) -> Tensor:
+    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
+    utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
+
+    batch_dim = input.size(0)
+    channel_dim = input.size(1)
+    input_h = input.size(2)
+    input_w = input.size(3)
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    def _get_im2col_indices_along_dim(
+        input_d, kernel_d, dilation_d, padding_d, stride_d
+    ):
+        blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
+
+        # Stride kernel over input and find starting indices along dim d
+        blocks_d_indices = torch.arange(
+            0, blocks_d, stride_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(0)
+        num_blocks = (blocks_d - 1) // stride_d + 1
+
+        # Apply dilation on kernel and find its indices along dim d
+        kernel_grid = torch.arange(
+            0, kernel_d * dilation_d, dilation_d, dtype=torch.int64, device=input.device
+        ).unsqueeze(-1)
+
+        # Broadcast and add kernel staring positions (indices) with
+        # kernel_grid along dim d, to get block indices along dim d
+        block_mask = blocks_d_indices + kernel_grid
+
+        return block_mask, num_blocks
+
+    blocks_row_indices, num_blocks_row = _get_im2col_indices_along_dim(
+        input_h, kernel_h, dilation_h, padding_h, stride_h
+    )
+    blocks_col_indices, num_blocks_col = _get_im2col_indices_along_dim(
+        input_w, kernel_w, dilation_w, padding_w, stride_w
+    )
+
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+
+    blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
+    output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
+    output = output.permute(0, 1, 2, 4, 3, 5)
+    return output.reshape(
+        batch_dim, channel_dim * kernel_h * kernel_w, num_blocks_row * num_blocks_col
+    )
 
 
 # TODO: the type annotations on arguments are not quite right
@@ -1370,26 +1461,13 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.nn.functional.avg_pool2d(input, kernel, stride)
 
     def start_index(a, b, c):
-        return (a * c) // b
+        return torch.div(a * c, b, rounding_mode="trunc")
 
     def end_index(a, b, c):
-        return (((a + 1) * c) / b).ceil().to(a.dtype)
+        return torch.div((a + 1) * c + b - 1, b, rounding_mode="trunc")
 
-    # Let's assume the reduction we want to apply is to sum all the elements (averaging from this is easy)
-    # Even more, let's assume that we want to just do the 1d case.
-    # The 2d case is recovered by applying the 1d case along two dimensions
-    # The issue here is that we may want to sum segments of different sizes.
-    # What we do is to get the largest segment, and select all the elements from the initial points
-    # up to the max length. Then we zero out the elements that we picked up and were not necessary if there were any such elements
-    # If all the elements have the same length, we compute the average already, otherwise, we return
-    # the sizes of each window, to compute the sizes of the rectrangles at the end.
-    # This function should recover the efficiency of avg_pool2d if the shape does not need the dynamic window shape
-
-    def adaptive_avg_pool1d(x, dim, out_size):
-        assert dim == -2 or dim == -1
-        in_size = x.size(dim)
-
-        orange = torch.arange(out_size, device=device)
+    def compute_idx(in_size, out_size):
+        orange = torch.arange(out_size, device=device, dtype=torch.int64)
         i0 = start_index(orange, out_size, in_size)
         # Let length = end_index - start_index, i.e. the length of the pooling kernels
         # length.max() can be computed analytically as follows:
@@ -1402,40 +1480,62 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         elif in_size_mod == 0:
             maxlength -= 1
 
-        range_max = torch.arange(maxlength, device=device)
+        range_max = torch.arange(maxlength, device=device, dtype=torch.int64)
         idx = i0.unsqueeze(-1) + range_max
         if adaptive:
             # Need to clamp to avoid accesing out-of-bounds memory
-            idx = idx.clamp(max=in_size - 1)
-        adv_idx_pad = tuple(slice(None) for _ in range(dim + ndim))
-        vals = x[(*adv_idx_pad, idx)]
+            # TODO make minimum accept scalars
+            maxval = torch.scalar_tensor(
+                in_size - 1, dtype=idx.dtype, device=idx.device
+            )
+            idx = torch.minimum(idx, maxval)
 
-        if adaptive:
+            # Compute the lenghts
             i1 = end_index(orange, out_size, in_size)
             length = i1 - i0
+        else:
+            length = maxlength
+        return idx, length, range_max, adaptive
+
+    # length is not None if it's constant, otherwise we'll need to compute it
+    idxh, length_h, range_max_h, adaptive_h = compute_idx(shape[-2], output_size[-2])
+    idxw, length_w, range_max_w, adaptive_w = compute_idx(shape[-1], output_size[-1])
+
+    vals = input[..., _unsqueeze_to_dim(idxh, 4), idxw]
+    # Shortcut for the simpler case
+    if not adaptive_h and not adaptive_w:
+        return torch.mean(vals, dim=(-3, -1))
+
+    def maybe_mask(vals, length, range_max, adaptive, dim):
+        if isinstance(length, int):
+            return vals, length
+        else:
             # zero-out the things we didn't really want to select
             assert dim < 0
-            mask = _unsqueeze_to_dim(range_max >= length.unsqueeze(-1), -dim + 1)
+            # hack
+            mask = range_max >= length.unsqueeze(-1)
+            if dim == -2:
+                mask = _unsqueeze_to_dim(mask, 4)
             vals = torch.masked_fill(vals, mask, 0.0)
-
             # Compute the length of each window
-            div = _unsqueeze_to_dim(length, -dim)
-            return vals.sum(dim), div
-        else:
-            # No need to return div as we have already divided by the mean
-            return vals.mean(dim), None
+            length = _unsqueeze_to_dim(length, -dim)
+            return vals, length
 
-    out, div1 = adaptive_avg_pool1d(input, -1, output_size[-1])
-    out, div2 = adaptive_avg_pool1d(out, -2, output_size[-2])
-    # Filter the Nones
-    divs = tuple(div for div in (div1, div2) if div is not None)
-    # prod(divs) does not work because it accumulates with *=
-    if len(divs) == 0:
-        return out
-    elif len(divs) == 1:
-        return out / divs[0]
-    else:  # len(divs) == 2
-        return out / (divs[0] * divs[1])
+    vals, length_h = maybe_mask(
+        vals, length_h, range_max_h, adaptive=adaptive_h, dim=-2
+    )
+    vals, length_w = maybe_mask(
+        vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1
+    )
+
+    # We unroll the sum as we assume that the kernels are going to be small
+    ret = None
+    for i, j in product(range(vals.shape[-3]), range(vals.shape[-1])):
+        if ret is None:
+            ret = vals[..., i, :, j]
+        else:
+            ret = ret + vals[..., i, :, j]
+    return ret / (length_h * length_w)
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
@@ -1641,3 +1741,176 @@ def nll_loss_forward(
             result = result.sum() / total_weight
 
     return result, total_weight
+
+
+@register_decomposition(aten.grid_sampler_2d)
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: Tensor,
+    grid: Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> Tensor:
+    utils.check(
+        interpolation_mode in (0, 1, 2),
+        lambda: f"Invalid interpolation mode {interpolation_mode}",
+    )
+    utils.check(
+        padding_mode in (0, 1, 2), lambda: f"Invalid padding mode {padding_mode}"
+    )
+
+    # Need this instead of just sum() to keep mypy happy
+    def sum_tensors(ts: Iterable[Tensor]) -> Tensor:
+        return functools.reduce(torch.add, ts)
+
+    def unnormalize(coords: Tensor, size: int) -> Tensor:
+        # Rescale coordinates from [-1, 1] to:
+        #   [0, size - 1] if align_corners is True
+        #   [-.5, size -.5] if align_corners is False
+        mul = (size * 0.5 - 0.5) if align_corners else (size * 0.5)
+        ofs = size * 0.5 - 0.5
+        return coords * mul + ofs
+
+    # Reflects coordinates until they fall between low and high (inclusive).
+    # The bounds are passed as twice their value so that half-integer values
+    # can be represented as ints.
+    def reflect_coordinates(coords: Tensor, twice_low: int, twice_high: int) -> Tensor:
+        if twice_low == twice_high:
+            return torch.zeros_like(coords)
+        coords_min = twice_low / 2
+        coords_span = (twice_high - twice_low) / 2
+        coords2 = (coords - coords_min).abs()
+        extra = torch.fmod(coords2, coords_span)
+        flips = (coords2 / coords_span).floor().to(dtype=torch.int8)
+        return torch.where(
+            flips & 1 == 0, extra + coords_min, coords_span + coords_min - extra
+        )
+
+    def compute_coordinates(coords: Tensor, size: int) -> Tensor:
+        if padding_mode == 0:  # Zero
+            return coords
+        elif padding_mode == 1:  # Borders
+            return torch.clamp(coords, 0, size - 1)
+        else:  # padding_mode == 2, Reflection
+            if align_corners:
+                coords_reflected = reflect_coordinates(coords, 0, 2 * (size - 1))
+            else:
+                coords_reflected = reflect_coordinates(coords, -1, 2 * size - 1)
+            return torch.clamp(coords_reflected, 0, size - 1)
+
+    def compute_source_index(coords: Tensor, size: int) -> Tensor:
+        coords_un = unnormalize(coords, size)
+        return compute_coordinates(coords_un, size)
+
+    N, C, iH, iW = a.shape
+    _, oH, oW, _ = grid.shape
+
+    def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
+        return torch.logical_and(
+            0 <= xs, torch.logical_and(xs < iW, torch.logical_and(0 <= ys, ys < iH))
+        )
+
+    N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
+    C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
+
+    def clip(xs: Tensor, ys: Tensor, ws: Tensor) -> TensorSequenceType:
+        cond = in_bounds_cond(xs, ys)
+        # To clip to inside valid coordinates, we map the coordinates
+        # to (x, y) = (0, 0) and also set the weight to 0
+        # We also change the shape of the tensor to the appropriate one for
+        # broadcasting with N_idx, C_idx for the purposes of advanced indexing
+        return tuple(
+            torch.where(cond, t, 0).view(N, 1, oH, oW)
+            for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
+        )
+
+    def get_summand(ix: Tensor, iy: Tensor, w) -> Tensor:
+        # Perform clipping, index into input tensor and multiply by weight
+        idx_x, idx_y, w_ = clip(ix, iy, w)
+        return a[N_idx, C_idx, idx_y, idx_x] * w_
+
+    x = grid[..., 0]
+    y = grid[..., 1]
+
+    if interpolation_mode == 0:  # Bilinear
+        ix = compute_source_index(x, iW)
+        iy = compute_source_index(y, iH)
+
+        ix_nw, iy_nw = ix.floor(), iy.floor()
+        ix_ne, iy_ne = ix_nw + 1, iy_nw
+        ix_sw, iy_sw = ix_nw, iy_nw + 1
+        ix_se, iy_se = ix_ne, iy_sw
+
+        w_nw = (ix_se - ix) * (iy_se - iy)
+        w_ne = (ix - ix_sw) * (iy_sw - iy)
+        w_sw = (ix_ne - ix) * (iy - iy_ne)
+        w_se = (ix - ix_nw) * (iy - iy_nw)
+
+        return sum_tensors(
+            get_summand(ix, iy, w)
+            for (ix, iy, w) in (
+                (ix_nw, iy_nw, w_nw),
+                (ix_ne, iy_ne, w_ne),
+                (ix_sw, iy_sw, w_sw),
+                (ix_se, iy_se, w_se),
+            )
+        )
+    elif interpolation_mode == 1:  # Nearest
+        ix = compute_source_index(x, iW)
+        iy = compute_source_index(y, iH)
+
+        ix_nearest = ix.round()
+        iy_nearest = iy.round()
+
+        return get_summand(ix_nearest, iy_nearest, 1)
+    else:  # interpolation_mode == 2, Bicubic
+        ix = unnormalize(x, iW)
+        iy = unnormalize(y, iH)
+
+        ix_nw = ix.floor()
+        iy_nw = iy.floor()
+
+        tx = ix - ix_nw
+        ty = iy - iy_nw
+
+        def get_value_bounded(ix: Tensor, iy: Tensor) -> Tensor:
+            x = compute_coordinates(ix, iW)
+            y = compute_coordinates(iy, iH)
+            return get_summand(x, y, 1)
+
+        # These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
+        # https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+        def cubic_convolution1(x: Tensor, A: float) -> Tensor:
+            return ((A + 2) * x - (A + 3)) * x * x + 1
+
+        def cubic_convolution2(x: Tensor, A: float) -> Tensor:
+            return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A
+
+        def get_cubic_upsample_coefficients(t: Tensor) -> TensorSequenceType:
+            A = -0.75
+            return (
+                cubic_convolution2(t + 1.0, A),
+                cubic_convolution1(t, A),
+                cubic_convolution1(1.0 - t, A),
+                cubic_convolution2(2.0 - t, A),
+            )
+
+        def cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
+            coeffs2 = get_cubic_upsample_coefficients(ts)
+            return sum_tensors(
+                c1 * c2.unsqueeze(1) for (c1, c2) in zip(coeffs, coeffs2)
+            )
+
+        def get_coeff(ofs: int) -> Tensor:
+            iy_ofs = iy_nw + (ofs - 1)
+            cs = (
+                get_value_bounded(ix_nw - 1, iy_ofs),
+                get_value_bounded(ix_nw, iy_ofs),
+                get_value_bounded(ix_nw + 1, iy_ofs),
+                get_value_bounded(ix_nw + 2, iy_ofs),
+            )
+            return cubic_interp1d(cs, tx)
+
+        coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
+        return cubic_interp1d(coeffs, ty)
