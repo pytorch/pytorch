@@ -600,7 +600,7 @@ DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate(
 auto ${tmp_var} = ([&]() {
   if (${try_jit_decomposition_bool} && ${any_has_forward_grad}) {
     static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
-    static auto opt_op = c10::Dispatcher::singleton().findSchema(full_name);
+    static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
     return impl::run_jit_decomposition_with_args_for_jvp<${returns_and_args}>("${op_name}", *opt_op, ks, ${arg_names});
   } else {
     ${guard}
