@@ -45,7 +45,7 @@ def to_nvfuser_template_args(args):
                 arg.size(),
                 arg.stride(),
                 getnvFuserDtype(arg.dtype),
-                arg.device.type == "cpu",
+                arg.is_cpu,  # type: ignore[attr-defined]
             )
         elif isinstance(arg, Number):
             return nvFuserScalarTemplate(getnvFuserDtype(number_type(arg)))
@@ -159,21 +159,33 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 def nvfuser_execute(gm: GraphModule, *args):
     flat_args, _ = tree_flatten(args)
 
-    # Construction of the fusion is expensive and cached based on the GraphModule
-    # and symbolic nvFuser args.
-    nv_template_args = to_nvfuser_template_args(flat_args)
-    fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+    # check for cuda only fusion
+    if any(isinstance(arg, torch.Tensor) and arg.is_cuda for arg in flat_args) and all(  # type: ignore[attr-defined]
+        (
+            not isinstance(arg, torch.Tensor)
+            or (arg.is_cpu and arg.ndim != 0)
+            or arg.is_cuda  # type: ignore[attr-defined]
+        )
+        for arg in flat_args
+    ):
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs
-    # marked with `define_tensor/scalar`
-    concrete_fusion_inputs = tuple(
-        arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
-    )
+        # Construction of the fusion is expensive and cached based on the GraphModule
+        # and symbolic nvFuser args.
+        nv_template_args = to_nvfuser_template_args(flat_args)
+        fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    return tree_unflatten(
-        fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
-        unflatten_spec,  # type: ignore[has-type]
-    )
+        # Inputs to fusion.execute correspond to the same template/symbolic inputs
+        # marked with `define_tensor/scalar`
+        concrete_fusion_inputs = tuple(
+            arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
+        )
+
+        return tree_unflatten(
+            fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
+            unflatten_spec,  # type: ignore[has-type]
+        )
+    else:
+        return gm.forward(*args)
 
 
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
