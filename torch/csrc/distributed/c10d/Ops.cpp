@@ -58,7 +58,8 @@ allgather_(
       c10::intrusive_ptr<ProcessGroup::Work>>(output_tensors, work);
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>> reduce_scatter_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
