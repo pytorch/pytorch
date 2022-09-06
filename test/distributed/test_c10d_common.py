@@ -9,8 +9,10 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 from itertools import product
 from sys import platform
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
@@ -47,7 +49,12 @@ from torch.testing._internal.common_utils import (
     parametrize
 )
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_map,
+    tree_map_only,
+    tree_unflatten
+)
 from torch.utils.checkpoint import checkpoint
 
 
@@ -1378,11 +1385,20 @@ class CommResult:
     _work: torch.classes.c10d.Work
 
 
-def wrap_comm_result(result):
+def wrap_comm_result(result: Tuple[Any]) -> Tuple[Any]:
+    def wrap(work, e):
+        assert isinstance(e, torch.Tensor), (
+            "Excepting collection of tensors as the first element in the "
+            "return value of communication operations."
+        )
+
+        return CommResult(e, work)
+
+    # E.g.,
     # allreduce_ returns ([tensor], work)
-    tensor = result[0][0]
+    # allgather_ returns ([[tensor1, tensor2]], work)
     work = result[1]
-    return ([CommResult(result[0][0], result[1])], result[1])
+    return (tree_map(partial(wrap, work), result[0]), work)
 
 
 class CommTensor(torch.Tensor):
@@ -1487,6 +1503,16 @@ class CommTensor(torch.Tensor):
             else:
                 return e
 
+        def wrap(e):
+            return CommTensor(e) if isinstance(e, torch.Tensor) else e
+
+        def mark_after_comm(work, e):
+            if isinstance(e, torch.Tensor) or isinstance(e, CommTensor):
+                e._work = work
+                e._after_comm = True
+
+            return e
+
         unwrapped_args = tree_map(unwrap, args)
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
@@ -1525,20 +1551,22 @@ class CommTensor(torch.Tensor):
 
                 # N.B.: we still need to remember the work handle here, and wait
                 # for it later to make sure the execution during tracing is
-                # correct.
-                args[0][0]._work = out[1]
-                # remember comm is already launched
-                args[0][0]._after_comm = True
+                # correct. Also, remember comm is already launched
+                # args[0] is always the collection of output tensors
+                tree_map(partial(mark_after_comm, out[1]), args[0])
 
                 # HACK: update the proxy on the input argument as this is an
                 # inplace collective communication.
-                set_proxy_slot(unwrapped_args[0][0], tracer, get_proxy(out[0][0]))
-                return out
+                flat_args, args_spec = tree_flatten(unwrapped_args[0])
+                flat_out, out_spec = tree_flatten(out[0])
+                for a, o in zip(flat_args, flat_out):
+                    set_proxy_slot(a, tracer, get_proxy(o))
+
+                return (tree_unflatten(flat_out, out_spec), out[1])
             else:
                 # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **kwargs)
-                args[0][0]._work = out[1]
-                args[0][0]._after_comm = True
+                tree_map(partial(mark_after_comm, out[1]), args[0])
                 return out
         else:
             if after_comm:
@@ -1546,7 +1574,7 @@ class CommTensor(torch.Tensor):
             else:
                 # we need to propagate CommTensor wrapping until the first
                 # subsequent operation has waited for it.
-                return CommTensor(func(*unwrapped_args, **unwrapped_kwargs))
+                return tree_map(wrap, func(*unwrapped_args, **unwrapped_kwargs))
 
 
 class CompilerTest(MultiProcessTestCase):
