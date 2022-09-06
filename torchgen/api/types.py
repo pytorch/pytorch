@@ -786,7 +786,9 @@ def kernel_signature(
         return DispatcherSignature.from_schema(f.func, prefix=prefix)
     else:
         meta = backend_index.get_kernel(f)
-        return NativeSignature(f.func, prefix=prefix, symint=meta is not None and meta.supports_symint())
+        return NativeSignature(
+            f.func, prefix=prefix, symint=meta is not None and meta.supports_symint()
+        )
 
 
 # Functions only, no types

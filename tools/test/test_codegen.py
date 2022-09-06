@@ -314,7 +314,6 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 dispatch_key=k,
                 use_out_as_primary=True,
                 external=False,
-                symint=False,
                 device_guard=False,
                 index=backend_indices[k],
             )
@@ -392,7 +391,7 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
         backend_metadata = self.backend_indices[DispatchKey.CompositeExplicitAutograd][
             op_name
         ]
-        self.assertEqual(backend_metadata.kernel, "op_out")
+        self.assertEqual(backend_metadata.kernel, "op_out_symint")
 
     def test_functional_variant_autogen_out_variant_two_returns(self) -> None:
         native_functions = [self.two_returns_func]
@@ -406,7 +405,7 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
         backend_metadata = self.backend_indices[DispatchKey.CompositeExplicitAutograd][
             op_name
         ]
-        self.assertEqual(backend_metadata.kernel, "op_2_out")
+        self.assertEqual(backend_metadata.kernel, "op_2_out_symint")
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()
