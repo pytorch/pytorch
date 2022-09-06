@@ -1067,7 +1067,7 @@ class TestNestedTensorDeviceType(TestCase):
             torch.functional.F.linear(nt, weight1, bias)
 
         # inconsistent last dim of nested tensor
-        msg = r"all tensors in NestedTensor must have the same trailing dim"
+        msg = r"Expected all tensors in nested tensor to have the same trailing dimension, instead last dimension equals:"
         nt2 = torch.nested_tensor([torch.randn(1, 2, device=device, dtype=dtype),
                                   torch.randn(2, 3, device=device, dtype=dtype)])
         with self.assertRaisesRegex(RuntimeError, msg):
