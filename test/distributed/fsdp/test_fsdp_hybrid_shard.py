@@ -117,8 +117,12 @@ class TestFSDPHybridShard(FSDPTest):
                 self.assertTrue(_rank_not_in_group(r, inter_node_pg))
 
         orig_ar = dist.all_reduce
+        allreduce_called = False
+
         def patched_allreduce(*args, **kwargs):
             print(" -- patched --")
+            nonlocal allreduce_called
+            allreduce_called = True
             return orig_ar(*args, **kwargs)
 
         with patch_allreduce(patched_allreduce):
@@ -126,6 +130,8 @@ class TestFSDPHybridShard(FSDPTest):
             out = fsdp_model(inp)
             loss = fsdp_model.get_loss(inp, out)
             loss.backward()
+
+        self.assertTrue(allreduce_called)
 
 
 
