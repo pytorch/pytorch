@@ -12095,6 +12095,9 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               
+               # couldn't find symbolic meta function/decomposition
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
