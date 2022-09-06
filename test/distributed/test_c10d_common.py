@@ -1609,7 +1609,6 @@ class CompilerTest(MultiProcessTestCase):
             # discussion.
             y = CommTensor(x + x)
             work, z = comm_fn(y, group=pg)
-            # work = dist.all_reduce(y, group=pg, async_op=True)
             # this wait() will be ignored in tracing mode as
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
