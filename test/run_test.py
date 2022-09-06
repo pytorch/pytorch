@@ -729,7 +729,18 @@ def run_doctests(test_module, test_directory, options):
     # Hack: Only do a small subset of the doctests to try to avoid CI errors.
     # pkgpath = os.path.join(pkgpath, 'utils')
     # pkgpath = os.path.join(pkgpath, 'nn')
-    pkgpath = pkgpath
+    pkgpath = os.path.join(pkgpath, 'ao')
+    # pkgpath = os.path.join(pkgpath, 'autograd')
+    # pkgpath = os.path.join(pkgpath, 'jit')
+    # pkgpath = os.path.join(pkgpath, 'distributions')
+    # pkgpath = os.path.join(pkgpath, 'masked')
+    # pkgpath = os.path.join(pkgpath, 'optim')
+    # pkgpath = os.path.join(pkgpath, 'cuda')
+    # pkgpath = os.path.join(pkgpath, 'distributed')
+    # pkgpath = os.path.join(pkgpath, 'rx')
+    # pkgpath = os.path.join(pkgpath, 'monitor')
+    # pkgpath = os.path.join(pkgpath, 'futures')
+    # pkgpath = pkgpath
 
     xdoctest_config = {
         'global_exec': r'\n'.join([
