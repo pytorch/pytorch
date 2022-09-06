@@ -609,19 +609,19 @@ class MixtureOfExperts(NestedWrappedModule):
         if self.delay_before_free_ms > 0:
             expert = self.module[2]
             if isinstance(expert, FSDP):
-                orig_free_full_params = self.module[2]._free_full_params
+                orig_reshard = self.module[2]._reshard
 
                 def _free_full_params_with_delay(*args):
                     torch.cuda._sleep(
                         int(self.delay_before_free_ms * get_cycles_per_ms())
                     )
-                    return orig_free_full_params(*args)
+                    return orig_reshard(*args)
 
                 assert hasattr(
-                    expert, "_free_full_params"
-                ), "expert FSDP module should has _free_full_params attribute."
+                    expert, "_reshard"
+                ), "expert FSDP module should have a `_reshard()` method"
                 with mock.patch.object(
-                    expert, "_free_full_params", _free_full_params_with_delay
+                    expert, "_reshard", _free_full_params_with_delay
                 ):
                     return self.module(x)
 
