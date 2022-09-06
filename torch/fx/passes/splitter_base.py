@@ -26,6 +26,7 @@ from .tools_common import (
 )
 import warnings
 
+
 __all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,19 +60,11 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
-        parser.add_argument(
-            "--op_lowering_disallow_list",
-            default="",
-            type=str,
-            help="A comma separated string which represents a disallow_list of "
-            "operator names."
-        )
         args, unknown = parser.parse_known_args()
 
         self.min_acc_module_size: int = args.min_acc_module_size
         self.skip_fusion: bool = args.skip_fusion
         self.allow_non_tensor: bool = args.allow_non_tensor
-        self.op_lowering_disallow_list: List[str] = args.op_lowering_disallow_list.split(",")
 
 
 @compatibility(is_backward_compatible=False)
@@ -323,10 +316,20 @@ class _SplitterBase:
         self.update_deps_for_fusions()
 
         self.non_acc_submodule_name = non_acc_submodule_name
+        self._node_submodule_map: Dict[str, str] = {}
 
     # ===============================================================
     # Helpers for ctor and initial state
     # ===============================================================
+
+    def get_node_submodule_map(self) -> Dict[str, str]:
+        """ Returns a map from node name to submodule name, e.g.
+            node: main_module_impl_impl_over_arch_unary_multiple_embedding
+              _pooling_embedding_pooling_sparse_entity_equivalence_key
+              _proxy_embedding_bag
+            maps to submodule name of: _run_on_acc_1
+        """
+        return self._node_submodule_map
 
     def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
         """
@@ -723,12 +726,9 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # Determine which subgraph to start from based on node dependency
-        acc_subgraph: bool = True
-        for n in current_cpu_nodes:
-            if self.deps[n] <= visited_nodes:
-                acc_subgraph = False
-                break
+        # Determine which subgraph to start from based on which subgraph has
+        # 0-dep node
+        acc_subgraph: bool = not any([len(self.deps[n]) == 0 for n in current_cpu_nodes])
 
         current_subgraph_nodes: NodeList = []
 
@@ -817,14 +817,14 @@ class _SplitterBase:
     def tag(self, subgraphs: List[Subgraph]):
         self.tags: List[str] = []
         for subgraph in subgraphs:
-            subgraph_name = self.non_acc_submodule_name
-
             tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):
                     raise FxNetSplitterInternalError(f"Node {node} was already tagged")
+
                 node.tag = tag  # type: ignore[attr-defined]
+                self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
         split_module = split_by_tags(self.module, self.tags)

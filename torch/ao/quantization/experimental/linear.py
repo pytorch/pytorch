@@ -141,12 +141,6 @@ class LinearAPoT(WeightedQuantizedModule):
             for col in range(weight_cols):
                 decomposed_weight[row][col] = self.decompose_APoT(bin(self.weight_transposed[row][col]))
 
-        rows1 = self.weight_transposed.size(dim=0)
-        cols1 = self.weight_transposed.size(dim=1)
-
-        rows2 = activation.size(dim=0)
-        cols2 = activation.size(dim=1)
-
         result = self.matmul(decomposed_weight, activation).type(torch.FloatTensor)
 
         return result

@@ -1,6 +1,7 @@
 import torch
 import warnings
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+import weakref
+from typing import Any, Iterable, List, Tuple
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -294,6 +295,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
 
     Example:
+        >>> # xdoctest: +SKIP("stub")
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
@@ -350,25 +352,39 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: Dict[int, Optional[torch.Tensor]] = {}
-    counter = 0
+    # Custom class to be able to take weak references
+    class Holder():
+        pass
+    # The Holder object for each of the saved object is saved directly on the
+    # SavedVariable and is cleared when reset_data() is called on it. We MUST make
+    # sure that this is the only object having an owning reference to ensure that
+    # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
+    # data is cleared.
+    storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    weak_holder_list = []
 
     def pack(x):
-        nonlocal counter
-        counter += 1
-        # TODO(varal7): Instead of returning indices, we can return things metadata (such as
+        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
         # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        return counter - 1
+        res = Holder()
+        weak_holder_list.append(weakref.ref(res))
+        return res
+
 
     def unpack(x):
         unpack_counter = 0
         if len(storage) == 0:
-
             def inner_pack(inner):
                 nonlocal unpack_counter
-                storage[unpack_counter] = inner
                 unpack_counter += 1
-                return None
+                # If the holder went out of scope, the SavedVariable is dead and so
+                # the value will never be read from the storage. Skip filling it.
+                if weak_holder_list[unpack_counter - 1]() is None:
+                    return
+                # Use detach here to ensure we don't keep the temporary autograd
+                # graph created during the second forward
+                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
+                return
 
             def inner_unpack(packed):
                 raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
@@ -398,7 +414,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                 " open an issue with details on your use case so that we can prioritize adding this."
             )
 
-        return storage.pop(x)
+        return storage[x]
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args, **kwargs)

@@ -6,6 +6,8 @@
 namespace torch {
 namespace utils {
 
+using SchemaSpecialCasePair =
+    std::pair<c10::FunctionSchema, std::unordered_set<std::string>>;
 /**
  * class SchemaInfo
  *
@@ -16,20 +18,21 @@ namespace utils {
 struct TORCH_API SchemaInfo {
  public:
   explicit SchemaInfo(const c10::FunctionSchema& schema)
-      : schema_(std::move(schema)), alias_maps_current_(false) {
-    initSchemaInfo();
-  }
+      : schema_(std::move(schema)),
+        alias_maps_current_(false),
+        has_init_(false) {}
   explicit SchemaInfo(const char* signature)
       : schema_(torch::jit::parseSchema(signature)),
-        alias_maps_current_(false) {
-    initSchemaInfo();
-  }
+        alias_maps_current_(false),
+        has_init_(false) {}
 
   bool is_mutable();
 
   bool is_mutable(const c10::SchemaArgument& argument);
 
   bool is_mutable(c10::string_view name);
+
+  bool has_argument(c10::string_view name);
 
   bool is_nondeterministic() const;
 
@@ -83,7 +86,11 @@ struct TORCH_API SchemaInfo {
 
   static std::vector<c10::FunctionSchema> getNonDeterministicOps();
 
-  static std::vector<c10::FunctionSchema> getTrainingOps();
+  static std::vector<SchemaSpecialCasePair> getTrainingOps();
+
+  const std::unordered_set<c10::SchemaArgument>& wildcardSet();
+
+  const std::unordered_set<c10::SchemaArgument>& containerSet();
 
   // Set of all wildcard arguments
   std::unordered_set<c10::SchemaArgument> wildcard_set_;
@@ -103,6 +110,8 @@ struct TORCH_API SchemaInfo {
   const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;
+
+  bool has_init_;
 };
 } // namespace utils
 } // namespace torch

@@ -75,8 +75,6 @@ RandomnessType DynamicLayer::randomness() const {
   return VmapInterpreterPtr(&interpreter_).randomness();
 }
 
-constexpr DispatchKeySet kFrontBackKeys({kDynamicLayerBackModeKey, kDynamicLayerFrontModeKey});
-
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
 DynmetaData kDynMetaDataSingleton;
 

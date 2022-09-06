@@ -138,7 +138,7 @@ static PyObject* THPStorage_resize_(PyObject* _self, PyObject* number_arg) {
   } else {
     TORCH_CHECK(
         false,
-        "_UntypedStorage.resize_: got unexpected device type ",
+        "UntypedStorage.resize_: got unexpected device type ",
         device_type);
   }
   Py_INCREF(self);

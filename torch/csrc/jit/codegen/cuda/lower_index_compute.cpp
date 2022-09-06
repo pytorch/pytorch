@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -23,39 +24,6 @@ IndexFromIdGraph::IndexFromIdGraph(
       resolved_loop_domains(loop_domains_) {}
 
 namespace {
-
-void insertMagicZero(
-    const std::vector<kir::ForLoop*>& loops,
-    const std::vector<IterDomain*>& loop_domains,
-    std::unordered_map<IterDomain*, Val*>& concrete_loop_idx_map) {
-  // Find magic zero insertion point
-  IterDomain* magic_zero_loop = nullptr;
-
-  // Search for proper magic zero insertion point,
-  //  prefer innermost.
-  for (auto idx : c10::irange(loops.size())) {
-    auto loop = loops[idx];
-    auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
-        loop_domains[idx], IdMappingMode::EXACT);
-    auto loop_ind = concrete_loop_idx_map.at(concrete_loop_id);
-
-    // Save the concrete id if this loop id is decided to
-    //  be the insertion point by the magic zero util.
-    if (Index::protectWithMagicZero(loop, concrete_loop_id, loop_ind)) {
-      magic_zero_loop = concrete_loop_id;
-    }
-  }
-
-  // Insert magic zero if insertion point found
-  if (magic_zero_loop != nullptr &&
-      concrete_loop_idx_map.count(magic_zero_loop)) {
-    auto& ind = concrete_loop_idx_map.at(magic_zero_loop);
-    if (!ind->isConstScalar()) {
-      ind = SimplifyingIrBuilder::addExpr(
-          ind, GpuLower::current()->kernel()->magicZeroVal());
-    }
-  }
-}
 
 // Maps all producer domains to consumer with broadcast
 // forwarding. Used to find the allocation position.
@@ -159,7 +127,7 @@ IndexingParameters getGlobalIndexParameters(
   index_parameters.concrete_id_to_halo_extent =
       GpuLower::current()->haloInfo().buildConcreteHaloExtentMap(loop_indexing);
 
-  insertMagicZero(
+  protectNonPredicateIndexWithMagicZero(
       loops,
       loop_indexing.loopDomains(),
       index_parameters.initial_concrete_id_index);
@@ -182,10 +150,13 @@ IndexingParameters getGlobalIndexParameters(
 
         auto concrete_loop_id = ir_utils::caMapExactConcreteId(loop_id);
 
+        auto stage_depth =
+            GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+                loop->iter_domain());
         index_parameters.initial_concrete_id_index[concrete_loop_id] =
             SimplifyingIrBuilder::addExpr(
                 index_parameters.initial_concrete_id_index[concrete_loop_id],
-                GpuLower::current()->kernel()->oneVal());
+                SimplifyingIrBuilder::create<Int>(stage_depth - 1));
       }
     }
   }
@@ -412,9 +383,12 @@ IndexingParameters getPredicateInitialIndexParameters(
       // be true that that index has been modified to support
       // unswitch. In that case, it is not necessary to move ahead the
       // index for double buffering.
+      auto stage_depth =
+          GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+              db_loop->iter_domain());
       if (cur_index == db_loop->index()) {
         loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
-            cur_index, GpuLower::current()->kernel()->oneVal());
+            cur_index, SimplifyingIrBuilder::create<Int>(stage_depth - 1));
       }
     }
   }
@@ -428,10 +402,9 @@ IndexingParameters getPredicateInitialIndexParameters(
         loop_to_ind_map.at(loop);
   }
 
-  insertMagicZero(
-      loops,
-      loop_indexing.loopDomains(),
-      index_parameters.initial_concrete_id_index);
+  // Note that, unlike non-predicate indexing, magic-zero insertion is
+  // not done at this point but is done individually for each indexed
+  // domain. See Index::getReferenceRootPredicates.
 
   // Derive the halo extents from the loop indexing result.
   index_parameters.concrete_id_to_halo_extent =
@@ -826,11 +799,12 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
   indexing.run(loop_indexing);
 
   // Populate indexing through exact map from initial indexing
+  auto consumer_root = index_producer ? consumer_tv->getRootDomain()
+                                      : consumer_tv->getMaybeRFactorDomain();
 
   // First collect all iterdomains in consumer transform history.
   auto all_consumer_vals = DependencyCheck::getAllValsBetween(
-      {consumer_tv->getMaybeRFactorDomain().begin(),
-       consumer_tv->getMaybeRFactorDomain().end()},
+      {consumer_root.begin(), consumer_root.end()},
       {consumer_tv->domain()->domain().begin(),
        consumer_tv->domain()->domain().end()});
 

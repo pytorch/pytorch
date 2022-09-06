@@ -128,6 +128,7 @@ def update_names(tensor, names, rename_map, inplace):
 
     >>> x.rename('batch', '...', 'width').names
     ('batch', 'C', 'H', 'width')
+
     ```
 
     tensor.rename(**rename_map) returns a view on tensor that has rename dims
@@ -138,6 +139,7 @@ def update_names(tensor, names, rename_map, inplace):
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
     >>> x.rename(W='width', H='height').names
     ('N', 'C', 'height', 'width')
+
     ```
 
     Finally, tensor.rename has an in-place version called tensor.rename_.

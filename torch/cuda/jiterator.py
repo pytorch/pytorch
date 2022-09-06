@@ -54,7 +54,7 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        assert self.is_cuda_available, "Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available."
+        assert self.is_cuda_available, "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
 
         assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 

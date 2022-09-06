@@ -38,6 +38,7 @@ base_names = {
     'test_make_fx_exhaustive_',
     'test_vmap_exhaustive_',
     'test_op_has_batch_rule_',
+    'test_vmap_autograd_grad_',
 }
 
 failed_tests = [get_failed_test(line) for line in lines]
@@ -67,6 +68,8 @@ def parse_namespace(base):
         'fft_': 'fft',
         'linalg_': 'linalg',
         '_masked_': '_masked',
+        'sparse_': 'sparse',
+        'speical_': 'special',
     }
     for heading in mappings.keys():
         if base.startswith(heading):

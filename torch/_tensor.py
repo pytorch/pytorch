@@ -158,10 +158,10 @@ class Tensor(torch._C._TensorBase):
                             f"Unsupported qscheme {self.qscheme()} in deepcopy"
                         )
                     # TODO: Once we decide to break serialization FC, no longer
-                    # need to wrap with _TypedStorage
+                    # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage._TypedStorage(
-                            wrap_storage=new_storage._untyped(), dtype=self.dtype
+                        torch.storage.TypedStorage(
+                            wrap_storage=new_storage.untyped(), dtype=self.dtype
                         ),
                         self.storage_offset(),
                         self.size(),
@@ -255,7 +255,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -324,10 +324,10 @@ class Tensor(torch._C._TensorBase):
                     f"Serialization is not supported for tensors of type {self.qscheme()}"
                 )
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args_qtensor = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -382,10 +382,10 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -763,16 +763,16 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.split, (self,), self, split_size, dim=dim
             )
-        if isinstance(split_size, int):
-            return super(Tensor, self).split(split_size, dim)
-        elif isinstance(split_size, Tensor):
+        if isinstance(split_size, Tensor):
             try:
                 split_size = int(split_size)
-                return super(Tensor, self).split(split_size, dim)
             except ValueError:
-                return super(Tensor, self).split_with_sizes(split_size, dim)
+                pass
+
+        if isinstance(split_size, int):
+            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return super(Tensor, self).split_with_sizes(split_size, dim)
+            return torch._VF.split_with_sizes(self, split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -912,8 +912,10 @@ class Tensor(torch._C._TensorBase):
         return iter(self.unbind(0))
 
     def __hash__(self):
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__hash__, (self,), self)
+        # Do NOT handle __torch_function__ here as user's default
+        # implementation that handle most functions will most likely do it wrong.
+        # It can be easily overridden by defining this method on the user
+        # subclass if needed.
         return id(self)
 
     def __dir__(self):
@@ -1195,7 +1197,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> renamed_imgs = imgs.rename(None)
             >>> renamed_imgs.names
-            (None,)
+            (None, None, None, None)
 
             >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
             >>> renamed_imgs.names

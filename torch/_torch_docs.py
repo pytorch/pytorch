@@ -7095,7 +7095,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     {input}
-    {dim} If `None`, reduces all dimensions. Default is `None`.
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -10806,7 +10806,7 @@ any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -10971,7 +10971,7 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -11664,6 +11664,20 @@ If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
 resulting :attr:`out` tensor *does not* share the underlying storage
 with the :attr:`input` tensor.
 
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` with compressed
+layout (SparseCSR, SparseBSR, SparseCSC or SparseBSC) the arguments
+:attr:`dim0` and :attr:`dim1` must be both batch dimensions, or must
+both be sparse dimensions. The batch dimensions of a sparse tensor are the
+dimensions preceding the sparse dimensions.
+
+.. note::
+    Transpositions which interchange the sparse dimensions of a `SparseCSR`
+    or `SparseCSC` layout tensor will result in the layout changing between
+    the two options. Transposition of the sparse dimensions of a ` SparseBSR`
+    or `SparseBSC` layout tensor will likewise generate a result with the
+    opposite layout.
+
+
 Args:
     {input}
     dim0 (int): the first dimension to be transposed
@@ -12188,7 +12202,7 @@ Otherwise, the sample variance is calculated, without any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -12228,7 +12242,7 @@ correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -13523,6 +13537,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,
