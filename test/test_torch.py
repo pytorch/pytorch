@@ -6229,6 +6229,7 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/pytorch/pull/83567")
     def test_parsing_intlist(self):
         #  parse with integer variables
         self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
@@ -6921,6 +6922,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_Size_scalar(self):
         three = torch.tensor(3)
         two = torch.tensor(2)
@@ -7470,6 +7472,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint32.is_signed)
 
     # FIXME: Put the following random tests into their own test class or test suite
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -7481,6 +7484,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         after = torch.rand(1000)
         self.assertEqual(before, after, atol=0, rtol=0)
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNGStateAliasing(self):
         # Fork the random number stream at this point
         gen = torch.Generator()
@@ -7493,6 +7497,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, atol=0, rtol=0, msg="RNG has not forked correctly.")
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNG_after_pickle(self):
         torch.random.manual_seed(100)
         before = torch.rand(10)
@@ -7505,6 +7510,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertEqual(before, after, atol=0, rtol=0)
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_boxMullerState(self):
         torch.manual_seed(123)
         odd_number = 101
@@ -7520,6 +7526,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(seeded, reseeded, atol=0, rtol=0,
                          msg='repeated calls to manual_seed not generating same sequence of normally distributed numbers')
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_manual_seed(self):
         rng_state = torch.get_rng_state()
         torch.manual_seed(2)
