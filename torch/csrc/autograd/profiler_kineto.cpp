@@ -226,7 +226,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       int64_t total_allocated,
       int64_t total_reserved,
       c10::Device device) override {
-    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+    if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_allocation_event(
           torch::profiler::impl::getApproximateTime(),
           ptr,
@@ -243,7 +243,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       int64_t total_allocated,
       int64_t total_reserved,
       c10::Device device) override {
-    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+    if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_ooms_event(
           torch::profiler::impl::getApproximateTime(),
           alloc_size,
@@ -558,13 +558,18 @@ void enableProfiler(
 
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-      config.state == ProfilerState::KINETO_ONDEMAND);
+      config.state == ProfilerState::KINETO_GPU_FALLBACK || config.global());
   TORCH_CHECK(
       !activities.empty(), "No activities specified for Kineto profiler");
 
-  if (config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+  if (config.global()) {
+    KinetoTLSGlobalStateManager::init(config, activities);
+
+    TORCH_INTERNAL_ASSERT(
+        activities.count(ActivityType::CPU),
+        "Ondemand profiling must enable CPU tracing");
+    pushProfilingCallbacks<true>(scopes);
+  } else {
     auto state = std::make_shared<KinetoThreadLocalState>(config, activities);
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
@@ -572,15 +577,6 @@ void enableProfiler(
       pushProfilingCallbacks<false>(scopes);
     }
     torch::profiler::impl::kineto::startTrace();
-  }
-
-  if (config.state == ProfilerState::KINETO_ONDEMAND) {
-    KinetoTLSGlobalStateManager::init(config, activities);
-
-    TORCH_INTERNAL_ASSERT(
-        activities.count(ActivityType::CPU),
-        "Ondemand profiling must enable CPU tracing");
-    pushProfilingCallbacks<true>(scopes);
   }
 }
 
@@ -601,9 +597,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
            config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
-  if (state_ptr->hasCallbackHandle()) {
-    at::removeCallback(state_ptr->callbackHandle());
-  }
+  state_ptr->removeCallback();
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (state_ptr->config().state == ProfilerState::KINETO_ONDEMAND) {

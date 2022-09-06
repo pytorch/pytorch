@@ -19,7 +19,6 @@ from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
 from . import config
-from .decompositions import register_decomposition
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 
@@ -28,6 +27,14 @@ try:
 except ImportError:
 
     def disable_torchdynamo(x):
+        return x
+
+
+try:
+    from torchdynamo.utils import dynamo_timed
+except ImportError:
+
+    def dynamo_timed(x):
         return x
 
 
@@ -178,11 +185,6 @@ def normalize_as_list(x):
 
 aot_autograd_decompositions = {}
 
-# TODO: Remove these stupid decompositions
-@register_decomposition(aten._reshape_alias, aot_autograd_decompositions)
-def _reshape_alias(x, shape, strides):
-    return aten.view(x, shape)
-
 
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
@@ -285,6 +287,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
+
     out = flat_fn(*flat_args)
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
@@ -297,25 +300,36 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         _num_outs = 1
 
     joint_inputs = (flat_args, out)
-    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.use_functionalize:
-        # Functionalize the foward backward graph. First create a
-        # fake fn to make functionalize happy
+        # Trace once without decompositions, into a graph of ATen ops.
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
         def fake_fn(primals, tangents):
             return fx_g(primals, tangents)
 
-        fx_g = make_fx(functionalize(fake_fn))(*joint_inputs)
+        # Trace a second time, running functionalization, and THEN running decompositions.
+        # functionalization only acts on ATen today, and doesn't currently handle
+        # view and inplace ops that come from primtorch.
+        # Eventually, functionalization should support primtorch view/inplace ops,
+        # which will make it ok to run decompositions before functionalization.
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+    else:
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
-        print(fx_g.code)
+        print("====== Joint graph ======")
+        fx_g.print_readable()
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
 
         if config.debug_graphs:
-            print(fw_module.code, bw_module.code)
+            print("====== Forward graph ======")
+            fw_module.print_readable()
+            print("====== Backward graph ======")
+            bw_module.print_readable()
 
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
@@ -363,6 +377,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     return CompiledFunction.apply
 
 
+@dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
 ):
@@ -406,9 +421,12 @@ def create_aot_dispatcher_function(
                 # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
                 # because they use a "running-mean" style op that requires
                 # resizing the running counter buffers stored on the module.
+                def make_input(x):
+                    return x.detach().requires_grad_(x.requires_grad)
+
                 fake_flat_tensor_args = pytree.tree_map_only(
                     Tensor,
-                    lambda x: x.detach().requires_grad_(x.requires_grad),
+                    make_input,
                     flat_args,
                 )
             return fake_flat_tensor_args
@@ -812,10 +830,12 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace(), torch.autograd.detect_anomaly(
-                    check_nan=False
-                ):
-                    out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
@@ -881,6 +901,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
 
     forward.zero_grad = mod.zero_grad
+    forward.named_parameters = mod.named_parameters
     return forward
 
 

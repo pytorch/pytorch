@@ -187,7 +187,10 @@ coverage_ignore_classes = [
     "DeserializationStorageContext",
     "DeviceObjType",
     "DictType",
+    "DispatchKey",
+    "DispatchKeySet",
     "EnumType",
+    "ExcludeDispatchKeyGuard",
     "ExecutionPlan",
     "FileCheck",
     "FloatType",
@@ -319,7 +322,8 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymIntNode"
+    "SymIntNode",
+    "SymFloatNode",
 ]
 
 # The suffix(es) of source filenames.

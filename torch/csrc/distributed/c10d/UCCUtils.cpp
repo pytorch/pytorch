@@ -3,6 +3,11 @@
 #include <c10d/UCCTracing.hpp>
 #include <c10d/UCCUtils.hpp>
 
+#include <cctype>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace c10d {
 
 namespace {
