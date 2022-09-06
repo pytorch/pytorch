@@ -7,6 +7,7 @@ from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._mode_utils import no_dispatch
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -378,6 +379,10 @@ class TestDecomp(TestCase):
         saved_rel_tol = self.rel_tol
 
         class DecompCrossRefMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return self._torch_dispatch(func, types, args, kwargs)
+
             def _torch_dispatch(self, func, types, args=(), kwargs=None):
                 self.precision = saved_precision
                 self.rel_tol = saved_rel_tol
