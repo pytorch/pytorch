@@ -67,11 +67,11 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
 void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
   if (has_symint) {
     if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
-      reportSignatureError(call_signature);
+      reportSignatureError(call_signature, *sym_cpp_signature_);
     }
   } else {
     if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
-      reportSignatureError(call_signature);
+      reportSignatureError(call_signature, *cpp_signature_);
     }
   }
 }
@@ -484,13 +484,13 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
+void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
-        "  correct signature:  ", sym_cpp_signature_->signature.name(), "\n",
-        "    ", sym_cpp_signature_->debug, "\n",
+        "  correct signature:  ", saved_signature.signature.name(), "\n",
+        "    ", saved_signature.debug, "\n",
         "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
