@@ -1568,7 +1568,6 @@ class CommTensor(torch.Tensor):
                 for a, o in zip(flat_args, flat_out):
                     set_proxy_slot(a, tracer, get_proxy(o))
 
-                #return (tree_unflatten(flat_out, out_spec), out[1])
                 return out
             else:
                 # in eager mode, simply remember work handle as an attribute
