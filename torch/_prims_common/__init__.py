@@ -43,9 +43,12 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
+# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex)
+Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -764,6 +767,29 @@ def dtype_to_type(dtype: torch.dtype) -> type:
     raise ValueError("Invalid dtype!")
 
 
+def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]:
+    """
+    Computes the corresponding Python type constructor for the
+    given dtype.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_float
+
+    assert isinstance(dtype, torch.dtype)
+
+    if dtype is torch.bool:
+        return lambda x: bool(x)
+    if dtype in _integer_dtypes:
+        # TODO: type error here is real, replace with sym_int
+        return lambda x: int(x)  # type: ignore[arg-type]
+    if dtype in _float_dtypes:
+        return sym_float
+    if dtype in _complex_dtypes:
+        # TODO: type error here is real, replace with sym_complex
+        return lambda x: complex(x)  # type: ignore[arg-type]
+
+    raise ValueError("Invalid dtype!")
+
+
 def type_to_dtype(typ: type) -> torch.dtype:
     """
     Computes the corresponding dtype for a Number type.
@@ -1033,6 +1059,28 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     ALWAYS_BOOL = (3,)
 
 
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
+
+
+# TODO: when NumberType contains the sym types, can simplify this
+def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
+    if isinstance(x, torch.SymIntNode):
+        return int
+    elif isinstance(x, torch.SymFloatNode):
+        return float
+    else:
+        return type(x)
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1137,7 +1185,7 @@ def elementwise_dtypes(
             raise ValueError(msg)
 
         if isinstance(x, Number):
-            highest_type = get_higher_type(highest_type, type(x))
+            highest_type = get_higher_type(highest_type, number_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1346,6 +1394,23 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
     validate_no_repeating_dims(dims)
     return dims
+
+
+def set_correction(
+    unbiased: Optional[bool] = None,
+    correction: Optional[int] = None,
+):
+    if correction is not None and unbiased is not None:
+        raise RuntimeError("cannot specify both correction and unbiased arguments")
+    elif correction is None and unbiased is None:
+        correction = 1
+    elif correction is None and unbiased is not None:
+        correction = 0 if unbiased is False else 1
+    if not isinstance(correction, int):
+        raise ValueError("correction argument should be integer")
+    if correction < 0:
+        raise ValueError("correction argument should be non-negative")
+    return correction
 
 
 def check_in_bounds_for_storage(

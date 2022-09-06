@@ -107,7 +107,7 @@ def generate_qconfig_map(
         qconfig_mapping: QConfigMapping,
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
-    qconfig_map = dict()
+    qconfig_map = {}
 
     # example:
     #
