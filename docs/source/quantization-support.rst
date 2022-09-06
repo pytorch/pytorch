@@ -2,7 +2,7 @@ Quantization API Reference
 -------------------------------
 
 torch.ao.quantization
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
 
@@ -52,7 +52,7 @@ Utility functions
     get_observer_dict
 
 torch.ao.quantization.quantize_fx
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
 
@@ -69,7 +69,7 @@ This module contains FX graph mode quantization APIs (prototype).
     fuse_fx
 
 torch.ao.quantization.qconfig_mapping
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains QConfigMapping for configuring FX graph mode quantization.
 
@@ -90,7 +90,7 @@ This module contains BackendConfig, a config object that defines how quantizatio
 in a backend. Currently only used by FX Graph Mode Quantization, but we may extend Eager Mode
 Quantization to work with this as well.
 
-.. currentmodule:: torch.ao.quantization.qconfig_mapping
+.. currentmodule:: torch.ao.quantization.backend_config
 
 .. autosummary::
     :toctree: generated
@@ -161,7 +161,7 @@ regular full-precision tensor.
 
 
 torch.ao.quantization.observer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
@@ -194,7 +194,7 @@ the values observed during calibration (PTQ) or training (QAT).
     default_float_qparams_observer
 
 torch.ao.quantization.fake_quantize
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
 during QAT.
@@ -223,7 +223,7 @@ during QAT.
     enable_observer
 
 torch.ao.quantization.qconfig
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
