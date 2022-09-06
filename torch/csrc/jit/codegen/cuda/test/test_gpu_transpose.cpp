@@ -932,6 +932,37 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize3_CUDA) {
   testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
 }
 
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTranspose2DSmallInnerSize_CUDA) {
+  std::array<std::vector<int64_t>, 2> shapes{
+      std::vector<int64_t>{1024 * 1024 * 128, 2},
+      std::vector<int64_t>{2, 1024 * 1024 * 128}};
+  for (const auto& shape : shapes) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeContigTensor(2);
+    fusion.addInput(tv0);
+    auto tv1 = sin(tv0);
+    auto tv2 = transpose(tv1, 0, 1);
+    auto tv3 = cos(tv2);
+    fusion.addOutput(tv3);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor input = at::randn(shape, options);
+
+    auto lparams = scheduleTranspose(&fusion, {input});
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {input}, lparams);
+    auto outputs = fe.runFusion({input}, lparams);
+
+    auto tv_ref = input.sin().transpose(0, 1).cos();
+
+    testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
