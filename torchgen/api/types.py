@@ -783,10 +783,10 @@ def kernel_signature(
         # not so good for more conventional backends but we don't have any of
         # those.  If we do, that's time to add a new Signature that is a cross
         # between DispatcherSignature and NativeSignature
-        assert backend_index.symint
         return DispatcherSignature.from_schema(f.func, prefix=prefix)
     else:
-        return NativeSignature(f.func, prefix=prefix, symint=backend_index.symint)
+        meta = backend_index.get_kernel(f)
+        return NativeSignature(f.func, prefix=prefix, symint=meta is not None and meta.supports_symint())
 
 
 # Functions only, no types
