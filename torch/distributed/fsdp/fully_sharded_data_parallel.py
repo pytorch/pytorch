@@ -655,7 +655,6 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
-        forward_prefetch: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -670,7 +669,6 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fn=param_init_fn,
                 device_id=device_id,
                 sync_module_states=sync_module_states,
-                forward_prefetch=forward_prefetch,
             )
             return
 
@@ -696,7 +694,6 @@ class FullyShardedDataParallel(nn.Module):
                 "sharding_strategy": sharding_strategy,
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
-                "forward_prefetch": forward_prefetch,
                 "mixed_precision": mixed_precision,
                 "param_init_fn": param_init_fn,
                 "device_id": device_id,
@@ -710,7 +707,6 @@ class FullyShardedDataParallel(nn.Module):
         self.training_state = TrainingState_.IDLE
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
-        self.forward_prefetch = forward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision or MixedPrecision()
         # Save a mapping from fully prefixed buffer name to its original dtype
@@ -1700,15 +1696,7 @@ class FullyShardedDataParallel(nn.Module):
             self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None
         )
-        if state == TrainingState_.FORWARD:
-            return (
-                self.forward_prefetch
-                and valid_fsdp_graph_and_index
-                and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
-                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
-                != TrainingState_.FORWARD
-            )
-        elif state == TrainingState_.BACKWARD_PRE:
+        if state == TrainingState_.BACKWARD_PRE:
             return (
                 self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
                 and valid_fsdp_graph_and_index
