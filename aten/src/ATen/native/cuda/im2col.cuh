@@ -244,6 +244,7 @@ C10_LAUNCH_BOUNDS_1(512)
 __global__ void col2im_batched_kernel(
     const int64_t n,
     const dt* data_col,
+    const int64_t col_batch_stride,
     const int64_t nbatch,
     const int64_t height,
     const int64_t width,
@@ -258,11 +259,10 @@ __global__ void col2im_batched_kernel(
     const int64_t dilation_width,
     const int64_t height_col,
     const int64_t width_col,
-    dt* data_im) {
+    dt* data_im,
+    const int64_t im_batch_stride) {
   using accT = at::acc_type<dt, /*is_cuda*/true>;
   const auto im_numel = n * nbatch;
-  const auto col_batch_stride = height_col * width_col * kernel_h * kernel_w;
-  const auto im_batch_stride = n;
 
   CUDA_KERNEL_LOOP_TYPE(index, im_numel, int64_t) {
     const auto ibatch = index / n;
@@ -292,6 +292,7 @@ template <typename dt>
 void col2im_batched(
     cudaStream_t stream,
     const dt* data_col,
+    const int64_t col_batch_stride,
     const int64_t nbatch,
     const int64_t channels,
     const int64_t height,
@@ -306,7 +307,8 @@ void col2im_batched(
     const int64_t stride_width,
     const int64_t dilation_height,
     const int64_t dilation_width,
-    dt* data_im) {
+    dt* data_im,
+    const int64_t im_batch_stride) {
   const int64_t num_kernels = channels * height * width;
   const int64_t output_numel = nbatch * num_kernels;
   if (output_numel == 0) {
@@ -319,6 +321,7 @@ void col2im_batched(
   col2im_batched_kernel<<<GET_BLOCKS(output_numel, 512), 512, 0, stream>>>(
           num_kernels,
           data_col,
+          col_batch_stride,
           nbatch,
           height,
           width,
@@ -333,7 +336,8 @@ void col2im_batched(
           dilation_width,
           height_col,
           width_col,
-          data_im);
+          data_im,
+          im_batch_stride);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
