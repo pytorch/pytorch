@@ -1431,7 +1431,7 @@ class CommTensor(torch.Tensor):
     It is specifically tailored for allreduce_ at the moment.
     """
 
-    _supported_comms = ["allreduce_", "allgather_", "reduce_scatter_"]
+    _supported_comms = ["allreduce_", "allgather_", "broadcast_", "reduce_scatter_"]
 
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
@@ -1681,6 +1681,13 @@ class CompilerTest(MultiProcessTestCase):
             out_tensor = torch.zeros_like(tensor)
             work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
             return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_broadcast_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.broadcast(tensor, src=0, group=group, async_op=True)
+            return work, tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
