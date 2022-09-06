@@ -389,7 +389,7 @@ WithoutTop::~WithoutTop() {
   pushDynamicLayer(std::move(layer_));
 }
 
-static void dynamicLayerFrontFallbackOperator(
+static void dynamicLayerFrontFallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
@@ -417,10 +417,6 @@ static void dynamicLayerFrontFallbackOperator(
 static c10::impl::ForceDispatchKeyGuard
 restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
   return c10::impl::ForceDispatchKeyGuard(key_set);
-}
-
-void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack);
 }
 
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
