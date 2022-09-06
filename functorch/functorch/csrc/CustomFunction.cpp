@@ -24,7 +24,7 @@ public:
   // libtorch_python, so we want to disarm the deallocation if that happens.
   // PyInterpreter does this correctly, pybind11 does not.
   ~PythonKernelHolder() override {
-    getPyInterpreter()->decref(func_, /*is_tensor*/false);
+    (*getPyInterpreter())->decref(func_, /*is_tensor*/false);
   }
 
   void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack) {
