@@ -37,17 +37,20 @@ namespace c10 {
 #endif
 
 class C10_API SymInt {
+ public:
   enum Unchecked {
     UNCHECKED,
   };
 
- public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
     SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
   };
   SymInt() : data_(0) {}
 
   // unchecked c-tor accepting raw `data_`
+  // One appropriate use for this is when you are constructing a symint
+  // in a situation where you know it is non-negative (or, if it is negative,
+  // the negative value is -1; i.e., not user controlled)
   SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
