@@ -361,7 +361,7 @@ class OptimStateKeyType(Enum):
 # A handles key represents the group of `FlatParamHandle`s involved in a given
 # module's forward. These will be all-gathered together in the pre-forward and
 # pre-backward.
-HandlesKey = Tuple[FlatParamHandle, ...]
+_HandlesKey = Tuple[FlatParamHandle, ...]
 
 
 class _ExecOrderWarnStatus(Enum):
@@ -384,11 +384,11 @@ class _ExecOrderData:
         # Tracks the pre-forward order for post-backward prefetching
         self.handles_pre_forward_order: List[int] = []
         # Maps each handles key to its index in `handles_pre_forward_order`
-        self.handles_to_pre_forward_order_index: Dict[HandlesKey, int] = {}
+        self.handles_to_pre_forward_order_index: Dict[_HandlesKey, int] = {}
         # Tracks the post-forward order for pre-backward prefetching
         self.handles_post_forward_order: List[int] = []
         # Maps each handles key to its index in `handles_post_forward_order`
-        self.handles_to_post_forward_order_index: Dict[HandlesKey, int] = {}
+        self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
         self.is_first_iter: Optional[bool] = None
 
         # Data structures for execution order validation
@@ -438,9 +438,9 @@ class _ExecOrderData:
 
     def get_handles_to_backward_prefetch(
         self,
-        current_handles_key: HandlesKey,
+        current_handles_key: _HandlesKey,
         backward_prefetch: BackwardPrefetch,
-    ) -> Optional[HandlesKey]:
+    ) -> Optional[_HandlesKey]:
         """
         Returns the handles key of the handles to backward prefetch given the
         current handles key or ``None`` if there is no valid handles key to
@@ -507,7 +507,7 @@ class _ExecOrderData:
         self.handles_to_pre_forward_order_index[handles_key] = index
         self.handles_pre_forward_order.append(handles_key)
 
-    def _check_order(self, handles_key: HandlesKey) -> None:
+    def _check_order(self, handles_key: _HandlesKey) -> None:
         """
         Checks the forward execution order.
 
@@ -624,7 +624,7 @@ class _ExecOrderData:
 
     def _get_handle_indices(
         self,
-        handles_key: HandlesKey,
+        handles_key: _HandlesKey,
     ) -> Tuple[Optional[int], ...]:
         """
         Returns the handle indices (i.e. indices into ``self.all_handles``)
@@ -659,7 +659,7 @@ class _ExecOrderData:
 
     def _get_names_from_handles(
         self,
-        handles_key: HandlesKey,
+        handles_key: _HandlesKey,
     ) -> List[List[str]]:
         """
         Returns a list of prefixed parameter names for each handle in
@@ -694,7 +694,7 @@ class _ExecOrderData:
                 self.warn_status = _ExecOrderWarnStatus.WARNED
 
 
-class FreeEventQueue:
+class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to in-flight all-gathers. The
     queueing pattern is iterative enqueues followed by a flush, and the current
@@ -952,7 +952,7 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
-        limit_all_gathers: bool = True,
+        limit_all_gathers: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -1064,19 +1064,19 @@ class FullyShardedDataParallel(nn.Module):
         self._hook_registered = False
 
         # Used to prevent running the pre-backward hook multiple times
-        self._ran_pre_backward_hook: Dict[HandlesKey, bool] = {}
+        self._ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
         # Used to know whether to sync the pre-all-gather stream
         self._ran_pre_unshard: bool = False
         self._is_root: Optional[bool] = None  # `None` indicates not yet set
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
         self._streams: Dict[str, torch.cuda.Stream] = {}
-        self._free_event_queue = FreeEventQueue()
+        self._free_event_queue = _FreeEventQueue()
         self._debug_level = dist.get_debug_level()
         self._exec_order_data = _ExecOrderData(self._debug_level)
-        self._handles_prefetched: Dict[HandlesKey, bool] = {}
+        self._handles_prefetched: Dict[_HandlesKey, bool] = {}
         # Used for guarding against mistargeted backward prefetches
-        self._needs_pre_backward_unshard: Dict[HandlesKey, bool] = {}
+        self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
         # where a module's forward involves multiple handles. The two forward
         # order structures are populated and finalized in the first iteration.
@@ -1965,7 +1965,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _prefetch_handles(
         self,
-        current_handles_key: HandlesKey,
+        current_handles_key: _HandlesKey,
     ) -> None:
         """
         Prefetches the next handles if needed (without synchronization). An
@@ -1982,8 +1982,8 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_handles_to_prefetch(
         self,
-        current_handles_key: HandlesKey,
-    ) -> Optional[HandlesKey]:
+        current_handles_key: _HandlesKey,
+    ) -> Optional[_HandlesKey]:
         """
         Returns the handles to prefetch if the module corresponding to
         ``current_handles_key`` should prefetch for the next module and
@@ -2036,7 +2036,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_training_state(
         self,
-        handles_key: HandlesKey,
+        handles_key: _HandlesKey,
     ) -> HandleTrainingState:
         """Returns the training state of the handles in ``handles_key``."""
         p_assert(len(handles_key) > 0, "Expects a non-empty handles key")
