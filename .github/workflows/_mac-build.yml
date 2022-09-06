@@ -42,11 +42,6 @@ on:
         required: true
         description: Secret for S3 bucket for macOS sccache.
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -e -l {0}
-
 jobs:
   build:
     # Don't run on forked repos.
@@ -71,12 +66,9 @@ jobs:
           fi
 
       - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          auto-update-conda: true
           python-version: ${{ inputs.python_version }}
-          activate-environment: build
-          miniconda-version: 4.7.12
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -103,7 +95,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-          .jenkins/pytorch/macos-build.sh
+          ${CONDA_RUN} .jenkins/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
