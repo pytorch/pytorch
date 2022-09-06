@@ -261,7 +261,7 @@ struct InputTensorRecord : RecordFunctor {
     if (symbolic_sizes.empty() && is_cpu) {
       tv->setCpuScalar(true);
     } else {
-      TORCH_INTERNAL_ASSERT(!is_cpu, "cpu non-scalar tensor is not supported");
+      TORCH_CHECK(!is_cpu, "cpu non-scalar tensor is not supported");
     }
 
     fd.setFusionState(outputs.at(0), tv);
