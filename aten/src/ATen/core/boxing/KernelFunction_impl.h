@@ -50,18 +50,24 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
     return (*func)(functor, dispatchKeySet, std::forward<Args>(args)...);
 }
 
-template <typename T>
-inline T unpackSymInt(T x) { return x; }
+// This template requires you to explicitly specify the argument you want to
+// forward; it doesn't work if you try to deduce it
 
-inline int64_t unpackSymInt(c10::SymInt x) {
+template <typename T>
+inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
+
+template <>
+inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
   return x.expect_int();
 }
 
-inline c10::IntArrayRef unpackSymInt(c10::SymIntArrayRef x) {
+template <>
+inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIntArrayRef x) {
   return c10::asIntArrayRefSlow(x);
 }
 
-inline c10::optional<int64_t> unpackSymInt(c10::optional<c10::SymInt> x) {
+template <>
+inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
   return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
 }
 
@@ -82,7 +88,7 @@ C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, Di
       if (unboxed_kernel_func_ != nullptr) {
         auto *functor = boxed_kernel_func_.getFunctor();
         return callUnboxedKernelFunction<Return, typename remove_symint<Args>::type...>(
-            unboxed_kernel_func_, functor, dispatchKeySet, std::forward<typename remove_symint<Args>::type>(unpackSymInt<Args>(args))...);
+            unboxed_kernel_func_, functor, dispatchKeySet, unpackSymInt<Args>(args)...);
       }
     } else {
       if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
