@@ -649,7 +649,7 @@ inline std::ostream& operator<<(
   }
 
 #define CAFFE_DEFINE_KNOWN_TYPE(T) \
-  template uint16_t TypeMeta::addTypeMetaData<T>();
+  template EXPORT_IF_NOT_GCC uint16_t TypeMeta::addTypeMetaData<T>();
 
 // Unlike CAFFE_KNOWN_TYPE, CAFFE_DECLARE_KNOWN_TYPE avoids a function
 // call to access _typeMetaData in the common case.
