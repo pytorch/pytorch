@@ -126,8 +126,9 @@ using c10::Argument;
 using c10::FunctionSchema;
 using c10::SchemaArgType;
 using c10::SchemaArgument;
-using c10::SymIntNode;
+using c10::SymFloat;
 using c10::SymFloatNode;
+using c10::SymIntNode;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using torch::utils::SchemaInfo;
@@ -161,7 +162,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
   }
 
   // TODO: virtualize
-  c10::SymFloat sym_float();
+  SymFloat sym_float();
 
   virtual std::string str() override {
     py::gil_scoped_acquire acquire;
@@ -260,7 +261,7 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
 
-c10::SymFloat PythonSymIntNodeImpl::sym_float() {
+SymFloat PythonSymIntNodeImpl::sym_float() {
   py::gil_scoped_acquire acquire;
   return c10::make_intrusive<PythonSymFloatNodeImpl>(
              getPyObj().attr("__sym_float__")())
@@ -1391,7 +1392,8 @@ void initJITBindings(PyObject* module) {
                 TORCH_INTERNAL_ASSERT(psn);
                 return psn->sym_float();
               })
-          .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+          .def("__str__", [](c10::SymIntNode a) { return a->str(); })
+          .def("__repr__", [](c10::SymIntNode a) { return a->str(); });
 
   py::class_<c10::SymFloatNodeImpl, c10::SymFloatNode>(m, "SymFloatNode")
       .def_static(
@@ -1808,6 +1810,11 @@ void initJITBindings(PyObject* module) {
           "is_mutable",
           [](SchemaInfo& self, const SchemaArgument& argument) {
             return self.is_mutable(argument);
+          })
+      .def(
+          "has_argument",
+          [](SchemaInfo& self, const std::string& name) {
+            return self.has_argument(name);
           })
       .def(
           "is_mutable",

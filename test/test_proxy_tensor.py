@@ -1226,7 +1226,6 @@ symbolic_tensor_failures = {
     xfail('randint_like', ''),  # aten.randint_like.default - couldn't find symbolic meta function/decomposition
     xfail('randn_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
-    xfail('repeat', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('reshape', ''),  # Tensors of type TensorImpl do not have numel
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
