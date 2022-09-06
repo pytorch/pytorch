@@ -2293,11 +2293,11 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   auto args = std::move(args_kwargs.first);
   auto kwargs = std::move(args_kwargs.second);
 
-  auto state = c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(state);
+  auto python_dispatcher = c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
+  TORCH_INTERNAL_ASSERT(python_dispatcher);
 
   py::object obj = py::reinterpret_steal<py::object>(PyObject_CallFunction(
-      state,
+      python_dispatcher,
       "OOOO",
       torch_api_function_overload,
       py::cast(ks).ptr(),

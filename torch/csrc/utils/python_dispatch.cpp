@@ -409,7 +409,7 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(keyset);
   });
 
-  m.def("_dispatch_get_backend_keyset_from_autograd", getBackendKeySetFromAutograd);
+  m.def("_dispatch_get_backend_keyset_from_autograd", c10::getBackendKeySetFromAutograd);
 
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
@@ -421,7 +421,7 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
   });
-  m.def("_dispatch_is_included_in_alias", c10::isIncludedInAlias);
+  m.def("_dispatch_is_included_in_alias", [](c10::DispatchKey a, c10::DispatchKey b) { return c10::isIncludedInAlias(a, b); });
   py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
       .def(py::init<c10::DispatchKeySet>());
 
