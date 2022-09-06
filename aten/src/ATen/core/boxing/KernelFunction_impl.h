@@ -81,8 +81,8 @@ C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, Di
 
       if (unboxed_kernel_func_ != nullptr) {
         auto *functor = boxed_kernel_func_.getFunctor();
-        return callUnboxedKernelFunction<Return, Args...>(
-            unboxed_kernel_func_, functor, dispatchKeySet, std::forward<Args>(unpackSymInt<Args>(args))...);
+        return callUnboxedKernelFunction<Return, typename remove_symint<Args>::type...>(
+            unboxed_kernel_func_, functor, dispatchKeySet, std::forward<typename remove_symint<Args>::type>(unpackSymInt<Args>(args))...);
       }
     } else {
       if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {

@@ -55,7 +55,7 @@ Tensor empty_strided(
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(
-      c10::SymIntArrayRef::fromIntArrayRef(sizes),
+      sizes,
       dtype,
       layout,
       device,
