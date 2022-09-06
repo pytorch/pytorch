@@ -2354,12 +2354,23 @@ class CompilerTest(test_c10d_common.CompilerTest):
         store = c10d.FileStore(self.file_name, self.world_size)
         return c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-    def test_work_wait_cpu(self):
-        self._test_work_wait(torch.ones(2, 2) * self.rank)
+    def test_allreduce_work_wait_cpu(self):
+        self._test_allreduce_work_wait(torch.ones(2, 2) * self.rank)
 
     @skip_if_lt_x_gpu(2)
-    def test_work_wait_gpu(self):
-        self._test_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+    def test_allreduce_work_wait_gpu(self):
+        self._test_allreduce_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_allgather_work_wait_cpu(self):
+        self._test_allgather_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_work_wait_gpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
 
 if __name__ == "__main__":

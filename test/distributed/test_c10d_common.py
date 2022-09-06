@@ -12,7 +12,7 @@ from datetime import timedelta
 from functools import partial
 from itertools import product
 from sys import platform
-from typing import Any, Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.distributed as dist
@@ -53,7 +53,6 @@ from torch.utils._pytree import (
     tree_flatten,
     tree_map,
     tree_map_only,
-    tree_unflatten
 )
 from torch.utils.checkpoint import checkpoint
 
@@ -1431,6 +1430,9 @@ class CommTensor(torch.Tensor):
 
     It is specifically tailored for allreduce_ at the moment.
     """
+
+    _supported_comms = ["allreduce_", "allgather_"]
+
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
         r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
@@ -1450,6 +1452,10 @@ class CommTensor(torch.Tensor):
     # disable __torch_function__ so that CommTensor can recursively dispatch
     # with ProxyTorchDispatchMode in make_fx
     __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def _is_supported(cls, op_name):
+        return any([comm in op_name for comm in cls._supported_comms])
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1516,7 +1522,7 @@ class CommTensor(torch.Tensor):
         unwrapped_args = tree_map(unwrap, args)
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
-        if "allreduce_" in func.__name__:
+        if cls._is_supported(func.__name__):
             if tracer is not None:
                 # in tracing mode, get proxies for args
                 proxy_args, proxy_kwargs = tree_map_only(
@@ -1562,7 +1568,7 @@ class CommTensor(torch.Tensor):
                 for a, o in zip(flat_args, flat_out):
                     set_proxy_slot(a, tracer, get_proxy(o))
 
-                return (tree_unflatten(flat_out, out_spec), out[1])
+                return out
             else:
                 # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **kwargs)
@@ -1592,7 +1598,7 @@ class CompilerTest(MultiProcessTestCase):
     def _get_process_group(self):
         raise NotImplementedError("To be implemented by subclass")
 
-    def _test_work_wait(self, x: torch.Tensor):
+    def _test_work_wait(self, x: torch.Tensor, comm_fn: Callable):
         pg = self._get_default_group()
 
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -1600,12 +1606,12 @@ class CompilerTest(MultiProcessTestCase):
             # all_reduce Python implementation, as the later will need more
             # discussion.
             y = CommTensor(x + x)
-            work = dist.all_reduce(y, group=pg, async_op=True)
+            work, z = comm_fn(y, group=pg)
             # this wait() will be ignored in tracing mode as
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return y * 2
+            return z * 2
 
         xx = x.clone()
 
@@ -1629,7 +1635,7 @@ class CompilerTest(MultiProcessTestCase):
                     ])
                     commed |= all([
                         curr.op == "call_function",
-                        "allreduce_" in curr.target.__name__
+                        CommTensor._is_supported(curr.target.__name__),
                     ])
 
                     prev = curr.args[0]
@@ -1651,6 +1657,23 @@ class CompilerTest(MultiProcessTestCase):
         xx += 1
         yy = traced_fn(xx)
         self.assertFalse(y.allclose(yy))
+
+    def _test_allreduce_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(tensor, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_allgather_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            work = dist.all_gather(out_tensors, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, sum(out_tensors)
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
 if __name__ == "__main__":
