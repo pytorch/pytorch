@@ -114,22 +114,17 @@
 //  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
 //  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#define C10_NODISCARD
-#if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
+#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
 #define C10_NODISCARD [[nodiscard]]
-#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
+#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
 // TODO: It's possible this is still triggering
 // https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
 // fix it.
-#undef C10_NODISCARD
 #define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+#else
+#define C10_NODISCARD
 #endif
 
 // suppress an unused variable.
@@ -336,18 +331,30 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
     (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void _wassert(
+    const wchar_t* wexpr,
+    const wchar_t* wfile,
+    unsigned line);
+#else
 #if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
 }
-#endif
+#endif // __SYCL_DEVICE_ONLY__
+#endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
     (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
   }
@@ -391,6 +398,11 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
