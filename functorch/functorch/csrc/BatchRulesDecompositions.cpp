@@ -146,6 +146,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_norm);
+  OP_DECOMPOSE2(linalg_norm, ord_str);
   OP_DECOMPOSE(linalg_solve);
   OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
