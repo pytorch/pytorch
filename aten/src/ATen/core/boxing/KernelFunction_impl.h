@@ -141,11 +141,12 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
 
     auto* unboxed_fn = &impl::wrap_kernel_functor_unboxed<KernelFunctor>::call;
     void* void_unboxed_fn = reinterpret_cast<void*>(unboxed_fn);
+    bool is_symint = fn_has_symint<decltype(unboxed_fn)>::value;
     return KernelFunction(
         std::move(kernelFunctor),
         &impl::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        void_unboxed_fn,
-        guts::typelist::true_for_any_type<has_symint, typename guts::infer_function_traits<decltype(unboxed_fn)>::type::parameter_types>::value ? void_unboxed_fn : nullptr
+        is_symint ? nullptr : void_unboxed_fn,
+        is_symint ? void_unboxed_fn : nullptr
     );
 }
 

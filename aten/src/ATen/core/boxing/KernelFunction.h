@@ -22,6 +22,12 @@ using has_symint =
     std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
   >;
 
+template <typename T>
+using fn_has_symint = typename guts::typelist::true_for_any_type<
+  has_symint,
+  typename guts::infer_function_traits<T>::type::parameter_types
+>;
+
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
