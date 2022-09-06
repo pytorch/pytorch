@@ -3227,6 +3227,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -3289,6 +3290,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
         xfail('eig'),
