@@ -167,7 +167,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -195,13 +197,33 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):
+    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
                 continue
             if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
+                continue
+
+            is_lower_than_cuda11_0 = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
+
+            if (
+                skip_bfloat
+                and is_lower_than_cuda11_0
+                and (
+                    (
+                        isinstance(sample.input, torch.Tensor)
+                        and sample.input.dtype == torch.bfloat16
+                    )
+                    or any(
+                        isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                        for arg in sample.args
+                    )
+                )
+            ):
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
@@ -354,6 +376,7 @@ class TestCommon(TestCase):
             op,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
+            skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
         )
 
     @skipMeta
@@ -370,7 +393,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1545,6 +1570,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.item',
+        '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
         '_refs.std_var',
@@ -1563,14 +1589,12 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.transpose',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
-        '_refs.swap_axes',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
@@ -1596,11 +1620,14 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isfinite',
         '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.poisson_nll_loss',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
         '_refs.square',
         '_refs.tensor_split',
+        '_refs.to',
         '_refs.true_divide',
         '_refs.trunc_divide',
         '_refs.vsplit',
@@ -1610,8 +1637,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
-        # CompositeExplicitAutograd,
-        '_refs.unbind',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
@@ -1759,7 +1784,7 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(inner=None)
+                mode = FakeTensorMode()
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):

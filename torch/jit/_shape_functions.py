@@ -754,7 +754,7 @@ def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[L
     dim = len(input)
     output_size: List[int] = []
     input_batch_size_dim = 0
-    weight_output_channels_dim = 0
+    weight_output_channels_dim = 1
     output_size.append(input[input_batch_size_dim])
     output_size.append(weight[weight_output_channels_dim])
 
@@ -769,7 +769,7 @@ def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]]
     dim = len(input)
     output_size: List[int] = []
     input_batch_size_dim = 0
-    weight_output_channels_dim = 0
+    weight_output_channels_dim = 1 if transposed else 0
     output_size.append(input[input_batch_size_dim])
     output_size.append(weight[weight_output_channels_dim])
 

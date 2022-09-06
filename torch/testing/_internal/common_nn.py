@@ -5951,8 +5951,7 @@ class ModuleTest(TestBase):
             ref_input = deepcopy(input)
             ref_module = deepcopy(module)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(out, expected_out)
+            test_case.assertEqual(out, expected_out, exact_dtype=False)
         if self.check_forward_only:
             return
         self.test_noncontig(test_case, module, input)
@@ -6051,8 +6050,7 @@ class ModuleTest(TestBase):
         if getattr(cpu_module, "return_indices", False):
             cpu_output = cpu_output[0]
             gpu_output = gpu_output[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output, atol=self.precision, rtol=0, exact_dtype=False)
 
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
@@ -6060,8 +6058,7 @@ class ModuleTest(TestBase):
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
                 test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
@@ -6089,8 +6086,7 @@ class ModuleTest(TestBase):
                 create_graph=True)
 
             for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0, exact_dtype=False)
 
             # We mix output into the second backwards computation so that
             # torch.autograd.grad doesn't complain that some inputs
@@ -6104,11 +6100,9 @@ class ModuleTest(TestBase):
                 gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0, exact_dtype=False)
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
@@ -6421,18 +6415,16 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
         gpu_gradInput = test_case._backward_criterion(
             gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_gradInput, gpu_gradInput,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -6444,3 +6436,38 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
     @property
     def extra_args(self):
         return self._get_arg('extra_args', False)
+
+
+def _test_bfloat16_ops(test_case, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
+    # fp32 compute
+    input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+    if scale_factor is not None:
+        input1 = (torch.rand(inp_dims, dtype=torch.bfloat16, device=device) * scale_factor).float().requires_grad_()
+    out1 = op(input1)
+    grad_input1 = torch.randn_like(out1, device=device)
+    out1.backward(grad_input1)
+
+    # bfloat16 compute
+    op_bfp16 = op.bfloat16()
+    input2 = input1.detach().bfloat16().requires_grad_()
+    grad_input2 = grad_input1.bfloat16()
+    out2 = op_bfp16(input2)
+    out2.backward(grad_input2)
+
+    test_case.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
+    test_case.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
+
+def _test_module_empty_input(test_case, module, inp, check_size=True, inference=False):
+    if not inference:
+        inp.requires_grad_(True)
+    out = module(inp)
+    if not inference:
+        gO = torch.rand_like(out)
+        out.backward(gO)
+    if check_size:
+        test_case.assertEqual(out.size(), inp.size())
+    if not inference:
+        for p in module.parameters():
+            if p.requires_grad:
+                test_case.assertEqual(p.grad, torch.zeros_like(p.grad))
+        test_case.assertEqual(inp.grad, torch.zeros_like(inp))

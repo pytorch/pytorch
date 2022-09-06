@@ -3210,6 +3210,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
+        xfail('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
@@ -3221,14 +3222,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
+        xfail('linalg.cross'),  # Issue #83936
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
+        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        skip('linalg.eigh', ''),  # silent incorrectness; Flaky but is likely a real problem
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
 
@@ -3286,6 +3290,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
         xfail('eig'),
@@ -3297,8 +3302,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.lstsq'),
-        xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_rank'),
         xfail('linalg.matrix_rank', 'hermitian'),
         xfail('linalg.pinv'),
@@ -3332,7 +3335,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.ihfftn'),
         xfail('allclose'),
         xfail('argwhere'),
-        xfail('linalg.cross'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
@@ -3500,6 +3502,46 @@ class TestVmapOperatorsOpInfo(TestCase):
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
+
+    def test_linalg_eigh(self, device):
+        # linalg_svd returns two tensors, (Q, L).
+        # Given the same input, it may return different tensors,
+        # because the eig decomposition isn't unique.
+        # To test that eigh is correct, we multiply
+        # Q @ diag(L) @ Qh and check that that the output from vmap matches the
+        # output from a for-loop.
+        def compute_A(out):
+            L, Q = out
+            n = Q.shape[-1]
+            diag_L = L.new_zeros(*L.shape[:-1], n, n)
+            diag_L.diagonal(offset=0, dim1=-2, dim2=-1).copy_(L)
+            Qh = Q.transpose(-2, -1).conj()
+            return Q @ diag_L @ Qh
+
+        opinfos = [op for op in op_db if op.name == 'linalg.eigh']
+        assert len(opinfos) > 0
+
+        for op in opinfos:
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
+                                  postprocess_fn=compute_A)
+
+    def test_fill__Tensor(self, device):
+        # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
+        def test():
+            B = 2
+            args = (torch.randn(B, 3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (0, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (-1, 0))
+
+            args = (torch.randn(3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (None, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn([]))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
+
+        check_vmap_fallback(self, test, Tensor.fill_)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -3790,9 +3832,15 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
+        # throws in vmap on CUDA
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
+        # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
+        # but it passes locally
+        skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
@@ -4391,7 +4439,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:

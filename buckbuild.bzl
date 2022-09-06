@@ -249,6 +249,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -307,6 +308,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -327,6 +329,8 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
@@ -364,7 +368,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -739,7 +743,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":flatbuffers_jit"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -1083,6 +1087,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
@@ -1347,7 +1353,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":flatbuffers_jit",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
@@ -1417,6 +1423,7 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",
@@ -1702,12 +1709,12 @@ def define_buck_targets(
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
-            "{}:flatbuffer_serializer".format(ROOT),
+            "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1771,7 +1778,7 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
+        name = "flatbuffers_serializer_jit",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
@@ -1789,7 +1796,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
+            ":flatbuffers_serializer_mobile",
             ":torch_core",
             ":torch_mobile_module",
             C10,
@@ -1801,8 +1808,17 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 

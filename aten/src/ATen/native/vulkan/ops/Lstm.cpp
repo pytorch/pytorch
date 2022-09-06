@@ -8,19 +8,25 @@ namespace vulkan {
 namespace ops {
 namespace {
 //
-// input_vk: input tensor of shape (L, N, H_in) when batch_first=False or (N, L,
-// H_in) when batch_first=True
-//           containing the features of the input sequence
+// input_vk: input tensor of shape (L, N, H_in) when batch_first=False or
+// (N, L, H_in) when batch_first=True containing the features of the input
+// sequence
+//
 // hx_vk: tensor of shape (D * num_layers, N, H_out) containing the initial
-// hidden state for each element in the input sequence. cx_vk: tensor of shape
-// (D * num_layers, N, H_cell) containing the initial cell state for each
-// element in the input sequence. output: tensor of shape (L, N, D * H_out) when
-// batch_first=False or (N, L, D * H_out) when batch_first=True
-//         containing the output features (h_t) from the last layer of the LSTM,
-//         for each t
+// hidden state for each element in the input sequence.
+//
+// cx_vk: tensor of shape (D * num_layers, N, H_cell) containing the initial
+// cell state for each element in the input sequence.
+//
+// output: tensor of shape (L, N, D * H_out) when batch_first=False or
+// (N, L, D * H_out) when batch_first=True, containing the output features
+// (h_t) from the last layer of the LSTM, for each t
+//
 // h_n: tensor of shape (D * num_layers, N, H_out) containing the final hidden
-// state for each element in the sequence. c_n: tensor of shape (D * num_layers,
-// N, H_cell) containing the final cell state for each element in the sequence.
+// state for each element in the sequence.
+//
+// c_n: tensor of shape (D * num_layers, N, H_cell) containing the final cell
+// state for each element in the sequence.
 //
 //  where
 //    L = sequence length
@@ -61,10 +67,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan LSTM expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan LSTM expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
+
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
 
   const Tensor& hx_vk = hx[0];
   const Tensor& cx_vk = hx[1];
@@ -74,8 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   std::vector<at::Tensor> c_n_list; // cell state output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   h_n_list.reserve(num_layers);
   c_n_list.reserve(num_layers);
@@ -134,6 +144,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
 
   auto h_n = at::cat(h_n_list, 1);
   auto c_n = at::cat(c_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
   return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
@@ -155,7 +166,11 @@ pack_lstm_linear_op_contexts(
     int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
-      "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'.");
+      "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'."
+      " But 'params_cpu' has size: ",
+      params_cpu.size(),
+      " and 'num_layers' is: ",
+      num_layers);
   std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 8);
 
@@ -213,8 +228,6 @@ LstmPackedContext::LstmPackedContext(
   TORCH_INTERNAL_ASSERT(!train, "Vulkan LSTM expects 'train' to be false.");
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan LSTM expects 'bidirectional' to be false.");
-  TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan LSTM expects 'batch_first' to be true.");
   TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
@@ -309,25 +322,34 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
       cx_vk.sizes().size() == 3,
       "Vulkan LSTM expects cell state dims to be 3.");
 
+  const int64_t num_layers =
+      lstm_context->get_val(LstmPackedContext::Packed::NumLayers).toInt();
+  const bool batch_first =
+      lstm_context->get_val(LstmPackedContext::Packed::BatchFirst).toBool();
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
+
   const c10::List<c10::IValue> packed_linear_op_contexts =
       lstm_context->get_val(LstmPackedContext::Packed::LinearContexts).toList();
-  const int64_t packed_num_layers =
-      lstm_context->get_val(LstmPackedContext::Packed::NumLayers).toInt();
 
-  const int64_t linear_op_contexts_per_layer =
-      8; // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf), (b_ig,
-         // w_ig), (b_hg, w_hg), (b_io, w_io), (b_ho, w_ho)
+  const int64_t linear_op_contexts_per_layer = 8;
+  // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf),
+  // (b_ig, w_ig), (b_hg, w_hg), (b_io, w_io), (b_ho, w_ho)
+
   std::vector<at::Tensor> h_n_list; // hidden state output
   std::vector<at::Tensor> c_n_list; // cell state output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
-  h_n_list.reserve(packed_num_layers);
-  c_n_list.reserve(packed_num_layers);
+  h_n_list.reserve(num_layers);
+  c_n_list.reserve(num_layers);
 
-  for (int64_t l = 0; l < packed_num_layers; ++l) {
+  for (int64_t l = 0; l < num_layers; ++l) {
     // extract each hidden state and squeeze into 2D dim
     auto h = at::slice(hx_vk, 0, l, l + 1, 1);
     h = h.reshape({h.size(0) * h.size(1), h.size(2)});
@@ -383,6 +405,7 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
 
   auto h_n = at::cat(h_n_list, 1);
   auto c_n = at::cat(c_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
   return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
