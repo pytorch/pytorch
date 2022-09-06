@@ -899,7 +899,7 @@ class TestOptim(TestCase):
                     lr=1e-3, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
-            # TODO: File an issue!
+            # Ref: https://github.com/pytorch/pytorch/issues/84560
             # self._test_complex_2d(optimizer)
             self._test_complex_optimizer(lambda params: optimizer([params]))
             self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
