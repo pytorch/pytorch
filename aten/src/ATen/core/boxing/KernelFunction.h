@@ -23,6 +23,26 @@ using has_symint =
   >;
 
 template <typename T>
+struct remove_symint {
+  using type = T;
+};
+
+template <>
+struct remove_symint<c10::SymInt> {
+  using type = int64_t;
+};
+
+template <>
+struct remove_symint<c10::SymIntArrayRef> {
+  using type = c10::IntArrayRef;
+};
+
+template <>
+struct remove_symint<c10::optional<c10::SymInt>> {
+  using type = c10::optional<int64_t>;
+};
+
+template <typename T>
 using fn_has_symint = typename guts::typelist::true_for_any_type<
   has_symint,
   typename guts::infer_function_traits<T>::type::parameter_types
