@@ -23,8 +23,10 @@ from functorch import (
 from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion, clear_compile_cache
+    min_cut_rematerialization_partition, aot_function, aot_module,
+    decomposition_table, nop,
+    num_of_recompilations, default_partition, default_decompositions,
+    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -329,6 +331,50 @@ class TestAOTAutograd(AOTTestCase):
         f = aot_function(f, list_nop)
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
+
+    def test_compilation_context(self):
+        def f(x):
+            return x.sin().sin()
+        count = []
+
+        def compiler(fx_g, _):
+            context = get_aot_compilation_context()
+            count.append((context[0], len(fx_g.graph.nodes)))
+            return fx_g
+
+        f = aot_function(f, compiler)
+        out = f(torch.randn(5, requires_grad=True))
+        f(torch.randn(5))
+        out.sum().backward()
+        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_batch_norm_amp(self):
+        device = "cuda"
+        input_dtype = torch.float16
+        param_dtype = torch.float32
+        weight, bias = [torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2)]
+        running_mean, running_var = [torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)]
+
+        def bn(x):
+            return torch.ops.aten.cudnn_batch_norm(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                False,
+                0.1,
+                1e-05,
+            )
+        inp = torch.ones(torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device)
+
+        ref = bn(inp)
+        cudnn_batch_norm_decomp = torch._decomp.get_decompositions({torch.ops.aten.cudnn_batch_norm})
+        aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
+        res = aot_fn(inp)
+        for a, b in zip(ref, res):
+            assert torch.allclose(a, b)
 
 
 

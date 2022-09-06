@@ -40,6 +40,12 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Clones the method by the name of orig_method_name into new_method_name method
+TORCH_API void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name);
+
 // Check if a value in the graph is a Scalar value
 TORCH_API bool isScalar(Value* v);
 
@@ -47,9 +53,9 @@ TORCH_API bool isScalar(Value* v);
 TORCH_API bool hitGraphInput(Value* value);
 
 // Converts a mangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
 // into an unmangled name, such as
-//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+//   __torch__.torch.ao.nn.quantized.modules.conv.Conv2d
 TORCH_API std::string removeTorchMangle(const std::string& orig_name);
 
 // Return the module name that corresponds to the value.

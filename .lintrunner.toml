@@ -719,7 +719,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
-    'torch/testing/_internal/opinfo/definitions/*.py',
+    'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
     'functorch/functorch/_src/aot_autograd.py',
     'functorch/functorch/_src/compilers.py',
