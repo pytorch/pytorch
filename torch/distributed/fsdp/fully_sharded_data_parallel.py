@@ -1574,16 +1574,6 @@ class FullyShardedDataParallel(nn.Module):
 
         return ret
 
-    def _get_gradient_predivide_factor(self, world_size: int) -> float:
-        """
-        Returns a pre-divide factor to prevent underflow/overflow during
-        gradient synchronization.
-        """
-        factor: int = 1
-        while world_size % factor == 0 and world_size / factor > factor:
-            factor *= 2
-        return float(factor)
-
     def _mixed_precision_enabled_for_params(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
