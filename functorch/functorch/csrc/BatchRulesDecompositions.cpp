@@ -81,7 +81,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(dsplit, int);
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
-  OP_DECOMPOSE(diag_backward);
+  m.impl("diag_backward", native::diag_backward_symint);
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
