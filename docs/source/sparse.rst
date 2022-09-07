@@ -36,24 +36,31 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
    array, the usage of adjective "non-zero" is not strict: one is
    allowed to store also zeros in the sparse array data
    structure. Hence, in the following, we use "specified elements" for
-   those array elements that are actually stored. In addition, the
-   unspecified elements are typically assumed to have zero value, but
-   not only, hence we use the term "fill value" to denote such
-   elements.
+   those array elements that are actually stored.
 
 .. note::
 
-   Using a sparse storage format for storing sparse arrays can be
-   advantageous only when the size and sparsity levels of arrays are
-   high. Otherwise, for small-sized or low-sparsity arrays using the
-   contiguous memory storage format is likely the most efficient
-   approach.
+   Using a sparse storage format for storing sparse arrays is not
+   always advantageous. Details such as the distribution of zero
+   valued elements and the level of sparsity matter. We provide
+   access to different compression techniques, but not a means of
+   determining the best one for your particular application.
 
 .. warning::
 
   The PyTorch API of sparse tensors is in beta and may change in the near future.
 
 .. _sparse-coo-docs:
+
+How to use
+++++++++++
+
+It is straightforward to construct a sparse Tensor from a given dense Tensor. We assume
+that for most intents and purposes conversion is sufficient. Subsequent sections talk about
+the details of particular sparse storage formats and are provided as references.
+
+Operations on Tensor with sparse storage formats behave the same as operations on Tensor with
+dense storage formats. The main difference is the underlying kernel.
 
 Sparse COO tensors
 ++++++++++++++++++
