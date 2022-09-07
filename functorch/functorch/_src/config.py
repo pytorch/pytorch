@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 
-use_functionalize = False
+use_functionalize = True
 
 # TODO: flip this to true by default
 # Waiting on
