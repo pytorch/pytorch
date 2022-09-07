@@ -195,12 +195,6 @@ inline void handle_variadic_bdims(std::vector<std::pair<Tensor, optional<int64_t
 #define VARIADIC_BDIMS_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_variadic_bdims), &handle_variadic_bdims>>());
 
-void run_jit_decomposition(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-
-#define RUN_JIT_DECOMPOSITION(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&run_jit_decomposition>());
-
-
 using UnpackedBatchedTensor = std::tuple<Tensor,optional<int64_t>>;
 
 inline void find_and_unpack_tensors(
