@@ -139,7 +139,7 @@ class TestPythonKey(AOTTestCase):
         includes_aten_relu = any(
             n.target == torch.ops.aten.relu.default for n in gm.graph.nodes
         )
-        self.assertTrue(include_relu)
+        self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
         # FIXME
