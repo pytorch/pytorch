@@ -5222,7 +5222,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     // zero gradients for the inactive input.
     if (k < input.size(-1)) {
       auto zero_grad_shape =
-        at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
+          at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
       zero_grad_shape.push_back(input.size(-1) - k);
       auto zero_grad = at::zeros(zero_grad_shape, input_.options());
       input_grads.push_back(zero_grad);
