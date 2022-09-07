@@ -26,6 +26,7 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
 , cpp_signature_()
+, sym_cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
@@ -34,12 +35,11 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 }
 
 namespace {
-  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
+  void checkSchema(const OperatorName& name, const FunctionSchema& from_def_, const std::string& from_def_debug, const KernelFunction& kernel, const FunctionSchema& inferred_, const std::string& inferred_debug) {
     // TODO: figure out if we can just directly save real schema at def time
-    c10::optional<std::string> schema_difference = findSchemaDifferences(
-      from_def.cloneWithRealTypes(),
-      inferred.cloneWithRealTypes()
-    );
+    FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
+    FunctionSchema inferred = inferred_.cloneWithRealTypes();
+    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
@@ -64,12 +64,24 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
+void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
+  if (has_symint) {
+    if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *sym_cpp_signature_);
+    }
+  } else {
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *cpp_signature_);
+    }
+  }
+}
+
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, std::vector<at::Tag> tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
       if (j.inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
+        checkSchema(name_, schema, debug, j.kernel, *j.inferred_function_schema, j.debug);
       }
     }
   }
@@ -103,25 +115,26 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   // which means if you could validly change the type of a cpp_signature, then
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
-    if (cpp_signature_.has_value()) {
-      TORCH_CHECK(*cpp_signature == cpp_signature_->signature,
+    auto& local_cpp_signature = kernel.isValidSymUnboxed() ? sym_cpp_signature_ : cpp_signature_;
+    if (local_cpp_signature.has_value()) {
+      TORCH_CHECK(*cpp_signature == local_cpp_signature->signature,
         "\nMismatch in kernel C++ signatures\n",
         "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
         "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-        "  kernel 1: ", cpp_signature_->signature.name(), "\n",
-        "    dispatch key: ", toString(cpp_signature_->dispatch_key), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  kernel 1: ", local_cpp_signature->signature.name(), "\n",
+        "    dispatch key: ", toString(local_cpp_signature->dispatch_key), "\n",
+        "    ", local_cpp_signature->debug, "\n",
         "  kernel 2: ", cpp_signature->name(), "\n",
         "    dispatch key: ", toString(dispatch_key), "\n",
         "    ", debug, "\n"
       );
     } else {
-      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
+      local_cpp_signature = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
     }
   }
 
   if (schema_ && inferred_function_schema) {
-    checkSchema(name_, schema_->schema, schema_->debug, *inferred_function_schema, debug);
+    checkSchema(name_, schema_->schema, schema_->debug, kernel, *inferred_function_schema, debug);
   }
 
   // Add the kernel to the kernels list,
@@ -138,7 +151,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
                "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
                "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
                "  dispatch key: ", toString(dispatch_key), "\n",
-               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
+               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
                "       new kernel: ", debug
     );
   }
@@ -471,13 +484,13 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
+void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
-        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  correct signature:  ", saved_signature.signature.name(), "\n",
+        "    ", saved_signature.debug, "\n",
         "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."

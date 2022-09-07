@@ -9,8 +9,10 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 from itertools import product
 from sys import platform
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.distributed as dist
@@ -47,7 +49,11 @@ from torch.testing._internal.common_utils import (
     parametrize
 )
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_map,
+    tree_map_only,
+)
 from torch.utils.checkpoint import checkpoint
 
 
@@ -1378,11 +1384,20 @@ class CommResult:
     _work: torch.classes.c10d.Work
 
 
-def wrap_comm_result(result):
+def wrap_comm_result(result: Tuple[Any]) -> Tuple[Any]:
+    def wrap(work, e):
+        assert isinstance(e, torch.Tensor), (
+            "Excepting collection of tensors as the first element in the "
+            "return value of communication operations."
+        )
+
+        return CommResult(e, work)
+
+    # E.g.,
     # allreduce_ returns ([tensor], work)
-    tensor = result[0][0]
+    # allgather_ returns ([[tensor1, tensor2]], work)
     work = result[1]
-    return ([CommResult(result[0][0], result[1])], result[1])
+    return (tree_map(partial(wrap, work), result[0]), work)
 
 
 class CommTensor(torch.Tensor):
@@ -1415,6 +1430,15 @@ class CommTensor(torch.Tensor):
 
     It is specifically tailored for allreduce_ at the moment.
     """
+
+    _supported_comms = [
+        "allreduce_",
+        "allgather_",
+        "broadcast_",
+        "reduce_scatter_",
+        "scatter_",
+    ]
+
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
         r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
@@ -1434,6 +1458,10 @@ class CommTensor(torch.Tensor):
     # disable __torch_function__ so that CommTensor can recursively dispatch
     # with ProxyTorchDispatchMode in make_fx
     __torch_function__ = _disabled_torch_function_impl
+
+    @classmethod
+    def _is_supported(cls, op_name):
+        return any([comm in op_name for comm in cls._supported_comms])
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1487,10 +1515,20 @@ class CommTensor(torch.Tensor):
             else:
                 return e
 
+        def wrap(e):
+            return CommTensor(e) if isinstance(e, torch.Tensor) else e
+
+        def mark_after_comm(work, e):
+            if isinstance(e, torch.Tensor) or isinstance(e, CommTensor):
+                e._work = work
+                e._after_comm = True
+
+            return e
+
         unwrapped_args = tree_map(unwrap, args)
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
-        if "allreduce_" in func.__name__:
+        if cls._is_supported(func.__name__):
             if tracer is not None:
                 # in tracing mode, get proxies for args
                 proxy_args, proxy_kwargs = tree_map_only(
@@ -1525,20 +1563,22 @@ class CommTensor(torch.Tensor):
 
                 # N.B.: we still need to remember the work handle here, and wait
                 # for it later to make sure the execution during tracing is
-                # correct.
-                args[0][0]._work = out[1]
-                # remember comm is already launched
-                args[0][0]._after_comm = True
+                # correct. Also, remember comm is already launched
+                # args[0] is always the collection of output tensors
+                tree_map(partial(mark_after_comm, out[1]), args[0])
 
                 # HACK: update the proxy on the input argument as this is an
                 # inplace collective communication.
-                set_proxy_slot(unwrapped_args[0][0], tracer, get_proxy(out[0][0]))
+                flat_args, args_spec = tree_flatten(unwrapped_args[0])
+                flat_out, out_spec = tree_flatten(out[0])
+                for a, o in zip(flat_args, flat_out):
+                    set_proxy_slot(a, tracer, get_proxy(o))
+
                 return out
             else:
                 # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **kwargs)
-                args[0][0]._work = out[1]
-                args[0][0]._after_comm = True
+                tree_map(partial(mark_after_comm, out[1]), args[0])
                 return out
         else:
             if after_comm:
@@ -1546,7 +1586,7 @@ class CommTensor(torch.Tensor):
             else:
                 # we need to propagate CommTensor wrapping until the first
                 # subsequent operation has waited for it.
-                return CommTensor(func(*unwrapped_args, **unwrapped_kwargs))
+                return tree_map(wrap, func(*unwrapped_args, **unwrapped_kwargs))
 
 
 class CompilerTest(MultiProcessTestCase):
@@ -1564,7 +1604,7 @@ class CompilerTest(MultiProcessTestCase):
     def _get_process_group(self):
         raise NotImplementedError("To be implemented by subclass")
 
-    def _test_work_wait(self, x: torch.Tensor):
+    def _test_work_wait(self, x: torch.Tensor, comm_fn: Callable):
         pg = self._get_default_group()
 
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -1572,12 +1612,12 @@ class CompilerTest(MultiProcessTestCase):
             # all_reduce Python implementation, as the later will need more
             # discussion.
             y = CommTensor(x + x)
-            work = dist.all_reduce(y, group=pg, async_op=True)
+            work, z = comm_fn(y, group=pg)
             # this wait() will be ignored in tracing mode as
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return y * 2
+            return z * 2
 
         xx = x.clone()
 
@@ -1601,7 +1641,7 @@ class CompilerTest(MultiProcessTestCase):
                     ])
                     commed |= all([
                         curr.op == "call_function",
-                        "allreduce_" in curr.target.__name__
+                        CommTensor._is_supported(curr.target.__name__),
                     ])
 
                     prev = curr.args[0]
@@ -1623,6 +1663,48 @@ class CompilerTest(MultiProcessTestCase):
         xx += 1
         yy = traced_fn(xx)
         self.assertFalse(y.allclose(yy))
+
+    def _test_allreduce_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(tensor, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_allgather_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            work = dist.all_gather(out_tensors, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, sum(out_tensors)
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor.clone() + i for i in range(group.size())]
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_broadcast_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.broadcast(tensor, src=0, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor + i for i in range(group.size())] if self.rank == 0 else None
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
 if __name__ == "__main__":
