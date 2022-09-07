@@ -149,6 +149,7 @@ class BackendConfig:
         backend_config = BackendConfig("my_backend") \
             .set_backend_pattern_config(linear_config) \
             .set_backend_pattern_config(conv_relu_config)
+
     """
     def __init__(self, name: str = ""):
         self.name = name
@@ -185,6 +186,7 @@ class BackendConfig:
 
             "name": the name of the target backend
             "configs": a list of dictionaries that each represents a `BackendPatternConfig`
+
         """
         conf = cls(backend_config_dict.get(NAME_DICT_KEY, ""))
         for d in backend_config_dict.get(CONFIGS_DICT_KEY, []):

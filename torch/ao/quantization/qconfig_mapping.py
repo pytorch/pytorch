@@ -161,6 +161,7 @@ class QConfigMapping:
             .set_module_name("module1", qconfig1)
             .set_module_name("module2", qconfig2)
             .set_module_name_object_type_order("foo.bar", torch.nn.functional.linear, 0, qconfig3)
+
     """
 
     def __init__(self):
