@@ -601,7 +601,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             "real": lambda x: x,
             "fake": wrap_fake_concrete,
         }
-        with decompose(decomposition_table), fake_tensor_mode:
+        with fake_tensor_mode:
             pass  # fake tensor mode needed w/ correct ancestors needed to wrap input tensors
 
         def maybe_restore_fake_tensor_mode():
@@ -623,7 +623,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with maybe_restore_fake_tensor_mode(), \
+        with decompose(decomposition_table), maybe_restore_fake_tensor_mode(), \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
