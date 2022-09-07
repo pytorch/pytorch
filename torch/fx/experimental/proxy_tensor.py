@@ -19,7 +19,7 @@ import weakref
 
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._subclasses import FakeTensor
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt
+from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
 
@@ -150,7 +150,7 @@ class _ProxyTensor:
     proxy: Proxy
 
 
-def fetch_symint_proxy(tracer):
+def fetch_sym_proxy(tracer):
     def inner(e):
         n = e.get_pyobj()
         if n.constant is not None:
@@ -201,8 +201,8 @@ def proxy_call(proxy_mode, func, args, kwargs):
         )
 
     proxy_args, proxy_kwargs = pytree.tree_map_only(
-        SymInt,
-        fetch_symint_proxy(proxy_mode.tracer),
+        (SymInt, SymFloat),
+        fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
 
@@ -296,7 +296,7 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, SymInt):
+        elif isinstance(a, (SymInt, SymFloat)):
             assert a.get_pyobj().constant is not None
             return a.get_pyobj().constant
         return super().create_arg(a)
@@ -372,7 +372,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         return out
 
 
-SymInt = torch._C.SymIntNode
+SymInt = torch.SymIntNode
+SymFloat = torch.SymFloatNode
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -397,7 +398,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         if not self.enable_tracing:
             return func(*args, **kwargs)
         p_args, p_kwargs = pytree.tree_map_only(
-            PySymInt,
+            (PySymInt, PySymFloat),
             lambda s: get_proxy_slot(s, self.tracer) if s.constant is None else s.constant,
             (args, kwargs)
         )
@@ -409,7 +410,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
         set_meta(p_out, out)
-        assert isinstance(out, PySymInt), f"{func}(*{args}, **{kwargs}) = {out}"
+        assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
         set_proxy_slot(out, self.tracer, p_out)
         return out
 
