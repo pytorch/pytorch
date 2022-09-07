@@ -311,8 +311,8 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
 class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
-      : impl_(new c10::impl::PyInterpreter(ConcretePyInterpreterVTable::instance())) {
-  }
+      : impl_(new c10::impl::PyInterpreter(
+            ConcretePyInterpreterVTable::instance())) {}
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
