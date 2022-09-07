@@ -18,6 +18,7 @@ from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F4
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 from torch.types import Number
+from torch.onnx import symbolic_opset8 as opset8, symbolic_opset9 as opset9, symbolic_opset10 as opset10, symbolic_opset11 as opset11, symbolic_opset13 as opset13
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -704,13 +705,9 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
 @_beartype.beartype
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if GLOBALS.export_onnx_opset_version <= 9:
-        from torch.onnx.symbolic_opset9 import _slice as _slice9
-
-        return _slice9(g, input, axes, starts, ends)
+        return opset9._slice(g, input, axes, starts, ends)
     else:
-        from torch.onnx.symbolic_opset10 import _slice as _slice10
-
-        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
+        return opset10._slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
 @_beartype.beartype
@@ -818,13 +815,9 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
 @_beartype.beartype
 def _lt_helper(g, input, other):
     if GLOBALS.export_onnx_opset_version <= 8:
-        from torch.onnx.symbolic_opset8 import lt as _lt8
-
-        return _lt8(g, input, other)
+        return opset8._lt(g, input, other)
     else:
-        from torch.onnx.symbolic_opset9 import lt as _lt9
-
-        return _lt9(g, input, other)
+        return opset9._lt(g, input, other)
 
 
 @_beartype.beartype
@@ -1220,21 +1213,21 @@ def __interpolate_helper(
 @_beartype.beartype
 def _unbind_helper(g, self, dim, _outputs):
     if GLOBALS.export_onnx_opset_version < 11:
-        from torch.onnx.symbolic_opset9 import unbind
+        unbind = opset9.unbind
     elif GLOBALS.export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+        unbind = opset11.unbind
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+        unbind = opset13.unbind
     return unbind(g, self, dim, _outputs)
 
 
 @_beartype.beartype
 def _scatter_helper(g, self, dim, index, src):
     if GLOBALS.export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import scatter
+        scatter = opset9.scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        scatter = opset11.scatter
     return scatter(g, self, dim, index, src)
 
 
@@ -1243,7 +1236,7 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
     if GLOBALS.export_onnx_opset_version <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
-        from torch.onnx.symbolic_opset13 import split
+        split = opset13.split
 
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
         split_out = split(g, self, repeats, dim, _outputs=reps)
@@ -1295,16 +1288,16 @@ def _arange_cast_helper(
 @_beartype.beartype
 def _arange_helper(g, *args):
     if GLOBALS.export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import arange
+        arange = opset9.arange
     else:
-        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
+        arange = opset11.arange
     return arange(g, *args)
 
 
 @_beartype.beartype
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
-    from torch.onnx.symbolic_opset9 import select
+    select = opset9.select
 
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
@@ -1319,10 +1312,9 @@ def _index_fill_reshape_helper(g, self, dim, index):
     from torch.onnx.symbolic_opset9 import expand
 
     if GLOBALS.export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import scatter
+        scatter = opset9.scatter
     else:
-        # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        scatter = opset11.scatter
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")
@@ -1360,8 +1352,6 @@ def _reshape_helper(g, input, shape, allowzero=0):
 
 @_beartype.beartype
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
-    from torch.onnx.symbolic_opset9 import _var_mean
-
     batch_size = _get_tensor_dim_size(input, 0)
     channel_size = _get_tensor_dim_size(input, 1)
 
@@ -1408,7 +1398,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
             ),
         )
         trans_in = g.op("Transpose", reshape_in, perm_i=[0, 2, 1])
-        running_var, running_mean = _var_mean(
+        running_var, running_mean = opset9._var_mean(
             g,
             trans_in,
             g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)),
@@ -1474,7 +1464,7 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
         ]
 
     final_shape = g.op("Concat", *slices, axis_i=0)
-    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    _reshape_from_tensor = opset9._reshape_from_tensor
 
     return _reshape_from_tensor(g, input, final_shape)
 
