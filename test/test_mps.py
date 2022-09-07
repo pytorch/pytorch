@@ -6723,7 +6723,6 @@ class TestConsistency(TestCase):
         'isreal': ['f16', 'f32'],
         'kron': ['f32'],
         'linalg.matrix_norm': ['f16'],
-        'linalg.norm': ['f16', 'f32'],
         'linalg.svd': ['f32'],
         'linspace': ['f16', 'f32'],
         'log': ['f32'],
