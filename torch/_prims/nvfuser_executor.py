@@ -30,6 +30,7 @@ class nvFuserTensorTemplate:
     size: tuple
     stride: tuple
     dtype: DataType
+    is_cpu: bool
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,10 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
+                arg.size(),
+                arg.stride(),
+                getnvFuserDtype(arg.dtype),
+                arg.is_cpu,  # type: ignore[attr-defined]
             )
         elif isinstance(arg, Number):
             return nvFuserScalarTemplate(getnvFuserDtype(number_type(arg)))
@@ -134,7 +138,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
+                x = fd.define_tensor(arg.size, arg.stride, arg.dtype, arg.is_cpu)
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
@@ -155,21 +159,36 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 def nvfuser_execute(gm: GraphModule, *args):
     flat_args, _ = tree_flatten(args)
 
-    # Construction of the fusion is expensive and cached based on the GraphModule
-    # and symbolic nvFuser args.
-    nv_template_args = to_nvfuser_template_args(flat_args)
-    fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+    # check for cuda only fusion
+    if any(isinstance(arg, torch.Tensor) and arg.is_cuda for arg in flat_args) and all(  # type: ignore[attr-defined]
+        (
+            not isinstance(arg, torch.Tensor)
+            or (arg.is_cpu and arg.ndim == 0)  # type: ignore[attr-defined]
+            or arg.is_cuda  # type: ignore[attr-defined]
+        )
+        for arg in flat_args
+    ):
 
-    # Inputs to fusion.execute correspond to the same template/symbolic inputs
-    # marked with `define_tensor/scalar`
-    concrete_fusion_inputs = tuple(
-        arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
-    )
+        # Construction of the fusion is expensive and cached based on the GraphModule
+        # and symbolic nvFuser args.
+        nv_template_args = to_nvfuser_template_args(flat_args)
+        fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
-    return tree_unflatten(
-        fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
-        unflatten_spec,  # type: ignore[has-type]
-    )
+        # Inputs to fusion.execute correspond to the same template/symbolic inputs
+        # marked with `define_tensor/scalar`
+        concrete_fusion_inputs = tuple(
+            arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
+        )
+
+        return tree_unflatten(
+            fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
+            unflatten_spec,  # type: ignore[has-type]
+        )
+    else:
+        warn(
+            "nvfuser_executor is executed with non-cuda args, fallback to aten executor"
+        )
+        return gm.forward(*args)
 
 
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
