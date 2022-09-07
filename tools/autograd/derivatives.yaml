@@ -1956,7 +1956,20 @@
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
-  output: auto_element_wise
+  # HACK: This is just auto_element_wise followed by a view_as. The reason we have
+  # this is bc forward AD was complaining here about the shapes not being the same:
+  # the primal/tangent are 0-D/1-D respectively. This started happening after moving the
+  # jvp decomposition mechanism from functorch to core, possibly due to a batching rule.
+  # In functorch we rely on OP_DECOMPOSE, but now we compute forward AD using an actual
+  # formula.
+  #
+  # We'd like to avoid keeping the entire jvp decomposition mechanism in functorch,
+  # just for this single decomposition, but also want to avoid any cases from regressing:
+  # e.g. test_vmapjvpall_nn_functional_logsigmoid_cuda_float32 (passes on cpu, fails on CUDA).
+  #
+  # We should either figure out what is going on with vmap or perhaps fwd AD could
+  # be more tolerant about 0-dim vs 1-dim tensors
+  output: log_sigmoid_backward(self_t.conj(), self_p, buffer).conj().view_as(self_p)
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
