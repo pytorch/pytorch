@@ -268,6 +268,25 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
+void fill__Tensor_batch_rule(
+    Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& other,
+    optional<int64_t> other_bdim) {
+  if (!other_bdim.has_value()) {
+    // Optimization: fill_ is faster than the other path which does
+    // reshaping + copy_
+    self.fill_(other);
+    return;
+  }
+  if (!self_bdim && other_bdim) {
+    vmapIncompatibleInplaceError("fill_");
+  }
+  auto self_and_other = _binary_pointwise_helper(
+      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
+  std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
+}
+
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
@@ -456,7 +475,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #undef SINGLE_ARG
 #undef LOGICAL_COMPARISON_POINTWISE
   VMAP_SUPPORT(masked_select, masked_select_batch_rule);
-  VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule)
+  VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule);
+
+  VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
 }
 
 }}
