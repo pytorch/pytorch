@@ -377,6 +377,7 @@ class TestDecomp(TestCase):
 
         saved_precision = self.precision
         saved_rel_tol = self.rel_tol
+        test_case = self
 
         class DecompCrossRefMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -430,14 +431,14 @@ class TestDecomp(TestCase):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
                             continue
-                        op_assert_ref(self, func, test_dtype, i, orig, decomp, ref, args, kwargs)
+                        op_assert_ref(test_case, func, test_dtype, i, orig, decomp, ref, args, kwargs)
                 else:
                     for orig, decomp in zip(real_out, decomp_out):
                         if not isinstance(orig, torch.Tensor):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
                             continue
-                        op_assert_equal(self, func, test_dtype, orig, decomp, args, kwargs)
+                        op_assert_equal(test_case, func, test_dtype, orig, decomp, args, kwargs)
 
                 return real_out_unflat
 
