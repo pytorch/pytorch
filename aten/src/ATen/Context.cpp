@@ -104,6 +104,22 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::userEnabledFusedSDP() const {
+  return enabled_fusedSDP;
+}
+
+void Context::setUserEnabledFusedSDP(bool e) {
+  enabled_fusedSDP = e;
+}
+
+bool Context::userEnabledMathSDP() const {
+  return enabled_mathSDP;
+}
+
+void Context::setUserEnabledMathSDP(bool e) {
+  enabled_mathSDP = e;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)

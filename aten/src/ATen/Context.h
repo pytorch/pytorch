@@ -126,6 +126,22 @@ class TORCH_API Context {
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
+  // Note [Disabling Fused SDP Kernels]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Fused SDP kernels are enabled by default. However, they can be disabled
+  // by setting at::globalContext().setUserEnabledFusedSDP(false) flag.
+  // This is useful for debugging purposes. For example, if you want to
+  // compare the performance of the fused SDP kernels with the unfused
+  // kernel, you can disable the fused SDP kernels. By disabling
+  // the math SDP kernel, you can force your code to use fused kernels.
+  // The math SDP kernel can be disabled by setting
+  // at::globalContext().setUserEnabledMathSDP(false) flag.
+  void setUserEnabledFusedSDP(bool);
+  bool userEnabledFusedSDP() const;
+
+  void setUserEnabledMathSDP(bool);
+  bool userEnabledMathSDP() const;
+
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
@@ -253,6 +269,8 @@ class TORCH_API Context {
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
+  bool enabled_fusedSDP = true;
+  bool enabled_mathSDP = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
