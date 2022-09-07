@@ -7,7 +7,7 @@ import typing
 import warnings
 from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
 
-from typing_extensions import Literal
+from typing_extensions import Literal, TypeGuard
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -149,8 +149,7 @@ def _maybe_get_const(
 ):
     # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
     # otherwise it'd be converted to onnx::Constant
-    # TODO(justinchuby): Replace insinstance with _is_value once we figure out mypy
-    if isinstance(value, _C.Value) and _is_onnx_constant(value):
+    if _is_value(value) and _is_onnx_constant(value):
         return _parse_arg(value, descriptor)
     return value
 
@@ -427,7 +426,7 @@ def _if_scalar_type_as(self, tensor):
     actually need to insert an ONNX cast operator here; just
     fix up the scalar.
     """
-    if isinstance(self, _C.Value):
+    if _is_value(self):
         return self
 
     scalar_type = tensor.type().scalarType()
@@ -444,7 +443,7 @@ def _is_none(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def _is_value(x: Any) -> bool:
+def _is_value(x: Any) -> TypeGuard[_C.Value]:
     return isinstance(x, _C.Value)
 
 
@@ -457,7 +456,7 @@ def _is_constant(value: Any) -> bool:
 
 
 @_beartype.beartype
-def _is_tensor(x: _C.Value) -> bool:
+def _is_tensor(x: _C.Value) -> TypeGuard[_C.TensorType]:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
@@ -469,7 +468,7 @@ def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
 
 
 @_beartype.beartype
-def _is_list(x: _C.Value) -> bool:
+def _is_list(x: _C.Value) -> TypeGuard[_C.ListType]:
     return _as_list_type(x.type()) is not None
 
 
@@ -573,7 +572,7 @@ def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoRetur
         f"Please feel free to request support or submit a pull request "
         f"on PyTorch GitHub: {_constants.PYTORCH_GITHUB_ISSUES_URL}"
     )
-    if isinstance(value, _C.Value):
+    if _is_value(value):
         raise errors.SymbolicValueError(
             message,
             value,
@@ -592,7 +591,7 @@ def _onnx_opset_unsupported(
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
         f"Please try opset version {supported_opset}."
     )
-    if isinstance(value, _C.Value):
+    if _is_value(value):
         raise errors.SymbolicValueError(
             message,
             value,
@@ -612,7 +611,7 @@ def _onnx_opset_unsupported_detailed(
         f"Unsupported: ONNX export of {op_name} in "
         f"opset {current_opset}. {reason}. Please try opset version {supported_opset}."
     )
-    if isinstance(value, _C.Value):
+    if _is_value(value):
         raise errors.SymbolicValueError(
             message,
             value,
