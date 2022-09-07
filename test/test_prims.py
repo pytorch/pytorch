@@ -301,9 +301,9 @@ class TestPrims(TestCase):
             torch.ops.nvprims.exp.default == node.target
             for node in call_function_nodes
         )
+        self.assertFalse(includes_aten_sigmoid)
         self.assertFalse(includes_prims_digamma)
-        self.assertEqual(includes_aten_sigmoid, not a.is_cuda)
-        self.assertEqual(includes_nvprims_exp, a.is_cuda)
+        self.assertTrue(includes_nvprims_exp)
 
 
     def test_aten_overload_to_prims(self, device):
@@ -450,7 +450,7 @@ class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float16)
-    def test_cpu_scalar(self, device, dtype):
+    def test_cpu_tensor(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
@@ -467,6 +467,7 @@ class TestPrims(TestCase):
             gm = make_fx(_wrapper)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
+        # cpu scalar tensor is handled by nvfuser codegen
         actual = execute(gm, a, b, c, executor="nvfuser")
         self.assertEqual(expected, actual)
 
@@ -476,6 +477,10 @@ class TestPrims(TestCase):
             for node in call_function_nodes
         )
         self.assertFalse(includes_aten_add)
+
+        # cpu tensor is handled by nvprim aten fallback
+        nvprim_aten_fallback = execute(gm, a.cpu(), b.cpu(), c, executor="nvfuser")
+        self.assertEqual(expected, nvprim_aten_fallback)
 
     @onlyCUDA
     @skipCUDAIfRocm

@@ -185,6 +185,7 @@ def nvfuser_execute(gm: GraphModule, *args):
             unflatten_spec,  # type: ignore[has-type]
         )
     else:
+        warn("nvfuser_executor is executed with non-cuda args, fallback to aten executor")
         return gm.forward(*args)
 
 
