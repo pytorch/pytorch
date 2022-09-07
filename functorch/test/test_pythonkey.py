@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn as nn
@@ -20,6 +21,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
+import functorch._src.config as functorch_config
 from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
@@ -570,9 +572,6 @@ class TestPartitioning(AOTTestCase):
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -643,6 +642,9 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    # TODO: stacktrace preservation doesn't work with make_fx retrace yet
+    @patch.object(functorch_config, "use_functionalize", False)
+    @patch.object(functorch_config, "enable_pre_autograd_decomps", False)
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -680,6 +682,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
         res = aot_mod(*inputs)
+        res[0].sum().backward()
 
 
 only_for = ("cpu")

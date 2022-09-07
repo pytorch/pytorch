@@ -290,11 +290,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     if config.enable_pre_autograd_decomps:
         # Trace with decompositions before autograd so that
         # we can generate backward function from forward decomposition
-        with torch.no_grad():
-            decomposed_forward = make_fx(flat_fn, pre_autograd_decompositions)(
-                *flat_args
-            )
-
+        decomposed_forward = make_fx(flat_fn, pre_autograd_decompositions)(
+            *flat_args
+        )
         joint_forward_backward = create_joint_forward_backward(decomposed_forward)
     else:
         joint_forward_backward = create_joint_forward_backward(flat_fn)
