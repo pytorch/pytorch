@@ -124,6 +124,11 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     return not already_freed
 
 
+def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
+    """Returns if ``x`` and ``y`` share the same storage."""
+    return x.storage().data_ptr() == y.storage().data_ptr()
+
+
 def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
