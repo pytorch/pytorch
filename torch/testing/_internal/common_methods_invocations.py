@@ -6770,7 +6770,11 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs=kwargs)
 
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # We get better tests if we change the range of the values to something like [-2,2]
+    # because for grid (second tensor argument) the "useful" range is [-1,1] and this way
+    # you get a better combination of out-of-range and in-range test cases
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                           low=-2, high=2)
 
     batch_size = 2
     num_channels = 3
@@ -10561,10 +10565,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
-               DecorateInfo(unittest.skip("Skipped! RuntimeError: bias tensor has to be contiguous"), 'TestGradients',
-                            'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
-                            active_if=(not TEST_CUDNN)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -11083,7 +11083,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
@@ -16881,12 +16880,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
@@ -17397,149 +17396,3 @@ def mask_not_all_zeros(shape):
         result = torch.randn(shape).gt(0)
         if result.sum() > 0:
             return result
-
-
-# TODO: move all tri/tril/triu testing to tensor creation op test suite and remove
-#   these from here
-def _compare_trilu_indices(
-        self, row, col, offset=0, dtype=torch.long, device='cpu'):
-    if row == 0 or col == 0:
-        # have to handle this separately as tril and triu does not take
-        # empty matrix as input
-        self.assertEqual(
-            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
-
-        self.assertEqual(
-            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
-            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
-
-    else:
-        self.assertEqual(
-            torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype=dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
-
-        self.assertEqual(
-            torch.ones(row, col, device='cpu')
-                 .triu(offset).nonzero().to(dtype=dtype).transpose(0, 1),
-            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
-
-
-def _compare_large_trilu_indices(
-        self, row, col, offset=0, dtype=torch.long, device='cpu'):
-    l = torch.ones(row, col, dtype=dtype, device='cpu').tril(offset) \
-             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
-    torch.cuda.empty_cache()
-
-    r = torch.tril_indices(
-        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
-    self.assertEqual(l, r)
-    torch.cuda.empty_cache()
-
-    l = torch.ones(row, col, dtype=dtype, device='cpu').triu(offset) \
-             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
-    torch.cuda.empty_cache()
-
-    r = torch.triu_indices(
-        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
-    self.assertEqual(l, r)
-    torch.cuda.empty_cache()
-
-# (
-#   row
-#   col
-#   offset (optional)
-#   dtype (optional)
-# )
-tri_tests_args = [
-    (1, 1),
-    (3, 3),
-    (3, 3, 1),
-    (3, 3, 2),
-    (3, 3, 200),
-    (3, 3, -1),
-    (3, 3, -2),
-    (3, 3, -200),
-    (0, 3, 0),
-    (0, 3, 1),
-    (0, 3, -1),
-    (0, 1, 2),
-    (1, 0, 2),
-    (3, 0, 0),
-    (3, 0, 1),
-    (3, 0, -1),
-    (0, 0, 0),
-    (0, 0, 1),
-    (0, 0, -1),
-    (3, 6, 0),
-    (3, 6, 1),
-    (3, 6, 3),
-    (3, 6, 9),
-    (3, 6, -1),
-    (3, 6, -3),
-    (3, 6, -9),
-    (6, 3, 0),
-    (6, 3, 1),
-    (6, 3, 3),
-    (6, 3, 9),
-    (6, 3, -1),
-    (6, 3, -3),
-    (6, 3, -9),
-    (3, 513, 1, torch.long),
-    (513, 3, 1, torch.int),
-    (1024, 1024),
-    (1024, 1024, 1023),
-    (1024, 1024, -500),
-    (1023, 1025),
-    (1025, 1023, 1022),
-    (1024, 1024, -500),
-    (3, 2028),
-    (3, 2028, 1),
-    (3, 2028, -1),
-    (2028, 3),
-    (2028, 1),
-    (2028, 1, -1)
-]
-
-tri_large_tests_args: List[Tuple[int, ...]] = [
-    # Large test cases below are deliberately commented out to speed up CI
-    # tests and to avoid OOM error. When modifying implementations of
-    # tril_indices and triu_indices, please enable these tests and make sure
-    # they pass.
-    #
-    # (1, 268435455),
-    # (5000, 5000),
-    # (10000, 10000),
-    # (268435455, 1),
-    # (134217727, 2, 1),
-    # (2, 134217727, 1),
-    # (536870901, 1),
-    # (1, 536870901),
-    # (268435455, 2, 1),
-    # (2, 268435455, 1)
-]
-
-
-def run_additional_tri_tests(self, device):
-    x = torch.ones(
-        3, 3, dtype=torch.long, device=device, layout=torch.strided)
-    l = x.tril(0).nonzero().transpose(0, 1)
-    u = x.triu(0).nonzero().transpose(0, 1)
-    self.assertEqual(l, torch.tril_indices(3, 3, device=device))
-    self.assertEqual(
-        l, torch.tril_indices(3, 3, device=device, layout=torch.strided))
-
-    self.assertEqual(u, torch.triu_indices(3, 3, device=device))
-    self.assertEqual(
-        u, torch.triu_indices(3, 3, device=device, layout=torch.strided))
-
-    self.assertRaises(
-        RuntimeError,
-        lambda: torch.triu_indices(
-            1, 1, device=device, layout=torch.sparse_coo))
-
-    self.assertRaises(
-        RuntimeError,
-        lambda: torch.tril_indices(
-            1, 1, device=device, layout=torch.sparse_coo))
