@@ -163,7 +163,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     if any(isinstance(arg, torch.Tensor) and arg.is_cuda for arg in flat_args) and all(  # type: ignore[attr-defined]
         (
             not isinstance(arg, torch.Tensor)
-            or (arg.is_cpu and arg.ndim == 0)
+            or (arg.is_cpu and arg.ndim == 0)  # type: ignore[attr-defined]
             or arg.is_cuda  # type: ignore[attr-defined]
         )
         for arg in flat_args
@@ -185,7 +185,9 @@ def nvfuser_execute(gm: GraphModule, *args):
             unflatten_spec,  # type: ignore[has-type]
         )
     else:
-        warn("nvfuser_executor is executed with non-cuda args, fallback to aten executor")
+        warn(
+            "nvfuser_executor is executed with non-cuda args, fallback to aten executor"
+        )
         return gm.forward(*args)
 
 
