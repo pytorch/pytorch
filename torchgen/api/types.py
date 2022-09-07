@@ -577,10 +577,8 @@ class DispatcherSignature:
     # and need to avoid naming collisions.
     prefix: str = ""
 
-    symint: bool = True
-
     def arguments(self) -> List[Binding]:
-        return dispatcher.arguments(self.func, symint=self.symint)
+        return dispatcher.arguments(self.func)
 
     def name(self) -> str:
         return self.prefix + dispatcher.name(self.func)
@@ -606,7 +604,7 @@ class DispatcherSignature:
         return [Expr(a.name, a.nctype) for a in self.arguments()]
 
     def returns_type(self) -> CType:
-        return dispatcher.returns_type(self.func.returns, symint=self.symint)
+        return dispatcher.returns_type(self.func.returns)
 
     def ptr_type(self) -> str:
         dispatcher_args_types_str = ", ".join(a.type for a in self.arguments())
@@ -618,8 +616,8 @@ class DispatcherSignature:
         return f"{self.returns_type().cpp_type()} ({dispatcher_args_types_str})"
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, prefix: str = "", symint: bool = True) -> "DispatcherSignature":
-        return DispatcherSignature(func, prefix, symint)
+    def from_schema(func: FunctionSchema, *, prefix: str = "") -> "DispatcherSignature":
+        return DispatcherSignature(func, prefix)
 
 
 @dataclass(frozen=True)

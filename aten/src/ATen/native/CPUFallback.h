@@ -20,9 +20,9 @@ struct _call_fallback_fn final {};
 
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op, class ReturnType, class... ParameterTypes>
 struct _call_fallback_fn<fallback_fn, Op, ReturnType(ParameterTypes...)> final {
-    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<typename Op::schema_symint>::return_type>::value,
+    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<typename Op::schema>::return_type>::value,
       "Return type mismatch");
-    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<typename Op::schema_symint>::parameter_types>::value,
+    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<typename Op::schema>::parameter_types>::value,
       "Parameter types mismatch");
 
     static ReturnType call(ParameterTypes... args) {
@@ -43,7 +43,7 @@ struct _call_fallback_fn<fallback_fn, Op, ReturnType(ParameterTypes...)> final {
 };
 
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op>
-using call_fallback_fn = _call_fallback_fn<fallback_fn, Op, typename Op::schema_symint>;
+using call_fallback_fn = _call_fallback_fn<fallback_fn, Op, typename Op::schema>;
 
 } // namespace native
 } // namespace at

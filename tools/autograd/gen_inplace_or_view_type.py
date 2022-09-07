@@ -148,7 +148,7 @@ auto ${val} = ${arg}.value_or(${default});
 
 CALL_DISPATCH = CodeTemplate(
     """\
-at::_ops::${unambiguous_name}::call_symint(${unpacked_args})"""
+at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 )
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
@@ -194,7 +194,7 @@ INPLACE_REDISPATCH = CodeTemplate(
     """\
 {
   at::AutoDispatchBelowADInplaceOrView guard;
-  at::_ops::${unambiguous_name}::redispatch_symint(${unpacked_args});
+  at::_ops::${unambiguous_name}::redispatch(${unpacked_args});
 }
 """
 )
@@ -209,7 +209,7 @@ VIEW_REDISPATCH = CodeTemplate(
     """\
 ${assign_return_values} ([&]() {
   at::AutoDispatchBelowADInplaceOrView guard;
-  return at::_ops::${unambiguous_name}::redispatch_symint(${unpacked_args});
+  return at::_ops::${unambiguous_name}::redispatch(${unpacked_args});
 })();
 """
 )
@@ -585,7 +585,7 @@ def gen_inplace_or_view_type(
         [fn for fn in fns_with_infos if use_derived(fn)],
         key_fn=lambda fn: fn.func.root_name,
         base_env={
-            "generated_comment": "@" + f"generated from {template_path}/ADInplaceOrViewType.cpp",
+            "generated_comment": f"@generated from {template_path}/ADInplaceOrViewType.cpp",
         },
         env_callable=gen_inplace_or_view_type_env,
         num_shards=2,
