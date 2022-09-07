@@ -39,6 +39,10 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 
+# Make sure that decompositions used for test_forward_mode_AD and
+# test_fn_fwgrad_bwgrad are registered to the jit
+import torch._decomp.decompositions_for_jvp
+
 import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
@@ -10164,6 +10168,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=True),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
@@ -10173,6 +10178,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=True),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -10185,6 +10191,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            assert_autodiffed=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False),
     OpInfo('nn.functional.softmin',
            variant_test_name="with_dtype",
@@ -10193,6 +10200,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -10201,6 +10209,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -10292,6 +10301,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            assert_jit_shape_analysis=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
            skips=(
@@ -10565,10 +10575,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
-               DecorateInfo(unittest.skip("Skipped! RuntimeError: bias tensor has to be contiguous"), 'TestGradients',
-                            'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
-                            active_if=(not TEST_CUDNN)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -10667,6 +10673,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
@@ -10685,6 +10692,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            decorators=[
                DecorateInfo(
@@ -11087,7 +11095,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                # RuntimeError: The tensor has a non-zero number of elements, but its data is not allocated yet.
@@ -11725,6 +11732,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_batch_norm,
            skips=(
@@ -11747,6 +11755,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
@@ -14709,6 +14718,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -14718,6 +14728,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    aten_backward_name='logit_backward',
@@ -14931,20 +14942,24 @@ op_db: List[OpInfo] = [
         "norm",
         sample_inputs_func=sample_inputs_norm,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
-        check_batched_forward_grad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Dispatches in Python to vector_norm. Not sure how to make this test happy
-            # Happens to pass on complex64. Also a mystery
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
     ),
     OpInfo('norm',
            variant_test_name='nuc',
+           aten_name='nuclear_norm',
            sample_inputs_func=sample_inputs_norm_nuc,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            check_batched_gradgrad=False,
@@ -14956,14 +14971,19 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
-               # Dispatches in Python to matrix_norm. Not sure how to make this test happy
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
+               # RuntimeError not raised :
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # RuntimeError:
+               # Arguments for call are not valid.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
+           )
            ),
     OpInfo('norm',
            variant_test_name='fro',
+           aten_name='frobenius_norm',
            sample_inputs_func=sample_inputs_norm_fro,
-           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
@@ -14977,25 +14997,30 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Dispatches in Python to vector_norm. Not sure how to make this test happy
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
-           ),
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # Arguments for call are not valid.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
+           )),
     OpInfo(
         "norm",
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
-        check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         # fast gradcheck produces NaNs
         gradcheck_fast_mode=False,
         skips=(
-            # Dispatches in Python to vector_norm. Not sure how to make this test happy
-            # Happens to pass on complex64. Also a mystery
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
     ),
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
@@ -15580,6 +15605,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
         skips=(
             # RuntimeError:
@@ -16871,12 +16897,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
@@ -17387,149 +17413,3 @@ def mask_not_all_zeros(shape):
         result = torch.randn(shape).gt(0)
         if result.sum() > 0:
             return result
-
-
-# TODO: move all tri/tril/triu testing to tensor creation op test suite and remove
-#   these from here
-def _compare_trilu_indices(
-        self, row, col, offset=0, dtype=torch.long, device='cpu'):
-    if row == 0 or col == 0:
-        # have to handle this separately as tril and triu does not take
-        # empty matrix as input
-        self.assertEqual(
-            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
-
-        self.assertEqual(
-            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
-            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
-
-    else:
-        self.assertEqual(
-            torch.ones(row, col, device='cpu')
-                 .tril(offset).nonzero().to(dtype=dtype).transpose(0, 1),
-            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
-
-        self.assertEqual(
-            torch.ones(row, col, device='cpu')
-                 .triu(offset).nonzero().to(dtype=dtype).transpose(0, 1),
-            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
-
-
-def _compare_large_trilu_indices(
-        self, row, col, offset=0, dtype=torch.long, device='cpu'):
-    l = torch.ones(row, col, dtype=dtype, device='cpu').tril(offset) \
-             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
-    torch.cuda.empty_cache()
-
-    r = torch.tril_indices(
-        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
-    self.assertEqual(l, r)
-    torch.cuda.empty_cache()
-
-    l = torch.ones(row, col, dtype=dtype, device='cpu').triu(offset) \
-             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
-    torch.cuda.empty_cache()
-
-    r = torch.triu_indices(
-        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
-    self.assertEqual(l, r)
-    torch.cuda.empty_cache()
-
-# (
-#   row
-#   col
-#   offset (optional)
-#   dtype (optional)
-# )
-tri_tests_args = [
-    (1, 1),
-    (3, 3),
-    (3, 3, 1),
-    (3, 3, 2),
-    (3, 3, 200),
-    (3, 3, -1),
-    (3, 3, -2),
-    (3, 3, -200),
-    (0, 3, 0),
-    (0, 3, 1),
-    (0, 3, -1),
-    (0, 1, 2),
-    (1, 0, 2),
-    (3, 0, 0),
-    (3, 0, 1),
-    (3, 0, -1),
-    (0, 0, 0),
-    (0, 0, 1),
-    (0, 0, -1),
-    (3, 6, 0),
-    (3, 6, 1),
-    (3, 6, 3),
-    (3, 6, 9),
-    (3, 6, -1),
-    (3, 6, -3),
-    (3, 6, -9),
-    (6, 3, 0),
-    (6, 3, 1),
-    (6, 3, 3),
-    (6, 3, 9),
-    (6, 3, -1),
-    (6, 3, -3),
-    (6, 3, -9),
-    (3, 513, 1, torch.long),
-    (513, 3, 1, torch.int),
-    (1024, 1024),
-    (1024, 1024, 1023),
-    (1024, 1024, -500),
-    (1023, 1025),
-    (1025, 1023, 1022),
-    (1024, 1024, -500),
-    (3, 2028),
-    (3, 2028, 1),
-    (3, 2028, -1),
-    (2028, 3),
-    (2028, 1),
-    (2028, 1, -1)
-]
-
-tri_large_tests_args: List[Tuple[int, ...]] = [
-    # Large test cases below are deliberately commented out to speed up CI
-    # tests and to avoid OOM error. When modifying implementations of
-    # tril_indices and triu_indices, please enable these tests and make sure
-    # they pass.
-    #
-    # (1, 268435455),
-    # (5000, 5000),
-    # (10000, 10000),
-    # (268435455, 1),
-    # (134217727, 2, 1),
-    # (2, 134217727, 1),
-    # (536870901, 1),
-    # (1, 536870901),
-    # (268435455, 2, 1),
-    # (2, 268435455, 1)
-]
-
-
-def run_additional_tri_tests(self, device):
-    x = torch.ones(
-        3, 3, dtype=torch.long, device=device, layout=torch.strided)
-    l = x.tril(0).nonzero().transpose(0, 1)
-    u = x.triu(0).nonzero().transpose(0, 1)
-    self.assertEqual(l, torch.tril_indices(3, 3, device=device))
-    self.assertEqual(
-        l, torch.tril_indices(3, 3, device=device, layout=torch.strided))
-
-    self.assertEqual(u, torch.triu_indices(3, 3, device=device))
-    self.assertEqual(
-        u, torch.triu_indices(3, 3, device=device, layout=torch.strided))
-
-    self.assertRaises(
-        RuntimeError,
-        lambda: torch.triu_indices(
-            1, 1, device=device, layout=torch.sparse_coo))
-
-    self.assertRaises(
-        RuntimeError,
-        lambda: torch.tril_indices(
-            1, 1, device=device, layout=torch.sparse_coo))

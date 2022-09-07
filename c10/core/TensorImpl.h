@@ -229,7 +229,7 @@ struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
-  SymInt storage_offset_ = 0;
+  SymInt storage_offset_ = 0; // TODO
   // TODO:
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -730,7 +730,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
-    return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(strides_default());
+    return sym_strides_default();
   }
 
   IntArrayRef strides_default() const {
