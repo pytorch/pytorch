@@ -1581,7 +1581,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
    */
-  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride, c10::optional<int64_t> storage_offset = c10::nullopt) {
+  void set_sizes_and_strides(
+      IntArrayRef new_size,
+      IntArrayRef new_stride,
+      c10::optional<int64_t> storage_offset = c10::nullopt) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "set_sizes_and_strides ",

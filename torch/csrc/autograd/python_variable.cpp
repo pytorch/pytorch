@@ -802,13 +802,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides, sym_storage_offset.value_or(0));
-
-    // TODO: this may need to be symbolic as well
-    auto storage_offset = r.toInt64Optional(3);
-    if (storage_offset) {
-      tensor_impl->set_storage_offset(*storage_offset);
-    }
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
