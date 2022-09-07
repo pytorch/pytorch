@@ -239,6 +239,7 @@ struct ConcretePyInterpreterVTable final
   c10::Layout layout(const TensorImpl* self) const override;
   c10::SymInt sym_numel(const TensorImpl* self) const override;
   c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override;
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
 
   void trace_gpu_event_creation(uintptr_t event) const override {
     concrete_trace_cuda<trace_cuda_event_creation_fn_name>(event);
@@ -2517,6 +2518,29 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
         !self->has_symbolic_sizes_strides(),
         "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
+  }
+  return torch::is_symint_node(out)
+      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
+      : c10::SymInt{py::cast<int64_t>(out)};
+}
+
+c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
+    const c10::TensorImpl* self) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "sym_storage_offset",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_storage_offset")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out == Py_None) {
+    return self->sym_storage_offset_default();
   }
   return torch::is_symint_node(out)
       ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
