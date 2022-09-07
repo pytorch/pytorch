@@ -1,3 +1,4 @@
+import collections
 import collections.abc
 import math
 import operator
@@ -147,7 +148,7 @@ class SampleInput(object):
         # This field is used to verify the behavior for inplace variant.
         #
         # If a SampleInput is marked with `broadcasts_input=True`,
-        # it is verified that we get a `RuntimerError` with this sample,
+        # it is verified that we get a `RuntimeError` with this sample,
         # and inplace variant. Also inplace grad{grad} tests are skipped,
         # for such inputs (as they will error out otherwise).
         self.broadcasts_input = broadcasts_input
@@ -259,6 +260,9 @@ class SampleInput(object):
             return t
 
         return self.transform(to_noncontiguous)
+
+
+NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
 
 
 class ErrorInput(object):

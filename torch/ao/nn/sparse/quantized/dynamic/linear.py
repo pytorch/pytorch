@@ -1,11 +1,11 @@
 from typing import Optional
 
-from torch.ao.nn.sparse.quantized import linear
-from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
-
 import torch
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+
+from torch.ao.nn.sparse.quantized import linear
+from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
+from torch.ao.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 __all__ = ['Linear']
 
