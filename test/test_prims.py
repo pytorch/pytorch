@@ -2,6 +2,7 @@
 
 from functools import partial
 from itertools import product
+import warnings
 from warnings import catch_warnings
 import unittest
 
@@ -23,6 +24,7 @@ import torch._refs as refs
 if TEST_SCIPY:
     import scipy.special
 
+NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 
 class TestPrims(TestCase):
     @onlyCUDA
@@ -183,7 +185,7 @@ class TestPrims(TestCase):
     def test_nvfuser_no_args(self, device):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.executor import execute
+        from torch._prims.executor import execute, make_nvfuser_fusion
 
         a = torch.randn(3, 3, device=device)
 
@@ -193,8 +195,13 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)()
 
-        with self.assertRaisesRegex(AssertionError, "There must be at least one argument"):
+        with warnings.catch_warnings(record=True) as caught:
             execute(gm, executor="strictly_nvfuser")
+        # fusion execute with no cuda input is handled by nvprim aten fallback
+        self.assertTrue(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
+
+        with self.assertRaisesRegex(AssertionError, "There must be at least one argument"):
+            make_nvfuser_fusion(gm)
 
         with self.assertRaisesRegex(AssertionError, "Number of placeholder nodes in the graph must match"):
             execute(gm, a, executor="strictly_nvfuser")
@@ -466,12 +473,10 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(_wrapper)(a, b, c)
 
-        fallback_str = "fallback to aten executor"
-
         with warnings.catch_warnings(record=True) as caught:
             actual = execute(gm, a, b, c, executor="nvfuser")
         # cpu scalar tensor is handled by nvfuser codegen, so it shouldn't fallback
-        self.assertFalse(any(fallback_str in str(w.message) for w in caught))
+        self.assertFalse(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
 
         expected = execute(gm, a, b, c, executor="aten")
         self.assertEqual(expected, actual)
@@ -486,7 +491,7 @@ class TestPrims(TestCase):
         with warnings.catch_warnings(record=True) as caught:
             nvprim_aten_fallback = execute(gm, a.cpu(), b.cpu(), c, executor="nvfuser")
         # cpu tensor is handled by nvprim aten fallback, assert that it's indeed in warning
-        self.assertTrue(any(fallback_str in str(w.message) for w in caught))
+        self.assertTrue(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
 
         self.assertEqual(expected, nvprim_aten_fallback)
 
