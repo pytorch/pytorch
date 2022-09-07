@@ -5115,10 +5115,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
-
-  auto input_grad = at::zeros_like(input_);
-  auto tau_grad = at::zeros_like(tau);
-
   auto m = input_.size(-2);
   auto k = tau.size(-1);
 
@@ -5191,23 +5187,70 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // K <- H_0^{-1} @ K
   K = apply_householder_reflector(
       0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K, /*left=*/true);
-  for (const auto i : c10::irange(k)) {
-    // NOTE: narrow will unsqueeze(-1)
-    auto v_i = input.narrow(-1, i, 1);
-    auto t_i = tau.narrow(-1, i, 1);
 
-    Tensor v_i_grad, tau_i_grad;
-    std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-    input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
-    tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+  Tensor input_grad, tau_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as `input`, 'tau' or `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({input, tau, K})) {
+    std::vector<Tensor> input_grads = {};
+    std::vector<Tensor> tau_grads = {};
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
 
-    // K <- H_{i + 1}^{-1} @ K @ H_i
-    if (i < k - 1) {
-      auto v_i_next = input.narrow(-1, i + 1, 1);
-      auto s_i_next = sigma.narrow(-1, i + 1, 1);
-      K = apply_householder_reflector(
-          i + 1, v_i_next, s_i_next, K, /*left=*/true);
-      K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grads.push_back(v_i_grad.squeeze(-1));
+      tau_grads.push_back(tau_i_grad.squeeze(-1));
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
+    }
+
+    input_grad = at::stack(input_grads, -1);
+    tau_grad = at::stack(tau_grads, -1);
+
+    // Only first k columns are active in forward.
+    // zero gradients for the inactive input.
+    if (k < input.size(-1)) {
+      auto input_sizes = input_.sizes();
+      at::DimVector new_sizes(input_sizes);
+      new_sizes[input_.dim() - 1] = input.size(-1) - k;
+      auto zeros = at::zeros(new_sizes, input_.options());
+      input_grad = at::cat({input_grad, zeros}, -1);
+    }
+  } else {
+    input_grad = at::zeros_like(input_);
+    tau_grad = at::zeros_like(tau);
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
+
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
+      tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
     }
   }
 
@@ -5299,10 +5342,18 @@ Tensor householder_product_jvp(
 
     H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
 
-    dprod.add_(H_minus.matmul(
+    // `H_minus_dH_i_H_plus` = H_1 * ... * H_{i-1} dH_i * H_{i+1} * ...
+    auto H_minus_dH_i_H_plus = H_minus.matmul(
         apply_simple_product(v_i, v_i, dtau_i, H_plus) +
         apply_simple_product(dv_i, v_i, tau_i, H_plus) +
-        apply_simple_product(v_i, dv_i, tau_i, H_plus)));
+        apply_simple_product(v_i, dv_i, tau_i, H_plus));
+    // For Composite Compliance, if `intermediate` is a Tensor-Subclass,
+    // we use out-of-place variant of add.
+    if (at::isTensorSubclassLike(H_minus_dH_i_H_plus)) {
+      dprod = dprod.add(H_minus_dH_i_H_plus);
+    } else {
+      dprod.add_(H_minus_dH_i_H_plus);
+    }
 
     H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
   }
