@@ -466,9 +466,14 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(_wrapper)(a, b, c)
 
+        fallback_str = "fallback to aten executor"
+
+        with warnings.catch_warnings(record=True) as caught:
+            actual = execute(gm, a, b, c, executor="nvfuser")
+        # cpu scalar tensor is handled by nvfuser codegen, so it shouldn't fallback
+        self.assertFalse(any(fallback_str in str(w.message) for w in caught))
+
         expected = execute(gm, a, b, c, executor="aten")
-        # cpu scalar tensor is handled by nvfuser codegen
-        actual = execute(gm, a, b, c, executor="nvfuser")
         self.assertEqual(expected, actual)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
@@ -478,8 +483,11 @@ class TestPrims(TestCase):
         )
         self.assertFalse(includes_aten_add)
 
-        # cpu tensor is handled by nvprim aten fallback
-        nvprim_aten_fallback = execute(gm, a.cpu(), b.cpu(), c, executor="nvfuser")
+        with warnings.catch_warnings(record=True) as caught:
+            nvprim_aten_fallback = execute(gm, a.cpu(), b.cpu(), c, executor="nvfuser")
+        # cpu tensor is handled by nvprim aten fallback, assert that it's indeed in warning
+        self.assertTrue(any(fallback_str in str(w.message) for w in caught))
+
         self.assertEqual(expected, nvprim_aten_fallback)
 
     @onlyCUDA
