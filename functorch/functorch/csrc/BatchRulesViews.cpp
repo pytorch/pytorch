@@ -15,7 +15,6 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
-#include <torch/csrc/jit/runtime/decomposition_registry.h>
 
 namespace at { namespace functorch {
 
@@ -511,7 +510,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
-  m.impl("trace", torch::CppFunction::makeFromBoxedFunction<&torch::jit::run_jit_decomposition>());
+  RUN_JIT_DECOMPOSITION(trace)
   VMAP_SUPPORT(tril, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
   VMAP_SUPPORT(triu, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
   VMAP_SUPPORT(repeat, repeat_batch_rule);
