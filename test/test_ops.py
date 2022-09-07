@@ -228,18 +228,16 @@ class TestCommon(TestCase):
             ):
                 continue
 
-            ref_results = []
-            torch_results = []
             # Note: this deliberately uses 'op.torch_opinfo' in both cases
             # because 'op.aliases' is empty.  When the aliases are executed
             # within the context, they will behave as refs.  This is done to
             # check for compatibility between all APIs.
             aliases = op.torch_opinfo.aliases
             with ctx():
-                for ref_result in [op] + list(aliases):
-                    ref_results.append(ref_result(sample.input, *sample.args, **sample.kwargs))
-            for torch_result in [op.torch_opinfo] + list(aliases):
-                torch_results.append(torch_result(sample.input, *sample.args, **sample.kwargs))
+                ref_results = [f(sample.input, *sample.args, **sample.kwargs)
+                               for f in itertools.chain((op,), aliases)]
+            torch_results = [f(sample.input, *sample.args, **sample.kwargs)
+                             for f in itertools.chain((op.torch_opinfo,), aliases)]
 
             for ref_result, torch_result in zip(ref_results, torch_results):
                 for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
