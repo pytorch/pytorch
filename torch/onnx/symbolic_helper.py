@@ -456,7 +456,7 @@ def _is_constant(value: Any) -> bool:
 
 
 @_beartype.beartype
-def _is_tensor(x: _C.Value) -> TypeGuard[_C.TensorType]:
+def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
@@ -468,7 +468,7 @@ def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
 
 
 @_beartype.beartype
-def _is_list(x: _C.Value) -> TypeGuard[_C.ListType]:
+def _is_list(x: _C.Value) -> bool:
     return _as_list_type(x.type()) is not None
 
 
