@@ -299,7 +299,7 @@ at::Tensor LazyNativeFunctions::empty_symint(
   }
 }
 
-at::Tensor LazyNativeFunctions::empty_strided(
+at::Tensor LazyNativeFunctions::empty_strided_symint(
     c10::SymIntArrayRef sym_size,
     c10::SymIntArrayRef sym_stride,
     c10::optional<at::ScalarType> dtype,
@@ -438,7 +438,7 @@ at::Tensor LazyNativeFunctions::block_diag(at::TensorList tensors) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       block_diag)>::call(tensors);
 }
-at::Tensor LazyNativeFunctions::new_empty_strided(
+at::Tensor LazyNativeFunctions::new_empty_strided_symint(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride,
@@ -527,7 +527,7 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
-at::Tensor LazyNativeFunctions::diagonal_backward(
+at::Tensor LazyNativeFunctions::diagonal_backward_symint(
     const at::Tensor& grad_output,
     at::SymIntArrayRef input_sizes,
     int64_t offset,
@@ -537,7 +537,7 @@ at::Tensor LazyNativeFunctions::diagonal_backward(
       diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
 }
 
-at::Tensor LazyNativeFunctions::slice_backward(
+at::Tensor LazyNativeFunctions::slice_backward_symint(
     const at::Tensor& grad_output,
     at::SymIntArrayRef input_sizes,
     int64_t dim,

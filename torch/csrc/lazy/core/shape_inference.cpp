@@ -1334,7 +1334,7 @@ std::vector<Shape> compute_shape_diagonal_scatter(
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_slice_scatter(
+std::vector<Shape> compute_shape_slice_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     int64_t dim,
@@ -1360,7 +1360,7 @@ std::vector<Shape> compute_shape_slice_scatter(
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_as_strided_scatter(
+std::vector<Shape> compute_shape_as_strided_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     at::SymIntArrayRef size,
