@@ -43,16 +43,22 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
+# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex)
+Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
+    torch.Tensor.size,
+    torch.Tensor.storage_offset,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
@@ -442,19 +448,26 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 # "Wraps" a dim (up to one time) for the given rank, allowing
 # dims to be specified using negative indices
-def canonicalize_dim(rank: int, idx: int) -> int:
-    # TODO: add a comment for why this is
-    _rank = rank if rank != 0 else 1
+def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
+    if rank < 0:
+        msg = f"Rank cannot be negative but got {rank}"
+        raise IndexError(msg)
 
-    if idx >= 0 and idx < _rank:
+    if rank == 0:
+        if not wrap_scalar:
+            msg = f"Dimension specified as {idx} but tensor has no dimensions"
+            raise IndexError(msg)
+        rank = 1
+
+    if idx >= 0 and idx < rank:
         return idx
 
     if idx < 0:
-        _idx = idx + _rank
+        _idx = idx + rank
     else:
         _idx = idx
 
-    if _idx < 0 or _idx > _rank:
+    if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
         msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
             -rank, rank - 1, idx
@@ -649,6 +662,32 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
+def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
+    """
+    Infers the size of a dim with size -1, if it exists.
+    Also checks that new shape is compatible with the number of elements.
+    """
+    dim = None
+    newsize = 1
+    for i, d in enumerate(shape):
+        if d == -1:
+            check(dim is None, lambda: "only one dimension can be inferred")
+            dim = i
+        elif d >= 0:
+            newsize *= d
+        else:
+            check(False, lambda: f"invalid shape dimension {d}")
+    check(numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+          lambda: f"shape '{list(shape)}' is invalid for input of size {numel}")
+    if dim is not None:
+        check(newsize != 0,
+              lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+                      f"unspecified dimension size -1 can be any value and is ambiguous")
+        shape = list(shape)
+        shape[dim] = numel // newsize
+    return tuple(shape)
+
+
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -724,6 +763,29 @@ def dtype_to_type(dtype: torch.dtype) -> type:
         return float
     if dtype in _complex_dtypes:
         return complex
+
+    raise ValueError("Invalid dtype!")
+
+
+def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]:
+    """
+    Computes the corresponding Python type constructor for the
+    given dtype.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_float
+
+    assert isinstance(dtype, torch.dtype)
+
+    if dtype is torch.bool:
+        return lambda x: bool(x)
+    if dtype in _integer_dtypes:
+        # TODO: type error here is real, replace with sym_int
+        return lambda x: int(x)  # type: ignore[arg-type]
+    if dtype in _float_dtypes:
+        return sym_float
+    if dtype in _complex_dtypes:
+        # TODO: type error here is real, replace with sym_complex
+        return lambda x: complex(x)  # type: ignore[arg-type]
 
     raise ValueError("Invalid dtype!")
 
@@ -997,6 +1059,28 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     ALWAYS_BOOL = (3,)
 
 
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
+
+
+# TODO: when NumberType contains the sym types, can simplify this
+def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
+    if isinstance(x, torch.SymIntNode):
+        return int
+    elif isinstance(x, torch.SymFloatNode):
+        return float
+    else:
+        return type(x)
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1101,7 +1185,7 @@ def elementwise_dtypes(
             raise ValueError(msg)
 
         if isinstance(x, Number):
-            highest_type = get_higher_type(highest_type, type(x))
+            highest_type = get_higher_type(highest_type, number_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1312,6 +1396,23 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     return dims
 
 
+def set_correction(
+    unbiased: Optional[bool] = None,
+    correction: Optional[int] = None,
+):
+    if correction is not None and unbiased is not None:
+        raise RuntimeError("cannot specify both correction and unbiased arguments")
+    elif correction is None and unbiased is None:
+        correction = 1
+    elif correction is None and unbiased is not None:
+        correction = 0 if unbiased is False else 1
+    if not isinstance(correction, int):
+        raise ValueError("correction argument should be integer")
+    if correction < 0:
+        raise ValueError("correction argument should be non-negative")
+    return correction
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -1398,3 +1499,16 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
 def prod(xs: Sequence[NumberType]) -> NumberType:
     """Product of elements in input sequence. Returns 1 for empty sequence"""
     return reduce(operator.mul, xs, 1)
+
+
+def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
+    """
+    Similar to torch.where(mask, t, 0) but if t is boolean,
+    result is also boolean and not promoted to int.
+    """
+    # torch.where(mask, t, False) is equivalent
+    # but feels hacky and might break in the future
+    if t.dtype is torch.bool:
+        return mask.logical_and(t)
+    else:
+        return torch.where(mask, t, 0)

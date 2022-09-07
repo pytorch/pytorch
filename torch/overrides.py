@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -91,6 +91,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
+        torch.is_anomaly_check_nan_enabled,
         torch.is_grad_enabled,
         torch.merge_type_from_type_comment,
         torch.parse_ir,
@@ -280,7 +281,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor
+        Tensor.to_padded_tensor,
     }
 
 
@@ -692,6 +693,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),
         torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
+        torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
+        torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (lambda input, weight, bias, padding, output_padding, stride, dilation,
                                              groups, benchmark, deterministic: -1),
         torch.miopen_depthwise_convolution: (lambda input, weight, bias, padding, stride, dilation, groups, benchmark,
@@ -1803,8 +1806,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
