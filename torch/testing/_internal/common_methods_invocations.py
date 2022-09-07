@@ -190,47 +190,46 @@ def error_inputs_hsplit(op_info, device, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.hsplit requires a tensor with at least 1 dimension, "
                 "but got a tensor with 0 dimensions!")
-    si1 = SampleInput(make_arg(()), args=(0,))
+    yield ErrorInput(SampleInput(make_arg(()), args=(0,)), error_regex=err_msg1)
+
     err_msg2 = (f"torch.hsplit attempted to split along dimension 1, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
+    yield ErrorInput(SampleInput(make_arg((S, S, S)), args=(0,)), error_regex=err_msg2)
 
     # Incorrect type for indices_or_section argument
     err_msg3 = ("received an invalid combination of arguments.")
-    si3 = SampleInput(make_arg((S, S, S)), args=("abc",))
-    yield ErrorInput(si1, error_regex=err_msg1)
-    yield ErrorInput(si2, error_regex=err_msg2)
-    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
+    yield ErrorInput(
+        SampleInput(make_arg((S, S, S)), args=("abc",)),
+        error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
                 "but got a tensor with 1 dimensions!")
-    si1 = SampleInput(make_arg((S,)), args=(0,))
+    yield ErrorInput(SampleInput(make_arg((S,)), args=(0,)), error_regex=err_msg1)
+
     err_msg2 = (f"torch.vsplit attempted to split along dimension 0, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
+    yield ErrorInput(SampleInput(make_arg((S, S, S)), args=(0,)),
+                     error_regex=err_msg2)
 
     # Incorrect type for indices_or_section argument
     err_msg3 = ("received an invalid combination of arguments.")
-    si3 = SampleInput(make_arg((S, S, S)), args=("abc",))
-    yield ErrorInput(si1, error_regex=err_msg1)
-    yield ErrorInput(si2, error_regex=err_msg2)
-    yield ErrorInput(si3, error_type=TypeError, error_regex=err_msg3)
+    yield ErrorInput(SampleInput(make_arg((S, S, S)), args=("abc",)),
+                     error_type=TypeError, error_regex=err_msg3)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
                 "but got a tensor with 1 dimensions!")
-    si1 = SampleInput(make_arg((S,)), args=(0,))
+    yield ErrorInput(SampleInput(make_arg((S,)), args=(0,)), error_regex=err_msg1)
+
     err_msg2 = (f"torch.dsplit attempted to split along dimension 2, "
                 f"but the size of the dimension {S} "
                 f"is not divisible by the split_size 0!")
-    si2 = SampleInput(make_arg((S, S, S)), args=(0,))
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),)
+    yield ErrorInput(SampleInput(make_arg((S, S, S)), args=(0,)), error_regex=err_msg2)
 
 
 def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
@@ -4744,8 +4743,8 @@ def sample_inputs_view_as_complex(op_info, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    tensors = (make_arg((S, S)), make_arg(()))
-    return [SampleInput(tensor) for tensor in tensors]
+    sizes = ((S, S), ())
+    return (SampleInput(make_arg(size)) for size in sizes)
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
@@ -4944,8 +4943,8 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
 def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return (SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense()),
-            SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
+    yield SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense())
+    yield SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense())
 
 def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
     batch_size, num_classes = shape = (2, 3)
@@ -6128,16 +6127,16 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
     # tests overlapping output fails
     t = make_tensor(10, dtype=torch.float32, device=device)
     indices = torch.empty((), device=device, dtype=torch.long)
-    si = SampleInput(t, args=(5,), kwargs={'out': (t, indices)})
+    yield ErrorInput(SampleInput(t, args=(5,), kwargs={'out': (t, indices)}),
+                     error_regex="unsupported operation")
 
     k_out_of_range_err = "selected number k out of range for dimension"
-    return (ErrorInput(si, error_regex="unsupported operation"),
-            ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3, 0)),
-                       error_regex=k_out_of_range_err),
-            ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3,)),
-                       error_regex=k_out_of_range_err),
-            ErrorInput(SampleInput(torch.tensor(2, device=device), args=(3,)),
-                       error_regex=k_out_of_range_err),)
+    yield ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3, 0)),
+                     error_regex=k_out_of_range_err)
+    yield ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3,)),
+                     error_regex=k_out_of_range_err)
+    yield ErrorInput(SampleInput(torch.tensor(2, device=device), args=(3,)),
+                     error_regex=k_out_of_range_err)
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
                           train=None, valid_input_dim=None, **kwargs):
@@ -7419,30 +7418,35 @@ def error_inputs_mean(op_info, device, **kwargs):
     err_msg1 = (r"mean\(\): could not infer output dtype. "
                 r"Input dtype must be either a floating point or complex dtype. "
                 r"Got: Long")
-    si1 = SampleInput(
-        make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-        args=([],))
+    yield ErrorInput(
+        SampleInput(
+            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
+            args=([],)),
+        error_regex=error_msg1,
+    )
 
     err_msg2 = (r"mean\(\): could not infer output dtype. "
                 r"Optional dtype must be either a floating point or complex dtype. "
                 r"Got: Long")
-    si2 = SampleInput(
-        make_tensor((3, 4, 5), dtype=torch.float32, device=device),
-        args=([],),
-        kwargs={"dtype": torch.int64})
+    yield ErrorInput(
+        SampleInput(
+            make_tensor((3, 4, 5), dtype=torch.float32, device=device),
+            args=([],),
+            kwargs={"dtype": torch.int64}),
+        error_regex=err_msg2
+    )
 
     err_msg3 = "Expected out tensor to have dtype double, but got float instead"
-    si3 = SampleInput(
-        make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-        args=([],),
-        kwargs={
-            "dtype": torch.float64,
-            "out": make_tensor([], dtype=torch.float32, device=device),
-        })
-
-    return (ErrorInput(si1, error_regex=err_msg1),
-            ErrorInput(si2, error_regex=err_msg2),
-            ErrorInput(si3, error_regex=err_msg3))
+    yield ErrorInput(
+        SampleInput(
+            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
+            args=([],),
+            kwargs={
+                "dtype": torch.float64,
+                "out": make_tensor([], dtype=torch.float32, device=device),
+            }),
+        error_regex=err_msg3
+    )
 
 # numpy implementation of torch.flatten
 # unfortunately there's no np.flatten. we figure out the desired shape and call np.reshape
