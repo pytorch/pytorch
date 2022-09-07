@@ -40,15 +40,15 @@ fi
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 
-# If there exists env variable and it equals to 0, build full jit interpreter.
-# Default behavior is to build lite interpreter
-# cmd:  BUILD_LITE_INTERPRETER=0 ./scripts/build_mobile.sh
-if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
-  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
-else
+# If there exists env variable and it equals to 1, build lite interpreter.
+# Default behavior is to build full jit interpreter.
+# cmd:  BUILD_LITE_INTERPRETER=1 ./scripts/build_mobile.sh
+if [ "x${BUILD_LITE_INTERPRETER}" == "x1" ]; then
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
 fi
-if [ "${TRACING_BASED}" == 1 ]; then
+if [ "x${TRACING_BASED}" == "x1" ]; then
   CMAKE_ARGS+=("-DTRACING_BASED=ON")
 else
   CMAKE_ARGS+=("-DTRACING_BASED=OFF")
@@ -73,7 +73,6 @@ CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
 CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
-CMAKE_ARGS+=("-DUSE_BLAS=OFF")
 CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
 CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
 CMAKE_ARGS+=("-DUSE_BLAS=OFF")
