@@ -91,15 +91,15 @@ class CommTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
-        r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_subclass(
             cls,
             tensor,
             require_grad=tensor.requires_grad,
         )
         # The tensor object wrapped by this CommTensor
-        r._tensor: torch.Tensor = tensor  # type: ignore
+        r._tensor: torch.Tensor = tensor  # type: ignore[misc]
         # Record whether communication has launched on this tensor.
-        r._after_comm: bool = False  # type: ignore[attr-defined]
+        r._after_comm: bool = False  # type: ignore[misc]
         return r
 
     def __repr__(self):
