@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Tuple
+from typing import Any, List, Tuple
 
 
 import torch
@@ -20,21 +20,21 @@ from torch.utils._pytree import (
 )
 
 
-def _wait_comm(comm_result):
+@dataclass
+class _CommResult:
+    # a custom type wrapping both inplace output tensor and work handle
+    _tensor: torch.Tensor
+    _work: torch.distributed._Work
+
+
+def _wait_comm(comm_result: _CommResult):
     # This function is only used by tracing mode as a call_function node right
     # before consuming a collective result tensor.
     comm_result._work.wait()
     return comm_result._tensor
 
 
-@dataclass
-class _CommResult:
-    # a custom type wrapping both inplace output tensor and work handle
-    _tensor: torch.Tensor
-    _work: torch.classes.c10d.Work
-
-
-def _wrap_comm_result(result: Tuple[Any]) -> Tuple[Any]:
+def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     def wrap(work, e):
         assert isinstance(e, torch.Tensor), (
             "Excepting collection of tensors as the first element in the "
@@ -78,13 +78,15 @@ class CommTensor(torch.Tensor):
     that computation waits for communication.
     """
 
-    _supported_comms = [
+    _supported_comms: List[str] = [
         "allreduce_",
         "allgather_",
         "broadcast_",
         "reduce_scatter_",
         "scatter_",
     ]
+    _after_comm: bool
+    _tensor: torch.Tensor
 
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
@@ -94,9 +96,9 @@ class CommTensor(torch.Tensor):
             require_grad=tensor.requires_grad,
         )
         # The tensor object wrapped by this CommTensor
-        r._tensor: torch.Tensor = tensor
+        r._tensor: torch.Tensor = tensor  # type: ignore
         # Record whether communication has launched on this tensor.
-        r._after_comm: bool = False
+        r._after_comm: bool = False  # type: ignore
         return r
 
     def __repr__(self):
@@ -234,4 +236,3 @@ class CommTensor(torch.Tensor):
                 # we need to propagate CommTensor wrapping until the first
                 # subsequent operation has waited for it.
                 return tree_map(wrap, func(*unwrapped_args, **unwrapped_kwargs))
-
