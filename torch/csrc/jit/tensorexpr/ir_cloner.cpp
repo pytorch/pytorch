@@ -256,7 +256,13 @@ StmtPtr IRCloner::mutate(ForPtr v) {
   auto stop_new = v->stop()->accept_mutator(this);
   auto body_new = v->body()->accept_mutator(this);
 
-  return alloc<For>(v->var(), start_new, stop_new, body_new, v->loop_options());
+  return alloc<For>(
+      v->var(),
+      start_new,
+      stop_new,
+      body_new,
+      v->is_reduction_axis(),
+      v->loop_options());
 }
 
 StmtPtr IRCloner::mutate(BlockPtr v) {

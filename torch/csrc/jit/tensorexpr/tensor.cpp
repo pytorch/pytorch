@@ -31,7 +31,12 @@ StmtPtr Tensor::constructStmt(
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
       auto const& dim = reduce_dims[dim_index];
-      s = alloc<For>(reduce_args[dim_index], immLike(dim, 0), dim, s);
+      s = alloc<For>(
+          reduce_args[dim_index],
+          immLike(dim, 0),
+          dim,
+          s,
+          /*is reduction*/ true);
     }
     if (init_expr) {
       StorePtr init_stmt = alloc<Store>(buf(), indices, init_expr);

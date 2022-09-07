@@ -1167,6 +1167,23 @@ class TestTensorExprFuser(BaseTestClass):
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
 
+    def test_sum(self):
+        def test(x, y):
+            c = torch.sum(torch.add(x, y), -1)
+            return c
+
+        shapes = [[4, 7], [4, 8], [4, 9], [4, 10], [4], [8], [9], [7]]
+        old = torch._C._jit_set_texpr_reductions_enabled(True)
+        for shape in shapes:
+            traced = torch.jit.trace(test, (torch.randn(shape), torch.randn(shape)))
+            inp = torch.randn(shape)
+            traced(inp, inp)
+            ref = test(inp, inp)
+            res = traced(inp, inp)
+            self.assertLastGraphAllFused()
+            self.assertEqual(ref, res)
+        torch._C._jit_set_texpr_reductions_enabled(old)
+
     def _test_softmax(self, device):
         def test_softmax(x, y):
             a = F.softmax(x, dim=0, dtype=torch.float32)

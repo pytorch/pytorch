@@ -708,6 +708,10 @@ class TORCH_API For : public StmtNode<For> {
   BlockPtr body() const {
     return body_;
   }
+  bool is_reduction_axis() const {
+    return is_reduction_axis_;
+  }
+
   static ForPtr make(
       const VarHandle& var,
       const ExprHandle& start,
@@ -716,7 +720,7 @@ class TORCH_API For : public StmtNode<For> {
     if (!body) {
       return nullptr;
     }
-    return alloc<For>(var.node(), start.node(), stop.node(), body);
+    return alloc<For>(var.node(), start.node(), stop.node(), body, false);
   }
   static ForPtr make(
       const VarHandle& var,
@@ -728,14 +732,21 @@ class TORCH_API For : public StmtNode<For> {
       return nullptr;
     }
     return alloc<For>(
-        var.node(), start.node(), stop.node(), body, loop_options);
+        var.node(), start.node(), stop.node(), body, false, loop_options);
   }
   const LoopOptions loop_options() const {
     return loop_options_;
   }
 
-  For(VarPtr var, ExprPtr start, ExprPtr stop, StmtPtr body)
-      : var_(var), start_(start), stop_(stop) {
+  For(VarPtr var,
+      ExprPtr start,
+      ExprPtr stop,
+      StmtPtr body,
+      bool is_reduction_axis = false)
+      : var_(var),
+        start_(start),
+        stop_(stop),
+        is_reduction_axis_(is_reduction_axis) {
     BlockPtr b = to<Block>(body);
     if (!b) {
       b = alloc<Block>(std::vector<StmtPtr>({body}));
@@ -749,9 +760,18 @@ class TORCH_API For : public StmtNode<For> {
       ExprPtr stop,
       StmtPtr body,
       LoopOptions loop_options)
+      : For(var, start, stop, body, false, loop_options) {}
+
+  For(VarPtr var,
+      ExprPtr start,
+      ExprPtr stop,
+      StmtPtr body,
+      bool is_reduction_axis,
+      LoopOptions loop_options)
       : var_(var),
         start_(start),
         stop_(stop),
+        is_reduction_axis_(is_reduction_axis),
         loop_options_(std::move(loop_options)) {
     if (!var) {
       throw malformed_input("invalid Var in For loop", var);
@@ -792,7 +812,8 @@ class TORCH_API For : public StmtNode<For> {
   }
 
   ForPtr cloneWithNewBody(StmtPtr body) const {
-    return alloc<For>(var_, start_, stop_, body, loop_options_);
+    return alloc<For>(
+        var_, start_, stop_, body, is_reduction_axis_, loop_options_);
   }
 
   BlockPtr removeBody() {
@@ -823,11 +844,16 @@ class TORCH_API For : public StmtNode<For> {
     var_ = var;
   }
 
+  void set_reduction_axis(bool is_reduction_axis) {
+    is_reduction_axis_ = is_reduction_axis;
+  }
+
  private:
   VarPtr var_;
   ExprPtr start_;
   ExprPtr stop_;
   BlockPtr body_;
+  bool is_reduction_axis_;
   LoopOptions loop_options_;
 };
 

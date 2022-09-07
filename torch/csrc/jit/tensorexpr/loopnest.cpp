@@ -502,7 +502,13 @@ class Vectorizer : public IRMutator {
       return (ForPtr)v;
     }
 
-    return alloc<For>(var, new_start, new_stop, new_body, loop_options);
+    return alloc<For>(
+        var,
+        new_start,
+        new_stop,
+        new_body,
+        v->is_reduction_axis(),
+        loop_options);
   }
 
   StmtPtr mutate(BlockPtr v) override {
@@ -1415,7 +1421,8 @@ bool LoopNest::optimizeConditionals() {
           for_to_split->var(),
           comp_values[i],
           comp_values[i + 1],
-          new_for_body);
+          new_for_body,
+          for_to_split->is_reduction_axis());
       LoopNest::normalize(new_for);
       split_loops.push_back(new_for);
     }
@@ -1477,11 +1484,147 @@ void LoopNest::vectorizeInnerLoops() {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr tail1;
 
+    // Wrap inner reduction loop as a block to locate current loop accurately
+    // as the loop patent would be the block
+    if (loop->is_reduction_axis()) {
+      auto parent_stmt = to<Block>(loop->get_parent());
+      CHECK(parent_stmt);
+
+      auto inner_loop_block = alloc<Block>(std::vector<StmtPtr>({}));
+      auto new_loop = to<For>(loop->clone(loop));
+      inner_loop_block->append_stmt(new_loop);
+      parent_stmt->replace_stmt(loop, inner_loop_block);
+      loop = new_loop;
+    }
+
     static const int kBodyVectorWidth = 8;
     splitWithTail(loop, kBodyVectorWidth, &split1, &tail1);
-    vectorize(split1);
 
-    if (tail1) {
+    if (loop->is_reduction_axis()) {
+      // Take sum as an example.
+      //   torch.sum(torch.randn(4, 10), -1)
+      //
+      // IR after split:
+      //   for (int64_t i_1 = 0ll; i_1 < 4ll; i_1++) {
+      //     sum[i_1] = 0.f;
+      //     {
+      //       for (int64_t j_1_outer = 0ll; j_1_outer < (10ll - 0ll) / 8ll;
+      //       j_1_outer++) {
+      //         for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //           sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_inner,
+      //           j_1_outer});
+      //         }
+      //       }
+      //       for (int64_t j_1_tail = 0ll; j_1_tail < (10ll - 0ll) % 8ll;
+      //       j_1_tail++) {
+      //         sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_tail});
+      //       }
+      //     }
+      //   }
+      auto parent_stmt = to<Block>(loop->get_parent());
+      CHECK(parent_stmt);
+
+      auto _get_outer_inner_loop =
+          [](BlockPtr parent_block) -> std::pair<ForPtr, ForPtr> {
+        auto loops = NodeFinder<For>::find(parent_block);
+        TORCH_INTERNAL_ASSERT(loops.size() >= 1);
+        auto outer_loop = loops[0];
+
+        auto child_block = outer_loop->body();
+        auto inner_loops = NodeFinder<For>::find(child_block);
+        TORCH_INTERNAL_ASSERT(inner_loops.size() == 1);
+        return {outer_loop, inner_loops[0]};
+      };
+
+      auto reordeded_loops = _get_outer_inner_loop(parent_stmt);
+
+      // IR after reorderAxis:
+      //   for (int64_t i_1 = 0ll; i_1 < 4ll; i_1++) {
+      //     sum[i_1] = 0.f;
+      //     {
+      //       for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //         for (int64_t j_1_outer = 0ll; j_1_outer < (10ll - 0ll) / 8ll;
+      //         j_1_outer++) {
+      //           sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_inner,
+      //           j_1_outer});
+      //         }
+      //       }
+      //       for (int64_t j_1_tail = 0ll; j_1_tail < (10ll - 0ll) % 8ll;
+      //       j_1_tail++) {
+      //         sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_tail});
+      //       }
+      //     }
+      //   }
+      reorderAxis(reordeded_loops.first, reordeded_loops.second);
+
+      reordeded_loops = _get_outer_inner_loop(parent_stmt);
+      // IR after rfactor:
+      //   for (int64_t i_1 = 0ll; i_1 < 4ll; i_1++) {
+      //     sum[i_1] = 0.f;
+      //     {
+      //       for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //         sum_rfac[i_1, j_1_inner] = float(0);
+      //         for (int64_t j_1_outer = 0ll; j_1_outer < (10ll - 0ll) / 8ll;
+      //         j_1_outer++) {
+      //           sum_rfac[i_1, j_1_inner] = ReduceOp(sum_rfac[i_1, j_1_inner]
+      //           + ..., reduce_args={j_1_outer});
+      //         }
+      //         sum[i_1] = ReduceOp(sum[i_1] + (sum_rfac[i_1, j_1_inner]),
+      //         reduce_args={j_1_inner});
+      //       }
+      //       for (int64_t j_1_tail = 0ll; j_1_tail < (10ll - 0ll) % 8ll;
+      //       j_1_tail++) {
+      //         sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_tail});
+      //       }
+      //     }
+      //   }
+      rfactor(
+          *(reordeded_loops.second->body()->begin()), reordeded_loops.first);
+
+      reordeded_loops = _get_outer_inner_loop(parent_stmt);
+      // IR after reorderAxis:
+      //   for (int64_t i_1 = 0ll; i_1 < 4ll; i_1++) {
+      //     sum[i_1] = 0.f;
+      //     {
+      //       for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //         sum_rfac[i_1, j_1_inner] = float(0);
+      //       }
+      //       for (int64_t j_1_outer = 0ll; j_1_outer < (10ll - 0ll) / 8ll;
+      //       j_1_outer++) {
+      //         for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //           sum_rfac[i_1, j_1_inner] = ReduceOp(sum_rfac[i_1, j_1_inner]
+      //           + ..., reduce_args={j_1_outer});
+      //         }
+      //       }
+      //       for (int64_t j_1_inner = 0ll; j_1_inner < 8ll; j_1_inner++) {
+      //         sum[i_1] = ReduceOp(sum[i_1] + (sum_rfac[i_1, j_1_inner]),
+      //         reduce_args={j_1_inner});
+      //       }
+      //       for (int64_t j_1_tail = 0ll; j_1_tail < (10ll - 0ll) % 8ll;
+      //       j_1_tail++) {
+      //         sum[i_1] = ReduceOp(sum[i_1] + ..., reduce_args={j_1_tail});
+      //       }
+      //     }
+      //   }
+      reorderAxis(reordeded_loops.first, reordeded_loops.second);
+
+      auto loops = NodeFinder<For>::find(parent_stmt);
+      TORCH_INTERNAL_ASSERT(loops.size() >= 3);
+      auto acc_buf_init_loop = loops[0];
+      auto reduce_main_loop_outer = loops[1];
+      auto reduce_all_loop = loops[2];
+
+      auto _inner_loops = NodeFinder<For>::find(reduce_main_loop_outer->body());
+      TORCH_INTERNAL_ASSERT(_inner_loops.size() == 1);
+      auto reduce_main_loop_innder = _inner_loops[0];
+
+      vectorize(acc_buf_init_loop);
+      vectorize(reduce_main_loop_innder);
+    } else {
+      vectorize(split1);
+    }
+
+    if (tail1 && (!loop->is_reduction_axis())) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       ForPtr split2;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1516,7 +1659,12 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), immLike(f->stop(), factor)), f->stop(), true);
-  *head = alloc<For>(f->var(), f->start(), head_end, Stmt::clone(f->body()));
+  *head = alloc<For>(
+      f->var(),
+      f->start(),
+      head_end,
+      Stmt::clone(f->body()),
+      f->is_reduction_axis());
   p->insert_stmt_before(*head, f);
 
   f->set_start(head_end);
@@ -1556,7 +1704,12 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), immLike(f->stop(), factor)), true);
-  *tail = alloc<For>(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+  *tail = alloc<For>(
+      f->var(),
+      tail_start,
+      f->stop(),
+      Stmt::clone(f->body()),
+      f->is_reduction_axis());
   p->insert_stmt_after(*tail, f);
 
   f->set_stop(tail_start);
@@ -1630,7 +1783,12 @@ void LoopNest::splitWithTail(
 
     StmtPtr body_tail =
         SubstituteInClone(f->body(), {{f->var(), combined_index2}});
-    *tail = alloc<For>(i_tail, immLike(tail_size, 0), tail_size, body_tail);
+    *tail = alloc<For>(
+        i_tail,
+        immLike(tail_size, 0),
+        tail_size,
+        body_tail,
+        f->is_reduction_axis());
 
     p->insert_stmt_after(*tail, f);
   } else {
@@ -1640,8 +1798,12 @@ void LoopNest::splitWithTail(
   StmtPtr body_inner =
       Substitute(f->removeBody(), {{f->var(), combined_index1}});
 
-  *inner =
-      alloc<For>(i_inner, immLike(factor_expr, 0), factor_expr, body_inner);
+  *inner = alloc<For>(
+      i_inner,
+      immLike(factor_expr, 0),
+      factor_expr,
+      body_inner,
+      f->is_reduction_axis());
   // The input loop `f` will be the outer loop after split.
   f->set_var(i_outer);
   f->set_start(immLike(split_count, 0));
@@ -1707,8 +1869,12 @@ void LoopNest::splitWithMask(ForPtr f, int factor, ForPtr* inner) {
   }
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
-  *inner =
-      alloc<For>(i_inner, immLike(factor_expr, 0), factor_expr, body_inner);
+  *inner = alloc<For>(
+      i_inner,
+      immLike(factor_expr, 0),
+      factor_expr,
+      body_inner,
+      f->is_reduction_axis());
   // The input loop `f` will be the outer loop after split.
   f->set_var(i_outer);
   f->set_start(immLike(split_count, 0));
@@ -2966,7 +3132,11 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_init = alloc<For>(
-          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_init);
+          new_loop_vars[i],
+          immLike(tmp_dims[i], 0),
+          tmp_dims[i],
+          tmp_init,
+          true);
     }
 
     if (is_block) {
@@ -2987,7 +3157,11 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store = alloc<For>(
-          new_loop_vars[i], immLike(tmp_dims[i], 0), tmp_dims[i], tmp_store);
+          new_loop_vars[i],
+          immLike(tmp_dims[i], 0),
+          tmp_dims[i],
+          tmp_store,
+          true);
     }
 
     if (is_block) {
