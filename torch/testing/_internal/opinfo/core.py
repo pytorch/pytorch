@@ -793,6 +793,9 @@ class OpInfo(object):
 
     test_neg_view: bool = True
 
+    # test aliases in '_ref_test_helper'
+    test_aliases: bool = True
+
     # assert that jit shape analysis fully propagates shape
     assert_jit_shape_analysis: bool = False
 

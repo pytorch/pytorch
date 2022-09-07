@@ -232,7 +232,7 @@ class TestCommon(TestCase):
             # because 'op.aliases' is empty.  When the aliases are executed
             # within the context, they will behave as refs.  This is done to
             # check for compatibility between all APIs.
-            aliases = op.torch_opinfo.aliases
+            aliases = op.torch_opinfo.aliases if op.test_aliases else ()
             with ctx():
                 ref_results = [f(sample.input, *sample.args, **sample.kwargs)
                                for f in itertools.chain((op,), aliases)]

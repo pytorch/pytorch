@@ -15872,6 +15872,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.absolute
         skips=(
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -15886,19 +15887,23 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
         torch_opinfo_name="acos",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arccos
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acosh",
         torch_opinfo_name="acosh",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arccosh
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asin",
         torch_opinfo_name="asin",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arcsin
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asinh",
         torch_opinfo_name="asinh",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arcsinh
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -16031,17 +16036,19 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.movedim",
-        aliases=('moveaxis',),
         torch_opinfo_name="movedim",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.moveaxis
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arctan
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arctanh
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -16067,20 +16074,24 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.digamma",
         torch_opinfo_name="digamma",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.psi
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erf",
         torch_opinfo_name="erf",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.erf
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfinv",
         torch_opinfo_name="erfinv",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.erfinv
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfc",
         torch_opinfo_name="erfc",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.erfc
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
@@ -16089,10 +16100,12 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
         torch_opinfo_name="expm1",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.expm1
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp2",
         torch_opinfo_name="exp2",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.exp2
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -16147,11 +16160,13 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.i0",
         torch_opinfo_name="i0",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.i0
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.gammaln
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
@@ -16160,6 +16175,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.log1p
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log10",
@@ -16172,6 +16188,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.logsumexp
         # When keepdim=False logsumexp function uses squeeze operation
         # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
@@ -16189,6 +16206,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.negative
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -16207,6 +16225,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.round",
         torch_opinfo_name="round",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.round
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rsqrt",
@@ -16215,6 +16234,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.expit
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
@@ -16264,6 +16284,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.trunc",
         torch_opinfo_name="trunc",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.fix
     ),
     #
     # Elementwise Unary Special OpInfos
@@ -16342,6 +16363,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.layer_norm
         skips=(
             # Reference result was farther (3.5762786809723224e-07) from the precise computation
             # than the torch result was (2.5068410824946596e-07)!
@@ -16469,6 +16491,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
         torch_opinfo_name="atan2",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.arctan2
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_and",
@@ -16500,6 +16523,7 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="no_rounding_mode",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.divide
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -16528,6 +16552,7 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="trunc_rounding",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.divide
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -16537,6 +16562,7 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="floor_rounding",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.divide
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -16603,10 +16629,12 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.greater_equal
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.greater
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.heaviside",
@@ -16623,11 +16651,13 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
         torch_opinfo_name="igamma",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.gammainc
         supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igammac",
         torch_opinfo_name="igammac",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.special.gammaincc
         supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -16647,6 +16677,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.less_equal
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_and",
@@ -16667,6 +16698,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
         torch_opinfo_name="lt",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.less
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
@@ -16687,6 +16719,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.mul",
         torch_opinfo_name="mul",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.multiply
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -16715,6 +16748,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
         torch_opinfo_name="ne",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.not_equal
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -16774,6 +16808,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.subtract
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
@@ -16843,6 +16878,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.clip
         supports_nvfuser=False,
     ),
     #
@@ -16908,6 +16944,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.concat
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -16943,6 +16980,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.linalg.diagonal
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17065,6 +17103,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.swapdims
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17090,6 +17129,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.vstack",
         torch_opinfo_name="vstack",
+        test_aliases=False,  # RuntimeError: no _refs support for torch.row_stack
         supports_nvfuser=False,
         skips=(
             # https://github.com/pytorch/pytorch/issues/78613
