@@ -94,9 +94,15 @@ void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
         %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::run_gru_context(%input.1, %hx.1, %packed_weights_biases)
         return (%y.1, %hn.1) )";
 
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto node = match.values_map.at(vmap.at("params_cpu"))->node();
+    return node->output()->type()->str() == "Tensor[]";
+  };
+
   SubgraphRewriter gru_rewriter;
   gru_rewriter.RegisterRewritePattern(gru_pattern, prepacked_ops_pattern);
-  gru_rewriter.runOnGraph(graph);
+  gru_rewriter.runOnGraph(graph, filter);
 }
 
 void insertPrePackedLstmOp(std::shared_ptr<Graph>& graph) {
@@ -112,9 +118,15 @@ void insertPrePackedLstmOp(std::shared_ptr<Graph>& graph) {
         %y.1 : Tensor, %hn.1 : Tensor, %cn.1 : Tensor = vulkan_prepack::run_lstm_context(%input.1, %hx.1, %cx.1, %packed_weights_biases)
         return (%y.1, %hn.1, %cn.1) )";
 
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto node = match.values_map.at(vmap.at("hx"))->node();
+    return node->output()->type()->str() == "Tensor[]";
+  };
+
   SubgraphRewriter lstm_rewriter;
   lstm_rewriter.RegisterRewritePattern(lstm_pattern, prepacked_ops_pattern);
-  lstm_rewriter.runOnGraph(graph);
+  lstm_rewriter.runOnGraph(graph, filter);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -231,9 +243,13 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_conv2d_context")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_tconv2d_context")) ||
+        (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::create_tconv2d_context")));
+         Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_lstm_context")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
