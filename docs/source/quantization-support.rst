@@ -86,6 +86,7 @@ This module contains QConfigMapping for configuring FX graph mode quantization.
 
 torch.ao.quantization.backend_config.BackendConfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 This module contains BackendConfig, a config object that defines how quantization is supported
 in a backend. Currently only used by FX Graph Mode Quantization, but we may extend Eager Mode
 Quantization to work with this as well.
