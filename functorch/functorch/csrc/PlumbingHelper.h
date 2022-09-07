@@ -6,7 +6,6 @@
 #pragma once
 #include <ATen/Tensor.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/functorch/Constants.h>
 #include <functorch/csrc/DynamicLayer.h>
 
 // NOTE: [vmap plumbing]

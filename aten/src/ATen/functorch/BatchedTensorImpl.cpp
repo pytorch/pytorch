@@ -15,7 +15,7 @@ namespace functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      key_set.add(kBatchedKey),
+      key_set.add(DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )

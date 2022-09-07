@@ -70,14 +70,14 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
   if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }

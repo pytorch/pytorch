@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functorch/csrc/Macros.h>
-#include <ATen/functorch/Constants.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
