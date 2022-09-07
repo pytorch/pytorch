@@ -182,12 +182,15 @@ static bool is_weight_symmetric_quant(
 static bool preferred(
     const at::Tensor& weight,
     bool is_transposed_conv,
-    int groups) {
+    int groups,
+    torch::List<int64_t> output_padding) {
   bool vnni_available =
       cpuinfo_has_x86_avx512vnni() || cpuinfo_has_x86_avx512_4vnniw();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
-  return vnni_available && (groups <= 100) && w_sym_quant;
+  bool opad_all_zero =
+      std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
+  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
 }
 
 } // onednn_utils
