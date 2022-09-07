@@ -7,8 +7,62 @@
 torch.sparse
 ============
 
-Introduction
-++++++++++++
+How to use this documentation
++++++++++++++++++++++++++++++
+
+It is straightforward to construct a sparse Tensor from a given dense Tensor.
+
+    >>> a = torch.tensor([[0, 1.], [0, 0]])
+    >>> b = torch.tensor([[0, 2.], [3, 0]])
+    >>> a + b
+    tensor([[0., 3.],
+            [3., 0.]])
+    >>> a + b.to_sparse()
+    tensor([[0., 3.],
+            [3., 0.]])
+    >>> b.to_sparse()
+    tensor(indices=tensor([[0, 1],
+                           [1, 0]]),
+           values=tensor([2., 3.]),
+           size=(2, 2), nnz=2, layout=torch.sparse_coo)
+
+
+Operations on Tensor with sparse storage formats behave the same as operations on Tensor with
+dense storage formats. The main goal of storage formats is to compress repeat zeros and provide
+access to kernels that take advantage of that. Since changing the storage format changes the
+underlying kernel this may result in slight numerical differences.
+
+Another difference is operator coverage. Not as many operations support sparse Tensors as support
+dense Tensors.
+
+    >>> b_s = b.to_sparse_csr()
+    >>> b_s.cos()
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+    RuntimeError: unsupported tensor layout: SparseCsr
+    >>> b_s.sin()
+    tensor(crow_indices=tensor([0, 1, 2]),
+           col_indices=tensor([1, 0]),
+           values=tensor([0.9093, 0.1411]), size=(2, 2), nnz=2,
+           layout=torch.sparse_csr)
+
+As shown in the example above we don't support non-zero preserving unary operators. We view sparse
+storage formats as a performance optimization and assume our users employ them to gain maximum
+performance. The output of a non-zero preserving unary operation will not be able to take advantage
+of sparse storage formats to the same extent as the input and potentially result in a catastrophic
+increase in memory. We instead rely on the user to explicitly convert to a dense Tensor
+first and then run the operation.
+
+    >>> b_s.to_dense().cos()
+    tensor([[ 1.0000, -0.4161],
+            [-0.9900,  1.0000]])
+
+We are aware that some users want to ignore compressed zero for operations such
+as `cos` and just move on. For this we'd like to kindly point to https://pytorch.org/maskedtensor, which
+is in turn also backed and powered by sparse storage formats and kernels.
+
+Caveats
++++++++
 
 PyTorch provides :class:`torch.Tensor` to represent a
 multi-dimensional array containing elements of a single data type. By
@@ -52,56 +106,6 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
 
 .. _sparse-coo-docs:
 
-How to use
-++++++++++
-
-It is straightforward to construct a sparse Tensor from a given dense Tensor. We assume
-that for most intents and purposes conversion is sufficient. Subsequent sections talk about
-the details of particular sparse storage formats and are provided as references.
-
-    >>> a = torch.tensor([[0, 1.], [0, 0]])
-    >>> b = torch.tensor([[0, 2.], [3, 0]])
-    >>> a + b
-    tensor([[0., 3.],
-            [3., 0.]])
-    >>> a + b.to_sparse()
-    tensor([[0., 3.],
-            [3., 0.]])
-    >>> b.to_sparse()
-    tensor(indices=tensor([[0, 1],
-                           [1, 0]]),
-           values=tensor([2., 3.]),
-           size=(2, 2), nnz=2, layout=torch.sparse_coo)
-
-
-Operations on Tensor with sparse storage formats behave the same as operations on Tensor with
-dense storage formats. The main difference is the underlying kernel, which may result in slight
-numerical differences. Another difference is operator coverage. Not as many operations support
-sparse Tensors as support dense Tensors.
-
-    >>> b_s = b.to_sparse_csr()
-    >>> b_s.cos()
-    Traceback (most recent call last):
-      File "<stdin>", line 1, in <module>
-    RuntimeError: unsupported tensor layout: SparseCsr
-    >>> b_s.sin()
-    tensor(crow_indices=tensor([0, 1, 2]),
-           col_indices=tensor([1, 0]),
-           values=tensor([0.9093, 0.1411]), size=(2, 2), nnz=2,
-           layout=torch.sparse_csr)
-
-As shown in the example above we don't support non-zero preserving unary operators, since the
-resulting output will not be able to take advantage of sparse storage formats and potentially
-result in a catastrophic increase in memory. Since we view sparse storage formats as a performance
-optimization this is not ideal. We instead rely on the user to explicitly convert to a dense Tensor
-first and then run the operation.
-
-    >>> b_s.to_dense().cos()
-    tensor([[ 1.0000, -0.4161],
-            [-0.9900,  1.0000]])
-
-We are aware that some users want to in some sense ignore compressed values for operations such
-as `cos` and just move on. For this we'd like to kindly point to https://pytorch.org/maskedtensor.
 
 Sparse COO tensors
 ++++++++++++++++++
