@@ -4,6 +4,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils._pytree import tree_map
+import functorch
 
 import operator
 
@@ -21,15 +22,17 @@ class CudaGraphsSupport(OperatorSupport):
 
         found_not_cuda = False
 
+        FK = "val" if functorch.compile.config.use_fake_tensor else "fake_result"
+
         def find_not_cuda(t):
             nonlocal found_not_cuda
             if isinstance(t, torch.Tensor) and t.device.type != 'cuda':
                 found_not_cuda = True
 
         for n in node.all_input_nodes:
-            tree_map(find_not_cuda, n.meta['fake_result'])
+            tree_map(find_not_cuda, n.meta[FK])
 
-        tree_map(find_not_cuda, node.meta['fake_result'])
+        tree_map(find_not_cuda, node.meta[FK])
 
         # NB: factory function is accounted for because the result would be
         # cpu or cuda
