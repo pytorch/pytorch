@@ -38,11 +38,6 @@ class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
 
 
-@dataclass
-class DataDependentOutputException(RuntimeError):
-    func: OpOverload
-
-
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
     aten.nested_tensor.default,
@@ -342,17 +337,8 @@ def clone(fake_mode, func, input, memory_format=None):
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
     and func != aten.index.Tensor
 )
-def dyn_shape(fake_mode, func, *args, **kwargs):
+def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
-
-
-@register_op_impl(
-    lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
-)
-def data_dep(fake_mode, func, *args, **kwargs):
-    if fake_mode.throw_on_data_dependent_ops:
-        raise DataDependentOutputException(func)
-    return NotImplemented
 
 
 # Bool Indices get Expanded as Masks
@@ -622,18 +608,12 @@ class FakeTensor(torch.Tensor):
 
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
-        self,
-        *,
-        allow_fallback_kernels=True,
-        allow_meta=False,
-        throw_on_data_dependent_ops=False,
+        self, *, allow_fallback_kernels=True, allow_meta=False, const_tensors=True
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         self.allow_meta = allow_meta
-
-        # TODO: delete arg and default to true. waiting on dynamo perf regression testing
-        self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
+        self.const_tensors = const_tensors
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
@@ -827,9 +807,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             for run_impl_check, op_impl in op_implementations:
                 if run_impl_check(func):
-                    op_impl_out = op_impl(self, func, *args, **kwargs)
-                    if op_impl_out != NotImplemented:
-                        return op_impl_out
+                    return op_impl(self, func, *args, **kwargs)
 
             try:
                 with in_kernel_invocation_manager(self):
@@ -865,7 +843,7 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap), r)
 
     def may_turn_const(self, t):
-        return t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse
+        return self.const_tensors and t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse and not isinstance(t, FakeTensor)
 
     def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
         any_constant = any(e.constant is not None for e in flat_arg_tensors)
