@@ -175,7 +175,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard2(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
     return self.resize_(size, optional_memory_format);
   }
 
@@ -190,7 +190,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
 
   // Resize the wrapped tensor
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   self_value = moveBatchDimToFront(self_value, self_bdim);
   VmapDimVector new_size(size);
   new_size.insert(new_size.begin(), self_value.size(*self_bdim));
