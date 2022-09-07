@@ -45,7 +45,7 @@ import types
 from collections import namedtuple
 
 import functorch
-from functorch import vmap, grad, grad_and_value, jvp, vjp
+from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
 from functorch._C import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
@@ -3836,11 +3836,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
-        # throws in vmap on CUDA
-        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
-        # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
-        # but it passes locally
-        skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
@@ -4484,6 +4479,19 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
+    def test_jacfwd_with_random(self):
+        # checks on behavior are above, this just checks that jacfwd respects
+        # the randomness param
+
+        x = torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+            jacfwd(torch.bernoulli)(x)
+
+        # x isn't batched so use bernoulli since it doesn't do inplace randomness
+        jacfwd(torch.bernoulli, randomness="same")(x)
+        jacfwd(torch.bernoulli, randomness="different")(x)
+
+
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
@@ -4516,7 +4524,6 @@ class TestTransformFailure(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
-
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)

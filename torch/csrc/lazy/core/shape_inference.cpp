@@ -1290,14 +1290,14 @@ std::vector<Shape> compute_shape_select_scatter(
     const at::Tensor& src,
     int64_t dim,
     int64_t index) {
-  auto self_meta = at::native::empty_strided_meta(
+  auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
       /*dtype=*/c10::make_optional(self.scalar_type()),
       /*layout=*/c10::make_optional(self.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto src_meta = at::native::empty_strided_meta(
+  auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
       /*dtype=*/c10::make_optional(src.scalar_type()),
@@ -1315,14 +1315,14 @@ std::vector<Shape> compute_shape_diagonal_scatter(
     int64_t offset,
     int64_t dim1,
     int64_t dim2) {
-  auto self_meta = at::native::empty_strided_meta(
+  auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
       /*dtype=*/c10::make_optional(self.scalar_type()),
       /*layout=*/c10::make_optional(self.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto src_meta = at::native::empty_strided_meta(
+  auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
       /*dtype=*/c10::make_optional(src.scalar_type()),
@@ -1334,46 +1334,46 @@ std::vector<Shape> compute_shape_diagonal_scatter(
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_slice_scatter(
+std::vector<Shape> compute_shape_slice_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step) {
-  auto self_meta = at::native::empty_strided_meta(
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step) {
+  auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
       /*dtype=*/c10::make_optional(self.scalar_type()),
       /*layout=*/c10::make_optional(self.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto src_meta = at::native::empty_strided_meta(
+  auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
       /*dtype=*/c10::make_optional(src.scalar_type()),
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::slice_scatter(
+  auto out_meta = at::compositeexplicitautograd::slice_scatter_symint(
       self_meta, src_meta, dim, start, end, step);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_as_strided_scatter(
+std::vector<Shape> compute_shape_as_strided_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     at::SymIntArrayRef size,
     at::SymIntArrayRef stride,
     c10::optional<c10::SymInt> storage_offset) {
-  auto self_meta = at::native::empty_strided_meta(
+  auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
       /*dtype=*/c10::make_optional(self.scalar_type()),
       /*layout=*/c10::make_optional(self.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto src_meta = at::native::empty_strided_meta(
+  auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
       /*dtype=*/c10::make_optional(src.scalar_type()),

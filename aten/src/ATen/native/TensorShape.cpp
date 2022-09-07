@@ -876,9 +876,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
-  // TODO: properly support SymInt expand
-  auto size = asIntArrayRefSlow(sym_size);
+Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -921,7 +919,7 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   return result;
 }
 
-Tensor as_strided_tensorimpl_meta(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
+Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
   auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -959,19 +957,14 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-const Tensor &as_strided_(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
-  // TODO: fix me
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
-  auto storage_offset_ = sym_storage_offset_.has_value() ? c10::make_optional(sym_storage_offset_->expect_int()) : c10::nullopt;
+const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
 }
 
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
-  // TODO: properly support SymInt narrow_copy
-  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -3248,12 +3241,6 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view_meta(const Tensor& self,
-            at::SymIntArrayRef size) {
-  // TODO: Properly support SymInt view
-  return view_impl(self, c10::asIntArrayRefSlow(size));
-}
-
 Tensor view(const Tensor& self,
             at::IntArrayRef size) {
   return view_impl(self, size);
@@ -3360,7 +3347,7 @@ Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   return result;
 }
 
-Tensor diag_backward(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
+Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   AT_ASSERT(ndimension == 1 || ndimension == 2);
 
@@ -3372,7 +3359,7 @@ Tensor diag_backward(const Tensor& grad, SymIntArrayRef input_sizes, int64_t dia
   return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
@@ -3544,7 +3531,7 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
-at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     auto output = self.clone();
@@ -3609,7 +3596,7 @@ at::Tensor& _neg_view_copy_out(const at::Tensor & self, at::Tensor & out) {
 }
 
 
-at::Tensor& as_strided_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset, at::Tensor & out) {
+at::Tensor& as_strided_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset, at::Tensor & out) {
   auto tmp = self.as_strided_symint(size, stride, storage_offset);
   out.copy_(tmp);
   return out;
@@ -3637,7 +3624,7 @@ at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef 
 }
 
 
-at::Tensor& expand_copy_out(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+at::Tensor& expand_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
   auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
@@ -3793,7 +3780,7 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
 }
 
 
-at::Tensor& view_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
+at::Tensor& view_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
   auto tmp = self.view_symint(size);
   out.copy_(tmp);
   return out;

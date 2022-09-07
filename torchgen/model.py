@@ -668,15 +668,6 @@ class NativeFunction:
                 "unnecessary dispatch table for this function; just delete the dispatch "
                 "key entirely"
             )
-            # if a function is a structured delegate, deleting the dispatch
-            # table is NOT semantics preserving
-            assert structured_delegate or dispatch.keys() != {
-                DispatchKey.CompositeImplicitAutograd
-            }, (
-                f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
-                f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
-                "name, then delete the dispatch table"
-            )
         elif not structured and structured_delegate is None:
             name = str(func.name.name)
             assert not (
@@ -1098,6 +1089,9 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    def supports_symint(self) -> bool:
+        return "_symint" in self.kernel
+
 
 @dataclass(frozen=True)
 class UfuncInnerLoop:
@@ -1141,8 +1135,6 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
-    # Whether or not this backend handles symbolic ints or not
-    symint: bool
 
     @staticmethod
     def grow_index(
