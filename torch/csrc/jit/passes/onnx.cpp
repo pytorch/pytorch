@@ -453,6 +453,8 @@ void NodeToONNX(
 
     py::object opset_version =
         onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version");
+    // NOTE(justinchuby): Call the internal registry to register the symbolic
+    // method defined in the module.
     bool is_registered_op =
         onnx_registration.attr("registry")
             .attr("is_registered_op")("prim::PythonOp", opset_version)
@@ -516,9 +518,16 @@ void NodeToONNX(
       // Call the symbolic function
       // Use a little trampoline function so we can give good error messages
       // upon argument mismatch
+      // Register as a custom operator
+      // TODO: Find a more elegant way to do this without having to touch
+      // internal Python modules.
+      // TODO(justinchuby): Define a namespace for these Python Ops.
       onnx_registration.attr("registry")
           .attr("register")(
-              "::" + op->name(), opset_version, pyobj.attr("symbolic"));
+              "::" + op->name(),
+              opset_version,
+              pyobj.attr("symbolic"),
+              /* custom */ true);
       py::object raw_output = onnx.attr("_run_symbolic_method")(
           new_block->owningGraph(),
           op->name(),
