@@ -675,7 +675,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),  # .item or data-dependent control flow
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
-        xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
@@ -705,6 +704,10 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1323,9 +1326,6 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
-        # call inplace functions
-        xfail('linalg.householder_product'),  # inplace
-
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
         xfail('masked_select'),
@@ -1349,6 +1349,12 @@ class TestOperators(TestCase):
         skip('native_layer_norm', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
     })
+    @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+    ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
