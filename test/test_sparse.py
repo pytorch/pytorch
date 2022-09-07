@@ -66,6 +66,7 @@ class CrossRefSparseFakeMode(TorchDispatchMode):
             ]
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
+            and torch.Tag.data_dependent_output not in func.tags
         ):
             from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
             from torch.utils._pytree import tree_map
