@@ -86,6 +86,26 @@ struct OpRecord : RecordFunctor {
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
+struct PermuteOpRecord : RecordFunctor {
+  PermuteOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int64_t>& permutation)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        permutation_(std::move(permutation)) {}
+  virtual ~PermuteOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto output = torch::jit::fuser::cuda::permute(arg, permutation_);
+    fd.setFusionState(outputs.at(0), output);
+  }
+
+ private:
+  //! Represents the mapping from the original shape to the new shape
+  std::vector<int64_t> permutation_;
+};
+
 struct SqueezeOpRecord : RecordFunctor {
   SqueezeOpRecord(
       std::vector<size_t> _args,
