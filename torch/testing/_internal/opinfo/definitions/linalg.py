@@ -368,7 +368,6 @@ def sample_inputs_linalg_norm(
     ]
 
     vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
-    matrix_ords = (None, "fro", "nuc", 1, 2, inf, -1, -2, -inf)
     if dtype in {torch.float16, torch.bfloat16, torch.complex32}:
         # svdvals not supported for low precision dtypes
         matrix_ords = ("fro", inf, -inf, 1, -1)
