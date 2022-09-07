@@ -618,7 +618,11 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_FBGEMM OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
-  set(INTERN_USE_EIGEN_BLAS ON)
+  if(USE_BLAS)
+    set(INTERN_USE_EIGEN_BLAS ON)
+  else()
+    set(INTERN_USE_EIGEN_BLAS OFF)
+  endif()
   # Disable developing mobile interpreter for actual mobile build.
   # Enable it elsewhere to capture build error.
   set(INTERN_DISABLE_MOBILE_INTERP ON)
