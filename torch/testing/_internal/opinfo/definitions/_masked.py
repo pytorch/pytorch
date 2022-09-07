@@ -50,9 +50,9 @@ def sample_inputs_softmax_variant(
     if torch.device(device).type != "xla":
         cases.append(((), (0,)))
 
-    return [
+    return (
         SampleInput(make_arg(shape), args=dim, kwargs=kwargs) for shape, dim in cases
-    ]
+    )
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
