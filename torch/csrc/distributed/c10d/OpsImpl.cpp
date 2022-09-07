@@ -1,5 +1,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/library.h>
 
 namespace c10d {
@@ -51,7 +52,7 @@ c10::intrusive_ptr<Work> recv_cuda_(
 c10::intrusive_ptr<Work> reduce_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
@@ -59,7 +60,7 @@ c10::intrusive_ptr<Work> reduce_cpu_(
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          *reduce_op.get(),
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
@@ -68,7 +69,7 @@ c10::intrusive_ptr<Work> reduce_cpu_(
 c10::intrusive_ptr<Work> reduce_cuda_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
@@ -76,7 +77,7 @@ c10::intrusive_ptr<Work> reduce_cuda_(
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-          static_cast<ReduceOp>(reduce_op),
+          *reduce_op.get(),
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
@@ -111,14 +112,12 @@ c10::intrusive_ptr<Work> broadcast_cuda_(
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->allreduce(
       tensor_vec,
-      AllreduceOptions{
-          static_cast<ReduceOp>(reduce_op),
-          std::chrono::milliseconds(timeout)});
+      AllreduceOptions{*reduce_op.get(), std::chrono::milliseconds(timeout)});
 
   // Return input tensors as output tensors to make inplace allreduce look like
   // a functional API, so that make_fx can correctly build the dependencies in
@@ -130,14 +129,12 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cpu_(
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cuda_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->allreduce(
       tensor_vec,
-      AllreduceOptions{
-          static_cast<ReduceOp>(reduce_op),
-          std::chrono::milliseconds(timeout)});
+      AllreduceOptions{*reduce_op.get(), std::chrono::milliseconds(timeout)});
 
   // Return input tensors as output tensors to make inplace allreduce look like
   // a functional API, so that make_fx can correctly build the dependencies in
