@@ -44,6 +44,10 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+// TearDown mode: tear down process upon error, see `WorkNCCL::handleNCCLGuard`
+// Soft mode: just clean up collectives and abort communicators without tearing down process
+enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -125,7 +129,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     // Helper function used in CUDA Stream callbacks to complete WorkNCCL
     // objects and throw exceptions when neeeded.
-    void handleNCCLGuard();
+    void handleNCCLGuard(ErrorHandlingMode asyncErrorHandling);
 
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
@@ -659,7 +663,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
-  bool asyncErrorHandling_ = false;
+  ErrorHandlingMode asyncErrorHandling_ = NoHandling;
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
