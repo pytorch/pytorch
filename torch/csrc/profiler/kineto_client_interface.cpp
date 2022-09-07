@@ -47,8 +47,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
   }
 
   void stop() override {
-    if (ProfilerStateBase::pop(/*global=*/true) ||
-        ProfilerStateBase::pop(/*global=*/false)) {
+    if (ProfilerStateBase::pop()) {
       TORCH_WARN("LibKinetoClient preempted another profiler.");
     }
   }
