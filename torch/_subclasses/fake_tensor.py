@@ -350,9 +350,7 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
 def data_dep(fake_mode, func, *args, **kwargs):
-    if fake_mode.throw_on_data_dependent_ops:
-        raise DataDependentOutputException(func)
-    return NotImplemented
+    raise DataDependentOutputException(func)
 
 
 # Bool Indices get Expanded as Masks
@@ -626,14 +624,10 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         allow_fallback_kernels=True,
         allow_meta=False,
-        throw_on_data_dependent_ops=False,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         self.allow_meta = allow_meta
-
-        # TODO: delete arg and default to true. waiting on dynamo perf regression testing
-        self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
@@ -865,7 +859,11 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap), r)
 
     def may_turn_const(self, t):
-        return and t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse and not isinstance(t, FakeTensor)
+        return (
+            t.numel() <= CONSTANT_NUMEL_LIMIT
+            and not t.is_sparse
+            and not isinstance(t, FakeTensor)
+        )
 
     def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
         any_constant = any(e.constant is not None for e in flat_arg_tensors)
