@@ -344,9 +344,19 @@ Check this module for more information.
                 return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(SymIntT):
             return direct_solve(NamedCType(goal.name, BaseCType(longT)))
+        elif goal.type == OptionalCType(BaseCType(SymIntT)):
+            argname = direct_solve(
+                NamedCType(goal.name, OptionalCType(BaseCType(longT)))
+            )
+            return f"{argname}.has_value() ? c10::make_optional(c10::SymInt(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(longT):
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
             return f"{symInt_type}.expect_int()"
+        elif goal.type == OptionalCType(BaseCType(longT)):
+            argname = direct_solve(
+                NamedCType(goal.name, OptionalCType(BaseCType(SymIntT)))
+            )
+            return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
