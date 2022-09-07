@@ -130,7 +130,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              size_t ndims,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
+             Nvf::DataType dtype = Nvf::DataType::Float,
+             bool is_cpu = false) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (simple)");
             std::vector<int64_t> maybe_symbolic_sizes(ndims, -1);
             ;
@@ -141,19 +142,22 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {self.recordingState(out())},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
-                dtype));
+                dtype,
+                is_cpu));
 
             return out;
           },
           py::arg("ndims"),
           py::arg("dtype") = Nvf::DataType::Float,
+          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t>& symbolic_sizes,
              std::vector<bool>& contiguous,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
+             Nvf::DataType dtype = Nvf::DataType::Float,
+             bool is_cpu = false) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (default)");
 
             for (size_t i = 0; i < symbolic_sizes.size(); ++i) {
@@ -171,20 +175,23 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {self.recordingState(out())},
                 symbolic_sizes,
                 contiguous,
-                dtype));
+                dtype,
+                is_cpu));
 
             return out;
           },
           py::arg("symbolic_sizes"),
           py::arg("contiguous"),
           py::arg("dtype") = Nvf::DataType::Float,
+          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t>& sizes,
              std::vector<int64_t>& strides,
-             Nvf::DataType dtype = Nvf::DataType::Float) -> nvfuser::Tensor {
+             Nvf::DataType dtype = Nvf::DataType::Float,
+             bool is_cpu = false) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (integration)");
             TORCH_CHECK(
                 sizes.size() == strides.size(),
@@ -227,13 +234,15 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {self.recordingState(out())},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
-                dtype));
+                dtype,
+                is_cpu));
 
             return out;
           },
           py::arg("sizes"),
           py::arg("strides"),
           py::arg("dtype") = Nvf::DataType::Float,
+          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_constant",

@@ -704,7 +704,8 @@ struct TensorRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      Nvf::DataType _dtype)
+      Nvf::DataType _dtype,
+      bool _is_cpu = false)
       : RecordFunctor(
             {},
             std::move(_outputs),
@@ -712,15 +713,16 @@ struct TensorRecord : RecordFunctor {
             RecordType::Tensor),
         symbolic_sizes_(std::move(_symbolic_sizes)),
         contiguous_info_(std::move(_contiguous_info)),
-        dtype_(_dtype) {}
+        dtype_(_dtype),
+        is_cpu_(_is_cpu) {}
   virtual ~TensorRecord() = default;
   virtual RecordFunctor* clone() final {
     return new TensorRecord(*this);
   }
 
   //! Child specific hash function in lower 32 bits.
-  //! | 31 --- 24 | 23 --------- 12 | 11 ---------  0 |
-  //! | Dtype     | Symbolic Sizes  | Contiguous Info |
+  //! |  31  | 30 --- 24 | 23 --------- 12 | 11 ---------  0 |
+  //! | CPU? | Dtype     | Symbolic Sizes  | Contiguous Info |
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
     size_t ssize_hash = 0;
@@ -736,7 +738,8 @@ struct TensorRecord : RecordFunctor {
       contig_hash |= (contiguous_info_[i] << (contiguous_info_.size() - 1 - i));
     }
 
-    result |= ((static_cast<size_t>(dtype_) & 0xff) << 24);
+    result |= ((static_cast<size_t>(is_cpu_) & 0x1) << 31);
+    result |= ((static_cast<size_t>(dtype_) & 0x7f) << 24);
     return result | ((ssize_hash & 0xfff) << 12) | (contig_hash & 0xfff);
   }
 
@@ -745,6 +748,7 @@ struct TensorRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const TensorRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       result = result && (dtype_ == child_ptr->dtype_);
+      result = result && (is_cpu_ == child_ptr->is_cpu_);
       if (result) {
         result =
             ((symbolic_sizes_.size() == child_ptr->symbolic_sizes_.size()) &&
@@ -777,6 +781,12 @@ struct TensorRecord : RecordFunctor {
                   .shape(symbolic_sizes_)
                   .dtype(dtype_)
                   .build();
+
+    if (symbolic_sizes_.empty() && is_cpu_) {
+      tv->setCpuScalar(true);
+    } else {
+      TORCH_CHECK(!is_cpu_, "CPU non-scalar tensor is not supported!");
+    }
 
     fd.setFusionState(outputs_.at(0).index, tv);
     fd.addInput(tv);
@@ -824,6 +834,8 @@ struct TensorRecord : RecordFunctor {
   std::vector<bool> contiguous_info_;
   //! Tensor data type.
   Nvf::DataType dtype_;
+  //! Notes a scalar CPU Tensor
+  bool is_cpu_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
