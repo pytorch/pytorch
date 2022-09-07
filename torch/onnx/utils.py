@@ -1914,9 +1914,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.ONNX_STABLE_OPSETS, [_constants.ONNX_MAX_OPSET]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
 
@@ -1934,9 +1932,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.ONNX_STABLE_OPSETS, [_constants.ONNX_MAX_OPSET]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.unregister_op(op_name, ns, version)
 
