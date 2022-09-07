@@ -620,7 +620,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return extra_meta_->sizes_;
     } else {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(sizes_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          sizes_default());
     }
   }
 
