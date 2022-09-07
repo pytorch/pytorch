@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
+#include <tuple>
 
 namespace torch {
 namespace jit {
@@ -116,7 +117,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
-             NvfDataType dtype = NvfDataType::Float) -> nvfuser::Tensor* {
+             NvfDataType dtype = NvfDataType::Float,
+             bool is_cpu = false) -> nvfuser::Tensor* {
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -158,13 +160,15 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {out->index},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
-                dtype));
+                dtype,
+                is_cpu));
 
             return out;
           },
           py::arg("sizes"),
           py::arg("strides"),
           py::arg("dtype") = NvfDataType::Float,
+          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_constant",
@@ -180,11 +184,12 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](nvfuser::FusionDefinition& self,
-             c10::complex<double> val) -> nvfuser::Scalar* {
+             std::complex<double> val) -> nvfuser::Scalar* {
             nvfuser::Scalar* out = self.defineScalar();
             self.defineRecord(new nvfuser::ConstantRecord<
                               torch::jit::fuser::cuda::ComplexDouble,
-                              c10::complex<double>>({out->index}, val));
+                              c10::complex<double>>(
+                {out->index}, static_cast<c10::complex<double>>(val)));
             return out;
           },
           py::return_value_policy::reference)
@@ -917,6 +922,19 @@ void initNvFuserPythonBindings(PyObject* module) {
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
 
   nvf_ops.def(
+      "squeeze",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int64_t>& original_shape,
+         int64_t dim) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::SqueezeOpRecord(
+            {arg->index}, {output->index}, original_shape, dim));
+        return output;
+      },
+      py::return_value_policy::reference);
+
+  nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor* arg,
@@ -927,6 +945,25 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::VarianceOpRecord(
             {arg->index}, {output->index}, axes, correction, keepdim));
         return output;
+      },
+      py::return_value_policy::reference);
+
+  nvf_ops.def(
+      "var_mean",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int>& dims,
+         int64_t correction,
+         bool keepdim) -> decltype(auto) {
+        nvfuser::Tensor* var = self.fusion_definition->defineTensor();
+        nvfuser::Tensor* mean = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::VarianceMeanOpRecord(
+            {arg->index},
+            {var->index, mean->index},
+            dims,
+            correction,
+            keepdim));
+        return std::make_tuple(var, mean);
       },
       py::return_value_policy::reference);
 

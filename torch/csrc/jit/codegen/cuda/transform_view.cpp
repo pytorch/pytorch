@@ -14,180 +14,241 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-struct ViewIndexState {
-  // The index into the new view
-  size_t new_view_index = 0;
-
-  // The index into the original view
-  size_t original_view_index = 0;
-
-  // The index into the transform view
-  size_t transform_view_index = 0;
-
-  // The number of broadcast axes before this transformation
-  size_t broadcast_offset = 0;
-
-  // The number of trivial reduction axes before this transformation
-  size_t trivial_reduction_offset = 0;
-
-  // The number of split transformations
-  size_t split_offset = 0;
-
-  // The number of merge transformations
-  size_t merge_offset = 0;
-};
-
-//! Base class for all tranformations
+//! There's three domains associated with performing a view operation:
+//! 1) Original Domain:
+//!   This view is the original input to the view operation. It has no
+//!   transforms on it, it is however passed in without its reduction domains
+//!   (as is expected since we're trying to generate the output of the
+//!   operations).
+//!
+//! Trivially reduced domain:
+//!   Predicting which operations are trivial reduced are not trivial. If a
+//!   broadcast is between two iter domains in the original domain that must be
+//!   merged for the view transform:
+//!     - If the broadcast domain lines up with a broadcast domain in the final
+//!       tensor domain keep it.
+//!     - If the domain is size-1 but not marked as a broadcast domain (runtime
+//!       size==1)
+//!       Note: This isn't something we generally support consistently
+//!     - If the broadcast domain is marked as a compile time broadcast domain,
+//!       and doesn't line up with a broadcast domain in the final result.
+//!       Trivially reduce it.
+//!   The index for these transformations is marked as the index of the original
+//!   domain, as that's the input for the trivial reduction. This produces the
+//!   trivially reduced domain.
+//!
+//! Post-view Domain:
+//!   This domain is the original domain after the trivial reductions and all
+//!   transformations. This domain holds the rfactor domains determined by
+//!   merge/split operations of the find transformations pass. It is the final
+//!   domain without all the broadcast operations (can have some that were
+//!   preserved through the transformations).
+//!       For example: {1, 2, 1, 4} -> {1, 2, 1, 2, 2} doesn't have any
+//!         conflicts of the view transformation and the broadcast dimensions,
+//!         so they won't be trivial reduced, they will simply be propagated
+//!         through the view.
+//!         {1, 2, 1, 4} -> {1, 8, 1} does have the second 1 dimension in
+//!         between the 2 and 8 that have to be merged. The first broadcast axis
+//!         will be propagated through the domains unafected, yet the second
+//!         braodcast axis will be trivially reduced, then rebroadcasted.
+//!  The transformation index marked for the splits/merges to produce this
+//!  domain are done based on an "in progress" tensor view (called transform
+//!  view index in the find transformation pass). This allows us to simply apply
+//!  these transformations serially to produce this domain.
+//!
+//! Post-broadcast Domain:
+//!    This domain finally matches the output of the view operation fully and
+//!    can be used in further computations.
+//!
+//! View process at compute time:
+//!   1) View takes in the input TensorView x, original runtime
+//!      std::vector<int64_t>, and viewed runtime std::vector<int64_t>.
+//!   2) AnalyzeView is called Which will figure out what series of
+//!      transformations is required from the input tensor to the output tensor.
+//!      These transformations are recorded.
+//!   3) Sum operation is called on the trivial reduction axes from the
+//!      analysis.
+//!   4) applyViewTransforms will generate the output domain of the view
+//!      operation.
+//!        Calls TensorDomain::view(view_analysis) which returns the rfactored
+//!        domain.
+//!        Gets forwarded to transformView(TensorDomain, view_analysis)
+//!        Gets forwarded to createViewDomain(TensorDomain, view_analysis)
+//!        createViewDomain creates the new root domain, and calls
+//!        createRfactorDomain on view_analysis.transforms().
+//!   5) brooadcast will be called with view_analysis.broadcast_axes
+//!
+//! TODO: Caching assumes that all size-1 inputs are correctly marked as a
+//! broadcast dimension. We should probably remove the runtime size-1 merge
+//! support in find transformation.
+//!
+//! Simple abstract class to record transformation and the indices required to
+//! apply it.
 class Transform : public PolymorphicBase {
  public:
-  virtual void toString(std::ostream& output) const = 0;
+  virtual std::string toString() const = 0;
 
-  size_t index() const {
+  int64_t index() const {
     return index_;
   }
 
-  size_t originalIndex() const {
-    return original_index_;
-  }
-
-  size_t newIndex() const {
-    return new_index_;
-  }
-
  protected:
-  Transform(const ViewIndexState& state, size_t index)
-      : index_(index),
-        original_index_(state.original_view_index),
-        new_index_(Transform::computeNewIndex(state)) {}
+  // Relevant location information for the transformation. Stored information is
+  // related to when we have to apply that transformation (see long comment at
+  // top of this file).
+  Transform(int64_t index) : index_(index) {}
 
-  const size_t index_ = 0;
-  const size_t original_index_ = 0;
-  const size_t new_index_ = 0;
-
-  static size_t computeNewIndex(const ViewIndexState& state) {
-    return state.original_view_index - state.trivial_reduction_offset +
-        state.split_offset - state.merge_offset + state.broadcast_offset;
-  }
+  const int64_t index_ = 0;
 };
 
-//! Base class for all view tranformations - Merge, Split, Keep
-//! These transforms require updating the rfactor domain of the view TensorView
-//! and are applied after removing any unnecessary trivial broadcasts.
 class ViewTransform : public Transform {
  public:
+  // Function to apply the transformation. Transformation is applied on
+  // current_transformed_domain. root_domain is required here to replace
+  // IterDomains so we can flip the rfactor flag on the root domain if it's
+  // involved in merge/split trasnforms to produce the rfactor domain.
   virtual void createRfactorDomain(
-      const std::vector<IterDomain*>& new_root_domain,
-      std::vector<IterDomain*>& rfactor_domain) = 0;
+      std::vector<IterDomain*>& root_domain,
+      std::vector<IterDomain*>& current_transformed_domain) = 0;
 
-  virtual bool isOriginalAxisDynamic() const = 0;
+  // Convenience function to replace id in root_domain with an id that has
+  // expand expanded, and rfactor flag turned on.
+  static IterDomain* replaceRootIdWithRFactor(
+      std::vector<IterDomain*>& root_domain,
+      IterDomain* id) {
+    auto root_domain_it = std::find(root_domain.begin(), root_domain.end(), id);
+
+    TORCH_INTERNAL_ASSERT(
+        root_domain_it != root_domain.end(),
+        "Wanted to replace ",
+        id->toString(),
+        " in root with an rfactor dimension, but IterDomain was not found in root.");
+
+    auto root_domain_pos = std::distance(root_domain.begin(), root_domain_it);
+
+    bool is_expanded_dim = id->hasExpandedExtent();
+
+    auto extent = is_expanded_dim ? id->expandedExtent() : id->extent();
+
+    auto cloned_id =
+        IterDomainBuilder(id)
+            .iter_type(
+                is_expanded_dim ? IterType::Iteration : id->getIterType())
+            .extent(extent)
+            .expanded_extent(nullptr)
+            .is_rfactor_domain(true)
+            .build();
+
+    root_domain.erase(root_domain.begin() + root_domain_pos);
+    root_domain.insert(root_domain.begin() + root_domain_pos, cloned_id);
+    return cloned_id;
+  }
+
+  // Debugging utility to convert the transformation into a string.
+  virtual std::string toString() const = 0;
 
  protected:
-  ViewTransform(const ViewIndexState& state)
-      : Transform(state, ViewTransform::computeIndex(state)) {}
-
-  static size_t computeIndex(const ViewIndexState& state) {
-    return state.original_view_index - state.trivial_reduction_offset;
-  }
+  ViewTransform(const int64_t& index) : Transform(index) {}
 };
 
 namespace {
-typedef std::vector<size_t> Sizes;
-const size_t kEmptyAxis = 0;
-const size_t kSingletonAxis = 1;
-
 //! The merge tranformation either combines two root iterDomains together OR
-//! the last rfactor iterDomain with a root iterDomain.
+//! the last rfactor iterDomain with a root iterDomain. Unlike the general
+//! TensorView merge there's no merging across axes not placed in consecutive
+//! positions for View.
 class MergeTransform final : public ViewTransform {
  public:
-  MergeTransform(const ViewIndexState& state, bool is_last_axis_rfactor)
-      : ViewTransform(state), is_last_axis_rfactor_(is_last_axis_rfactor) {}
+  MergeTransform(int64_t index) : ViewTransform(index) {}
 
-  void toString(std::ostream& output) const override {
-    output << "Merge Index: " << index_ << " RF: " << is_last_axis_rfactor_
-           << std::endl;
-  }
-
-  bool isOriginalAxisDynamic() const override {
-    return false;
+  virtual std::string toString() const override {
+    std::stringstream ss;
+    ss << "Merge at index: " << index_;
+    return ss.str();
   }
 
   void createRfactorDomain(
-      const std::vector<IterDomain*>& new_root_domain,
-      std::vector<IterDomain*>& rfactor_domain) override {
+      std::vector<IterDomain*>& root_domain,
+      std::vector<IterDomain*>& current_transformed_domain) override {
     TORCH_INTERNAL_ASSERT(
-        (index_ + 1) < new_root_domain.size(),
-        "Index: \t",
-        index_,
-        "\t Domain Size:\t",
-        new_root_domain.size());
+        (index_ + 1) < current_transformed_domain.size(),
+        "Tried to apply: ",
+        toString(),
+        "\t To domain: \t",
+        current_transformed_domain);
 
-    IterDomain* merged_id = nullptr;
-    if (is_last_axis_rfactor_) {
-      TORCH_INTERNAL_ASSERT(!rfactor_domain.empty());
-      merged_id = rfactor_domain.back();
-      rfactor_domain.pop_back();
-    } else {
-      merged_id = new_root_domain[index_];
+    // Assumed to never merge over non-contiguous dimensions.
+    IterDomain* outer_id = current_transformed_domain[index_];
+    if (!outer_id->isRFactorProduct()) {
+      outer_id = replaceRootIdWithRFactor(root_domain, outer_id);
     }
 
-    auto merged_extent =
-        mul(merged_id->extent(), new_root_domain[index_ + 1]->extent());
+    IterDomain* inner_id = current_transformed_domain[index_ + 1];
+    if (!inner_id->isRFactorProduct()) {
+      inner_id = replaceRootIdWithRFactor(root_domain, inner_id);
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        outer_id->start()->isZeroInt() && inner_id->start()->isZeroInt(),
+        "Didn't expect to apply view transformations on an iter domain",
+        " starting at a non-zero position.");
+
+    auto merged_extent = mul(outer_id->extent(), inner_id->extent());
 
     auto new_merged_id =
         IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), merged_extent)
             .is_rfactor_domain(true)
             .build();
 
-    IrBuilder::create<Merge>(
-        new_merged_id, merged_id, new_root_domain[index_ + 1]);
+    IrBuilder::create<Merge>(new_merged_id, outer_id, inner_id);
 
-    rfactor_domain.push_back(new_merged_id);
+    current_transformed_domain.erase(
+        current_transformed_domain.begin() + index_);
+    current_transformed_domain.erase(
+        current_transformed_domain.begin() + index_);
+    current_transformed_domain.insert(
+        current_transformed_domain.begin() + index_, new_merged_id);
   }
-
- private:
-  const bool is_last_axis_rfactor_ = false;
 };
 
 //! The split tranformation creates two new iterDomains via an outer split.
 class SplitTransform final : public ViewTransform {
  public:
-  SplitTransform(
-      const ViewIndexState& state,
-      bool is_last_axis_rfactor,
-      size_t split_factor)
-      : ViewTransform(state),
-        is_last_axis_rfactor_(is_last_axis_rfactor),
-        split_factor_(split_factor) {}
-
-  void toString(std::ostream& output) const override {
-    output << "Split Index: " << index_ << " RF: " << is_last_axis_rfactor_
-           << " ARG: " << split_factor_ << std::endl;
+  SplitTransform(const int64_t index, int64_t split_factor)
+      : ViewTransform(index), split_factor_(split_factor) {
+    TORCH_INTERNAL_ASSERT(
+        split_factor > 0,
+        "Split factors must be greater than 0, but found ",
+        split_factor,
+        " during view transformation.");
   }
 
-  bool isOriginalAxisDynamic() const override {
-    return false;
+  virtual std::string toString() const override {
+    std::stringstream ss;
+    ss << "Split Index at: " << index_ << " by: " << split_factor_ << std::endl;
+    return ss.str();
   }
 
   void createRfactorDomain(
-      const std::vector<IterDomain*>& new_root_domain,
-      std::vector<IterDomain*>& rfactor_domain) override {
+      std::vector<IterDomain*>& root_domain,
+      std::vector<IterDomain*>& current_transformed_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ < new_root_domain.size(),
+        index_ < current_transformed_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
-        new_root_domain.size());
+        current_transformed_domain.size());
 
     auto factor = IrBuilder::create<Int>(split_factor_);
 
-    IterDomain* id = nullptr;
-    if (is_last_axis_rfactor_) {
-      TORCH_INTERNAL_ASSERT(!rfactor_domain.empty());
-      id = rfactor_domain.back();
-      rfactor_domain.pop_back();
-    } else {
-      id = new_root_domain[index_];
+    IterDomain* id = current_transformed_domain[index_];
+    if (!id->isRFactorProduct()) {
+      id = replaceRootIdWithRFactor(root_domain, id);
     }
+
+    TORCH_INTERNAL_ASSERT(
+        id->start()->isZeroInt(),
+        "Didn't expect to apply view transformations on an iter domain",
+        " starting at a non-zero position.");
 
     Val* remainder = ceilDiv(id->extent(), factor);
 
@@ -208,39 +269,20 @@ class SplitTransform final : public ViewTransform {
 
     IrBuilder::create<Split>(factor_id, remainder_id, id, factor, false);
 
-    rfactor_domain.push_back(factor_id);
-    rfactor_domain.push_back(remainder_id);
+    current_transformed_domain.erase(
+        current_transformed_domain.begin() + index_);
+    current_transformed_domain.insert(
+        current_transformed_domain.begin() + index_, remainder_id);
+    current_transformed_domain.insert(
+        current_transformed_domain.begin() + index_, factor_id);
+  }
+
+  int64_t split_factor() const {
+    return split_factor_;
   }
 
  private:
-  const bool is_last_axis_rfactor_ = false;
-  const size_t split_factor_ = 0;
-};
-
-//! The Keep transform moves the root iterDomain to the rfactor domain.
-class KeepTransform final : public ViewTransform {
- public:
-  KeepTransform(const ViewIndexState& state) : ViewTransform(state) {}
-
-  void toString(std::ostream& output) const override {
-    output << "Keep Index: " << index_ << std::endl;
-  }
-
-  bool isOriginalAxisDynamic() const override {
-    return true;
-  }
-
-  void createRfactorDomain(
-      const std::vector<IterDomain*>& new_root_domain,
-      std::vector<IterDomain*>& rfactor_domain) override {
-    TORCH_INTERNAL_ASSERT(
-        index_ < new_root_domain.size(),
-        "Index: \t",
-        index_,
-        "\t Domain Size:\t",
-        new_root_domain.size());
-    rfactor_domain.push_back(new_root_domain[index_]);
-  }
+  const int64_t split_factor_ = 0;
 };
 
 //! For any singleton dimensions in the new view, we create an implicit
@@ -248,11 +290,12 @@ class KeepTransform final : public ViewTransform {
 //! and view transformation steps.
 class BroadcastTransform final : public Transform {
  public:
-  BroadcastTransform(const ViewIndexState& state)
-      : Transform(state, Transform::computeNewIndex(state)) {}
+  BroadcastTransform(int64_t index) : Transform(index) {}
 
-  void toString(std::ostream& output) const override {
-    output << "Bcast Index: " << index_ << std::endl;
+  virtual std::string toString() const override {
+    std::stringstream ss;
+    ss << "Broadcast at: " << index_ << std::endl;
+    return ss.str();
   }
 };
 
@@ -260,16 +303,12 @@ class BroadcastTransform final : public Transform {
 //! them using a trivial reduction.
 class TrivialReductionTransform final : public Transform {
  public:
-  TrivialReductionTransform(const ViewIndexState& state)
-      : Transform(state, TrivialReductionTransform::computeIndex(state)) {}
+  TrivialReductionTransform(int64_t index) : Transform(index) {}
 
-  void toString(std::ostream& output) const override {
-    output << "1-Red Index: " << index_ << std::endl;
-  }
-
- private:
-  static size_t computeIndex(const ViewIndexState& state) {
-    return state.original_view_index;
+  virtual std::string toString() const override {
+    std::stringstream ss;
+    ss << "Trivial reduction at: " << index_ << std::endl;
+    return ss.str();
   }
 };
 
@@ -278,67 +317,93 @@ class TrivialReductionTransform final : public Transform {
 class AnalyzeViewTransformation {
  public:
   AnalyzeViewTransformation(
-      const Sizes& original_view,
-      const Sizes& new_view,
+      const std::vector<int64_t>& original_view,
+      const std::vector<int64_t>& new_view,
       std::vector<IterDomain*> root_domain = {})
-      : default_implicit_broadcast_(root_domain.empty()),
+      : root_domain_not_provided_(root_domain.empty()),
         root_domain_(root_domain),
+        root_is_transformed_(original_view.size(), false),
         original_view_(original_view),
-        new_view_(new_view),
-        transform_view_(original_view) {
-    // Check that the product of original and new view sizes are equal.
-    const size_t kOriginalNumElements = std::accumulate(
+        new_view_(new_view) {
+    TORCH_INTERNAL_ASSERT(
+        root_domain.empty() || original_view.size() == root_domain.size(),
+        "Incoming domain must match the original view sizes for view.");
+    // Check that the product of original and new view std::vector<int64_t> are
+    // equal.
+    const int64_t kOriginalNumElements = std::accumulate(
         original_view_.begin(), original_view_.end(), 1, std::multiplies<>());
-    const size_t kNewNumElements = std::accumulate(
+    const int64_t kNewNumElements = std::accumulate(
         new_view_.begin(), new_view.end(), 1, std::multiplies<>());
-    TORCH_INTERNAL_ASSERT(kOriginalNumElements == kNewNumElements);
+    TORCH_INTERNAL_ASSERT(
+        kOriginalNumElements == kNewNumElements,
+        "Total element counts across view operation must match.");
   }
 
   AnalyzeViewConstraint constraint() {
     findTransformation();
-    TORCH_INTERNAL_ASSERT(
-        validate(),
-        "Analyze View Transformation failed to find valid transformation.\n",
-        toString());
-    std::vector<int64_t> original_constraint(
-        original_view_.begin(), original_view_.end());
-    std::vector<int64_t> new_constraint(new_view_.begin(), new_view_.end());
-    for (auto& vt : view_transforms_) {
-      if (vt->isOriginalAxisDynamic()) {
-        original_constraint[vt->originalIndex()] = -1;
-        new_constraint[vt->newIndex()] = -1;
+
+    AnalyzeViewConstraint constraint;
+    constraint.original_constraint =
+        std::vector<int64_t>(original_view_.begin(), original_view_.end());
+    for (auto i : c10::irange(constraint.original_constraint.size())) {
+      if (constraint.original_constraint[i] != 1) {
+        constraint.original_constraint[i] = 0;
       }
     }
-    return {original_constraint, new_constraint};
-  }
 
-  AnalyzeViewResult run() {
-    findTransformation();
-
-    TORCH_INTERNAL_ASSERT(
-        validate(),
-        "Analyze View Transformation failed to find valid transformation.\n",
-        toString());
-
-    // Skip view operations if all iterDomains are kept as-is
-    bool all_keep_transforms = std::all_of(
-        view_transforms_.begin(),
-        view_transforms_.end(),
-        [](std::shared_ptr<ViewTransform> vt) {
-          return vt->isA<KeepTransform>();
-        });
-    if (all_keep_transforms) {
-      view_transforms_.clear();
+    constraint.new_constraint =
+        std::vector<int64_t>(new_view_.begin(), new_view_.end());
+    for (auto i : c10::irange(constraint.new_constraint.size())) {
+      if (constraint.new_constraint[i] != 1) {
+        constraint.new_constraint[i] = 0;
+      }
     }
 
-    return {
-        !broadcast_transforms_.empty(),
-        generateBroadcastAxes(),
-        generateTrivialReductionAxes(),
-        view_transforms_};
+    for (auto trivial_reduce : trivial_reduction_transforms_) {
+      constraint.trivial_reduction_string.push_back(trivial_reduce->index());
+    }
+
+    for (auto broadcast : broadcast_transforms_) {
+      constraint.broadcast_string.push_back(broadcast->index());
+    }
+
+    // Dilimeter for split/merge transforms is -2
+    for (auto split_merge : view_transforms_) {
+      if (split_merge->isA<SplitTransform>()) {
+        constraint.split_merge_string.push_back(split_merge->index());
+        constraint.split_merge_string.push_back(
+            split_merge->as<SplitTransform>()->split_factor());
+        constraint.split_merge_string.push_back(-2);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            split_merge->isA<MergeTransform>(),
+            "Unrecognized transformation found.");
+        constraint.split_merge_string.push_back(split_merge->index());
+        constraint.split_merge_string.push_back(-2);
+      }
+    }
+
+    return constraint;
+  }
+
+  // Fill out all the information needed in AnalyzeViewResult, this should
+  // contain all the information of what's required to perform the view
+  // operation.
+  AnalyzeViewResult run() {
+    // Find all the transformations to go from the original tensor domain to the
+    // final output of the view operations.
+    findTransformation();
+
+    auto trivial_reduction_axes = generateTrivialReductionAxes();
+    auto broadcast_axes = generateBroadcastAxes();
+
+    // Move data to AnalyzeViewResult and return it.
+    return {broadcast_axes, trivial_reduction_axes, view_transforms_};
   }
 
  private:
+  // Returns the bool flags that should be used to broadcast the output view
+  // tensor
   std::vector<bool> generateBroadcastAxes() {
     std::vector<bool> broadcast_axes(new_view_.size(), false);
     for (auto& bcast : broadcast_transforms_) {
@@ -347,6 +412,8 @@ class AnalyzeViewTransformation {
     return broadcast_axes;
   }
 
+  // Returns the positions for the trivial reductions to be performed before the
+  // view operation
   std::vector<int> generateTrivialReductionAxes() {
     std::vector<int> reduction_axes;
     for (auto& tred : trivial_reduction_transforms_) {
@@ -372,365 +439,254 @@ class AnalyzeViewTransformation {
     output << std::endl;
 
     output << "===============================" << std::endl;
-    for (auto& move : trivial_reduction_transforms_) {
-      move->toString(output);
+    for (auto& trivial_reduction : trivial_reduction_transforms_) {
+      output << trivial_reduction->toString() << "\n";
     }
-    for (auto& move : view_transforms_) {
-      move->toString(output);
+    for (auto& split_or_merge : view_transforms_) {
+      output << split_or_merge->toString() << "\n";
     }
-    for (auto& move : broadcast_transforms_) {
-      move->toString(output);
+    for (auto& broadcast : broadcast_transforms_) {
+      output << broadcast->toString() << "\n";
     }
     output << "===============================" << std::endl;
     return output.str();
   }
 
-  //! is_index_merge_rhs - Does the original_view_index point to the rhs of the
-  //! Merge transform
-  //! is_last_axis_rfactor - Is the last iterDomain already in the rfactor
-  //! domain?
-  void addMergeTransform(bool is_index_merge_rhs, bool is_last_axis_rfactor) {
-    // The invariant for merge transform is transform index = rhs_position-1
-    if (is_index_merge_rhs) {
-      // The original_view_index points to the rhs of the Merge transform.
-      ViewIndexState clone_state(state_);
-      --clone_state.original_view_index;
-      view_transforms_.push_back(
-          std::make_shared<MergeTransform>(clone_state, is_last_axis_rfactor));
-    } else {
-      // The original_view_index points to the rhs-1 invariant position.
-      view_transforms_.push_back(
-          std::make_shared<MergeTransform>(state_, is_last_axis_rfactor));
-    }
-    ++state_.merge_offset;
-  }
+  // Validation check after transformations are all found
 
-  void addSplitTransform(size_t split_factor, bool is_last_axis_rfactor) {
-    view_transforms_.push_back(std::make_shared<SplitTransform>(
-        state_, is_last_axis_rfactor, split_factor));
-    ++state_.split_offset;
-    ++state_.new_view_index;
-  }
-
-  void addKeepTransform(bool is_last_axis_rfactor) {
-    if (!is_last_axis_rfactor) {
-      view_transforms_.push_back(std::make_shared<KeepTransform>(state_));
-    }
-    ++state_.new_view_index;
-    ++state_.original_view_index;
-    ++state_.transform_view_index;
-  }
-
-  void addBroadcastTransform() {
-    broadcast_transforms_.push_back(
-        std::make_shared<BroadcastTransform>(state_));
-    ++state_.broadcast_offset;
-    ++state_.new_view_index;
-  }
-
-  void addTrivialReductionTransform() {
-    trivial_reduction_transforms_.push_back(
-        std::make_shared<TrivialReductionTransform>(state_));
-    ++state_.trivial_reduction_offset;
-  }
-
-  bool validate() const {
-    if (state_.new_view_index != new_view_.size() ||
-        state_.original_view_index != original_view_.size() ||
-        state_.transform_view_index != transform_view_.size()) {
-      return false;
-    }
-    return true;
-  }
-
-  bool isImplicitBroadcast(size_t original_view_index) const {
-    if (default_implicit_broadcast_) {
+  bool isImplicitBroadcast(int64_t original_view_index) const {
+    if (root_domain_not_provided_) {
       return original_view_[original_view_index] == 1;
     } else {
-      TORCH_INTERNAL_ASSERT(!root_domain_.empty());
-      return root_domain_[original_view_index]->isImplicitBroadcast();
+      TORCH_INTERNAL_ASSERT(original_view_index < root_domain_.size());
+      return root_domain_[original_view_index]->isImplicitBroadcast() &&
+          !root_domain_[original_view_index]->hasExpandedExtent();
     }
   }
-
-  //! This utility class merges a fixed set of axes together
-  //! according to some invariant. Implicit broadcast axes cannot be
-  //! merged with standard iterDomains, so they are handled separately
-  //! with the Trivial Reduction transform.
-  //!
-  //! 1) MergeThenSplitAxes class merges axes until it is evenly divisible
-  //!    by the split factor.
-  //! 2) MergeAdjacentSingletonAxes class merges or reduces any
-  //!    adjacent singleton dimensions.
-  class MergeAxesInterface {
-   public:
-    virtual ~MergeAxesInterface() = default;
-
-   protected:
-    // See addMergeTransform for "is_index_merge_rhs" and
-    // "is_last_axis_rfactor" descriptions
-    void handle(bool is_index_merge_rhs, bool is_last_axis_rfactor) {
-      findNumberOfMergeAxes();
-
-      bool any_merge = false;
-      for (size_t idx = 0; idx < num_merge_axes_; ++idx) {
-        if (avt_->isImplicitBroadcast(state_.original_view_index)) {
-          avt_->addTrivialReductionTransform();
-        } else {
-          avt_->addMergeTransform(
-              is_index_merge_rhs, is_last_axis_rfactor || any_merge);
-          any_merge = true;
-        }
-        updateViewIndexState();
-      }
-
-      epilogue(is_last_axis_rfactor || any_merge);
-    }
-
-    MergeAxesInterface(
-        AnalyzeViewTransformation* avt,
-        ViewIndexState& state,
-        size_t initial_size = 1)
-        : avt_(avt), state_(state), merged_axis_size_(initial_size) {}
-
-    // Get the current position in the original view shape
-    virtual size_t getCurrentAxisPosition() const = 0;
-    virtual bool isMergeInvariantValid() const = 0;
-    virtual void updateViewIndexState() = 0;
-
-    // Optional function run after merging all axes together
-    virtual void epilogue(bool is_last_axis_rfactor) = 0;
-
-   private:
-    bool isStateWithinBounds() const {
-      return getCurrentAxisPosition() < avt_->original_view_.size();
-    }
-
-    // Get the number of adjacent dimensions for Merge Transform
-    void findNumberOfMergeAxes() {
-      num_merge_axes_ = 0;
-      while (isStateWithinBounds() && isMergeInvariantValid()) {
-        merged_axis_size_ *= avt_->original_view_[getCurrentAxisPosition()];
-        ++num_merge_axes_;
-      }
-    }
-
-   protected:
-    AnalyzeViewTransformation* avt_;
-    ViewIndexState& state_;
-
-    // The number of adjacent axes for merge transform
-    size_t num_merge_axes_ = 0;
-
-    // The cumulative product of adjacent axes
-    size_t merged_axis_size_ = 0;
-  };
-
-  //! We merge axes until the sum of the original sizes is evenly divisible by
-  //! the new size. A Split transform is only valid if the axis is divisible
-  //! without remainder.
-  //!
-  //! 1) If the merged axis is larger than new size, then add a Split transform.
-  //!
-  //! 2) If the merged axis is equal to the new size but neither Split nor Merge
-  //! transforms were required, then keep the first non-singleton axis.
-  //!
-  //! 3) If the merged axis is equal to new size, then apply only the Merge
-  //! transforms.
-  //!
-  class MergeThenSplitAxes : MergeAxesInterface {
-   public:
-    static void process(
-        AnalyzeViewTransformation* avt,
-        ViewIndexState& state,
-        size_t initial_size,
-        size_t split_factor,
-        bool is_last_axis_rfactor) {
-      MergeThenSplitAxes mtsa(
-          avt, state, is_last_axis_rfactor, initial_size, split_factor);
-      mtsa.handle(false /* is_index_merge_rhs */, is_last_axis_rfactor);
-    }
-
-    virtual ~MergeThenSplitAxes() = default;
-
-   private:
-    MergeThenSplitAxes(
-        AnalyzeViewTransformation* avt,
-        ViewIndexState& state,
-        bool is_last_axis_rfactor,
-        size_t initial_size,
-        size_t split_factor)
-        : MergeAxesInterface(avt, state, initial_size),
-          split_factor_(split_factor) {}
-
-    size_t getCurrentAxisPosition() const override {
-      return state_.original_view_index + 1 + num_merge_axes_;
-    }
-
-    bool isMergeInvariantValid() const override {
-      return merged_axis_size_ % split_factor_ != 0;
-    }
-
-    void updateViewIndexState() override {
-      avt_->transform_view_[state_.transform_view_index] *=
-          avt_->original_view_[state_.original_view_index + 1];
-      avt_->transform_view_[state_.original_view_index + 1] = kEmptyAxis;
-      ++state_.original_view_index;
-    }
-
-    void epilogue(bool is_last_axis_rfactor) override {
-      if (merged_axis_size_ > split_factor_) {
-        avt_->transform_view_[state_.transform_view_index] /= split_factor_;
-        avt_->addSplitTransform(split_factor_, is_last_axis_rfactor);
-      } else {
-        avt_->addKeepTransform(is_last_axis_rfactor);
-      }
-    }
-
-   private:
-    const size_t split_factor_ = 0;
-  };
-
-  //! A utility class to merge any adjacent size-1 dimensions
-  class MergeAdjacentSingletonAxes : MergeAxesInterface {
-   public:
-    static void process(AnalyzeViewTransformation* avt, ViewIndexState& state) {
-      MergeAdjacentSingletonAxes masa(avt, state);
-      masa.handle(
-          true /* is_index_merge_rhs */, true /* is_last_axis_rfactor */);
-    }
-
-    virtual ~MergeAdjacentSingletonAxes() = default;
-
-   private:
-    MergeAdjacentSingletonAxes(
-        AnalyzeViewTransformation* avt,
-        ViewIndexState& state)
-        : MergeAxesInterface(avt, state) {}
-
-    size_t getCurrentAxisPosition() const override {
-      return state_.original_view_index + num_merge_axes_;
-    }
-
-    bool isMergeInvariantValid() const override {
-      return avt_->original_view_[getCurrentAxisPosition()] == kSingletonAxis;
-    }
-
-    void updateViewIndexState() override {
-      ++state_.original_view_index;
-      ++state_.transform_view_index;
-    }
-
-    void epilogue(bool is_last_axis_rfactor) override {}
-  };
 
   //! Find the broadcast, merge and split operations necessary
   //! to transform the original view into the new view
   void findTransformation() {
-    // The original and new view are processed from left to right.
-    // old_view_index and new_view_index track the current position in each
-    // view respectively.
-    // kRfactor - Is the last iterDomain already in the rfactor domain?
-    while (state_.new_view_index < new_view_.size() &&
-           state_.original_view_index < original_view_.size()) {
-      const auto kCurrentSize = transform_view_[state_.transform_view_index];
-      auto is_last_axis_rfactor = transform_view_[state_.original_view_index] !=
-          original_view_[state_.original_view_index];
+    // There are three particularly important state indices we're working with.
+    // There is:
+    //   1) original_view_index which is indexing into the original tensor
+    //      domain after all reductions are removed. This lines up with the last
+    //      domain in original view that we added to current_size.
+    //   2) transform_view_index which is the index of the transformations as
+    //      we're virtually "developing" the output tensor domain (split/merge
+    //      transformations post trivial reductions).
+    //   3) The new_view_index which is directly associated with the new_view
+    //      and the dimension in new_view we're currently trying to create.
 
-      if (kCurrentSize == kEmptyAxis) {
-        // If current size in transform view is 0, then it was already handled
-        // and should be skipped.
-        ++state_.transform_view_index;
-      } else if (kCurrentSize == new_view_[state_.new_view_index]) {
-        addKeepTransform(is_last_axis_rfactor);
-      } else if (new_view_[state_.new_view_index] == kSingletonAxis) {
-        addBroadcastTransform();
-      } else {
-        MergeThenSplitAxes::process(
-            this,
-            state_,
-            kCurrentSize,
-            new_view_[state_.new_view_index],
-            is_last_axis_rfactor);
+    int64_t original_view_index = 0;
+    int64_t transform_view_index = 0;
+    int64_t new_view_index = 0;
+    int64_t current_size = original_view_[0];
+
+    // Safety counters to make sure we don't end up in an infinite loop.
+    int64_t prev_original_view_index = std::numeric_limits<int64_t>::max();
+    int64_t prev_new_view_index = std::numeric_limits<int64_t>::max();
+
+    TORCH_INTERNAL_ASSERT(
+        view_transforms_.empty(),
+        "Already ran find transformation pass for View op, cannot run a second time.");
+
+    // Iterate until original view is completely consumed and new view is
+    // completely generated.
+    while (original_view_index < original_view_.size() ||
+           new_view_index < new_view_.size()) {
+      TORCH_INTERNAL_ASSERT(
+          !(prev_new_view_index == new_view_index &&
+            prev_original_view_index == original_view_index),
+          "Infinite loop detected in AnalyzeViewTransformation::findTransformation(). Bailing.");
+
+      prev_new_view_index = new_view_index;
+      prev_original_view_index = original_view_index;
+
+      if (new_view_index >= new_view_.size()) {
+        TORCH_INTERNAL_ASSERT(
+            current_size == 1,
+            "View is complete, but there's still some elements to distribute.");
       }
-    }
 
-    MergeAdjacentSingletonAxes::process(this, state_);
+      if ((new_view_index == new_view_.size() ||
+           (new_view_[new_view_index + 1] != 1)) &&
+          original_view_index + 1 < original_view_.size() &&
+          original_view_[original_view_index + 1] == 1 &&
+          !isImplicitBroadcast(original_view_index + 1)) {
+        // Next index in original_view is runtime size 1 and next new view is
+        // not, merge the size 1 into the current view before moving on. Even if
+        // the current size and new view size match we could have a trailing
+        // size 1 dimension on the input that needs to be merged in.
+        view_transforms_.push_back(
+            std::make_shared<MergeTransform>(transform_view_index));
+        ++original_view_index;
+        continue;
+      }
 
-    // Skip any root domains that were merged for any splits with remainder
-    // OR any singleton axes
-    while (state_.transform_view_index < transform_view_.size() &&
-           transform_view_[state_.transform_view_index] <= kSingletonAxis) {
-      ++state_.transform_view_index;
-    }
+      if (new_view_index < new_view_.size() &&
+          // Still new dimensions to resolve and current size does resolve it.
+          current_size == new_view_[new_view_index]) {
+        // Keep this dimension, it's good to go, we hit a boundary where there's
+        // a multiple of original dims, that matches a multiple of view dims.
+        // Increment state and keep going.
 
-    // Add broadcast axes for any remaining size 1 dimensions
-    while (state_.original_view_index == original_view_.size() &&
-           state_.new_view_index < new_view_.size() &&
-           new_view_[state_.new_view_index] == kSingletonAxis) {
-      addBroadcastTransform();
+        ++transform_view_index;
+        ++new_view_index;
+        ++original_view_index;
+
+        // Update current_size with the next size in original view
+        if (original_view_index < original_view_.size()) {
+          current_size = original_view_[original_view_index];
+        } else {
+          current_size = 0;
+        }
+        continue;
+      }
+
+      // Compile time broadcast in new view, but not a matching one in original
+      // view. Insert broadcast and increment new_view. Size 1 dimensions in
+      // new_view that don't match up with runtime size 1's in original view are
+      // assumed to be broadcast (not a split from a runtime domain).
+      if (new_view_index < new_view_.size() && new_view_[new_view_index] == 1) {
+        broadcast_transforms_.push_back(
+            std::make_shared<BroadcastTransform>(new_view_index));
+        ++new_view_index;
+        continue;
+      }
+
+      // If we run out of original_view dimensions we could still have broadcast
+      // dimensions for new_view, but that should be hit before this point.
+      TORCH_INTERNAL_ASSERT(
+          current_size != 0,
+          "View analysis failed, should never process an empty size unless we ",
+          "simply need to add broadcasts to the post-view domain.");
+
+      if (current_size == 1 && isImplicitBroadcast(original_view_index)) {
+        // Original view has a compile time size 1 dimension, and it's not found
+        // in the new_view_ (otherwise would have been caught in a branch
+        // above). Do a trivial reduction.
+        trivial_reduction_transforms_.push_back(
+            std::make_shared<TrivialReductionTransform>(original_view_index));
+        ++original_view_index;
+
+        // Update original position and current size.
+        if (original_view_index < original_view_.size()) {
+          current_size = original_view_[original_view_index];
+        } else {
+          current_size = 0;
+        }
+
+        continue;
+      }
+
+      if (original_view_index + 1 < original_view_.size() &&
+          isImplicitBroadcast(original_view_index + 1)) {
+        // Original view has a compile time size 1 dimension, and it's
+        // interfering with necessary transformations. Do a trivial reduction.
+        ++original_view_index;
+        trivial_reduction_transforms_.push_back(
+            std::make_shared<TrivialReductionTransform>(original_view_index));
+
+        continue;
+      }
+
+      // We're only left with performing transformations to match a new_view
+      // dimension, there must be an activew new_view.
+      TORCH_INTERNAL_ASSERT(
+          new_view_index < new_view_.size(),
+          "Expecting to still have new dimensions to work on in view, but none left.");
+
+      if (new_view_index < new_view_.size() &&
+          current_size % new_view_[new_view_index] == 0) {
+        // Insert split to generate the next new_view domain.
+        view_transforms_.push_back(std::make_shared<SplitTransform>(
+            transform_view_index, new_view_[new_view_index]));
+        current_size /= new_view_[new_view_index];
+        TORCH_INTERNAL_ASSERT(current_size > 1, "This should be unreachable.");
+        // Update transform and new since a split doesn't increment from the
+        // original domain we're working on.
+        ++transform_view_index;
+        ++new_view_index;
+        continue;
+      }
+
+      // Need more of the original_view dimension to resolve the new_view
+      // dimension, merge the next dimension in.
+      TORCH_INTERNAL_ASSERT(
+          original_view_index + 1 < original_view_.size(),
+          "Expecting to still have original dimensions to work on in view, but none left.");
+
+      view_transforms_.push_back(
+          std::make_shared<MergeTransform>(transform_view_index));
+      current_size *= original_view_[++original_view_index];
     }
   }
 
  private:
-  ViewIndexState state_;
-
   std::vector<std::shared_ptr<ViewTransform>> view_transforms_;
   std::vector<std::shared_ptr<BroadcastTransform>> broadcast_transforms_;
   std::vector<std::shared_ptr<TrivialReductionTransform>>
       trivial_reduction_transforms_;
 
-  bool default_implicit_broadcast_ = true;
-  const std::vector<IterDomain*> root_domain_;
-  const Sizes& original_view_;
-  const Sizes& new_view_;
+  // If root domain isn't provided always assume size-1 dimensions are
+  // compile-time dimensions. TODO: Remove runtime size-1 dimension support.
+  // This should be cached higher in the stack.
+  const bool root_domain_not_provided_ = true;
 
-  // transform_view is a mutable view and is initialized with the original_view.
-  // It is used to track the current state of the original tensor domain.
-  //
-  // When we merge dimensions in the original_view, we multiply the sizes of
-  // the adjacent, merged dimensions. The product size is placed in the current
-  // position of the transform_view, while the other dimensions are set to 0.
-  //
-  // When we add a Split transform, the current size is divided by the outer
-  // split factor.
-  //
-  // Size-0 dimensions are automatically skipped.
-  //
-  // If transform size != original size for an axis, then the transformation
-  // uses the last rfactor domain. Otherwise, it is a root domain
-  // transformation.
-  Sizes transform_view_;
+  const std::vector<IterDomain*> root_domain_;
+  // Track if the root ID was transformed or kept ()
+  std::vector<bool> root_is_transformed_;
+  const std::vector<int64_t>& original_view_;
+  const std::vector<int64_t>& new_view_;
 };
 
-//! Create new TensorDomain with a modified rfactor domain using the specified
-//! view transformations
+//! Create new TensorDomain with a new root domain and modified rfactor domains
+//! using the specified view transformations. Original domain should already be
+//! without reduction axes.
 TensorDomain* createViewDomain(
     TensorDomain* original_domain,
-    const std::vector<std::shared_ptr<ViewTransform>>& view_transforms) {
+    const AnalyzeViewResult& view_analysis) {
   FUSER_PERF_SCOPE("createViewDomain");
-
-  TORCH_INTERNAL_ASSERT(!view_transforms.empty());
+  TORCH_INTERNAL_ASSERT(!view_analysis.transforms.empty());
 
   std::vector<IterDomain*> new_root_domain;
-  for (auto id :
-       TensorDomain::noReductions(original_domain->getMaybeRFactorDomain())) {
+  auto orig_root_domain = original_domain->getMaybeRFactorDomain();
+
+  // Apply trivial reductions.
+  for (auto id_i : c10::irange(orig_root_domain.size())) {
+    auto id = orig_root_domain[id_i];
+    if (id->isReduction()) {
+      continue;
+    }
+    if (std::find(
+            view_analysis.trivial_reduction_axes.begin(),
+            view_analysis.trivial_reduction_axes.end(),
+            (int)id_i) != view_analysis.trivial_reduction_axes.end()) {
+      continue;
+    }
+
     new_root_domain.push_back(id->cloneWithoutRFactor());
   }
 
-  std::vector<IterDomain*> rfactor_domain;
-  for (auto& t : view_transforms) {
-    t->createRfactorDomain(new_root_domain, rfactor_domain);
+  std::vector<IterDomain*> new_rfactor_domain(
+      new_root_domain.begin(), new_root_domain.end());
+
+  // Apply rfactor transformations.
+  for (auto& t : view_analysis.transforms) {
+    t->createRfactorDomain(new_root_domain, new_rfactor_domain);
   }
 
   return IrBuilder::create<TensorDomain>(
       new_root_domain,
-      rfactor_domain,
-      rfactor_domain,
-      std::vector<bool>(rfactor_domain.size(), true));
+      new_rfactor_domain,
+      new_rfactor_domain,
+      std::vector<bool>(new_rfactor_domain.size(), true));
 }
 
-//! Infer -1 value in new view sizes from original view sizes
-std::pair<Sizes, Sizes> inferNewViewShape(
+} // namespace
+
+std::pair<std::vector<int64_t>, std::vector<int64_t>> inferViewShapes(
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
   bool valid_original_sizes = std::all_of(
@@ -739,13 +695,14 @@ std::pair<Sizes, Sizes> inferNewViewShape(
       });
   TORCH_INTERNAL_ASSERT(valid_original_sizes);
 
-  Sizes original_view(original_sizes.begin(), original_sizes.end());
-  Sizes new_view(new_sizes.size());
+  std::vector<int64_t> original_view(
+      original_sizes.begin(), original_sizes.end());
+  std::vector<int64_t> new_view(new_sizes.size());
 
   // TODO: refactor
   int64_t dynamic_index = -1;
-  size_t new_size_num_elements = 1;
-  for (size_t idx = 0; idx < new_sizes.size(); ++idx) {
+  int64_t new_size_num_elements = 1;
+  for (int64_t idx = 0; idx < new_sizes.size(); ++idx) {
     if (new_sizes[idx] == -1) {
       TORCH_INTERNAL_ASSERT(
           dynamic_index == -1, "Only one dimension can by inferred.")
@@ -757,7 +714,7 @@ std::pair<Sizes, Sizes> inferNewViewShape(
     }
   }
 
-  const size_t kNumElements = std::accumulate(
+  const int64_t kNumElements = std::accumulate(
       original_view.begin(), original_view.end(), 1, std::multiplies<>());
   if (dynamic_index != -1) {
     new_view[dynamic_index] = kNumElements / new_size_num_elements;
@@ -766,23 +723,31 @@ std::pair<Sizes, Sizes> inferNewViewShape(
   return {original_view, new_view};
 }
 
-} // namespace
-
 //! Generates the transformations necessary to convert
 //! from the original view into the new view.
 AnalyzeViewResult analyzeView(
-    const TensorView* tv,
+    const TensorView* original_view_tv,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size() ==
-      original_sizes.size());
-  auto sizes = inferNewViewShape(original_sizes, new_sizes);
+      original_sizes.size() > 0,
+      "Empty original size not supported for view operatioon.");
+
+  TORCH_INTERNAL_ASSERT(
+      TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain())
+          .size() == original_sizes.size());
+
+  // Fill -1 dimension in new_std::vector<int64_t> with size infered from all
+  // other values
+  auto sizes = inferViewShapes(original_sizes, new_sizes);
+
+  // Analysize the transformations required to go from original_sizes to
+  // new_sizes
   AnalyzeViewTransformation analyzer(
       sizes.first /* original_view */,
       sizes.second /* new_view */,
-      TensorDomain::noReductions(tv->getMaybeRFactorDomain()));
+      TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain()));
   return analyzer.run();
 }
 
@@ -790,7 +755,7 @@ AnalyzeViewConstraint analyzeViewConstraint(
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
   FUSER_PERF_SCOPE("analyzeViewConstraint");
-  auto sizes = inferNewViewShape(original_sizes, new_sizes);
+  auto sizes = inferViewShapes(original_sizes, new_sizes);
   AnalyzeViewTransformation analyzer(
       sizes.first /* original_view */, sizes.second /* new_view */);
   return analyzer.constraint();
@@ -800,9 +765,9 @@ AnalyzeViewConstraint analyzeViewConstraint(
 //! view transformations
 TensorDomain* transformView(
     TensorDomain* original_domain,
-    const std::vector<std::shared_ptr<ViewTransform>>& view_transforms) {
+    const AnalyzeViewResult& view_analysis) {
   FUSER_PERF_SCOPE("transformView");
-  return createViewDomain(original_domain, view_transforms);
+  return createViewDomain(original_domain, view_analysis);
 }
 
 } // namespace cuda

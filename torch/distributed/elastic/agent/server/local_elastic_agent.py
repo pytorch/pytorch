@@ -11,7 +11,10 @@ import os
 import shutil
 import signal
 import tempfile
+import uuid
 from typing import Any, Dict, Optional, Tuple
+
+import torch.distributed.elastic.timer as timer
 
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
@@ -28,7 +31,10 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 log = get_logger()
 
-__all__ = ['LocalElasticAgent']
+__all__ = ["LocalElasticAgent", "TORCHELASTIC_ENABLE_FILE_TIMER", "TORCHELASTIC_TIMER_FILE"]
+
+TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
+TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
 
 class LocalElasticAgent(SimpleElasticAgent):
     """
@@ -111,6 +117,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._pcontext: Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
+        self._worker_watchdog: Optional[timer.FileTimerServer] = None
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
@@ -118,6 +125,25 @@ class LocalElasticAgent(SimpleElasticAgent):
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
         log.info(f"log directory set to: {dir}")
         return dir
+
+    def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
+        enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
+        watchdog_enabled = os.getenv(enable_watchdog_env_name)
+        watchdog_file_env_name = TORCHELASTIC_TIMER_FILE
+        watchdog_file_path = os.getenv(watchdog_file_env_name)
+        if watchdog_enabled is not None and str(watchdog_enabled) == "1":
+            if watchdog_file_path is None:
+                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+            log.info(f"Starting a FileTimerServer with {watchdog_file_path} ...")
+            self._worker_watchdog = timer.FileTimerServer(file_path=watchdog_file_path, max_interval=0.1, daemon=True)
+            self._worker_watchdog.start()
+            log.info("FileTimerServer started")
+        else:
+            log.info(f"Environment variable '{enable_watchdog_env_name}' not found. Do not start FileTimerServer.")
+        # Propagate the watchdog file env to worker processes
+        if watchdog_file_path is not None:
+            for _, worker_env in envs.items():
+                worker_env[watchdog_file_env_name] = watchdog_file_path
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -175,6 +201,8 @@ class LocalElasticAgent(SimpleElasticAgent):
         shutil.rmtree(attempt_log_dir, ignore_errors=True)
         os.makedirs(attempt_log_dir)
 
+        self._setup_local_watchdog(envs=envs)
+
         assert spec.entrypoint is not None
         self._pcontext = start_processes(
             name=spec.role,
@@ -190,6 +218,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         return self._pcontext.pids()
 
     def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+        if self._worker_watchdog is not None:
+            self._worker_watchdog.stop()
+            self._worker_watchdog = None
         if self._pcontext:
             self._pcontext.close(death_sig)
 

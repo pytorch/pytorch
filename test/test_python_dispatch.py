@@ -2,18 +2,16 @@
 
 import tempfile
 import torch
-import traceback
 from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS, skipIfCrossRef
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode, \
-    _PYTHON_DISPATCH_TRACE_OFFSET
+from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 import logging
 
@@ -446,12 +444,6 @@ $0 = input('x')
 $1 = torch._ops.aten.detach.default($0)
 $2 = torch._ops.aten.detach.default($1)''')
 
-    def test_metadata_change_not_allowed(self) -> None:
-        x = LoggingTensor(torch.ones(1))
-        y = x.data
-        self.assertIsInstance(y, LoggingTensor)
-        self.assertRaises(RuntimeError, lambda: y.resize_(4))
-
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
         # return some virtual storage that is safe to work with
@@ -873,6 +865,24 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
+
+    def test_shallow_copy_and_detach(self) -> None:
+        seen = set()
+        test_case = self
+
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                tree_map_only(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
+                if kwargs is None:
+                    kwargs = {}
+                r = func(*args, **kwargs)
+                tree_map_only(torch.Tensor, lambda t: seen.add(t), r)
+                return r
+
+        with TestMode():
+            x = torch.randn(3, requires_grad=True)
+            loss = (x * x).sum()
+            loss.backward()
 
     def test_nested_enable_torch_dispatch_mode(self) -> None:
         class A(LoggingTensorMode):
@@ -1699,7 +1709,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func == torch.ops.aten.stride.default:
+                    if func == torch.ops.aten.sym_stride.default:
                         return (4, 2)
                     return NotImplemented
 
@@ -1710,13 +1720,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    if func == torch.ops.aten.stride.default:
+                    if func == torch.ops.aten.sym_stride.default:
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.stride'"
+            err_msg = "no implementation found for 'torch.ops.aten.sym_stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 e.stride()
 
             e = StridesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
@@ -1822,30 +1832,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
-
-    @skipIfCrossRef
-    def test_trace_offset(self):
-        class MockDispatchMode(TorchDispatchMode):
-            def __init__(self, traceback):
-                self.traceback = traceback
-
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                self.traceback.extend(traceback.format_stack())
-
-        # If this test stops working because of a change in Python dispatch,
-        # please make sure to change the constant itself.
-        expected_offset = _PYTHON_DISPATCH_TRACE_OFFSET - 1
-        tb = []
-        with MockDispatchMode(tb) as dispatch:
-            # Tests if the line calling the kernel launch is at the expected offset
-            # in the stack trace using the fact that the unique variable name will
-            # appear in it.
-            _long_and_unique_launch_name_ = torch.rand(3)
-            self.assertIn(
-                "_long_and_unique_launch_name_",
-                dispatch.traceback[expected_offset]
-            )
-
 
 if __name__ == '__main__':
     run_tests()
