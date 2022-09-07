@@ -957,3 +957,9 @@ if sys.executable != 'torch_deploy':
         from . import _meta_registrations
 
 from . import patch_getitem
+
+# Enable CUDA Sanitizer
+if 'TORCH_CUDA_SANITIZER' in os.environ:
+    import torch.cuda._sanitizer as csan
+
+    csan.enable_cuda_sanitizer()
