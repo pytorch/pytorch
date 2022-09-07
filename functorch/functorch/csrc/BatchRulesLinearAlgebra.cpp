@@ -382,6 +382,41 @@ fourOutputs linalg_lstsq_batch_rule(
   return std::make_tuple(res, 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
 }
 
+std::tuple<Tensor, c10::optional<int64_t>>
+matrix_rank_atol_rtol_tensor_batch_rule(
+    const Tensor& input, optional<int64_t> input_bdim, const optional<Tensor>& atol, const optional<int64_t> atol_bdim,
+    const optional<Tensor>& rtol, const optional<int64_t> rtol_bdim, bool hermitian) {
+  const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
+  TORCH_CHECK(input_logical_rank >= 2,
+            "torch.linalg.matrix_rank: The input tensor input must have at least 2 dimensions.");
+
+  // atol and rtol's dims must be broadcastable to the number of batch dims of input
+  // which is input's dim - 2 (input represents a batch of matrices, so 2 is for the matrix dimensions)
+  const auto input_logical_num_bdims = input_logical_rank - 2;
+  const int64_t atol_logical_num_bdims = atol.has_value() ? rankWithoutBatchDim(*atol, atol_bdim) : 0;
+  const int64_t rtol_logical_num_bdims = rtol.has_value() ? rankWithoutBatchDim(*rtol, rtol_bdim) : 0;
+  const auto max_logical_bdims = std::max({input_logical_num_bdims, atol_logical_num_bdims, rtol_logical_num_bdims});
+
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  auto atol_ = atol.has_value() ? moveBatchDimToFront(*atol, atol_bdim) : atol;
+  auto rtol_ = rtol.has_value() ? moveBatchDimToFront(*rtol, rtol_bdim) : rtol;
+
+  // pad all inputs to have the same number of (non-vmap) batch dimensions
+  input_ = maybePadToLogicalRank(input_, input_bdim, max_logical_bdims + 2);
+  atol_ = atol_.has_value() ? maybePadToLogicalRank(*atol_, atol_bdim, max_logical_bdims) : atol_;
+  rtol_ = rtol_.has_value() ? maybePadToLogicalRank(*rtol_, rtol_bdim, max_logical_bdims) : rtol_;
+
+  return std::make_tuple(at::linalg_matrix_rank(input_, atol_, rtol_, hermitian), 0);
+}
+
+std::tuple<Tensor,optional<int64_t>>
+matrix_rank_atol_rtol_float_batch_rule(
+    const Tensor& input, optional<int64_t> input_bdim, optional<double> atol, optional<double> rtol, bool hermitian) {
+  TORCH_CHECK(rankWithoutBatchDim(input, input_bdim) >= 2,
+            "torch.linalg.matrix_rank: The input tensor input must have at least 2 dimensions.");
+  return std::make_tuple(linalg_matrix_rank(moveBatchDimToFront(input, input_bdim), atol, rtol, hermitian), 0);
+}
+
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
   LinalgCheckMatrixUnaryRuleHelper<\
     func_string_##fn,\
@@ -494,6 +529,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
+  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_tensor, matrix_rank_atol_rtol_tensor_batch_rule);
+  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_float, matrix_rank_atol_rtol_float_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
