@@ -695,6 +695,7 @@ def _new_process_group_helper(
 
     if not group_name:
         group_name = str(_group_count)
+        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError(
@@ -730,7 +731,6 @@ def _new_process_group_helper(
         if not is_default_group:
             global_rank = _get_default_group().rank()
             if global_rank not in global_ranks_in_group:
-                _group_count += 1
                 return GroupMember.NON_GROUP_MEMBER
 
         # Use the group name as prefix in the default store, such that
@@ -847,14 +847,12 @@ def _new_process_group_helper(
                 dist_backend_opts.group_rank = group_rank
                 dist_backend_opts.group_size = group_size
                 dist_backend_opts.timeout = timeout
-                dist_backend_opts.group_id = _group_count
+                dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
 
                 pg = creator_fn(dist_backend_opts, pg_options)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
-
-    _group_count += 1
 
     return pg
 
