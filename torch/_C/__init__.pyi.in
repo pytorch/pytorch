@@ -817,6 +817,10 @@ def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
 def set_num_interop_threads(nthreads: _int) -> None: ...  # THPModule_setNumInteropThreads
 def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
+def _get_fused_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
+def _set_enabled_fused_sdp(arg: _bool) -> None: ...  # THPModule_setUserEnabledFusedSDP
+def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
+def _set_enabled_math_sdp(arg: _bool) -> None: ...  # THPModule_setUserEnabledMathSDP
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
