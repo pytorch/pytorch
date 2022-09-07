@@ -287,10 +287,11 @@ std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, o
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const IntArrayRef shape, const IntArrayRef strides) {
+std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const c10::SymIntArrayRef sym_shape, const IntArrayRef strides) {
   (void) strides;
   TORCH_INTERNAL_ASSERT(bdim.has_value());
-
+  // TODO: fix this later
+  auto shape = c10::asIntArrayRefSlow(sym_shape);
   auto self_ = moveBatchDimToFront(self, bdim);
   c10::SmallBuffer<int64_t, 5> new_shape(shape.size() + 1);
   new_shape[0] = self_.size(0);
