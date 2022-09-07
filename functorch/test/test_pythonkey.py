@@ -130,7 +130,6 @@ class TestPythonKey(AOTTestCase):
 
         a = torch.randn(3, device=device)
         symbolic_gm = torch.fx.symbolic_trace(fn)
-        symbolic_gm.graph.print_tabular()
         includes_method_relu_ = any(
             str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
         )
