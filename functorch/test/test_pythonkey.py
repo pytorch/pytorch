@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn as nn
@@ -20,6 +21,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
+import functorch._src.config as functorch_config
 from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
@@ -643,6 +645,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    @patch.object(functorch_config, "use_functionalize", True)
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
