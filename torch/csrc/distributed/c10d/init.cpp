@@ -977,7 +977,11 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
+      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>())
+      .def_property_readonly(
+          "underlying_store",
+          &::c10d::PrefixStore::getUnderlyingStore,
+          R"(Gets the underlying store object that PrefixStore wraps around.)");
 
   auto processGroup =
       py::class_<
