@@ -5163,7 +5163,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) -
         (t_unsqueezed * Kv).squeeze(-1);
     auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
-    return std::make_tuple(v_grad, tau_grad.squeeze(-1));
+    return std::make_tuple(v_grad.unsqueeze(-1), tau_grad.squeeze(-1));
   };
 
   auto apply_householder_reflector = [m, modify_K_in_place](
@@ -5205,8 +5205,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(
 
       Tensor v_i_grad, tau_i_grad;
       std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-      input_grads.push_back(v_i_grad.squeeze(-1));
-      tau_grads.push_back(tau_i_grad.squeeze(-1));
+      input_grads.push_back(v_i_grad);
+      tau_grads.push_back(tau_i_grad);
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
       if (i < k - 1) {
@@ -5218,18 +5218,18 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       }
     }
 
-    input_grad = at::stack(input_grads, -1);
-    tau_grad = at::stack(tau_grads, -1);
-
     // Only first k columns are active in forward.
     // zero gradients for the inactive input.
     if (k < input.size(-1)) {
-      auto input_sizes = input_.sizes();
-      at::DimVector new_sizes(input_sizes);
-      new_sizes[input_.dim() - 1] = input.size(-1) - k;
-      auto zeros = at::zeros(new_sizes, input_.options());
-      input_grad = at::cat({input_grad, zeros}, -1);
+      auto zero_grad_shape =
+          at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
+      zero_grad_shape.push_back(input.size(-1) - k);
+      auto zero_grad = at::zeros(zero_grad_shape, input_.options());
+      input_grads.push_back(zero_grad);
     }
+
+    input_grad = at::cat(input_grads, -1);
+    tau_grad = at::cat(tau_grads, -1);
   } else {
     input_grad = at::zeros_like(input_);
     tau_grad = at::zeros_like(tau);
