@@ -389,43 +389,9 @@ WithoutTop::~WithoutTop() {
   pushDynamicLayer(std::move(layer_));
 }
 
-// NOTE: [forward-mode AD decompositions hack]
-//
-// The mechanism is: in DynamicLayerFrontMode, IF we are dispatching on the
-// jvp transform, AND we have a decomposition for the operation, then run
-// the decomposition.
-//
-// Let's break that down. There are a douple of moving pieces.
-//
-// 0. How do we know what transform we're dispatching on?
-// Easy, check the top of the DynamicLayerStack and read the transform.
-//
-// 1. Next, we must identify when an operation (e.g. nll_loss_backward)
-// gets dispatched to.
-// - register a special kernel to the DynamicLayerFrontMode key
-//   (see JVP_DECOMP)
-// - that special kernel invokes dynamicLayerFrontFallbackOperator with
-//   an arg indicating we're going to use a decomp
-//
-// 2. Next, we need to call the decomposition. See call_decomposition_for_jvp.
-// We currently use python decompositions that we torchscript.
-
-// Ideally c10::OperatorHandle would have a field like this
-// to identify the operator.
-// The stuff here should map 1:1 with the operator name.
-// aten::nll_loss_backward -> nll_loss_backward
-// aten::add.Tensor -> add_Tensor
-
-static void call_decomposition_for_jvp(
+static void dynamicLayerFrontFallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  run_jit_decomposition(op, stack);
-}
-
-static void dynamicLayerFrontFallbackOperator(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    bool decomp_jvp) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -434,13 +400,6 @@ static void dynamicLayerFrontFallbackOperator(
     dump_local_tls();
   }
 #endif
-
-  // Hack: if jvp and we have a decomposition registered, then do the decomposition
-  if (dynamicLayerStack.back().interpreter().key() == TransformType::Jvp &&
-      decomp_jvp) {
-    return call_decomposition_for_jvp(op, stack);
-  }
-
   // Save the current LocalDispatchKeySet (to the current DynamicLayer).
   // Upon exiting the current scope, that LocalDispatchKeySet gets restored.
   // When the current DynamicLayer dispatches to the next (inner) DynamicLayer,
@@ -460,16 +419,6 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
   return c10::impl::ForceDispatchKeyGuard(key_set);
 }
 
-void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack, false);
-}
-
-void dynamicLayerFrontFallBackWithDecomp(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack, true);
-}
-
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& layer = dynamicLayerStackAccessor().back();
   auto restore_guard = restoreLocalDispatchKeySetRAII(layer.interpreter().getSavedLocalDispatchKeySet());
@@ -485,25 +434,6 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
 TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
-
-#define JVP_DECOMP(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallBackWithDecomp>());
-
-#define JVP_DECOMP2(op, overload) \
-  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallBackWithDecomp>());
-
-TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
-  JVP_DECOMP(nll_loss_backward);
-  JVP_DECOMP(nll_loss2d_backward);
-  JVP_DECOMP(_log_softmax_backward_data);
-  JVP_DECOMP(_softmax_backward_data);
-  OP_DECOMPOSE(log_sigmoid);
-  JVP_DECOMP(log_sigmoid_forward);
-  JVP_DECOMP(native_layer_norm_backward);
-  JVP_DECOMP(native_batch_norm_backward);
-  JVP_DECOMP(cudnn_batch_norm_backward);
-}
-
 
 }
 } // namespace at
