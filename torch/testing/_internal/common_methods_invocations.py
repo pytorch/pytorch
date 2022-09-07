@@ -6770,7 +6770,11 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs=kwargs)
 
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # We get better tests if we change the range of the values to something like [-2,2]
+    # because for grid (second tensor argument) the "useful" range is [-1,1] and this way
+    # you get a better combination of out-of-range and in-range test cases
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
+                           low=-2, high=2)
 
     batch_size = 2
     num_channels = 3
