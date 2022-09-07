@@ -59,11 +59,16 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
   // but we can't do that unless we give BatchedTensorImpl a notion of storage.
   if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
   } else {
-      TORCH_INTERNAL_ASSERT(unwrapped.nbytes() == wrapped_inner.nbytes());
-      TORCH_INTERNAL_ASSERT(unwrapped.sizes() == wrapped_inner.sizes(),
-          "An inplace-mutation op (like transpose_() was called on an input to the functionalization pass."
-          " Propagating those mutations to the input is currently not supported.");
-      unwrapped.copy_(wrapped_inner);
+    if (unwrapped.nbytes() != wrapped_inner.nbytes()) {
+      // Functions might resize zero-sized inputs, which we need to reflect ehre.
+      unwrapped.resize_(wrapped_inner.sizes());
+    }
+    // If the input tensor's metadata was mutated, then use as_strided_()
+    // to propagate the metadata change.
+    if (unwrapped.sizes() != wrapped_inner.sizes()) {
+      unwrapped.as_strided_(wrapped_inner.sizes(), wrapped_inner.strides());
+    }
+    unwrapped.copy_(wrapped_inner);
   }
 }
 

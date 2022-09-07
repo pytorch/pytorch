@@ -8,11 +8,11 @@ import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.qat as nnqat
 import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -158,9 +158,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
@@ -557,7 +557,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -578,7 +578,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)

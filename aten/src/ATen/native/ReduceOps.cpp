@@ -1079,10 +1079,6 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<Scal
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor sum_symint(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 Tensor& sum_out(const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
@@ -1447,7 +1443,7 @@ inline void allany_impl(
   if (self.numel() == 0) {
     result.fill_(identity);
   } else if (self.numel() == 1) {
-    result.fill_(self.item().toBool());
+    result.copy_(self.view_as(result).to(at::kBool));
   } else {
     auto iter = get_allany_iter(self, result, dims, keepdim);
     stub(iter.device_type(), iter);
@@ -1977,9 +1973,6 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   at::NoNamesGuard guard;
   TORCH_CHECK(self.device() == other.device(), "Cannot compare two tensors on "
               "different devices. Got: ", self.device(), " and ", other.device());
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   if (!self.is_same_size(other)) {
     return false;
   }

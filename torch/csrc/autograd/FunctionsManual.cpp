@@ -497,6 +497,14 @@ Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
   }
 }
 
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
+  // masked_select does not work well with functorch, as its shape is
+  // data-dependent
+  return areAnyTensorSubclassLike({grad, mask})
+      ? at::where(mask, grad, 0).sum()
+      : grad.masked_select(mask).sum();
+}
+
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, out);
@@ -3481,7 +3489,7 @@ Tensor eig_backward(
     }
     // No support for complex eigenvalues for real inputs yet.
     TORCH_CHECK(
-        at::equal(is_imag_eigvals_zero, is_imag_eigvals_zero.new_ones({})),
+        at::is_scalar_tensor_true(is_imag_eigvals_zero),
         "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
   } else {
     // torch.eig returns 2d tensors for eigenvalues,
@@ -4019,6 +4027,60 @@ Tensor linalg_matrix_exp_differential(
       self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
 }
 
+template <typename F1, typename F2, typename... Ts>
+Tensor masked_fmap(
+    const Tensor& mask,
+    const F1& f1,
+    const F2& f2,
+    const Tensor& t,
+    const Ts&... ts) {
+  // This function takes two functions f1 and f2 and a (variadic) list of
+  // tensors, and creates a new tensor of the same shape as the first element of
+  // the list of tensors by applying the function f1 to the tensors for which
+  // the mask is true and f2 to the tensors for which the mask is false This
+  // function is used when we have a formula that works for, say, all
+  // non-singular inputs and another one for when the inputs are singular. See
+  // for example det_backward
+
+  // Precondition for the n == 0 case to make sense
+  TORCH_INTERNAL_ASSERT(t.numel() != 0);
+  auto t_masked = t.index({mask});
+  auto n = t_masked.numel();
+  if (n == t.numel()) {
+    return f1(t, ts...);
+  } else if (n == 0) {
+    return f2(t, ts...);
+  } else {
+    // Equivalent to
+    // ret = torch.empty_like(t)
+    // ret[mask] = f1(t1[mask], ..., tn[mask])
+    // ret[~mask] = f2(t1[~mask], ..., tn[~mask])
+    auto not_mask = mask.logical_not();
+    return at::empty_like(t)
+        .index_put_({mask}, f1(t_masked, ts.index({mask})...))
+        .index_put_(
+            {not_mask}, f2(t.index({not_mask}), ts.index({not_mask})...));
+  }
+}
+
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T) {
+  // (d det)_A(E) = tr(A^{-1}E)*det
+  // We use that the determinant is C^1 to approximate the gradient of singular
+  // inputs Since we never differentiate over forward AD, we don't need to deal
+  // with further gradients, as we do in grad_backward
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+  auto LU_ =
+      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+  auto AinvE =
+      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  return AinvE.diagonal(0, -2, -1).sum(-1) * det;
+}
+
 Tensor linalg_det_backward(
     const Tensor& grad,
     const Tensor& det,
@@ -4026,7 +4088,8 @@ Tensor linalg_det_backward(
     const Tensor& LU,
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
-  if (!grad.defined()) {
+  // A.numel() == 0 necessary for the singular case
+  if (!grad.defined() || A.numel() == 0) {
     return {};
   }
 
@@ -4035,45 +4098,55 @@ Tensor linalg_det_backward(
   auto d_diag = grad * det.conj();
   // Optimisation, Make it F-transposed as it's what lu_solve expects
   auto d = at::diag_embed(d_diag.unsqueeze(-1).expand_as(pivots)).mT();
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
 
+  // Optimisation if we are not going to compute higher-order gradients
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
-    // is invertible det is C^1, so if it's not invertible, we can wiggle the LU
-    // decomposition a bit and use the resulting matrix as a decent
-    // approximation
-    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    // is invertible det is C^1, so if it's not invertible, we can apply a
+    // perturbation to the LU decomposition and use the resulting matrix as a
+    // non-singular approximation
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     auto use_A_T = A.is_contiguous() && !A.is_complex();
     return at::linalg_lu_solve(
         LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
-    // If we want to compute further gradients, we need to recompute the LU
-    // decomposition so that autograd computes the correct gradients wrt to A
-    // (cf. solve_backward)
+    // If we want to compute higher-order gradients, we need to recompute the
+    // LU decomposition so that autograd computes the correct gradients wrt
+    // to A (cf. solve_backward)
+    auto non_singular =
+        [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
+          return at::linalg_solve(A.mH(), d);
+        };
 
-    // TODO When the user wants higher derivatives, the trick above just does
-    // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
-    // and then if any determinant is zero, use an SVD decomposition to compute
-    // the derivative in those inputs (not all inputs). The derivative may be
-    // then computed explicitly by noting that the gradient of the derivative of
-    // the determinant is given in terms of the adjugate of a matrix. Then, the
-    // adjugate of a singular matrix may be computed as per
-    // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
-    // The code may be implemented as follows:
-    //
-    // Tensor U, S, Vh;
-    // std::tie(U, S, Vh) = at::linalg_svd(A);
-    // auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
-    // auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
-    // return (U * D.unsqueeze(-2)).matmul(Vh);
-    //
-    // The issue with this code is that the derivative given by autograd of
-    // prod_safe_zeros_backward is not the second derivative of the product.
-    // It is not clear to me how to implement the second derivative of the
-    // product efficently. Note that this is also currently a problem when we
-    // compute higher derivatives of `x.prod()` and `x` has more than one zero.
-    return at::linalg_solve(A.mH(), d);
+    // The derivative may be then computed explicitly by noting that the
+    // gradient of the derivative of the determinant is given in terms of the
+    // adjugate of a matrix. The adjugate of a singular matrix may be computed
+    // as per https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
+    auto singular = [](const Tensor& A,
+                       const Tensor& /*d*/,
+                       const Tensor& grad) {
+      Tensor U, S, Vh;
+      std::tie(U, S, Vh) = at::linalg_svd(A);
+      auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
+      auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
+      return (U * D.unsqueeze(-2)).matmul(Vh);
+    };
+
+    // We could use the singular formula for all inputs but we try to filter out
+    // some inputs via the masking, as computing an SVD is about 100 times
+    // slower than computing an lu_solve on GPU
+    // For tensor subclasses, we can't call masked_fmap as it calls
+    // index({mask}) which needs to call item to compute the number of elements
+    // in the result.
+
+    if (areAnyTensorSubclassLike({A, d, grad})) {
+      return singular(A, d, grad);
+    } else {
+      return masked_fmap(
+          det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    }
   }
 }
 
@@ -5042,10 +5115,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
-
-  auto input_grad = at::zeros_like(input_);
-  auto tau_grad = at::zeros_like(tau);
-
   auto m = input_.size(-2);
   auto k = tau.size(-1);
 
@@ -5118,23 +5187,70 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // K <- H_0^{-1} @ K
   K = apply_householder_reflector(
       0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K, /*left=*/true);
-  for (const auto i : c10::irange(k)) {
-    // NOTE: narrow will unsqueeze(-1)
-    auto v_i = input.narrow(-1, i, 1);
-    auto t_i = tau.narrow(-1, i, 1);
 
-    Tensor v_i_grad, tau_i_grad;
-    std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-    input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
-    tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+  Tensor input_grad, tau_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as `input`, 'tau' or `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({input, tau, K})) {
+    std::vector<Tensor> input_grads = {};
+    std::vector<Tensor> tau_grads = {};
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
 
-    // K <- H_{i + 1}^{-1} @ K @ H_i
-    if (i < k - 1) {
-      auto v_i_next = input.narrow(-1, i + 1, 1);
-      auto s_i_next = sigma.narrow(-1, i + 1, 1);
-      K = apply_householder_reflector(
-          i + 1, v_i_next, s_i_next, K, /*left=*/true);
-      K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grads.push_back(v_i_grad.squeeze(-1));
+      tau_grads.push_back(tau_i_grad.squeeze(-1));
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
+    }
+
+    input_grad = at::stack(input_grads, -1);
+    tau_grad = at::stack(tau_grads, -1);
+
+    // Only first k columns are active in forward.
+    // zero gradients for the inactive input.
+    if (k < input.size(-1)) {
+      auto input_sizes = input_.sizes();
+      at::DimVector new_sizes(input_sizes);
+      new_sizes[input_.dim() - 1] = input.size(-1) - k;
+      auto zeros = at::zeros(new_sizes, input_.options());
+      input_grad = at::cat({input_grad, zeros}, -1);
+    }
+  } else {
+    input_grad = at::zeros_like(input_);
+    tau_grad = at::zeros_like(tau);
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
+
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
+      tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
     }
   }
 
@@ -5226,10 +5342,18 @@ Tensor householder_product_jvp(
 
     H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
 
-    dprod.add_(H_minus.matmul(
+    // `H_minus_dH_i_H_plus` = H_1 * ... * H_{i-1} dH_i * H_{i+1} * ...
+    auto H_minus_dH_i_H_plus = H_minus.matmul(
         apply_simple_product(v_i, v_i, dtau_i, H_plus) +
         apply_simple_product(dv_i, v_i, tau_i, H_plus) +
-        apply_simple_product(v_i, dv_i, tau_i, H_plus)));
+        apply_simple_product(v_i, dv_i, tau_i, H_plus));
+    // For Composite Compliance, if `intermediate` is a Tensor-Subclass,
+    // we use out-of-place variant of add.
+    if (at::isTensorSubclassLike(H_minus_dH_i_H_plus)) {
+      dprod = dprod.add(H_minus_dH_i_H_plus);
+    } else {
+      dprod.add_(H_minus_dH_i_H_plus);
+    }
 
     H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
   }

@@ -78,7 +78,7 @@ jobs:
     !{{ upload.binary_env(config) }}
     steps:
       !{{ common.setup_rocm_linux() }}
-      - uses: !{{ common.download_artifact_s3_action }}
+      - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
