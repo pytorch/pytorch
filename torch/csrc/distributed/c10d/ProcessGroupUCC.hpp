@@ -158,13 +158,6 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     friend class Comm;
 
    public:
-    WorkUCC(OpType opType, const char* prof_title)
-        : ProcessGroup::Work(-1, opType, prof_title) {}
-    WorkUCC(
-        OpType opType,
-        const char* prof_title,
-        const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-        : ProcessGroup::Work(-1, opType, prof_title), logger_(logger) {}
     WorkUCC(
         OpType opType,
         const char* prof_title,
