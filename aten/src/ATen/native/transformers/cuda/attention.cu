@@ -18,6 +18,13 @@
 
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+
+#ifdef USE_FLASH_ATTENTION
+#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#endif
+
+#include <ATen/native/transformers/cuda/sdp_utils.h>
+
 namespace at {
 
 namespace native {
@@ -406,6 +413,152 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+}
+std::tuple<Tensor,Tensor> flash_attention_helper_dense(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool need_atten_weights,
+    bool is_causal) {
+  TORCH_INTERNAL_ASSERT(
+      !query.is_nested() && !key.is_nested() && !value.is_nested());
+  //  Query is of size (batch_size x dense_seq_len x 3 x n_heads
+  //  head_dim)
+  const auto batch_size = query.size(0);
+  auto max_seqlen_batch_q = query.size(1);
+  int64_t head_dim{query.size(-1)};
+  int64_t num_heads{query.size(-2)};
+
+  auto cumulative_sequence_length_q = at::arange(
+      0,
+      (batch_size + 1) * max_seqlen_batch_q,
+      max_seqlen_batch_q,
+      TensorOptions().device(at::kCUDA).dtype(at::kInt));
+  int64_t Nnz_q{batch_size * max_seqlen_batch_q};
+
+  if (key.is_same(value) || query.is_same(key) || query.is_same(value)) {
+    // In the dense case flash attention expects an input that is
+    // (b*s) x num_heads x head_dim
+    auto query_reshaped = query.reshape({Nnz_q, 3, num_heads, head_dim}).transpose(0, 1).contiguous();
+    // If we are passing in query, key, value all the same tensors than we have
+    // packed them into one tensor and need to slice for flash attention
+    auto q = query_reshaped[0];
+    auto k = query_reshaped[1];
+    auto v = query_reshaped[2];
+
+    TORCH_CHECK(q.is_contiguous());
+    TORCH_CHECK(k.is_contiguous());
+    TORCH_CHECK(v.is_contiguous());
+
+    // If we are passing in query, key, value all the same tensors then we have
+    // packed them into one tensor and need to slice for flash attention
+    std::tuple<Tensor,Tensor> attention_and_weights = at::_flash_scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_q,
+        max_seqlen_batch_q,
+        max_seqlen_batch_q,
+        dropout_p,
+        need_atten_weights,
+        is_causal);
+    // Reshape output to convert nnz to batch_size and seq_len
+    std::get<0>(attention_and_weights) = std::get<0>(attention_and_weights).reshape({batch_size, max_seqlen_batch_q, num_heads, head_dim});
+    return attention_and_weights;
+  }
+
+  // Query, Key, and Value are not all the same tensor and therefore need to
+  // calculate K meta data
+  auto max_seqlen_batch_k = key.size(1);
+  auto cumulative_sequence_length_k = at::arange(
+      0,
+      (batch_size + 1) * max_seqlen_batch_k,
+      max_seqlen_batch_k,
+      TensorOptions().device(at::kCUDA).dtype(at::kInt));
+
+  // K and V have to have the same Nnz, should probably torch_check before
+  // assume for now in order to not iterate over v
+  int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
+
+  // Calculate head dim
+  TORCH_INTERNAL_ASSERT(query.size(-1) == key.size(-1));
+  TORCH_INTERNAL_ASSERT(query.size(-1) == value.size(-1));
+
+  auto query_reshaped = query.reshape({Nnz_q, num_heads, head_dim}).contiguous();
+  auto key_reshaped = key.reshape({Nnz_kv, num_heads, head_dim}).contiguous();
+  auto value_reshaped = value.reshape({Nnz_kv, num_heads, head_dim}).contiguous();
+
+  std::tuple<Tensor,Tensor> attention_and_weights = at::_flash_scaled_dot_product_attention(
+      query_reshaped,
+      key_reshaped,
+      value_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      need_atten_weights,
+      is_causal);
+  // Reshape output to convert nnz to batch_size and seq_len
+    // Reshape output to convert nnz to batch_size and seq_len
+    std::get<0>(attention_and_weights) = std::get<0>(attention_and_weights).reshape({batch_size, max_seqlen_batch_q, num_heads, head_dim});
+    return attention_and_weights;
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+
+    // Determine which efficient kernel to use
+    sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
+    auto backend = select_sdp_backend(kernel_params);
+    switch(backend){
+      case sdp::SDPBackend::flash_attention:
+          return flash_attention_helper_dense(query_, key, value, dropout_p, need_attn_weights, is_causal);
+      case sdp::SDPBackend::mem_eff_attention:
+        TORCH_CHECK(false, "Mem efficient attention is not supported yet");
+        return std::make_tuple(Tensor(), Tensor());
+      case sdp::SDPBackend::math:
+        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+      default:
+        TORCH_CHECK(false, "Unsupported backend for scaled_dot_product_attention");
+        return std::make_tuple(Tensor(), Tensor());
+    }
+}
+
+std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool need_attn_weights,
+    bool is_causal) {
+#if defined(USE_FLASH_ATTENTION)
+  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  std::vector<Tensor> output = fmha::mha_fwd(
+      query,
+      key,
+      value,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      softmax_scale,
+      false,
+      is_causal,
+      need_attn_weights,
+      c10::nullopt);
+  return need_attn_weights? std::make_tuple(output[0], output[2]): std::make_tuple(output[0], Tensor{});
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(Tensor{}, Tensor{});
 }
 
 Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){

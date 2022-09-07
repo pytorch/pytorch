@@ -84,18 +84,12 @@ void add_padding_kernelLauncher(
     const int batch_size,
     const int output_batch_size);
 
-Tensor flash_attention_helper_dense(
+TORCH_API std::tuple<Tensor, Tensor> flash_attention_helper(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool causal);
-
-Tensor flash_attention_helper(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    double dropout_p,
-    bool causal);
+    bool need_atten_weights,
+    bool is_causal);
 } // namespace native
 } // namespace at
