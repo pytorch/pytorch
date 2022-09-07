@@ -1564,12 +1564,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
             ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_forward_ad"
-            ),
         ],
     ),
     OpInfo(
