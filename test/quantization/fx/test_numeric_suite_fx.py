@@ -79,6 +79,8 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_results_n_shadows_model,
     OutputComparisonLogger,
     print_comparisons_n_shadows_model,
+    loggers_set_enabled,
+    loggers_set_save_activations,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
@@ -2089,6 +2091,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         msq = convert_n_shadows_model(msp)
 
+        loggers_set_enabled(msq, True)
         msq(*example_input)
 
         results = extract_results_n_shadows_model(msq)
@@ -2254,6 +2257,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         # check behavior with save_activations enabled
         msq = convert_n_shadows_model(copy.deepcopy(msp))
+        loggers_set_enabled(msq, True)
+        loggers_set_save_activations(msq, True)
         # after prepare calibration but before convert calibration, loggers
         # should not have anything saved
         _check_logger_count(msq, 0, 0)
@@ -2262,7 +2267,9 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         _check_logger_count(msq, 1, 1)
 
         # check behavior with save_activations disabled
-        msq = convert_n_shadows_model(copy.deepcopy(msp), save_activations=False)
+        msq = convert_n_shadows_model(copy.deepcopy(msp))
+        loggers_set_enabled(msq, True)
+        loggers_set_save_activations(msq, False)
         # after prepare calibration but before convert calibration, loggers
         # should not have anything saved
         _check_logger_count(msq, 0, 0)

@@ -966,18 +966,26 @@ def prepare_n_shadows_model(
     mt.recompile()
     return mt
 
-def convert_n_shadows_model(model: GraphModule, save_activations=True) -> GraphModule:
+def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
+    for name, child in model.named_modules():
+        if isinstance(child, OutputLogger):
+            child.enabled = enabled
+
+def loggers_set_save_activations(
+    model: torch.nn.Module,
+    save_activations: bool,
+) -> None:
+    for name, child in model.named_modules():
+        if isinstance(child, OutputLogger):
+            child.save_activations = save_activations
+
+def convert_n_shadows_model(model: GraphModule) -> GraphModule:
     for node in model.graph.nodes:
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
             orig_mod = getattr(model, node.name)
             converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
                 orig_mod)
             setattr(model, node.name, converted_mod)
-
-    for name, child in model.named_modules():
-        if isinstance(child, OutputLogger):
-            child.enabled = True
-            child.save_activations = save_activations
 
     return model
 
