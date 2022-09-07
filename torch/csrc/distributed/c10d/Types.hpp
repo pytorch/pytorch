@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Store.hpp>
+#include <c10d/Store.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -156,7 +156,7 @@ struct DistributedBackendOptions {
   int group_rank;
   int group_size;
   std::chrono::duration<float> timeout;
-  int group_id;
+  std::string group_id;
   std::vector<int64_t> global_ranks_in_group;
 };
 
