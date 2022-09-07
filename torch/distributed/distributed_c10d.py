@@ -870,12 +870,6 @@ def _new_process_group_helper(
             creator_fn = backend_plugin.creator_fn
             extended_api = Backend._plugins[backend.upper()].extended_api
 
-            import inspect
-            if pg_options is None:
-                backend_module = inspect.getmodule(creator_fn)
-                if 'Options' not in dict(inspect.getmembers(backend_module, inspect.isclass)):
-                    logger.warn(f"Process group Options not defined in {backend.upper()} implementation")
-
             if not extended_api:
                 pg = creator_fn(prefix_store, group_rank, group_size, timeout)
             else:
