@@ -7,6 +7,11 @@
 #pragma once
 #include <c10/core/DispatchKey.h>
 
+// This file contains aliases for dispatch keys related to functorch.
+// We created these initially just in case we needed to change the names
+// of the keys in core but that is no longer relevant, so this file can
+// be deleted after refactoring.
+
 namespace at {
 namespace functorch {
 
