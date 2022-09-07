@@ -86,6 +86,31 @@ struct OpRecord : RecordFunctor {
   std::function<OutType(ArgTypes...)> fusion_op_;
 };
 
+struct ViewOpRecord : RecordFunctor {
+  ViewOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int64_t>& original_sizes,
+      std::vector<int64_t>& new_sizes)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        original_sizes_(std::move(original_sizes)),
+        new_sizes_(std::move(new_sizes)) {}
+  virtual ~ViewOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto output =
+        torch::jit::fuser::cuda::view(arg, original_sizes_, new_sizes_);
+    fd.setFusionState(outputs.at(0), output);
+  }
+
+ private:
+  //! Represents the tensor dimensions of the input tensor.
+  std::vector<int64_t> original_sizes_;
+  //! Represents the tensor dimensions of the output tensor.
+  std::vector<int64_t> new_sizes_;
+};
+
 struct SqueezeOpRecord : RecordFunctor {
   SqueezeOpRecord(
       std::vector<size_t> _args,

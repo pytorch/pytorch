@@ -935,6 +935,19 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::return_value_policy::reference);
 
   nvf_ops.def(
+      "view",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int64_t>& original_sizes,
+         std::vector<int64_t>& new_sizes) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::ViewOpRecord(
+            {arg->index}, {output->index}, original_sizes, new_sizes));
+        return output;
+      },
+      py::return_value_policy::reference);
+
+  nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor* arg,
