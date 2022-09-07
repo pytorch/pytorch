@@ -133,10 +133,10 @@ class TestPythonKey(AOTTestCase):
         includes_method_relu_ = any(
             str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
         )
-        self.assertTrue(includes_relu_)
+        self.assertTrue(includes_method_relu_)
         # Also verifies fix for https://github.com/pytorch/pytorch/issues/84570
         gm = make_fx(functionalize(symbolic_gm))(a)
-        include_aten_relu = any(
+        includes_aten_relu = any(
             n.target == torch.ops.aten.relu.default for n in gm.graph.nodes
         )
         self.assertTrue(include_relu)
