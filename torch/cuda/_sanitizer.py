@@ -497,9 +497,7 @@ class ArgumentHandler:
         kwargs: Dict[str, Any],
     ) -> None:
         for argument, value in zip_arguments(schema, args, kwargs):
-            is_write = False
-            if hasattr(argument, "alias_info") and argument.alias_info is not None:
-                is_write = getattr(argument.alias_info, "is_write", False)
+            is_write = argument.alias_info is not None and argument.alias_info.is_write
             tree_map(
                 functools.partial(
                     self._handle_argument, is_write=is_write, name=argument.name
