@@ -1338,7 +1338,8 @@ void initJITBindings(PyObject* module) {
           })
       .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
       .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
-      .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+      .def("__str__", [](c10::SymIntNode a) { return a->str(); })
+      .def("__repr__", [](c10::SymIntNode a) { return a->str(); });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -1739,6 +1740,11 @@ void initJITBindings(PyObject* module) {
           "is_mutable",
           [](SchemaInfo& self, const SchemaArgument& argument) {
             return self.is_mutable(argument);
+          })
+      .def(
+          "has_argument",
+          [](SchemaInfo& self, const std::string& name) {
+            return self.has_argument(name);
           })
       .def(
           "is_mutable",
