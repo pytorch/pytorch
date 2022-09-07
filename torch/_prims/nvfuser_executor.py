@@ -5,7 +5,7 @@ from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number
+from torch._prims_common import getnvFuserDtype, Number, number_type
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -44,19 +44,37 @@ def to_nvfuser_template_args(args):
                 arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
             )
         elif isinstance(arg, Number):
-            return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
+            return nvFuserScalarTemplate(getnvFuserDtype(number_type(arg)))
         else:
             return arg
 
     return tree_map(to_nvfuser, args)
 
 
+def _any_get_attr_used(call_function_nodes):
+    return any(
+        filter(
+            # bug in mypy https://github.com/python/mypy/issues/12682
+            lambda n: any(  # type: ignore[arg-type]
+                a.op == "get_attr" for a in n.args if isinstance(a, torch.fx.Node)  # type: ignore[attr-defined]
+            ),
+            call_function_nodes,
+        )
+    )
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
-    # PROTOTYPE nvfuser executor
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "Attempting to use nvFuser trace executor but CUDA is not available!"
+        )
+
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
+        if node.op == "call_function" and "getitem" in node.name:
+            continue
         if (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is None
@@ -65,6 +83,21 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 "All call_function nodes in the graph must support nvfuser. "
                 f"Node {node} with target {node.target} does not support nvfuser"
             )
+
+    graph_input_nodes = list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))
+    call_function_nodes = list(
+        filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    )
+    assert len(graph_input_nodes) == len(
+        nv_args_templates
+    ), "Number of placeholder nodes in the graph must match number of args"
+    assert len(nv_args_templates) > 0, "There must be at least one argument"
+    assert (
+        len(call_function_nodes) > 0
+    ), "Graph must contain at least one call_function node"
+    assert not _any_get_attr_used(
+        call_function_nodes
+    ), "Constant tensors that are saved in the graph and used as arguments are not supported yet"
 
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
@@ -76,7 +109,24 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         class FusionInterpreter(torch.fx.Interpreter):
+            def run_node(self, node):
+                # Squeeze requires original shape of args[0]
+                if node.target in [
+                    torch.ops.nvprims.squeeze,
+                    torch.ops.nvprims.squeeze.default,
+                ]:
+                    original_shape = list(node.args[0].meta["tensor_meta"].shape)
+                    assert len(node.args) == 2
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    args = [args[0], original_shape, args[1]]
+                    return self.call_function(node.target, args, node.kwargs)
+                return super().run_node(node)
+
             def call_function(self, target, args, kwargs):
+                # This handles tuple unpacking
+                if "getitem" in str(target):
+                    assert isinstance(args[0], tuple)
+                    return target(*args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
                 target = target.impl_nvfuser
                 args = (fd,) + args
@@ -103,11 +153,6 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
 
 def nvfuser_execute(gm: GraphModule, *args):
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "Attempting to use nvFuser trace executor but CUDA is not available!"
-        )
-
     flat_args, _ = tree_flatten(args)
 
     # Construction of the fusion is expensive and cached based on the GraphModule
@@ -132,6 +177,7 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
+            or "getitem" in node.name  # getitem is a special case
         )
 
 
@@ -160,11 +206,25 @@ class NvfuserGraphModule(torch.nn.Module):
 @lru_cache()  # type: ignore[arg-type]
 def maybe_partition_graph(gm: GraphModule):
     supported_ops = NvfuserPrimOperatorSupport()
-    call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    call_function_nodes = list(
+        filter(lambda n: n.op == "call_function", gm.graph.nodes)
+    )
     # the graph is partitioned only if at least one node is not supported by nvFuser
     any_unsupported = any(
         not supported_ops.is_node_supported(None, node) for node in call_function_nodes
     )
+    any_unsupported |= len(call_function_nodes) == 0
+
+    # When there are constant tensors in the graph, we can't partition it
+    # because deepcopy fails. Here we just return the original graph to be
+    # executed by eager mode
+    # https://github.com/pytorch/pytorch/issues/84415
+    if (
+        _any_get_attr_used(call_function_nodes)
+        or len(list(filter(lambda n: n.op == "placeholder", gm.graph.nodes))) == 0
+    ):
+        return gm, True
+
     if any_unsupported:
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
