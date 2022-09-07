@@ -185,7 +185,8 @@ class TestPrims(TestCase):
     def test_nvfuser_no_args(self, device):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.executor import execute, make_nvfuser_fusion
+        from torch._prims.executor import execute
+        from torch._prims.nvfuser_executor import make_nvfuser_fusion
 
         a = torch.randn(3, 3, device=device)
 

@@ -163,7 +163,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     if any(isinstance(arg, torch.Tensor) and arg.is_cuda for arg in flat_args) and all(  # type: ignore[attr-defined]
         (
             not isinstance(arg, torch.Tensor)
-            or (arg.is_cpu and arg.ndim != 0)
+            or (arg.is_cpu and arg.ndim == 0)
             or arg.is_cuda  # type: ignore[attr-defined]
         )
         for arg in flat_args
