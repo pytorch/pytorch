@@ -650,6 +650,10 @@ class FlatParamHandle:
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
+        if self._registered_orig_params:
+            # TODO (awgu): I am not sure if we want to enable this by default
+            # for `use_orig_params=True` since there may be some CPU overhead.
+            self._writeback_orig_params()
         if self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
         elif self._config.offload_params and self.flat_param.device != self.device:
