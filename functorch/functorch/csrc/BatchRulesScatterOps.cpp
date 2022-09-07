@@ -1050,7 +1050,7 @@ std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
   m.impl("index_put", index_put_plumbing);

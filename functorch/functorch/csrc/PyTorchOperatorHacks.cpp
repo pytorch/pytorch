@@ -290,7 +290,7 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
 
 } // dropout_hack
 
-TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("index_select_backward", index_select_backward_hack);
   m.impl("linear", linear_hack);
   m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);

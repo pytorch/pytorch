@@ -276,7 +276,7 @@ at::Tensor nll_loss_backward_decomposition(
   return grad_input * grad_output_;
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nll_loss_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss2d_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);

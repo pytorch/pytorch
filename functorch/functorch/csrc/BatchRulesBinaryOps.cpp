@@ -301,7 +301,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   m.impl("binomial", BINARY_RANDOM_POINTWISE_BATCH_RULE(at::functorch::binomial_wrapper));
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT2(op, overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 #define BINARY_POINTWISE(op) \

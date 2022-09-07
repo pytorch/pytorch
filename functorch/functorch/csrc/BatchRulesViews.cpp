@@ -58,7 +58,7 @@ namespace at { namespace functorch {
 //
 // Now that we have written `sum_batch_rule`, we have to register it inside a
 // TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     VMAP_SUPPORT2(sum, int, sum_batch_rule);
 //     ...
@@ -79,7 +79,7 @@ namespace at { namespace functorch {
 //     return torch.add(self, product, value);
 //   }
 // And register it inside a TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     m.impl("addcmul", addcmul_decomp);
 //     ...
@@ -519,7 +519,7 @@ Tensor expand_symint_decomp_hack(const Tensor& self, SymIntArrayRef packed_size,
    return self.expand(size, implicit);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));

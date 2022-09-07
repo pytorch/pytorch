@@ -504,7 +504,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
 }
 
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(convolution, convolution_batch_rule);
   m.impl("_convolution", _convolution_decomp);
   m.impl("convolution_backward", convolution_backward_plumbing);

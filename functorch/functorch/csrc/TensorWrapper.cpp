@@ -184,7 +184,7 @@ void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Sta
 
 // TensorWrapper backend fallback: Unwrap and fallthrough.
 
-TORCH_LIBRARY_IMPL(_, FT_GRAD_WRAPPER_KEY, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 

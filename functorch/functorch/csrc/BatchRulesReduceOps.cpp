@@ -368,7 +368,7 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(searchsorted, Tensor, searchsorted_batch_rule);
   REDUCTION_BOXED(_fft_r2c);
   REDUCTION_BOXED(_fft_c2r);

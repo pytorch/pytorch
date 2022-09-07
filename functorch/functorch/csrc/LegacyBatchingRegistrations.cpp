@@ -771,11 +771,11 @@ Tensor& BatchedTensor_requires_grad_(Tensor& self, bool requires_grad) {
 }
 
 
-TORCH_LIBRARY_IMPL(_, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
