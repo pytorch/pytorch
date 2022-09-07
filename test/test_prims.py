@@ -2,6 +2,7 @@
 
 from functools import partial
 from itertools import product
+import warnings
 from warnings import catch_warnings
 import unittest
 
@@ -23,17 +24,15 @@ import torch._refs as refs
 if TEST_SCIPY:
     import scipy.special
 
+NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 
 class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
-        # nvfuser is not currently capable of realizing a broadcasted tensor
-        # when the broadcast is the only operation.  Another op is needed.
         def _wrapper(a, b, broadcast_dimensions):
-            a_bc = prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
-            return prims.add(a_bc, b)
+            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
 
         traced = make_traced(_wrapper)
         make_arg = partial(make_tensor, device=device, dtype=dtype)
@@ -184,6 +183,7 @@ class TestPrims(TestCase):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
+        from torch._prims.nvfuser_executor import make_nvfuser_fusion
 
         a = torch.randn(3, 3, device=device)
 
@@ -193,8 +193,13 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)()
 
-        with self.assertRaisesRegex(AssertionError, "There must be at least one argument"):
+        with warnings.catch_warnings(record=True) as caught:
             execute(gm, executor="strictly_nvfuser")
+        # fusion execute with no cuda input is handled by nvprim aten fallback
+        self.assertTrue(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
+
+        with self.assertRaisesRegex(AssertionError, "There must be at least one argument"):
+            make_nvfuser_fusion(gm)
 
         with self.assertRaisesRegex(AssertionError, "Number of placeholder nodes in the graph must match"):
             execute(gm, a, executor="strictly_nvfuser")
@@ -475,6 +480,47 @@ class TestPrims(TestCase):
             for node in call_function_nodes
         )
         self.assertTrue(includes_nvprims_var_mean)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float16)
+    def test_cpu_tensor(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        def _wrapper(t0, t1, cpu_scalar):
+            return t0 + t1 + cpu_scalar
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((12, 1))
+        b = make_arg((12, 12))
+        c = torch.tensor(0.5)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(_wrapper)(a, b, c)
+
+        with warnings.catch_warnings(record=True) as caught:
+            actual = execute(gm, a, b, c, executor="nvfuser")
+        # cpu scalar tensor is handled by nvfuser codegen, so it shouldn't fallback
+        self.assertFalse(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
+
+        expected = execute(gm, a, b, c, executor="aten")
+        self.assertEqual(expected, actual)
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_aten_add = any(
+            torch.ops.aten.add.default == node.target
+            for node in call_function_nodes
+        )
+        self.assertFalse(includes_aten_add)
+
+        with warnings.catch_warnings(record=True) as caught:
+            nvprim_aten_fallback = execute(gm, a.cpu(), b.cpu(), c, executor="nvfuser")
+        # cpu tensor is handled by nvprim aten fallback, assert that it's indeed in warning
+        self.assertTrue(any(NVPRIM_ATEN_FALLBACK_WARNING in str(w.message) for w in caught))
+
+        self.assertEqual(expected, nvprim_aten_fallback)
 
     @onlyCUDA
     @skipCUDAIfRocm

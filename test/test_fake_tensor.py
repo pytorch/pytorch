@@ -392,12 +392,12 @@ class FakeTensorConstHandling(TestCase):
             self.assertTrue(arg.constant is None)
 
     def test_simple(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor(4.)
             self.assertEqual(x.item(), 4.)
 
     def test_inplace_add(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor(4.)
             y = x.add_(1)
             self.assertEqual(x.item(), 5.)
@@ -405,7 +405,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertConst(x, y)
 
     def test_shared_storages(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor([4.])
             y = x[:]
 
@@ -413,7 +413,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertEqual(x.constant.storage()._cdata, y.constant.storage()._cdata)
 
     def test_constant_invalidation(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor([1.])
             self.assertConst(x)
             y = torch.rand([1])
@@ -421,7 +421,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertNotConst(x)
 
     def test_inplace_view_invalidation(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor([1])
             self.assertConst(x)
             x.resize_([2])
@@ -429,7 +429,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertNotConst(x)
 
     def test_shared_storage_invalidation(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor([1.])
             y = x[:]
             self.assertConst(x, y)
@@ -437,7 +437,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertNotConst(x, y)
 
     def test_aliased_const_write(self):
-        with FakeTensorMode(const_tensors=True):
+        with FakeTensorMode():
             x = torch.tensor([1])
             y = x.expand([4])
             self.assertNotConst(y)
