@@ -78,6 +78,13 @@ jobs:
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_MERGE_BASE" \
                   --pr-head-sha "$PR_HEAD_SHA"
+      - name: Upload result to S3
+        run: |
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          python3 pytorch/.github/scripts/run_torchbench.py \
+                  s3-upload \
+                  --result-dir "~/.torchbench/bisection/pr${{ github.event.number }}"
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci

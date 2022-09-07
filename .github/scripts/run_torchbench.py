@@ -17,6 +17,7 @@ import git  # type: ignore[import]
 import pathlib
 import argparse
 import subprocess
+from pathlib import Path
 
 from typing import List, Tuple
 
@@ -137,9 +138,16 @@ def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, h
     print(f"Running torchbench userbenchmark command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
+def process_upload_s3(result_dir):
+    # validate result directory
+    result_dir = Path(result_dir)
+    assert result_dir.exists(), f"Specified result directory doesn't exist."
+    # upload all files to S3 bucket oss-ci-metrics
+    pass
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
-    parser.add_argument('--pr-body', required=True, help="The file that contains body of a Pull Request")
+    parser.add_argument('--pr-body', help="The file that contains body of a Pull Request")
 
     subparsers = parser.add_subparsers(dest='command')
     # parser for setup the torchbench branch name env
@@ -151,6 +159,9 @@ if __name__ == "__main__":
     run_parser.add_argument('--pr-head-sha', required=True, type=str, help="The Pull Request head hash")
     run_parser.add_argument('--pytorch-path', required=True, type=str, help="Path to pytorch repository")
     run_parser.add_argument('--torchbench-path', required=True, type=str, help="Path to TorchBench repository")
+    # parser to upload results to S3
+    upload_parser = subparsers.add_parser("upload-s3")
+    upload_parser.add_argument('--result-dir', required=True, type=str, help="Path to benchmark output")
     args = parser.parse_args()
 
     if args.command == 'set-torchbench-branch':
@@ -181,6 +192,8 @@ if __name__ == "__main__":
         if not models and not userbenchmarks:
             print("Can't parse valid models or userbenchmarks from the pr body. Quit.")
             exit(-1)
+    elif args.command == 'upload-s3':
+        process_upload_s3(args.result_dir)
     else:
         print(f"The command {args.command} is not supported.")
         exit(-1)
