@@ -891,7 +891,9 @@ void TensorImpl::set_sizes_and_strides(
     c10::optional<c10::SymInt> storage_offset) {
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
   auto int_strides = asIntArrayRefSlowOpt(strides);
-  if (int_sizes && int_strides && (!storage_offset.has_value() || !storage_offset->is_symbolic()) && !has_symbolic_sizes_strides_) {
+  if (int_sizes && int_strides &&
+      (!storage_offset.has_value() || !storage_offset->is_symbolic()) &&
+      !has_symbolic_sizes_strides_) {
     set_sizes_and_strides(*int_sizes, *int_strides);
     if (storage_offset.has_value())
       set_storage_offset(storage_offset->as_int_unchecked());

@@ -802,10 +802,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    tensor_impl->set_sizes_and_strides(sym_sizes, sym_strides, sym_storage_offset.value_or(0));
-
-    // N.B. we ignore the storage argument as it's eiher stored on a python
-    // tensor or gets overriden for XLA
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {

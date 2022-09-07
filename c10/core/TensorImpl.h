@@ -229,7 +229,7 @@ struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
-  SymInt storage_offset_ = 0; // TODO
+  SymInt storage_offset_ = 0;
   // TODO:
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -618,7 +618,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->sizes_;
     } else {
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(sizes_default());
+      // Sizes guaranteed to be non-negative, so unchecked cast is OK
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          sizes_default());
     }
   }
 
@@ -730,7 +732,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
-    return sym_strides_default();
+    // strides guaranteed to be non-negative, so unchecked cast is OK
+    return c10::SymIntArrayRef::fromIntArrayRefUnchecked(strides_default());
   }
 
   IntArrayRef strides_default() const {
@@ -1577,7 +1580,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
    */
-  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride, c10::optional<int64_t> storage_offset = c10::nullopt) {
+  void set_sizes_and_strides(
+      IntArrayRef new_size,
+      IntArrayRef new_stride,
+      c10::optional<int64_t> storage_offset = c10::nullopt) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "set_sizes_and_strides ",
@@ -1622,8 +1628,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_numel();
     refresh_contiguous();
 
-    if (storage_offset.has_value())
+    if (storage_offset.has_value()) {
       storage_offset_ = *storage_offset;
+    }
   }
 
   /**
