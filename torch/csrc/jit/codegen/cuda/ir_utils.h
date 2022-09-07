@@ -106,6 +106,10 @@ class FilteredView {
     return begin() == end();
   }
 
+  std::vector<value_type> vector() const {
+    return std::vector<value_type>(begin(), end());
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;

@@ -1,4 +1,5 @@
 #pragma once
+#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/compile_time_info.h>
@@ -33,13 +34,19 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
   static constexpr size_t max_alignment_size_in_byte = 16;
 
   //! Create runtime info for given fusion and input. Creating and binding
-  //! evaluator is optional. The evaluator is used to manage intermediate
+  //!  evaluator is optional. The evaluator is used to manage intermediate
   //!  integers in the fusion. We need them for segmenter and schedulers,
   //!  but we don't need them when we are just using this class to provide
   //!  additional encoding for kernel cache lookup.
   SchedulerRuntimeInfo(
       Fusion* complete_fusion,
-      const at::ArrayRef<at::IValue>& inputs,
+      const KernelArgumentHolder& inputs,
+      bool create_expr_evaluator = false);
+
+  // TODO: Remove this guy below. Everything needs to go into the other ctor
+  SchedulerRuntimeInfo(
+      Fusion* complete_fusion,
+      const at::ArrayRef<at::IValue>& aten_inputs,
       bool create_expr_evaluator = false);
 
   //! Lookup for the alignment sizes of the given tv. Currently only returns
@@ -78,12 +85,11 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
 
  private:
   // Bind full fusion inputs to the internal expression evaluator
-  void initializeExpressionEvaluator(const at::ArrayRef<at::IValue>& inputs);
+  void initializeExpressionEvaluator(const KernelArgumentHolder& inputs);
 
-  // check if input is compatible with 32b index mode
-  void collectIndexModeInfo(const at::ArrayRef<at::IValue>& inputs);
+  // Initialize SchedulerRuntimeInfo
+  void initialize(const KernelArgumentHolder& args, bool create_expr_evaluator);
 
- private:
   bool isInputTv(TensorView* tv) {
     return std::find(
                complete_fusion_->inputs().begin(),
@@ -91,6 +97,7 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
                tv) != complete_fusion_->inputs().end();
   }
 
+ private:
   // Returns the offset of tv in the inputs ignoring non tensor views. Used to
   // access input_sizes, input_strides, input_ptr
   int offsetTensorPos(TensorView* tv);

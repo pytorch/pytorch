@@ -92,36 +92,49 @@ void IndexLowering::handle(const kir::ForLoop* for_loop) {
   active_scope_ = prev_scope;
 }
 
-// TODO: use a separate IR node to represent rand like
-void IndexLowering::lowerRandLike(const UnaryOp* uop) {
+void IndexLowering::handle(const RNGOp* rop) {
   // Write random tensor indices into the consumer
   //  tensor index if the output is a tensor.
-  auto out_tv = dynamic_cast<TensorView*>(uop->out());
+  auto out_tv = dynamic_cast<TensorView*>(rop->output(0));
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "rand scalar not yet supported");
 
-  // TODO: using in as a placeholder for the random tensor index
-  //  would need to keep this space on the new rand op when separating
-  //  randlike from the unary op.
-  auto in = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getRandomTensorStridedIndices(out_tv, for_loops_));
+  // TensorIndex for philox subsequence and component.
+  auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
+      out_tv, Index::getLinearIndex(out_tv, for_loops_));
 
   // TensorIndex for writing randlike output.
-  const auto out = lowerDstIndex(uop->out());
+  const auto out = lowerDstIndex(out_tv);
 
-  pushBack(IrBuilder::create<UnaryOp>(
-      UnaryOpType::RandLike, out, in, uop->getRNGOffset()));
-  GpuLower::current()->propagateExprInfo(uop, back());
+  auto lowered = IrBuilder::create<RNGOp>(
+      rop->getRNGOpType(), out, rop->getRNGOffset(), philox_index);
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(rop, back());
+}
+
+void IndexLowering::handle(const ARangeOp* aop) {
+  // Write linear tensor indices into the consumer
+  //  tensor index if the output is a tensor.
+  auto out_tv = dynamic_cast<TensorView*>(aop->output(0));
+  TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+
+  // TensorIndex for philox subsequence and component.
+  auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
+      out_tv, Index::getLinearIndex(out_tv, for_loops_));
+
+  // TensorIndex for writing randlike output.
+  const auto out = lowerDstIndex(out_tv);
+  auto lowered = IrBuilder::create<ARangeOp>(
+      out, aop->start(), aop->end(), aop->step(), linear_index);
+
+  pushBack(lowered);
+  GpuLower::current()->propagateExprInfo(aop, back());
 }
 
 void IndexLowering::handle(const UnaryOp* uop) {
-  if (uop->getUnaryOpType() == UnaryOpType::RandLike) {
-    lowerRandLike(uop);
-    return;
-  }
   const auto in = lowerSrcIndex(uop->in(), uop->out());
   const auto out = lowerDstIndex(uop->out());
-  pushBack(IrBuilder::create<UnaryOp>(
-      uop->getUnaryOpType(), out, in, uop->getRNGOffset()));
+  pushBack(IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, in));
   GpuLower::current()->propagateExprInfo(uop, back());
 }
 
@@ -615,8 +628,6 @@ void IndexLowering::handle(const WelfordOp* wop) {
   const bool has_block_reduce = out_domain->hasBlockReduction();
   const bool has_grid_reduce = out_domain->hasGridReduction();
 
-  // If we do a grid reduction we can't have a reduction axis that is not bound
-  // to a grid or block dim ()
   if (has_grid_reduce) {
     TORCH_INTERNAL_ASSERT(
         std::none_of(
@@ -650,12 +661,12 @@ void IndexLowering::handle(const WelfordOp* wop) {
       out_avg,
       out_var,
       out_N,
-      wop->initAvg(),
-      wop->initVar(),
-      wop->initN(),
       in_avg,
       in_var,
       in_N,
+      wop->initAvg(),
+      wop->initVar(),
+      wop->initN(),
       wop->isAllreduce());
 
   if (wop->predicate()) {
@@ -692,17 +703,17 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       getGridCommWorkBufferSize(out_domain, for_loops_, is_persistent);
 
   const auto work_buffer_size = buffer_size_info.size_of_privatized_buffer;
-  auto out_var_buffer = allocateUniqueBuffer(
-      work_buffer_size,
-      indexed_wop->outVar()->dtype(),
-      false,
-      indexed_wop->outVar()->as<kir::TensorIndex>()->view(),
-      work_buffer_map_);
   auto out_avg_buffer = allocateUniqueBuffer(
       work_buffer_size,
       indexed_wop->outAvg()->dtype(),
       false,
       indexed_wop->outAvg()->as<kir::TensorIndex>()->view(),
+      work_buffer_map_);
+  auto out_var_buffer = allocateUniqueBuffer(
+      work_buffer_size,
+      indexed_wop->outVar()->dtype(),
+      false,
+      indexed_wop->outVar()->as<kir::TensorIndex>()->view(),
       work_buffer_map_);
   auto out_N_buffer = allocateUniqueBuffer(
       work_buffer_size,
@@ -768,6 +779,150 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
     // When using the fused reduction, allocate the reduction object at
     // the outer-most scope
     allocateUniqueFusedReduction(grid_welford, out_tv);
+  }
+}
+
+void IndexLowering::handle(const GroupedWelfordOp* grouped_wop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(grouped_wop));
+
+  const auto out_tv = ir_utils::getTvOutput(grouped_wop);
+  const auto out_domain = out_tv->domain();
+
+  const bool has_grid_reduce = out_domain->hasGridReduction();
+
+  std::vector<WelfordTriplet> indexed_outputs(grouped_wop->numExprs());
+  std::vector<WelfordTriplet> indexed_inputs(grouped_wop->numExprs());
+
+  for (const auto i : c10::irange(grouped_wop->numExprs())) {
+    const auto& output = grouped_wop->outputVals().at(i);
+    const auto& input = grouped_wop->inputVals().at(i);
+    WelfordTriplet indexed_output;
+    WelfordTriplet indexed_input;
+    for (const auto j : c10::irange(3)) {
+      indexed_output.get(j) = lowerDstIndex(output.get(j));
+      indexed_input.get(j) = lowerSrcIndex(input.get(j), output.get(j));
+    }
+    indexed_outputs[i] = indexed_output;
+    indexed_inputs[i] = indexed_input;
+  }
+
+  if (has_grid_reduce) {
+    handleGroupedGridWelford(
+        grouped_wop, indexed_outputs, indexed_inputs, grouped_wop->initVals());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Only grid welford is supported. Validation should have caught non-grid welford grouping.");
+  }
+}
+
+std::vector<kir::Allocate*> IndexLowering::allocateWelfordWorkBuffer(
+    const std::vector<WelfordTriplet>& triplets,
+    WelfordTriplet::ValName name,
+    Val* buffer_size) {
+  std::vector<kir::Allocate*> work_buffers;
+
+  std::transform(
+      triplets.begin(),
+      triplets.end(),
+      std::back_inserter(work_buffers),
+      [&](const WelfordTriplet& output) {
+        return allocateUniqueBuffer(
+            buffer_size,
+            output.get(name)->dtype(),
+            false,
+            output.get(name)->as<TensorView>(),
+            work_buffer_map_);
+      });
+
+  return work_buffers;
+}
+
+void IndexLowering::handleGroupedGridWelford(
+    const GroupedWelfordOp* op,
+    const std::vector<WelfordTriplet>& output_vals,
+    const std::vector<WelfordTriplet>& input_vals,
+    const std::vector<WelfordTriplet>& init_vals) {
+  const auto out_tv = ir_utils::getTvOutput(op);
+  const auto out_domain = out_tv->domain();
+
+  TORCH_INTERNAL_ASSERT(out_domain->hasGridReduction());
+
+  // If we do a grid reduction we can't have a reduction axis that is not bound
+  // to a grid or block dim.
+  TORCH_INTERNAL_ASSERT(
+      std::none_of(
+          out_domain->domain().begin(),
+          out_domain->domain().end(),
+          [](IterDomain* id) {
+            return !id->isThread() && id->isReduction() &&
+                !id->extent()->isOneInt();
+          }),
+      "Found a reduction stage that has both a non-parallelized ",
+      "reduction and a grid reduction. This is not supported, ",
+      "please use rfactor to do the serialized reduction first, ",
+      "then the grid reduction.");
+
+  const bool is_persistent = op->isAllreduce();
+  auto work_buf_size_info =
+      getGridCommWorkBufferSize(out_domain, for_loops_, is_persistent);
+
+  const auto work_buffers_avg = allocateWelfordWorkBuffer(
+      op->outputVals(),
+      WelfordTriplet::ValName::Avg,
+      work_buf_size_info.size_of_privatized_buffer);
+  const auto work_buffers_var = allocateWelfordWorkBuffer(
+      op->outputVals(),
+      WelfordTriplet::ValName::Var,
+      work_buf_size_info.size_of_privatized_buffer);
+  const auto work_buffers_N = allocateWelfordWorkBuffer(
+      op->outputVals(),
+      WelfordTriplet::ValName::N,
+      work_buf_size_info.size_of_privatized_buffer);
+
+  auto sync_buffer_size =
+      getGridSyncBufferSize(out_domain, for_loops_, is_persistent);
+  auto sync_buffer = allocateUniqueBuffer(
+      sync_buffer_size, DataType::Int, true, out_tv, sync_buffer_map_);
+
+  const auto entrance_ind = !is_persistent
+      ? getEntranceLinIndGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->zeroVal();
+  const auto n_entrances = !is_persistent
+      ? getEntranceCountGridReduce(for_loops_)
+      : GpuLower::current()->kernel()->oneVal();
+
+  // The thread predicate needs to be set separately from the main
+  // predicate. Do not combine them like other expressions.
+  const auto& thread_pred =
+      GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
+
+  auto indexed_op = IrBuilder::create<kir::GroupedGridWelford>(
+      output_vals,
+      input_vals,
+      init_vals,
+      std::array<std::vector<kir::Allocate*>, 3>{
+          work_buffers_avg, work_buffers_var, work_buffers_N},
+      sync_buffer,
+      entrance_ind,
+      n_entrances,
+      work_buf_size_info.buffer_stride,
+      op->isAllreduce());
+
+  indexed_op->setThreadPredicate(thread_pred);
+
+  if (op->predicate()) {
+    indexed_op->setPredicate(op->predicate());
+  }
+  if (op->writePredicate()) {
+    indexed_op->setWritePredicate(op->writePredicate());
+  }
+
+  pushBack(indexed_op);
+  GpuLower::current()->propagateExprInfo(op, back());
+
+  if (op->isAllreduce()) {
+    allocateUniqueFusedReduction(indexed_op, out_tv);
   }
 }
 
@@ -922,6 +1077,11 @@ void IndexLowering::allocateUniqueFusedReduction(
       fused_reduction_alloc_reduction =
           IrBuilder::create<kir::AllocateFusedReduction>(
               expr->as<kir::GroupedGridReduction>());
+      break;
+    case ExprType::GroupedGridWelford:
+      fused_reduction_alloc_reduction =
+          IrBuilder::create<kir::AllocateFusedReduction>(
+              expr->as<kir::GroupedGridWelford>());
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "Invalid expr: ", expr->toString());

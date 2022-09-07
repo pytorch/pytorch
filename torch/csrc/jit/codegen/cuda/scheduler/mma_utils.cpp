@@ -49,7 +49,7 @@ bool canValidateIsInnerDim(
       if (!maybe_factor.has_value()) {
         return false;
       }
-      int factor = maybe_factor.value();
+      int factor = maybe_factor->as<int64_t>();
       if (factor < inner_dim_size) {
         // This might be too restrictive. Would need more
         //   bookkeeping to relax.
@@ -68,7 +68,7 @@ bool canValidateIsInnerDim(
       if (!maybe_leaf_size.has_value()) {
         return false;
       }
-      if (maybe_leaf_size.value() != inner_dim_size) {
+      if (maybe_leaf_size->as<int64_t>() != inner_dim_size) {
         return false;
       }
       leaf = merge->inner();

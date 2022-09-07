@@ -127,6 +127,12 @@ class LoopIndexing {
   //!  topological order.
   std::vector<Expr*> getBackwardExprList() const;
 
+  //! Returns the set of out of line expressions in
+  //!  reverse topological order.
+  const std::vector<Expr*>& getBackwardOutOfLineExprList() const {
+    return out_of_line_exprs_;
+  }
+
   //! Returns all exact concrete id's that were produced
   //!  or consumed in the selected indexing expressions
   std::unordered_set<IterDomain*> getAllExactConcreteIdSet() const;
@@ -152,6 +158,12 @@ class LoopIndexing {
   //! The selected sequence of expressions that should represent
   //!  the correct indexing math from the given loop nest.
   std::vector<Expr*> index_exprs_;
+
+  //! The subset of sequence of expressions that can be resolved
+  //!  with only the iterdomains on the right of consumer tv's ca
+  //!  axis.
+  //! Expressions are ordered in reverse topological order.
+  std::vector<Expr*> out_of_line_exprs_;
 };
 
 // When indexing there are sometimes an option to propagate an index down

@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class FusionPrecomputedIntegers;
+class FusionPrecomputedValues;
 
 //! Calculate Fusion IR expressions
 class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
@@ -36,13 +36,12 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
   //! Debugging helper, prints all the currently known values
   void print() const;
 
-  void bindPrecomputedIntegers(
-      FusionPrecomputedIntegers* precomputed_integers) {
-    evaluator_precomputed_integers_ = precomputed_integers;
+  void bindPrecomputedValues(FusionPrecomputedValues* precomputed_values) {
+    evaluator_precomputed_values_ = precomputed_values;
   }
 
-  auto precomputedIntegers() {
-    return evaluator_precomputed_integers_;
+  auto precomputedValues() {
+    return evaluator_precomputed_values_;
   }
 
  private:
@@ -54,7 +53,7 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
  private:
   std::unordered_map<const Val*, IntOrDouble> known_values_;
   Fusion* fusion_ = nullptr;
-  FusionPrecomputedIntegers* evaluator_precomputed_integers_ = nullptr;
+  FusionPrecomputedValues* evaluator_precomputed_values_ = nullptr;
 };
 
 } // namespace cuda

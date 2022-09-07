@@ -86,6 +86,18 @@ class IndexCompute : public BackwardVisitor {
   //! based traversal.
   IterDomain* maybeGetExactMapConcreteID(IterDomain* id);
 
+  //! (Concrete indexing pass only)
+  //!  Collect permissive index binding from the given expression.
+  //! See also permissive_map_ and LoopIndexing::getBackwardOutOfLineExprList.
+  void collectIndexIntoPermissiveMap(const LoopIndexing& loop_indexing);
+
+  //! (Concrete indexing pass only)
+  //!  Iterate through id_expr's input and pull index vals from permissive
+  //! map, when both of the following are true:
+  //!    1. the output id is missing in index_map_.
+  //!    2. the output id is found in permissive map.
+  void updateIndexMapFromPermissiveMap(const Expr* id_expr);
+
   // Tensor domain we're mapping back to root
   const TensorDomain* td_; // NOLINT
 
@@ -136,6 +148,16 @@ class IndexCompute : public BackwardVisitor {
   //  pass, while loop mode swizzles are handled early on in concrete indexing
   //  pass. See also [Note on swizzle mode]
   SwizzleMode swizzle_mode_ = SwizzleMode::NoSwizzle;
+
+  // (Concrete id pass only)
+  // Contains the indexing math that could be resolved with only the
+  //  iterdomains on the right of the consumer_tv's ca axis, i.e. the
+  //  ones that corresponding to the loops that consumer_tv would not
+  //  share with any of its consumers.
+  // These indexing vals should be kept separate from index_map_ and
+  //  should only be used when the indexing traversal follows the
+  //  order defined in LoopIndexingAnalysis::traverseFromDomainVals.
+  std::unordered_map<IterDomain*, Val*> permissive_index_map_;
 
  public:
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
@@ -343,10 +365,8 @@ class Index {
 
   //! Returns a vector of strided indices mapped onto the (rfactor)
   //! root domain of a consumer tensor. The returned index is intended
-  //! to be used to index into Philox pseudo random sequences so that
-  //! inlined multivisit to the same element in a random tensor returns
-  //! consistent values.
-  static std::vector<Val*> getRandomTensorStridedIndices(
+  //! to be used to index into arange or Philox pseudo random sequences
+  static std::vector<Val*> getLinearIndex(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops);
 
