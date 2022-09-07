@@ -1926,6 +1926,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
+@pw_cast_for_opmath
 def mv(self, vec):
     utils.check(
         self.dim() == 2 and vec.dim() == 1,
@@ -1939,6 +1940,7 @@ def mv(self, vec):
 
 
 @register_decomposition(aten.dot, disable_meta=True)
+@pw_cast_for_opmath
 def dot(self, other):
     if self.is_complex():
         if self.is_conj():
