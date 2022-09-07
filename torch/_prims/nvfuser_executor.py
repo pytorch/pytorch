@@ -24,7 +24,7 @@ else:
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
         "use_python_fusion_cache": True,
-        "allow_single_op_fusion": False,
+        "allow_single_op_fusion": True,
     }
 )
 
