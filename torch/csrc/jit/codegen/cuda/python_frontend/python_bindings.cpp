@@ -1178,7 +1178,10 @@ void initNvFuserPythonBindings(PyObject* module) {
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor();
         fd->defineRecord(new nvfuser::SqueezeOpRecord(
-            {fd->recordingState(arg())}, {fd->recordingState(output())}, original_shape, dim));
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
+            original_shape,
+            dim));
         return output;
       },
       py::arg("arg"),

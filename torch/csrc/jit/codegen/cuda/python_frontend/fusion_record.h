@@ -291,7 +291,7 @@ struct SqueezeOpRecord : RecordFunctor {
   virtual RecordFunctor* clone() final {
     return new SqueezeOpRecord(*this);
   }
-  
+
   //! Child specific hash function in lower 32 bits.
   //! | 31 -------------- 16 | 15 --------------  0 |
   //! | Squeeze Dim hash     | original_shape hash  |
@@ -301,7 +301,7 @@ struct SqueezeOpRecord : RecordFunctor {
     for (auto shape : original_shape_) {
       original_shape_hash ^= static_cast<size_t>(shape);
     }
-    size_t squeeze_dim_hash = static_cast<size_t>(dim_);;
+    size_t squeeze_dim_hash = static_cast<size_t>(dim_);
     squeeze_dim_hash = (squeeze_dim_hash & 0xffff) << 16;
     return result | squeeze_dim_hash | (original_shape_hash & 0xffff);
   }
@@ -329,7 +329,8 @@ struct SqueezeOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
     auto output = Nvf::squeeze(arg, original_shape_, dim_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
