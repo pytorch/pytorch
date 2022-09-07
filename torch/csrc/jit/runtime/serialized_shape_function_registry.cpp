@@ -1740,8 +1740,12 @@ def conv_forwards(input: List[int],
   has_dilation = torch.gt(torch.len(dilation), 0)
   dim = torch.len(input)
   output_size = annotate(List[int], [])
+  if transposed:
+    weight_output_channels_dim = 1
+  else:
+    weight_output_channels_dim = 0
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[0])
+  _1 = torch.append(output_size, weight[weight_output_channels_dim])
   for _2 in range(torch.__range_length(2, dim, 1)):
     d = torch.__derive_index(_2, 2, 1)
     if has_dilation:
@@ -1789,7 +1793,7 @@ def conv_forwards(input: List[int],
   dim = torch.len(input)
   output_size = annotate(List[int], [])
   _0 = torch.append(output_size, input[0])
-  _1 = torch.append(output_size, weight[0])
+  _1 = torch.append(output_size, weight[1])
   for _2 in range(torch.__range_length(2, dim, 1)):
     d = torch.__derive_index(_2, 2, 1)
     if has_dilation:
@@ -2196,25 +2200,35 @@ def conv_forwards(input: List[int],
     dt: Any) -> List[int]:
   out = annotate(List[int], [])
   if torch.__is__(opt_dims, None):
-    dims = annotate(List[int], [])
+    _0, opt_dims0 = True, opt_dims
   else:
-    dims = unchecked_cast(List[int], opt_dims)
+    opt_dims1 = unchecked_cast(List[int], opt_dims)
+    _0, opt_dims0 = torch.eq(torch.len(opt_dims1), 0), opt_dims1
+  if _0:
+    _1 = torch.len(self)
+    dims0 = annotate(List[int], [])
+    for _2 in range(_1):
+      _3 = torch.append(dims0, _2)
+    dims = dims0
+  else:
+    opt_dims2 = unchecked_cast(List[int], opt_dims0)
+    dims = opt_dims2
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _0 in range(torch.len(dims)):
-      reduce_dim = dims[_0]
-      _1 = torch.len(self)
-      if torch.le(_1, 0):
+    for _4 in range(torch.len(dims)):
+      reduce_dim = dims[_4]
+      _5 = torch.len(self)
+      if torch.le(_5, 0):
         dim_post_expr = 1
       else:
-        dim_post_expr = _1
+        dim_post_expr = _5
       min = torch.neg(dim_post_expr)
       max = torch.sub(dim_post_expr, 1)
       if torch.lt(reduce_dim, min):
-        _2 = True
+        _6 = True
       else:
-        _2 = torch.gt(reduce_dim, max)
-      if torch.__not__(_2):
+        _6 = torch.gt(reduce_dim, max)
+      if torch.__not__(_6):
         pass
       else:
         ops.prim.RaiseException("AssertionError: ")
@@ -2230,11 +2244,11 @@ def conv_forwards(input: List[int],
       is_mean_dim = is_mean_dim0
     if is_mean_dim:
       if keep_dim:
-        _3 = torch.append(out, 1)
+        _7 = torch.append(out, 1)
       else:
         pass
     else:
-      _4 = torch.append(out, self[idx])
+      _8 = torch.append(out, self[idx])
   return out
 
 )=====")
@@ -2245,7 +2259,7 @@ def conv_forwards(input: List[int],
   out = annotate(List[int], [])
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _1 in range(1):
+    for _1 in range(torch.len(_0)):
       reduce_dim = _0[_1]
       _2 = torch.len(self)
       if torch.le(_2, 0):

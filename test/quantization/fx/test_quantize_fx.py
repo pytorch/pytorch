@@ -6,9 +6,9 @@ import contextlib
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
@@ -25,7 +25,6 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
-from torch.ao.quantization.fx.common_quantization_patterns import CommonQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -122,7 +121,7 @@ from torch.ao.quantization.fx.custom_config import (
     StandaloneModuleConfigEntry,
 )
 
-from torch.ao.quantization.fx.qconfig_utils import (
+from torch.ao.quantization.fx.qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
@@ -946,7 +945,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             self.checkGraphModeFxOp(
@@ -971,7 +970,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            node_occurrence = dict()
+            node_occurrence = {}
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
             result_dict = self.checkGraphModeFxOp(
@@ -1206,7 +1205,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for (ModuleClass, module_constructor_inputs,
                  inputs, quantized_node, weight_prepack_node) in tests:
                 for is_reference in [True, False]:
-                    node_occurrence = dict()
+                    node_occurrence = {}
                     if weight_prepack_node:
                         node_occurrence[weight_prepack_node] = 0
                     m = ModuleClass(*module_constructor_inputs).eval()
@@ -4693,12 +4692,12 @@ class TestQuantizeFx(QuantizationTestCase):
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            is not torch.ao.nn.qat.modules.linear.Linear,
             "prepare_qat_fx shold not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
-            is not torch.nn.qat.modules.linear.Linear,
+            is not torch.ao.nn.qat.modules.linear.Linear,
             "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
         )
 
@@ -4783,29 +4782,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
             weight=torch.ao.quantization.default_per_channel_weight_observer
         )
         self.common_quant_patterns = {
-            torch.nn.ConvTranspose1d: CommonQuantizeHandler,
-            torch.nn.ConvTranspose2d: CommonQuantizeHandler,
-            torch.nn.ELU: CommonQuantizeHandler,
-            torch.nn.LeakyReLU: CommonQuantizeHandler,
-            torch.nn.Hardswish: CommonQuantizeHandler,
-            torch.nn.InstanceNorm1d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm2d: CommonQuantizeHandler,
-            torch.nn.InstanceNorm3d: CommonQuantizeHandler,
-            torch.nn.LayerNorm: CommonQuantizeHandler,
-            torch.nn.SiLU: CommonQuantizeHandler,
-            torch.nn.Mish: CommonQuantizeHandler,
-            torch.nn.GELU: CommonQuantizeHandler,
-            torch.nn.Softmax: CommonQuantizeHandler,
-            torch.nn.functional.elu: CommonQuantizeHandler,
-            torch.nn.functional.hardswish: CommonQuantizeHandler,
-            torch.nn.functional.instance_norm: CommonQuantizeHandler,
-            torch.nn.functional.layer_norm: CommonQuantizeHandler,
-            torch.nn.functional.leaky_relu: CommonQuantizeHandler,
-            torch.nn.functional.silu: CommonQuantizeHandler,
-            torch.nn.functional.mish: CommonQuantizeHandler,
-            torch.nn.functional.gelu: CommonQuantizeHandler,
-            torch.nn.functional.softmax: CommonQuantizeHandler,
-            torch.sum: CommonQuantizeHandler
+            torch.nn.ConvTranspose1d: DefaultNodeQuantizeHandler,
+            torch.nn.ConvTranspose2d: DefaultNodeQuantizeHandler,
+            torch.nn.ELU: DefaultNodeQuantizeHandler,
+            torch.nn.LeakyReLU: DefaultNodeQuantizeHandler,
+            torch.nn.Hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm1d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm2d: DefaultNodeQuantizeHandler,
+            torch.nn.InstanceNorm3d: DefaultNodeQuantizeHandler,
+            torch.nn.LayerNorm: DefaultNodeQuantizeHandler,
+            torch.nn.SiLU: DefaultNodeQuantizeHandler,
+            torch.nn.Mish: DefaultNodeQuantizeHandler,
+            torch.nn.GELU: DefaultNodeQuantizeHandler,
+            torch.nn.Softmax: DefaultNodeQuantizeHandler,
+            torch.nn.functional.elu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.hardswish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.instance_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.layer_norm: DefaultNodeQuantizeHandler,
+            torch.nn.functional.leaky_relu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.silu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.mish: DefaultNodeQuantizeHandler,
+            torch.nn.functional.gelu: DefaultNodeQuantizeHandler,
+            torch.nn.functional.softmax: DefaultNodeQuantizeHandler,
+            torch.sum: DefaultNodeQuantizeHandler
         }
 
     """Unit tests for individual ops
@@ -5558,7 +5557,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self, scalar):
                 super().__init__()
                 self.scalar = scalar
-                self.add_func = torch.nn.quantized.FloatFunctional()
+                self.add_func = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 return self.add_func.add_scalar(x, self.scalar)
@@ -5981,7 +5980,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         is_reference = False
         node_list = [
-            ns.call_module(torch.nn.quantized.Softmax),
+            ns.call_module(torch.ao.nn.quantized.Softmax),
             ns.call_function(functional),
         ]
         self._test_default_node_quant_handler_ops(
@@ -6703,7 +6702,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m = prepare_fx_function(m, qconfig_dict, example_inputs=example_inputs)
             node_occurrence = {
                 ns.call_module(expected_act_post_process): 7,
-                ns.call_module(torch.nn.quantized.FloatFunctional): 0
+                ns.call_module(torch.ao.nn.quantized.FloatFunctional): 0
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             m(*example_inputs)
@@ -7059,7 +7058,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
 
-    @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_qmatmul(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -7068,7 +7066,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         m = M().eval()
         example_inputs = (torch.randn(2, 2), torch.randn(2, 2))
-        qconfig_dict = {"": torch.ao.quantization.default_qconfig}
+        qconfig_dict = get_default_qconfig_mapping("fbgemm")
         mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         mp(*example_inputs)
         mq = convert_fx(mp)

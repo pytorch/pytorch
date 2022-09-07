@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
@@ -26,19 +27,19 @@ Tensor max_pool1d_impl(
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
   TORCH_CHECK(
       kernel_size.size() == 1,
-      "max_pool1d() kernel_size must be an int or int list of size 1 but got size ",
+      "max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size ",
       kernel_size.size());
   TORCH_CHECK(
       stride.size() == 0 || stride.size() == 1,
-      "max_pool1d() stride must be None, an int or int list of size 1 but got size ",
+      "max_pool1d() stride must be None, an int, list of ints, or tuple of ints of size 1 but got size ",
       stride.size());
   TORCH_CHECK(
       padding.size() == 1,
-      "max_pool1d() padding must be an int or int list of size 1 but got size ",
+      "max_pool1d() padding must be an int, list of ints, or tuple of ints of size 1 but got size ",
       padding.size());
   TORCH_CHECK(
       dilation.size() == 1,
-      "max_pool1d() dilation must be an int or int list of size 1 but got size ",
+      "max_pool1d() dilation must be an int, list of ints or tuple of ints of size 1 but got size ",
       dilation.size());
 
   // If stride=None then set it to kernel_size
@@ -103,7 +104,8 @@ Tensor max_pool1d(
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
-      !self.device().is_cpu()) {
+      !self.device().is_cpu() ||
+      isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));

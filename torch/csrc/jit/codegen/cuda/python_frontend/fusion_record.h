@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/complex.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 
@@ -83,6 +84,32 @@ struct OpRecord : RecordFunctor {
  private:
   //! An nvFuser Arith Operation function signature
   std::function<OutType(ArgTypes...)> fusion_op_;
+};
+
+struct SqueezeOpRecord : RecordFunctor {
+  SqueezeOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int64_t>& original_shape,
+      int64_t dim)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        original_shape_(std::move(original_shape)),
+        dim_(dim) {}
+  virtual ~SqueezeOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+
+    auto output = torch::jit::fuser::cuda::squeeze(arg, original_shape_, dim_);
+
+    fd.setFusionState(outputs.at(0), output);
+  }
+
+ private:
+  //! Represents the tensor dimensions of the input tensor.
+  std::vector<int64_t> original_shape_;
+  //! Dimension to squeeze.
+  int64_t dim_;
 };
 
 //! Specialized Record Functor for the FusionDefinition's broadcast_in_dim op.
@@ -214,11 +241,13 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<size_t> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      NvfDataType _dtype)
+      NvfDataType _dtype,
+      bool _is_cpu = false)
       : RecordFunctor({}, std::move(_outputs)),
         symbolic_sizes(std::move(_symbolic_sizes)),
         contiguous_info(std::move(_contiguous_info)),
-        dtype(_dtype) {}
+        dtype(_dtype),
+        is_cpu(_is_cpu) {}
   virtual ~InputTensorRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
@@ -228,6 +257,12 @@ struct InputTensorRecord : RecordFunctor {
                   .shape(symbolic_sizes)
                   .dtype(dtype)
                   .build();
+
+    if (symbolic_sizes.empty() && is_cpu) {
+      tv->setCpuScalar(true);
+    } else {
+      TORCH_CHECK(!is_cpu, "cpu non-scalar tensor is not supported");
+    }
 
     fd.setFusionState(outputs.at(0), tv);
     fd.addInput(tv);
@@ -242,6 +277,8 @@ struct InputTensorRecord : RecordFunctor {
   std::vector<bool> contiguous_info;
   //! Tensor data type.
   NvfDataType dtype;
+  //! Tensor data type.
+  bool is_cpu;
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
@@ -360,6 +397,36 @@ struct VarianceOpRecord : RecordFunctor {
   int64_t correction_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
+};
+
+struct VarianceMeanOpRecord : RecordFunctor {
+  VarianceMeanOpRecord(
+      std::vector<size_t> _args,
+      std::vector<size_t> _outputs,
+      std::vector<int>& dims,
+      int64_t correction,
+      bool keepdim)
+      : RecordFunctor(std::move(_args), std::move(_outputs)),
+        dims_(dims),
+        correction_(correction),
+        keepdim_(keepdim) {}
+  virtual ~VarianceMeanOpRecord() = default;
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args.at(0))->as<NvfTensorView>();
+    auto output = torch::jit::fuser::cuda::variance_mean(
+        arg, dims_, correction_, keepdim_);
+    fd.setFusionState(outputs.at(0), output.var);
+    fd.setFusionState(outputs.at(1), output.mean);
+  }
+
+ private:
+  //! Dimensions of tensor to reduce for variance calculation
+  std::vector<int> dims_;
+  //! Bessel's correction value
+  int64_t correction_;
+  //! Indicates whether to keep the reduced dimension(s).
+  bool keepdim_;
 };
 
 } // namespace nvfuser

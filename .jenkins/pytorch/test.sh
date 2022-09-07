@@ -164,32 +164,7 @@ test_python_shard() {
     exit 1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-    # Manually shard to prevent slow-gradcheck CI from timing out
-    # See https://github.com/pytorch/pytorch/issues/83335#issuecomment-1213517290
-    if [[ "$NUM_TEST_SHARDS" != "2" ]]; then
-      echo "Expected NUM_TEST_SHARDS to equal 2 for slow-gradcheck"
-      exit 1
-    fi
-    if [[ "$1" == "1" ]]; then
-      SLOW_GRADCHECK_INC_EXC="--include test_ops_gradients"
-    else
-      SLOW_GRADCHECK_INC_EXC="--exclude test_ops_gradients"
-    fi
-    # shellcheck disable=SC2086
-    time python test/run_test.py \
-      --exclude-jit-executor \
-      --exclude-distributed-tests \
-      $SLOW_GRADCHECK_INC_EXC \
-      --verbose
-  else
-    time python test/run_test.py \
-      --exclude-jit-executor \
-      --exclude-distributed-tests \
-      --shard "$1" "$NUM_TEST_SHARDS" \
-      --verbose
-  fi
-
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
@@ -205,6 +180,9 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  pushd functorch
+  python setup.py develop
+  popd
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -224,6 +202,8 @@ test_dynamo_shard() {
       test_overrides \
       test_python_dispatch \
       test_fx \
+      test_package \
+      test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -622,7 +602,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
