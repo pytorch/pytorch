@@ -120,6 +120,28 @@ class TestPythonKey(AOTTestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    def test_make_fx_functionalize(self, device):
+        from functorch.experimental import functionalize
+
+        def fn(a):
+            a = a * 2
+            a.relu_()
+            return a
+
+        a = torch.randn(3, device=device)
+        symbolic_gm = torch.fx.symbolic_trace(fn)
+        symbolic_gm.graph.print_tabular()
+        includes_method_relu_ = any(
+            str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
+        )
+        self.assertTrue(includes_relu_)
+        # Also verifies fix for https://github.com/pytorch/pytorch/issues/84570
+        gm = make_fx(functionalize(symbolic_gm))(a)
+        include_aten_relu = any(
+            n.target == torch.ops.aten.relu.default for n in gm.graph.nodes
+        )
+        self.assertTrue(include_relu)
+
     def test_make_fx_no_decompose(self, device):
         # FIXME
         return self.skipTest("error: maximum recursion reached")
