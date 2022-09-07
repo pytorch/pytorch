@@ -87,6 +87,7 @@ class CommTensor(torch.Tensor):
     ]
     _after_comm: bool
     _tensor: torch.Tensor
+    _work: torch.distributed._Work
 
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
@@ -98,7 +99,7 @@ class CommTensor(torch.Tensor):
         # The tensor object wrapped by this CommTensor
         r._tensor: torch.Tensor = tensor  # type: ignore
         # Record whether communication has launched on this tensor.
-        r._after_comm: bool = False  # type: ignore
+        r._after_comm: bool = False  # type: ignore[attr-defined]
         return r
 
     def __repr__(self):
@@ -136,7 +137,7 @@ class CommTensor(torch.Tensor):
 
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
         # if communication has been launched on this tensor.
-        def unwrap(e):
+        def unwrap(e: Any):
             if isinstance(e, CommTensor):
                 nonlocal tracer, after_comm
 
@@ -164,13 +165,13 @@ class CommTensor(torch.Tensor):
             else:
                 return e
 
-        def wrap(e):
+        def wrap(e: Any):
             return CommTensor(e) if isinstance(e, torch.Tensor) else e
 
-        def mark_after_comm(work, e):
+        def mark_after_comm(work: torch.distributed._Work, e: Any):
             if isinstance(e, torch.Tensor) or isinstance(e, CommTensor):
-                e._work = work
-                e._after_comm = True
+                e._work = work  # type: ignore[attr-defined]
+                e._after_comm = True  # type: ignore[attr-defined]
 
             return e
 
