@@ -35,7 +35,12 @@ def name(func: FunctionSchema) -> str:
 
 
 def argumenttype_type(
-    t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False, symint: bool = True
+    t: Type,
+    *,
+    mutable: bool,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool = True,
 ) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
@@ -51,7 +56,11 @@ def argumenttype_type(
 
 
 def argument_type(
-    a: Argument, *, binds: ArgName, remove_non_owning_ref_types: bool = False, symint: bool = True
+    a: Argument,
+    *,
+    binds: ArgName,
+    remove_non_owning_ref_types: bool = False,
+    symint: bool = True,
 ) -> NamedCType:
     return argumenttype_type(
         a.type,
@@ -90,10 +99,15 @@ def jit_arguments(func: FunctionSchema) -> List[Argument]:
     )
 
 
-def argument(a: Argument, *, remove_non_owning_ref_types: bool = False, symint: bool = True) -> Binding:
+def argument(
+    a: Argument, *, remove_non_owning_ref_types: bool = False, symint: bool = True
+) -> Binding:
     return Binding(
         nctype=argument_type(
-            a, binds=a.name, remove_non_owning_ref_types=remove_non_owning_ref_types, symint=symint
+            a,
+            binds=a.name,
+            remove_non_owning_ref_types=remove_non_owning_ref_types,
+            symint=symint,
         ),
         name=a.name,
         argument=a,

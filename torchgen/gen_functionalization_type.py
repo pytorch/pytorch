@@ -89,7 +89,7 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
   if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
     return self.reshape(size);
   } else {
-    auto output = at::_ops::view::call_symint(self, c10::SymIntArrayRef::fromIntArrayRef(size));
+    auto output = at::_ops::view::call(self, c10::SymIntArrayRef::fromIntArrayRef(size));
     return output.clone();
   }
 }
@@ -130,7 +130,7 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
     # the input tensor, and runs the underlying view on the clone.
     return f"""
 {view_copy_sig.defn()} {{
-  auto output = at::_ops::{view_api_name}::call_symint({exprs});
+  auto output = at::_ops::{view_api_name}::call({exprs});
   {return_cloned_output}
 }}
 """
@@ -319,7 +319,7 @@ def emit_view_functionalization_body(
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call_symint({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
@@ -339,7 +339,7 @@ def emit_view_functionalization_body(
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        reference_tensor_output = at::_ops::{noop_api_name}::call_symint({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       // This function adds the above view meta to the current tensor and replays them off the base,
       // mutating the size/stride info of the current FunctionalTensorWrapper.
@@ -362,7 +362,7 @@ def emit_view_functionalization_body(
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call_symint({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       {return_type} reference_tensor_output;
@@ -370,15 +370,15 @@ def emit_view_functionalization_body(
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        reference_tensor_output = at::_ops::{noop_api_name}::call_symint({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
       {return_type} tmp_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
-          tmp_output = at::_ops::{noop_api_name}::call_symint({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
-          tmp_output = at::_ops::{api_name}::call_symint({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
         }}
       }}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
@@ -584,7 +584,7 @@ def emit_inplace_functionalization_body(
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        at::_ops::{f.func.name.unambiguous_name()}::call_symint({', '.join(a.name for a in meta_call_ctx)});
+        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
@@ -596,14 +596,14 @@ def emit_inplace_functionalization_body(
         }} else {{
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
-         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call_symint({', '.join(inplace_exprs)});
+         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
          {return_from_mutable_noop_redispatch(f, 'tmp_output')};
         }}
       }} else {{
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call_symint({', '.join(functional_exprs)});
+          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
         }}
         {wrap_propagate_mutations_and_return(f, g.functional, 'tmp_output')}
       }}

@@ -302,7 +302,7 @@ struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
 };
 
 template <class Op>
-using functionalize_aten_op = _functionalize_aten_op<Op, typename Op::schema_symint>;
+using functionalize_aten_op = _functionalize_aten_op<Op, typename Op::schema>;
 
 } // namespace functionalization
 } // namespace at

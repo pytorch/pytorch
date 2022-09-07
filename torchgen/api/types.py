@@ -618,7 +618,9 @@ class DispatcherSignature:
         return f"{self.returns_type().cpp_type()} ({dispatcher_args_types_str})"
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, prefix: str = "", symint: bool = True) -> "DispatcherSignature":
+    def from_schema(
+        func: FunctionSchema, *, prefix: str = "", symint: bool = True
+    ) -> "DispatcherSignature":
         return DispatcherSignature(func, prefix, symint)
 
 

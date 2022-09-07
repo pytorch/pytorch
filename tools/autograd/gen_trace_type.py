@@ -408,7 +408,7 @@ def get_return_value(f: NativeFunction) -> str:
 
 TRACE_DISPATCH = CodeTemplate(
     """\
-${assign_return_values}at::_ops::${unambiguous_name}::redispatch_symint(${unpacked_args});"""
+${assign_return_values}at::_ops::${unambiguous_name}::redispatch(${unpacked_args});"""
 )
 
 

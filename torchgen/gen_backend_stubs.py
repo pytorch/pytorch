@@ -3,7 +3,7 @@ import os
 import pathlib
 import re
 from collections import Counter, defaultdict, namedtuple
-from typing import Dict, List, Optional, Sequence, Union, Set
+from typing import Dict, List, Optional, Sequence, Set, Union
 
 import yaml
 

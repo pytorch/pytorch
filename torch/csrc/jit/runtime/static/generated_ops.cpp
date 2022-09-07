@@ -1812,7 +1812,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::prod, aten_prod, [](Node* n) -> SROperator {
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::prod_out_symint(self, dtype, out);
+      at::native::prod_out(self, dtype, out);
     };
   }
 
