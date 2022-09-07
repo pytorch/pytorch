@@ -1224,11 +1224,9 @@ def _unbind_helper(g, self, dim, _outputs):
 @_beartype.beartype
 def _scatter_helper(g, self, dim, index, src):
     if GLOBALS.export_onnx_opset_version <= 10:
-        scatter = opset9.scatter
+        return opset9.scatter(g, self, dim, index, src)
     else:
-        # for mypy, scatter was imported two lines above
-        scatter = opset11.scatter
-    return scatter(g, self, dim, index, src)
+        return opset11.scatter(g, self, dim, index, src)
 
 
 @_beartype.beartype
@@ -1236,10 +1234,8 @@ def _repeat_interleave_split_helper(g, self, reps, dim):
     if GLOBALS.export_onnx_opset_version <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
-        split = opset13.split
-
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
-        split_out = split(g, self, repeats, dim, _outputs=reps)
+        split_out = opset13.split(g, self, repeats, dim, _outputs=reps)
     return split_out if reps > 1 else [split_out]
 
 
@@ -1288,18 +1284,15 @@ def _arange_cast_helper(
 @_beartype.beartype
 def _arange_helper(g, *args):
     if GLOBALS.export_onnx_opset_version <= 10:
-        arange = opset9.arange
+        return opset9.arange(g, *args)
     else:
-        arange = opset11.arange
-    return arange(g, *args)
+        return opset11.arange(g, *args)
 
 
 @_beartype.beartype
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
-    select = opset9.select
-
-    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return opset9.select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
 
 @_beartype.beartype
@@ -1464,9 +1457,7 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
         ]
 
     final_shape = g.op("Concat", *slices, axis_i=0)
-    _reshape_from_tensor = opset9._reshape_from_tensor
-
-    return _reshape_from_tensor(g, input, final_shape)
+    return opset9._reshape_from_tensor(g, input, final_shape)
 
 
 @_beartype.beartype
