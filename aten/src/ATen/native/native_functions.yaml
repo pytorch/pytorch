@@ -171,9 +171,9 @@
     CUDA: _assert_async_cuda
 
 
-# - func: _assert_true(bool a) -> ()
+- func: _assert_true(bool value, str message) -> ()
 
-# - func: _tensor_equal(Tensor a, Tensor b, Dimname[] names) -> bool
+- func: _tensor_equal(Tensor a, int[]? size=None, int[]? stride=None, ScalarType? dtype=None) -> bool
 
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
