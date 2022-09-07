@@ -1,12 +1,12 @@
 Quantization API Reference
 -------------------------------
 
-torch.ao.quantization
+torch.quantization
 ~~~~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
 
-.. currentmodule:: torch.ao.quantization
+.. currentmodule:: torch.quantization
 
 Top level APIs
 ^^^^^^^^^^^^^^
@@ -51,12 +51,12 @@ Utility functions
     default_eval_fn
     get_observer_dict
 
-torch.ao.quantization.quantize_fx
+torch.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
 
-.. currentmodule:: torch.ao.quantization.quantize_fx
+.. currentmodule:: torch.quantization.quantize_fx
 
 .. autosummary::
     :toctree: generated
@@ -160,13 +160,13 @@ regular full-precision tensor.
     topk
 
 
-torch.ao.quantization.observer
+torch.quantization.observer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 
-.. currentmodule:: torch.ao.quantization.observer
+.. currentmodule:: torch.quantization.observer
 
 .. autosummary::
     :toctree: generated
@@ -193,13 +193,13 @@ the values observed during calibration (PTQ) or training (QAT).
     default_dynamic_quant_observer
     default_float_qparams_observer
 
-torch.ao.quantization.fake_quantize
+torch.quantization.fake_quantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
 during QAT.
 
-.. currentmodule:: torch.ao.quantization.fake_quantize
+.. currentmodule:: torch.quantization.fake_quantize
 
 .. autosummary::
     :toctree: generated
@@ -222,13 +222,13 @@ during QAT.
     disable_observer
     enable_observer
 
-torch.ao.quantization.qconfig
+torch.quantization.qconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
 
-.. currentmodule:: torch.ao.quantization.qconfig
+.. currentmodule:: torch.quantization.qconfig
 
 .. autosummary::
     :toctree: generated

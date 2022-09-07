@@ -593,7 +593,8 @@ def convert_fx(
          * `backend_config` (BackendConfig): A configuration for the backend which describes how
             operators should be quantized in the backend, this includes quantization
             mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
-            observer placement for each operators and fused operators. See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
+            observer placement for each operators and fused operators.
+            See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
 
     Return:
         A quantized model (torch.nn.Module)
