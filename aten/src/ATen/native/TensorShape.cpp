@@ -1,28 +1,29 @@
-#include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/SparseTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
-#include <ATen/native/cpu/StackKernel.h>
 #include <ATen/native/cpu/SerialStackImpl.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/WrapDimUtils.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -300,7 +301,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   new_values_size[0] = new_indices_size[1];
 
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
-  Tensor new_indices = at::native::new_empty(indices, new_indices_size);
+  Tensor new_indices = indices.new_empty(new_indices_size);
   if (broadcast_sizes.size()>0) {
     // ones(broadcast_sizes).nonzero() is equivalent to
     // product(map(arange, broadcast_sizes)) but avoids creating
@@ -542,14 +543,14 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
       zeros_sizes[0] = t._values().size(0);
       zeros_sizes[values_dim] = cumulative_size;
       cumulative_size += t._values().size(values_dim);
-      auto z1 = native::zeros(
+      auto z1 = at::zeros(
           zeros_sizes,
           optTypeMetaToScalarType(t._values().options().dtype_opt()),
           t._values().options().layout_opt(),
           t._values().options().device_opt(),
           t._values().options().pinned_memory_opt());
       zeros_sizes[values_dim] = total_size - cumulative_size;
-      auto z2 = native::zeros(
+      auto z2 = at::zeros(
           zeros_sizes,
           optTypeMetaToScalarType(t._values().options().dtype_opt()),
           t._values().options().layout_opt(),
@@ -843,12 +844,9 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
-  auto size = asIntArrayRefSlow(packed_size);
-  return self.expand(size, implicit);
-}
-
-Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
+Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
+  // TODO: properly support SymInt expand
+  auto size = asIntArrayRefSlow(sym_size);
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -927,12 +925,9 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
-Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  return self.narrow_copy(dim, start, sym_length.expect_int());
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  // TODO: properly support SymInt narrow_copy
+  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -1262,17 +1257,6 @@ Tensor alias_with_sizes_and_strides(
 }
 
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
-  // reshape has special autograd logic since it sometimes returns a view but sometimes does not
-  // we have to intercept here instead of using dispatcher
-  // otherwise we will see "autograd still running" kind of error in inference mode:
-  // * if we create a tensor in inference mode scope,
-  //   then pass it to a inference mode decorated function,
-  //   everything is fine
-  // * but if we create the input tensor not with inference mode,
-  //   then errors like "Cannot set version_counter for inference tensor" arise
-  if (self.is_nested()) {
-    return at::_reshape_nested(self, proposed_shape);
-  }
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
@@ -2095,10 +2079,6 @@ Tensor slice(
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
 
-  // INT64_MAX stands for default value.
-  if (start_val == INT64_MAX) {
-    start_val = 0;
-  }
   if (start_val < 0) {
     start_val += sizes[dim];
   }
@@ -2521,6 +2501,132 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   return self;
 }
 
+namespace {
+// Transpose implementation for sparse compressed layouts
+// NB: We assume that dim1,dim0 have already been wrapped
+static inline Tensor sparse_compressed_transpose(
+    const Tensor& self,
+    int64_t dim0,
+    int64_t dim1) {
+  auto compressed_inds = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "compressed_inds",
+      [&self]() { return self.crow_indices(); },
+      [&self]() { return self.ccol_indices(); });
+
+  auto plain_inds = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      self.layout(),
+      "plain_inds",
+      [&self]() { return self.col_indices(); },
+      [&self]() { return self.row_indices(); });
+
+  const auto n_batch_dim = compressed_inds.dim() - 1;
+  const auto n_dense_dim = self.dim() - n_batch_dim - 2;
+
+  // In theory it works, but missing to_dense coverage to test
+  TORCH_CHECK(
+      n_dense_dim == 0,
+      "transpose(): hybrid sparse compressed tensors with dense dimensions are not supported");
+
+  // Classify transpose "type"
+  enum class TransposeDim : uint8_t { Batch, Sparse, Dense };
+  auto classify_dim = [&n_batch_dim](const int64_t dim) {
+    if (dim < n_batch_dim) {
+      return TransposeDim::Batch;
+    } else if (dim > n_batch_dim + 1) {
+      return TransposeDim::Dense;
+    } else {
+      return TransposeDim::Sparse;
+    }
+  };
+
+  const auto transpose_type = classify_dim(dim0);
+  {
+    auto dim_type_name = [](const TransposeDim dim) {
+      switch (dim) {
+        case TransposeDim::Batch:
+          return "Batch";
+        case TransposeDim::Dense:
+          return "Dense";
+        case TransposeDim::Sparse:
+          return "Sparse";
+        default:
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Impossible TransposeDim value: ",
+              static_cast<std::underlying_type_t<TransposeDim>>(dim));
+      }
+    };
+    const auto dim1_type = classify_dim(dim1);
+    TORCH_CHECK(
+        dim1_type == transpose_type,
+        "transpose(): can only transpose dimensions of the same type (Batch, Sparse, Dense), got ",
+        dim0,
+        "(",
+        dim_type_name(transpose_type),
+        ")",
+        " and ",
+        dim1,
+        "(",
+        dim_type_name(dim1_type),
+        ")");
+  }
+
+  // We have validated everything, early exit for equal dims (no effect)
+  if (dim0 == dim1) {
+    return self.clone();
+  }
+
+  auto result_sizes = DimVector(self.sizes());
+  std::swap(result_sizes[dim0], result_sizes[dim1]);
+  Tensor result_vals;
+  auto result_layout = self.layout();
+
+  if (transpose_type == TransposeDim::Batch) {
+    compressed_inds = compressed_inds.transpose(dim0, dim1).contiguous();
+    plain_inds = plain_inds.transpose(dim0, dim1).contiguous();
+    result_vals = self.values().transpose(dim0, dim1).contiguous();
+
+  } else if (transpose_type == TransposeDim::Dense) {
+    // NB: This code should work, but is untestable due to lack of support for
+    // dense dimensions in to_dense. The Debug assert is present to emphasize
+    // the fact that the block should not be possible to hit this code block
+    TORCH_INTERNAL_ASSERT(
+        false, "transpose(): Shouldn't have reached this point");
+    result_vals = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        self.layout(),
+        "sparse_transpose",
+        // un-blocked: 2 sparse dims map to single nnz dim, so dense dim0/1 are
+        // one position left
+        [&]() { return self.values().transpose(dim0 - 1, dim1 - 1); },
+        // blocked: 2 sparse dims map to 3 (nnz, ) + blocksize dims, so dense
+        // dim0/1 are one position right
+        [&]() { return self.values().transpose(dim0 + 1, dim1 + 1); });
+  } else /*if (transpose_type == TransposeDim::Sparse) */ {
+    // Flip the layout
+    result_layout = sparse_csr::flip_compressed_layout(self.layout());
+    result_vals = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        self.layout(),
+        "sparse_transpose",
+        // un-blocked: no change to values, layout is flipped.
+        [&]() { return self.values(); },
+        // blocked: the blocks are nested under the sparse dims so they must be
+        // transposed as well.
+        [&]() {
+          return self.values().transpose(-2 - n_dense_dim, -1 - n_dense_dim);
+        });
+  }
+  return at::native::_sparse_compressed_tensor_unsafe(
+      compressed_inds,
+      plain_inds,
+      result_vals,
+      result_sizes,
+      self.scalar_type(),
+      result_layout,
+      self.device());
+}
+} // namespace
+
 Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
@@ -2533,8 +2639,10 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     Tensor self_clone = self.clone();
     return sparse_transpose_(self_clone, dim0, dim1);
   }
-  TORCH_CHECK(!(self.layout() == kSparseBsr || self.layout() == kSparseBsc),
-      "Transposition of tensors with ", self.layout(), " layout is currently not supported.");
+  if (self.layout() == kSparseBsr || self.layout() == kSparseCsr ||
+      self.layout() == kSparseBsc || self.layout() == kSparseCsc) {
+    return sparse_compressed_transpose(self, dim0, dim1);
+  }
 
   // Transpose of a tensor is a view operation.
   if (dim0 == dim1) {
@@ -2547,28 +2655,6 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
 
   DimVector sizes(self.sizes().begin(), self.sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-
-  if (self.layout() == kSparseCsr) {
-    TORCH_CHECK(self.dim() == 2, "Transposition for layout ", self.layout(), " is only supported for 2D inputs.")
-    return at::native::_sparse_csc_tensor_unsafe(
-        self.crow_indices(),
-        self.col_indices(),
-        self.values(),
-        sizes,
-        self.scalar_type(),
-        c10::kSparseCsc,
-        self.device());
-  }
-  if (self.layout() == kSparseCsc) {
-    return at::native::_sparse_csr_tensor_unsafe(
-        self.ccol_indices(),
-        self.row_indices(),
-        self.values(),
-        sizes,
-        self.scalar_type(),
-        c10::kSparseCsr,
-        self.device());
-  }
   DimVector strides(self.strides().begin(), self.strides().end());
   std::swap(strides[dim0], strides[dim1]);
   auto result = self.as_strided(sizes, strides);
@@ -2782,7 +2868,7 @@ Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
   if (dim <= sparse_dim) {
     auto new_indices = at::cat(
         {indices.narrow(0, 0, dim),
-         native::zeros(
+         at::zeros(
              {1, indices.size(1)},
              kLong,
              indices.options().layout_opt(),
@@ -3118,14 +3204,15 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view(const Tensor& self,
-            IntArrayRef size) {
-  return view_impl(self, size);
+Tensor view_meta(const Tensor& self,
+            at::SymIntArrayRef size) {
+  // TODO: Properly support SymInt view
+  return view_impl(self, c10::asIntArrayRefSlow(size));
 }
 
-Tensor view_symint(const Tensor& self,
-            c10::SymIntArrayRef size) {
-  return self.view(c10::asIntArrayRefSlow(size));
+Tensor view(const Tensor& self,
+            at::IntArrayRef size) {
+  return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {
@@ -3505,8 +3592,8 @@ at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef 
 }
 
 
-at::Tensor& expand_copy_out(const at::Tensor & self, at::IntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand(size, implicit);
+at::Tensor& expand_copy_out(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+  auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
 }
@@ -3661,8 +3748,8 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
 }
 
 
-at::Tensor& view_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
-  auto tmp = self.view(size);
+at::Tensor& view_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
+  auto tmp = self.view_symint(size);
   out.copy_(tmp);
   return out;
 }

@@ -583,6 +583,7 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -664,6 +665,7 @@ class TestOperators(TestCase):
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -673,7 +675,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),  # .item or data-dependent control flow
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
-        xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
@@ -703,6 +704,10 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -734,6 +739,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
@@ -741,7 +747,6 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('cross'),
         xfail('linalg.pinv'),
         xfail('masked_fill'),
         xfail('copysign'),
@@ -757,7 +762,6 @@ class TestOperators(TestCase):
         xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
-        xfail('linalg.cross'),
         xfail('nanmean'),
         xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -819,6 +823,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
         xfail('complex'),
         xfail('copysign'),
@@ -860,8 +865,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('cross'),
-        xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
@@ -946,6 +949,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -962,6 +966,7 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
+        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),
@@ -1321,9 +1326,6 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
-        # call inplace functions
-        xfail('linalg.householder_product'),  # inplace
-
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
         xfail('masked_select'),
@@ -1347,6 +1349,12 @@ class TestOperators(TestCase):
         skip('native_layer_norm', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
     })
+    @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+    ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)

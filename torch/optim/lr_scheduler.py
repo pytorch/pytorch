@@ -725,6 +725,7 @@ class PolynomialLR(_LRScheduler):
         >>> # lr = 0.00050   if epoch == 2
         >>> # lr = 0.00025   if epoch == 3
         >>> # lr = 0.0       if epoch >= 4
+        >>> # xdoctest: +SKIP("undefined vars")
         >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -1637,8 +1638,7 @@ class OneCycleLR(_LRScheduler):
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
                     if self.use_beta1:
-                        _, beta2 = group['betas']
-                        group['betas'] = (m_momentum, beta2)
+                        group['betas'] = (m_momentum, *group['betas'][1:])
                     else:
                         group['momentum'] = m_momentum
                     group['max_momentum'] = m_momentum
@@ -1692,8 +1692,7 @@ class OneCycleLR(_LRScheduler):
             lrs.append(computed_lr)
             if self.cycle_momentum:
                 if self.use_beta1:
-                    _, beta2 = group['betas']
-                    group['betas'] = (computed_momentum, beta2)
+                    group['betas'] = (computed_momentum, *group['betas'][1:])
                 else:
                     group['momentum'] = computed_momentum
 
