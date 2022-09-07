@@ -1314,6 +1314,13 @@ def cudnn_batch_norm(
     )
 
 
+def _broadcast_batch_norm_backward(x, broadcast_mask):
+    for axis, mask in enumerate(broadcast_mask):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
+            x = x.unsqueeze(axis)
+    return x
+
+
 @register_decomposition(aten.native_batch_norm_backward)
 def native_batch_norm_backward(
     grad_out: Tensor,
@@ -1372,21 +1379,23 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = torch.reshape(mean, broadcast_mask)  # type: ignore[arg-type]
+    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)  # type: ignore[arg-type]
     norm = 1.0 / num_features
     grad_output_sum = torch.sum(grad_out_cast, reduction_axes)  # type: ignore[arg-type]
-    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
+    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
 
-    grad_mean = torch.reshape(grad_output_sum * norm, broadcast_mask)
-    proj_scale = torch.reshape(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
+    grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
+    proj_scale = _broadcast_batch_norm_backward(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
 
     if weight_cast is None:
-        grad_scale = torch.reshape(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
+        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
     else:
-        grad_scale = torch.reshape(invstd * weight_cast, broadcast_mask)
+        grad_scale = _broadcast_batch_norm_backward(
+            invstd * weight_cast, broadcast_mask
+        )
 
     if train:
-        proj = (input_cast - mean) * proj_scale
+        proj = (input_cast - mean) * proj_scale  # type: ignore[operator]
         grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
         grad_input = grad_out_cast * grad_scale
