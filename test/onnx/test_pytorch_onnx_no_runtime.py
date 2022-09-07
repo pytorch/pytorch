@@ -7,7 +7,7 @@ import io
 import itertools
 import unittest
 import unittest.mock
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import onnx
 import onnx.numpy_helper
