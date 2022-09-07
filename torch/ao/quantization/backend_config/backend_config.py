@@ -225,6 +225,7 @@ class BackendPatternConfig:
         `set_fuser_method`: sets the function that specifies how to fuse the pattern for this pattern
 
     For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
+
     """
     def __init__(self, pattern: Pattern):
         self.pattern = pattern
