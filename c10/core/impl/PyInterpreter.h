@@ -141,8 +141,10 @@ struct C10_API PyInterpreterVTable {
       const = 0;
 
   // Invoke the Python dispatcher to handle this call
-  virtual void python_dispatcher(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack)
-      const = 0;
+  virtual void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const = 0;
 
   virtual bool is_contiguous(const TensorImpl* self) const = 0;
   virtual c10::Device device(const TensorImpl* self) const = 0;

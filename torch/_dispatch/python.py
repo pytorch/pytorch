@@ -1,10 +1,15 @@
 import torch
 from contextlib import contextmanager
 
+__all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
+
 DispatchKey = torch._C.DispatchKey
 
 def has_key(op, k):
-    return torch._C._dispatch_has_kernel_for_dispatch_key(op.name, k)
+    return (
+        torch._C._dispatch_has_kernel_for_dispatch_key(op.name, k)
+        or k in op.py_kernels
+    )
 
 is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
@@ -24,7 +29,7 @@ def resolve_key(op: torch._ops.OpOverload, k: DispatchKey):
         return cand
     has_backend_kernel = (
         torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name, torch._C._dispatch_get_backend_keyset_from_autograd(k))
-        or has_key(k, DispatchKey.CompositeExplicitAutograd)
+        or has_key(op, DispatchKey.CompositeExplicitAutograd)
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
@@ -58,13 +63,24 @@ def no_python_dispatcher():
     finally:
         del g
 
+@contextmanager
+def enable_python_dispatcher():
+    g = torch._C._EnablePythonDispatcher()
+    try:
+        yield
+    finally:
+        del g
+
 # The Python dispatcher
 def python_dispatcher(op, ks, args, kwargs):
+    """
     with no_python_dispatcher():
         print(op, ks, args, kwargs)
-
+    """
     k = resolve_key(op, ks.highestPriorityTypeId())
-    print(k)
-    return op._op_dk(k, *args, **kwargs)
+    if k in op.py_kernels:
+        return op.py_kernels[k](*args, **kwargs)
+    else:
+        return op._op_dk(k, *args, **kwargs)
 
 torch._C._set_python_dispatcher(python_dispatcher)

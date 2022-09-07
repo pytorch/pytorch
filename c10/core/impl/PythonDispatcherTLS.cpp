@@ -10,7 +10,8 @@ thread_local SafePyHandle pythonDispatcherState;
 
 void PythonDispatcherTLS::set_state(SafePyHandle state) {
   if (state) {
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::PythonDispatcher, true);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonDispatcher, true);
   } else {
     PythonDispatcherTLS::reset_state();
   }
@@ -23,7 +24,8 @@ SafePyHandle PythonDispatcherTLS::get_state() {
 
 void PythonDispatcherTLS::reset_state() {
   pythonDispatcherState.reset();
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::PythonDispatcher, false);
+  c10::impl::tls_set_dispatch_key_included(
+      DispatchKey::PythonDispatcher, false);
 }
 
 } // namespace impl

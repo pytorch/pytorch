@@ -13,5 +13,16 @@ struct C10_API PythonDispatcherTLS {
   static void reset_state();
 };
 
+struct C10_API DisablePythonDispatcher {
+  DisablePythonDispatcher()
+      : old_(PythonDispatcherTLS::get_state()) {
+    PythonDispatcherTLS::set_state({});
+  }
+  ~DisablePythonDispatcher() {
+    PythonDispatcherTLS::set_state(old_);
+  }
+  c10::SafePyHandle old_;
+};
+
 } // namespace impl
 } // namespace c10

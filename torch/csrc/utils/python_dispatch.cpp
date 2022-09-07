@@ -342,13 +342,13 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_tls_set_dispatch_key_excluded",
       [](c10::DispatchKey dispatch_key, bool desired_state) {
-        c10::impl::tls_set_dispatch_key_excluded(
-            dispatch_key, desired_state);
+        c10::impl::tls_set_dispatch_key_excluded(dispatch_key, desired_state);
       });
-  m.def("_dispatch_tls_is_dispatch_key_excluded", [](c10::DispatchKey dispatch_key) {
-    return c10::impl::tls_is_dispatch_key_excluded(
-        dispatch_key);
-  });
+  m.def(
+      "_dispatch_tls_is_dispatch_key_excluded",
+      [](c10::DispatchKey dispatch_key) {
+        return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
+      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
@@ -362,31 +362,27 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey")
-      DEF_ONE(Undefined)
+  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
-      DEF_ONE(CompositeExplicitAutograd)
-      DEF_ONE(CompositeImplicitAutogradNestedTensor)
-      DEF_ONE(CompositeImplicitAutograd)
-      DEF_ONE(AutogradOther)
-      DEF_ONE(Autograd)
-      DEF_ONE(BackendSelect)
-      DEF_ONE(ADInplaceOrView)
-      DEF_ONE(PythonTLSSnapshot)
-      DEF_ONE(Python)
+          DEF_ONE(CompositeExplicitAutograd)
+              DEF_ONE(CompositeImplicitAutogradNestedTensor)
+                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
+                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
+                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
+                              DEF_ONE(Python)
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
-#define DEF_MULTIPLE(fullname, prefix) \
-  DEF_SINGLE(, fullname) \
-  DEF_SINGLE(, StartOf##fullname##Backends) \
+#define DEF_MULTIPLE(fullname, prefix)              \
+  DEF_SINGLE(, fullname)                            \
+  DEF_SINGLE(, StartOf##fullname##Backends)         \
   C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
   DEF_SINGLE(, EndOf##fullname##Backends)
 
-  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-      ;
+                                      ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -397,9 +393,12 @@ void initDispatchBindings(PyObject* module) {
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
-  m.attr("_dispatch_autogradother_backends") = py::cast(c10::autogradother_backends);
+  m.attr("_dispatch_autogradother_backends") =
+      py::cast(c10::autogradother_backends);
 
-  m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) { return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t); });
+  m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
+    return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);
+  });
 
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
@@ -409,7 +408,9 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(keyset);
   });
 
-  m.def("_dispatch_get_backend_keyset_from_autograd", c10::getBackendKeySetFromAutograd);
+  m.def(
+      "_dispatch_get_backend_keyset_from_autograd",
+      c10::getBackendKeySetFromAutograd);
 
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
@@ -421,7 +422,11 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
   });
-  m.def("_dispatch_is_included_in_alias", [](c10::DispatchKey a, c10::DispatchKey b) { return c10::isIncludedInAlias(a, b); });
+  m.def(
+      "_dispatch_is_included_in_alias",
+      [](c10::DispatchKey a, c10::DispatchKey b) {
+        return c10::isIncludedInAlias(a, b);
+      });
   py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
       .def(py::init<c10::DispatchKeySet>());
 

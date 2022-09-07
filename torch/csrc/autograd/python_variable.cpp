@@ -230,8 +230,10 @@ struct ConcretePyInterpreterVTable final
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
-  void python_dispatcher(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack)
-      const override;
+  void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const override;
 
   bool is_contiguous(const TensorImpl* self) const override;
   c10::Device device(const TensorImpl* self) const override;
@@ -681,6 +683,7 @@ static PyObject* THPVariable_make_subclass(
         "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
+  c10::impl::DisablePythonDispatcher dpd_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we
@@ -2293,7 +2296,8 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   auto args = std::move(args_kwargs.first);
   auto kwargs = std::move(args_kwargs.second);
 
-  auto python_dispatcher = c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
+  auto python_dispatcher =
+      c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(python_dispatcher);
 
   py::object obj = py::reinterpret_steal<py::object>(PyObject_CallFunction(
@@ -2304,7 +2308,8 @@ void ConcretePyInterpreterVTable::python_dispatcher(
       args.ptr(),
       kwargs.ptr()));
 
-  if (obj == nullptr) throw python_error();
+  if (obj == nullptr)
+    throw python_error();
 
   pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }
