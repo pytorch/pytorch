@@ -323,6 +323,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
+        BaseCType(SymIntT),
         OptionalCType(BaseCType(SymIntT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT),

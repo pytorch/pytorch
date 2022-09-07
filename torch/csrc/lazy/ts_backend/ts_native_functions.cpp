@@ -539,11 +539,11 @@ at::Tensor LazyNativeFunctions::diagonal_backward(
 
 at::Tensor LazyNativeFunctions::slice_backward(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    at::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
+    c10::SymInt start,
+    c10::SymInt end,
+    c10::SymInt step) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
 }
