@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pathlib
+import itertools
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
@@ -515,10 +516,9 @@ class ComputeOperators:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
-        sig = DispatcherSignature.from_schema(f.func)
+        sig = DispatcherSignature.from_schema(f.func, symint=False)
+        sig_symint = DispatcherSignature.from_schema(f.func, symint=True)
         name = f.func.name.unambiguous_name()
-        call_method_name = "call"
-        redispatch_method_name = "redispatch"
 
         if self.target is Target.DECLARATION:
             # Note [The ATen Operators API]
@@ -547,13 +547,16 @@ class ComputeOperators:
             return f"""
 struct TORCH_API {name} {{
   using schema = {sig.type()};
+  using schema_symint = {sig_symint.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
-  static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
-  static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
+  static {sig.defn(name="call", is_redispatching_fn=False)};
+  static {sig.defn(name="redispatch", is_redispatching_fn=True)};
+  static {sig_symint.defn(name="call_symint", is_redispatching_fn=False)};
+  static {sig_symint.defn(name="redispatch_symint", is_redispatching_fn=True)};
 }};"""
 
         elif self.target is Target.DEFINITION:
@@ -568,21 +571,35 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
       .findSchemaOrThrow({name}::name, {name}::overload_name)
       .typed<{name}::schema>();
 }}
+
+static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema_symint> create_{name}_symint_typed_handle() {{
+  return c10::Dispatcher::singleton()
+      .findSchemaOrThrow({name}::name, {name}::overload_name)
+      .typed<{name}::schema_symint>();
+}}
 """
-            for is_redispatching_fn in [False, True]:
+            for symint, is_redispatching_fn in itertools.product([False, True], [False, True]):
+                lsig = sig_symint if symint else sig
                 if is_redispatching_fn:
                     dispatcher_exprs_str = ", ".join(
-                        ["dispatchKeySet"] + [a.name for a in sig.arguments()]
+                        ["dispatchKeySet"] + [a.name for a in lsig.arguments()]
                     )
-                    dispatcher_call = "redispatch"
-                    method_name = f"{name}::{redispatch_method_name}"
+                    method_base = "redispatch"
                 else:
-                    method_name = f"{name}::{call_method_name}"
-                    dispatcher_exprs_str = ", ".join([a.name for a in sig.arguments()])
-                    dispatcher_call = "call"
+                    dispatcher_exprs_str = ", ".join([a.name for a in lsig.arguments()])
+                    method_base = "call"
+
+                dispatcher_call = method_base
+
+                sym_suffix = ""
+                if symint:
+                    sym_suffix = "_symint"
+
+                method_base += sym_suffix
+                method_name = f"{name}::{method_base}"
 
                 fn_body = f"""
-    static auto op = create_{name}_typed_handle();
+    static auto op = create_{name}{sym_suffix}_typed_handle();
     return op.{dispatcher_call}({dispatcher_exprs_str});"""
 
                 if (
@@ -595,7 +612,7 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
                     )
                 defns += f"""
 // aten::{f.func}
-{sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
+{lsig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
     {fn_body}
 }}
 """
@@ -623,11 +640,14 @@ class ComputeFunction:
             target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
+            sym_suffix = ""
+            if sig.symint:
+                sym_suffix = "_symint"
 
             result += f"""
 // aten::{f.func}
 inline {sig.decl()} {{
-    return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
+    return at::_ops::{f.func.name.unambiguous_name()}::call_symint({exprs_str});
 }}
 """
         return result
@@ -671,7 +691,7 @@ class ComputeTensorMethod:
             result += f"""
 // aten::{f.func}
 inline {sig.defn(prefix="Tensor::")} const {{
-    return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
+    return at::_ops::{f.func.name.unambiguous_name()}::call_symint({exprs_str});
 }}
 """
 
@@ -700,7 +720,7 @@ class ComputeRedispatchFunction:
             result += f"""
 // aten::{f.func}
 inline {sig.decl(is_redispatching_fn=True)} {{
-    return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
+    return at::_ops::{f.func.name.unambiguous_name()}::redispatch_symint({exprs_str});
 }}
 """
 
@@ -906,7 +926,7 @@ DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   {compute_dk}
-  return at::_ops::{f.func.name.unambiguous_name()}::redispatch(
+  return at::_ops::{f.func.name.unambiguous_name()}::redispatch_symint(
       _dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """

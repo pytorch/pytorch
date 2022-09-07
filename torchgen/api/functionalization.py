@@ -101,7 +101,7 @@ def name(
         if reapply_views
         else g.view_copy.func.name.unambiguous_name()
     )
-    return f"at::_ops::{api_name}::call"
+    return f"at::_ops::{api_name}::call_symint"
 
 
 def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:

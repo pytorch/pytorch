@@ -557,7 +557,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     return f"""
 {sig.defn(name=sig.name() + "_symint")} {{
   {clone_mutable_inputs_str}
-  {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
+  {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call_symint({exprs});
   {ret_str}
 }}
 """
@@ -616,7 +616,7 @@ def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     # Kernel name needs to follow the naming convention defined in `generate_function()`
     return f"""
 {sig.defn(name=g.out.func.name.unambiguous_name() + "_symint")} {{
-  auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call({exprs});
+  auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call_symint({exprs});
   {copy_outs_str}
   {return_str(g.out.func.returns, rets)}
 }}

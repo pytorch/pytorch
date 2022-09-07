@@ -408,7 +408,7 @@ def get_return_value(f: NativeFunction) -> str:
 
 TRACE_DISPATCH = CodeTemplate(
     """\
-${assign_return_values}at::_ops::${unambiguous_name}::redispatch(${unpacked_args});"""
+${assign_return_values}at::_ops::${unambiguous_name}::redispatch_symint(${unpacked_args});"""
 )
 
 
@@ -535,7 +535,7 @@ def gen_trace_type(
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
         key_fn=lambda fn: fn.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/TraceType.cpp",
+            "generated_comment": "@" + f"generated from {template_path}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
         num_shards=5,

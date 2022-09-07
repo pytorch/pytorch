@@ -20,6 +20,13 @@ from torchgen.model import (
 from torchgen.utils import mapMaybe
 
 
+SYMINT_ALLOWLIST = [
+    "view",
+    "expand",
+    "expand_copy",
+]
+
+
 def is_tensor(typ: Type) -> bool:
     return isinstance(typ, BaseType) and typ.name == BaseTy.Tensor
 
@@ -79,7 +86,7 @@ def gen_unwraps(
 
 
 def gen_case_where_all_bdims_are_none(
-    schema: FunctionSchema, cur_level_var: str
+    outer_sig: DispatcherSignature, schema: FunctionSchema, cur_level_var: str
 ) -> str:
     conditions = []
     flat_args = schema.arguments.flat_all
@@ -88,13 +95,17 @@ def gen_case_where_all_bdims_are_none(
             continue
         conditions.append(f"!isBatchedAtLevel({arg.name}, {cur_level_var})")
 
-    sig = DispatcherSignature.from_schema(schema)
+    symint = str(schema.name) in SYMINT_ALLOWLIST
+    sig = DispatcherSignature.from_schema(schema, symint=symint)
+    sym_suffix = ""
+    if symint:
+        sym_suffix = "_symint"
     translated_args = ", ".join(
-        e.expr for e in translate(sig.arguments(), sig.arguments())
+        e.expr for e in translate(outer_sig.arguments(), sig.arguments())
     )
     return f"""\
 if ({' && '.join(conditions)}) {{
-  return at::_ops::{sig.func.name.unambiguous_name()}::call({translated_args});
+  return at::_ops::{sig.func.name.unambiguous_name()}::call{sym_suffix}({translated_args});
 }}"""
 
 
@@ -138,7 +149,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # - the argument that is being modified in-place is the first argument
     # - all returns are either Tensor, tuple of Tensor, or TensorList
     schema = native_function.func
-    sig = DispatcherSignature.from_schema(schema)
+    sig = DispatcherSignature.from_schema(schema, symint=str(schema.name) in SYMINT_ALLOWLIST)
     returns = schema.returns
 
     # Check assumptions. If these are invalid we return None
@@ -160,7 +171,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -178,11 +189,11 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 
 def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
     schema = native_function.func
-    sig = DispatcherSignature.from_schema(schema)
+    sig = DispatcherSignature.from_schema(schema, symint=str(schema.name) in SYMINT_ALLOWLIST)
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -199,7 +210,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 
 def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     schema = native_function.func
-    sig = DispatcherSignature.from_schema(schema)
+    sig = DispatcherSignature.from_schema(schema, symint=str(schema.name) in SYMINT_ALLOWLIST)
     returns = schema.returns
 
     # Only support cases where all returns are Tensors or vector<Tensor>
@@ -224,7 +235,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     wrapped_returns = gen_returns(returns, cur_level_var, results_var)
     return f"""\
