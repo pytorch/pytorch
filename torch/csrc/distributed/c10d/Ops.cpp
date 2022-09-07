@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/Ops.hpp>
 
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/library.h>
 
 namespace c10d {
@@ -21,14 +22,13 @@ c10::intrusive_ptr<Work> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t reduce_op,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
   return process_group->reduce_scatter(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-          static_cast<ReduceOp>(reduce_op),
-          std::chrono::milliseconds(timeout)});
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> gather_(
@@ -77,19 +77,21 @@ c10::intrusive_ptr<Work> barrier(
 }
 
 TORCH_LIBRARY(c10d, m) {
-  // The following ProcessGroup and Work definations are more like declarations.
-  // They don't expose the details of the two classes into TorchScript.
+  // The following ProcessGroup, Work, and ReduceOp definitions are more like
+  // declarations. They don't expose the details of the two classes into
+  // TorchScript.
   m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
   m.class_<Work>("Work")
       .def(torch::init<>())
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
+  m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
   // It's important to register the op to the CompositeExplicitAutograd key
   // instead of the CompositeImplicitAutograd key to enable
   // __torch_dispatch__.
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "allgather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
@@ -97,7 +99,7 @@ TORCH_LIBRARY(c10d, m) {
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
-      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
+      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "gather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
@@ -152,13 +154,13 @@ c10::intrusive_ptr<Work> allreduce(
           .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
               at::TensorList,
               const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              int64_t,
+              const c10::intrusive_ptr<::c10d::ReduceOp>&,
               int64_t)>();
 
   return std::get<1>(op.call(
       tensors,
       process_group,
-      static_cast<uint64_t>(opts.reduceOp),
+      c10::make_intrusive<ReduceOp>(opts.reduceOp),
       opts.timeout.count()));
 }
 
@@ -189,13 +191,13 @@ c10::intrusive_ptr<Work> reduce_scatter(
                            const std::vector<at::Tensor>&,
                            const std::vector<std::vector<at::Tensor>>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           int64_t,
+                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
                            int64_t)>();
   return op.call(
       output_tensors,
       input_tensors,
       process_group,
-      static_cast<uint64_t>(opts.reduceOp),
+      c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
       opts.timeout.count());
 }
 
@@ -208,14 +210,14 @@ c10::intrusive_ptr<Work> reduce(
                        .typed<c10::intrusive_ptr<::c10d::Work>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           int64_t,
+                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
                            int64_t,
                            int64_t,
                            int64_t)>();
   return op.call(
       tensors,
       process_group,
-      static_cast<uint64_t>(opts.reduceOp),
+      c10::make_intrusive<ReduceOp>(opts.reduceOp),
       opts.rootRank,
       opts.rootTensor,
       opts.timeout.count());
