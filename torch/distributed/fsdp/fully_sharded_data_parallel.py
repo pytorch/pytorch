@@ -679,14 +679,14 @@ class _ExecOrderData:
 
 class _FreeEventQueue:
     """
-    This tracks all pending frees corresponding to in-flight all-gathers. The
+    This tracks all pending frees corresponding to inflight all-gathers. The
     queueing pattern is iterative enqueues followed by a flush, and the current
     heuristic for the flush is based on the number of inflight all-gathers.
     """
 
     def __init__(self) -> None:
         self._queue: Deque[torch.cuda.Event] = collections.deque()
-        self._max_num_inflight_all_gathers = 2  # empirically chosen default
+        self._max_num_inflight_all_gathers = 2  # empirically chosen
 
     def enqueue(self, free_event: torch.cuda.Event) -> None:
         """Enqueues a free event."""
