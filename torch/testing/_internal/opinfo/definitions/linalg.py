@@ -526,6 +526,11 @@ def sample_inputs_linalg_norm(
 
     vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
     matrix_ords = (None, "fro", "nuc", 1, 2, inf, -1, -2, -inf)
+    if dtype in {torch.float16, torch.bfloat16, torch.complex32}:
+        # svdvals not supported for low precision dtypes
+        matrix_ords = ("fro", inf, -inf, 1, -1)
+    else:
+        matrix_ords = (None, "fro", "nuc", inf, -inf, 1, -1, 2, -2)
 
     inputs = []
 
@@ -1761,24 +1766,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
-            # RuntimeError: linalg.matrix_norm: Low precision dtypes not supported.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
         ),
     ),
     OpInfo(
@@ -1807,24 +1794,6 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure, "TestGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad"),
-            # RuntimeError: linalg.matrix_norm: Low precision dtypes not supported.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
         ),
     ),
     OpInfo(
@@ -2380,13 +2349,6 @@ python_ref_db: List[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
-        skips=(
-            # RuntimeError: linalg.matrix_norm: Half precision dtypes not supported. Got torch.bfloat16
-            DecorateInfo(
-                unittest.expectedFailure,
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
