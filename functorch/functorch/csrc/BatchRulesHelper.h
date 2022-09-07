@@ -16,7 +16,7 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <functorch/csrc/Constants.h>
+#include <ATen/functorch/Constants.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
 // This file contains helper functions for batching rules.

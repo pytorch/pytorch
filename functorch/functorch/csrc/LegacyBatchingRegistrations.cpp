@@ -14,7 +14,7 @@
 #include <functorch/csrc/BatchingMetaprogramming.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
-#include <functorch/csrc/Constants.h>
+#include <ATen/functorch/Constants.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
 namespace at {

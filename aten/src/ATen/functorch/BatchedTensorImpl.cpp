@@ -3,12 +3,11 @@
 //
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 
-#include <functorch/csrc/Constants.h>
 #include <c10/util/irange.h>
 
 namespace at {

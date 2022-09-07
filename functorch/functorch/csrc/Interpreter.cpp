@@ -1,5 +1,5 @@
 #include <functorch/csrc/Interpreter.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/VmapInterpreter.h>
 #include <functorch/csrc/FunctionalizeInterpreter.h>

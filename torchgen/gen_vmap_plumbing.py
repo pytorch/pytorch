@@ -256,7 +256,7 @@ def gen_all_vmap_plumbing(native_functions: Sequence[NativeFunction]) -> str:
 #pragma once
 #include <ATen/Operators.h>
 #include <functorch/csrc/PlumbingHelper.h>
-#include <functorch/csrc/Constants.h>
+#include <ATen/functorch/Constants.h>
 
 namespace at {{ namespace functorch {{
 
