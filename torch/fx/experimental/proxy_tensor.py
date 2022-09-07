@@ -96,6 +96,7 @@ def has_proxy(obj):
 def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
         proxy.node.meta['val'] = val
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, PySymInt):
         proxy.node.meta['val'] = val
     elif isinstance(val, torch.Tensor):

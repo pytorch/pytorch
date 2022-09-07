@@ -401,9 +401,9 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-    fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
+    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
 
-    with preserve_rng_state(), fake_mode as mode:
+    with preserve_rng_state(), fake_mode() as mode:
 
         def process_inputs(flat_args):
             if mode:
