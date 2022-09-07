@@ -14,11 +14,20 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
+from torch.onnx import (  # noqa: F401
+    _constants,
+    _patch_torch,
+    _type_utils,
+    errors,
+    symbolic_opset10 as opset10,
+    symbolic_opset11 as opset11,
+    symbolic_opset13 as opset13,
+    symbolic_opset8 as opset8,
+    symbolic_opset9 as opset9,
+)
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 from torch.types import Number
-from torch.onnx import symbolic_opset8 as opset8, symbolic_opset9 as opset9, symbolic_opset10 as opset10, symbolic_opset11 as opset11, symbolic_opset13 as opset13
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -1292,7 +1301,9 @@ def _arange_helper(g, *args):
 @_beartype.beartype
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
-    return opset9.select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return opset9.select(
+        g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim
+    )
 
 
 @_beartype.beartype
