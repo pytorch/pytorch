@@ -68,7 +68,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
                   "to https://github.com/pytorch/pytorch/issues.");
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   // TODO: If this check ever shows up as a bottleneck, which is unlikely given that
   // comparing devices only involves comparing the type and index (two integers), we
   // can move this to a DEBUG only assert. Until then this confirms and maintains a

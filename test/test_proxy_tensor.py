@@ -789,7 +789,6 @@ def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     detach = torch.ops.aten.detach.default(empty);  empty = None
     sym_size_2 = torch.ops.aten.sym_size(detach, 0)
     return detach""")
