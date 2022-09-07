@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 
-use_functionalize = False
+use_functionalize = True
 
 # TODO Benchmark
 use_fake_tensor = False
