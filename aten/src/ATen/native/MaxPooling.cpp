@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
@@ -103,7 +104,8 @@ Tensor max_pool1d(
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
-      !self.device().is_cpu()) {
+      !self.device().is_cpu() ||
+      isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
