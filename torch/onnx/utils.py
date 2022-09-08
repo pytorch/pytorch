@@ -1875,14 +1875,11 @@ def register_custom_op_symbolic(
         symbolic_name = f"aten{symbolic_name}"
 
     _verify_custom_op_name(symbolic_name)
+    versions = tuple(
+        itertools.chain(_constants.onnx_stable_opsets, [_constants.onnx_main_opset])
+    )
 
-    for version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
-        if version >= opset_version:
-            registration.registry.register(
-                symbolic_name, version, symbolic_fn, custom=True
-            )
+    registration.custom_onnx_symbolic(symbolic_name, versions)(symbolic_fn)
 
 
 @_beartype.beartype
