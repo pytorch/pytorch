@@ -732,7 +732,12 @@ auto FunctionParameter::check(
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
         return true;
       }
-      return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
+      if (allow_numbers_as_tensors) {
+        return THPUtils_checkScalar(obj) ||
+            torch::is_symint_node(py::handle(obj)) ||
+            torch::is_symfloat_node(py::handle(obj));
+      }
+      return false;
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -1475,6 +1480,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return THPVariable_Unpack(obj);
   }
 
+  bool save_symint = false;
   at::Scalar scalar;
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
@@ -1484,6 +1490,15 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  } else if (torch::is_symint_node(py::handle(obj))) {
+    save_symint = true;
+    // This scalar value doesn't matter, it shouldn't ever actually
+    // get read out.  Make it a big and weird looking number to help
+    // people figure out if there's aproblem.
+    scalar = at::Scalar(7777777);
+  } else if (torch::is_symfloat_node(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1498,6 +1513,14 @@ at::Tensor PythonArgs::tensor_slow(int i) {
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+
+  if (save_symint) {
+    auto py_tensor = py::cast(tensor);
+    if (PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) < 0) {
+      throw python_error();
+    }
+  }
+
   return tensor;
 }
 
