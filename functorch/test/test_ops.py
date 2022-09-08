@@ -288,7 +288,6 @@ def is_inplace(op, variant):
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
-    xfail('to_sparse'),
 }
 
 

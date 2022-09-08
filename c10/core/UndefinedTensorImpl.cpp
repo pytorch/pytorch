@@ -13,7 +13,13 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 }
 
 bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
-  return is_contiguous_default(format);
+  TORCH_CHECK(false, "is_contiguous() called on an undefined Tensor");
+}
+IntArrayRef UndefinedTensorImpl::strides_custom() const {
+  TORCH_CHECK(false, "strides() called on an undefined Tensor");
+}
+SymIntArrayRef UndefinedTensorImpl::sym_strides_custom() const {
+  TORCH_CHECK(false, "sym_strides() called on an undefined Tensor");
 }
 
 #ifdef DEBUG
