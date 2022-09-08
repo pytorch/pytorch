@@ -35,6 +35,7 @@ timeout: 720
 tests:"""
 S3_BUCKET = "ossci-metrics"
 S3_PREFIX = "torchbench-pr-test"
+S3_URL_BASE = "https://ossci-metrics.s3.amazonaws.com/"
 
 class S3Client:
     def __init__(self, bucket=S3_BUCKET, prefix=S3_PREFIX):
@@ -52,6 +53,8 @@ class S3Client:
         # make the object public
         object_acl = self.resource.ObjectAcl(self.bucket, s3_key)
         object_acl.put(ACL='public-read')
+        # output the result URL
+        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}/{self.bucket}/{s3_key}")
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
