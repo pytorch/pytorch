@@ -438,12 +438,6 @@ std::tuple<Tensor, optional<int64_t>> view_batching_rule(
   return std::make_tuple(self_.view_symint(size_), 0);
 }
 
-Tensor view_symint_decomposition(const Tensor& self,
-            c10::SymIntArrayRef size) {
-  return self.view( c10::asIntArrayRefSlow(size));
-}
-
-
 template <typename F, F Func>
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
     const Tensor &self, optional<int64_t> self_bdim, SymIntArrayRef size, bool implicit)
@@ -511,15 +505,7 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
   return std::make_tuple(at::diag_embed(self_, offset, dim1, dim2), 0);
 }
 
-// We need to write a real batching rule to fully support symint.
-// This requires symint variants of other operations, like `view`,
-// which don't exist yet.
-Tensor expand_symint_decomp_hack(const Tensor& self, SymIntArrayRef packed_size, bool implicit) {
-   auto size = asIntArrayRefSlow(packed_size);
-   return self.expand(size, implicit);
-}
-
-TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
