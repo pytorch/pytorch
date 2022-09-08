@@ -233,9 +233,10 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d =
+        sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
     if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+      if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() == z) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -253,9 +254,11 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -279,9 +282,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -328,7 +333,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.stride_at_unchecked(a) <
         sizes_and_strides_.stride_at_unchecked(b);
   });
-  int64_t require_stride = 1;
+  SymInt require_stride = 1;
   for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
@@ -620,8 +625,8 @@ void TensorImpl::copy_generic_tensor_metadata(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
-  if (src_impl->extra_meta_ != nullptr) {
-    dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
+  if (src_impl->named_tensor_meta_ != nullptr) {
+    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
   dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
 }
@@ -686,7 +691,8 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       "Extend() called on tensor with symbolic shape")
 
   using SizesVector = SmallVector<int64_t, 5>;
-  IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
   SizesVector newDims(sizes_and_strides.begin(), sizes_and_strides.end());
   newDims[0] += num;
   if (!storage_.data()) {
@@ -695,7 +701,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   }
   const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
   if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
-    sizes_and_strides_.set_sizes(newDims);
+    sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
     numel_ = newNumel;
     return;
   }
@@ -703,7 +709,8 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+          sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
+          (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
   Resize(newCapacity);
@@ -731,7 +738,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
         true); // non-blocking
   }
   reserved_ = true;
-  sizes_and_strides_.set_sizes(newDims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
   numel_ = newNumel;
 }
 
@@ -745,7 +752,8 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
 
   TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
-  IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
   SmallVector<int64_t, 5> newCapacity(
       sizes_and_strides.begin(), sizes_and_strides.end());
   newCapacity[0] = outer_dim;
@@ -761,7 +769,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   Resize(newCapacity);
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
-  sizes_and_strides_.set_sizes(oldDims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(oldDims));
   numel_ = oldSize;
   reserved_ = true;
 }
@@ -788,7 +796,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
       " The old caffe2 mixes Reshape and Resize but this behavior has "
       "been changed. If you find this error, most likely you will need "
       "to change corresponding code from Reshape to Resize.");
-  sizes_and_strides_.set_sizes(dims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(dims));
   empty_tensor_restride(MemoryFormat::Contiguous);
 }
 
@@ -872,17 +880,8 @@ void TensorImpl::set_sym_sizes_and_strides(
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;
   sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-  }
-  extra_meta_->sizes_ = sizes;
-  extra_meta_->strides_ = strides;
-  SymInt numel = 1;
-  for (const auto& s : sizes) {
-    numel *= s;
-  }
-  extra_meta_->numel_ = numel;
-  // TODO: refresh the other entries
+  sizes_and_strides_.set_sizes(sizes);
+  sizes_and_strides_.set_strides(strides);
 }
 
 namespace impl {
