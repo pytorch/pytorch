@@ -165,9 +165,6 @@ option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
     "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
-    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -591,18 +588,11 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
-# It's disabled for caffe2 mobile library.
-if(INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
-  set(INTERN_BUILD_ATEN_OPS OFF)
-else()
-  set(INTERN_BUILD_ATEN_OPS ON)
-endif()
+set(INTERN_BUILD_ATEN_OPS ON)
 
-# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
-# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
-# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# Build libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE)
   if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
   endif()
