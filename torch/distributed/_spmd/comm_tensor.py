@@ -97,9 +97,9 @@ class CommTensor(torch.Tensor):
             require_grad=tensor.requires_grad,
         )
         # The tensor object wrapped by this CommTensor
-        r._tensor: torch.Tensor = tensor  # type: ignore[misc]
+        r._tensor = tensor  # type: ignore[attr-defined]
         # Record whether communication has launched on this tensor.
-        r._after_comm: bool = False  # type: ignore[misc]
+        r._after_comm = False  # type: ignore[attr-defined]
         return r
 
     def __repr__(self):
