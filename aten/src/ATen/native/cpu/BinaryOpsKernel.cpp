@@ -68,8 +68,8 @@ void mul_kernel(TensorIteratorBase& iter) {
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) __ubsan_ignore_undefined__ {
           return a * b;
         });
     });

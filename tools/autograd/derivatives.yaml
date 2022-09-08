@@ -507,7 +507,7 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: at::linalg_lu_solve(LU, pivots, A_t, /*left*/true, /*adjoint*/!A_p.is_complex() && A_p.is_contiguous()).diagonal(0, -2, -1).sum(-1) * result
+  result: linalg_det_jvp(A_t, result, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, False, False]
 
 - name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
@@ -622,12 +622,9 @@
   self: grad * (result + 1)
   result: auto_element_wise
 
-- name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, self.sizes())
-  result: auto_linear
-
-- name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  self: at::sum_to(grad, c10::asIntArrayRefSlow(self.sym_sizes()))
+# TODO: this derivative is not SymInt safe, need sum_to support
+- name: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, self.sym_sizes())
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -835,13 +832,10 @@
   index: non_differentiable
   result: auto_linear
 
-- name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
-  result: -at::matmul(at::matmul(result, self_t), result)
-
-- name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
-  self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
-  inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
+- name: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+  A: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
+  inverse: -at::matmul(at::matmul(inverse, A_t), inverse)
+  output_differentiability: [True, False]
 
 - name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   self: pinv_backward(grad, result, self)
@@ -1362,10 +1356,6 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
-  self: _reshape_nested_backward(self, grad)
-  result: auto_linear
-
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
@@ -1400,8 +1390,12 @@
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  self: select_backward(grad, self.sizes(), dim, index)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: select_backward(grad, self.sizes(), dim, index)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_select_backward(grad, self, dim, index)
 
 - name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
@@ -1738,15 +1732,14 @@
   # linear
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
-- name: view(Tensor(a) self, int[] size) -> Tensor(a)
-  self: grad.reshape(self.sizes())
-  result: auto_linear
-
-- name: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
-  # TODO: add proper double backward for view.SymInt
-  # by SymIntizing `reshape`
-  self: grad.reshape(c10::asIntArrayRefSlow(self.sym_sizes()))
-  result: auto_linear
+- name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
+  dispatch:
+    Default:
+      self: grad.reshape(self.sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.reshape_as(self)
+      result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
@@ -2194,9 +2187,6 @@
 
 - name: mps_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask)
-
-- name: _mps_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
-  self, weight, bias: mps_linear_backward(self, grad, weight, grad_input_mask)
 
 - name: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)

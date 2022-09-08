@@ -5,6 +5,7 @@ import torch
 import unittest
 import warnings
 import torch.nn.utils._stateless as stateless
+import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
@@ -14,7 +15,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException
 from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -30,6 +31,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+HAS_CUDA = torch.cuda.is_available()
 
 
 def process_failures():
@@ -312,8 +314,8 @@ class TestGenericProxyTensor(TestCase):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy__default = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
-    return copy__default
+    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    return copy_
     """)
 
     def test_make_fx_reentrant_dispatch(self):
@@ -525,6 +527,29 @@ def forward(self, x_1):
             torch.allclose(fx_f(input, params)[1], f(input, params)[1])
         )
 
+    def test_make_fx_model_double_param(self):
+        class Emformer(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim: int = 256,
+            ) -> None:
+                super().__init__()
+
+                self.layer_norm = torch.nn.LayerNorm(input_dim)
+
+            def forward(mod_self, x):  # noqa: B902
+                self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
+                y = mod_self.layer_norm(x)
+                self.assertTrue(isinstance(mod_self.layer_norm.weight, torch.Tensor))
+                z = mod_self.layer_norm(y)
+                return z
+
+
+        gm = make_fx(Emformer())(torch.randn(16, 1, 256))
+        ops = set([n.target for n in gm.graph.nodes if n.op == 'call_function'])
+        self.assertEqual(len(ops), 2)
+
+
     def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -564,13 +589,19 @@ def forward(self, x_1):
         )
 
     def test_trace_subclasses(self):
-        def f(x):
+        def f1(x):
             x = UnwrapTensor(x)
             y = x * 2
             return y
 
+        def f2(x):
+            wrapped = UnwrapTensor(x)
+            y = x * wrapped
+            return y
+
         inp = [torch.randn(5)]
-        self._test(f, inp)
+        self._test(f1, inp)
+        self._test(f2, inp)
 
     def test_partial_decomp(self):
         def f(a, b, c):
@@ -591,8 +622,47 @@ def forward(self, x_1):
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
         self.assertEqual(len([n for n in decomposed_fx.graph.nodes if n.target == aten.addmm.default]), 1)
 
+    def test_decomp_of_capture(self):
+        val = torch.randn(5)
+
+        def f(x):
+            return x.t() + val.t()
+
+        def nop(x):
+            return x.cos()
+
+        traced = make_fx(f, decomposition_table={torch.ops.aten.t.default: nop})(torch.randn(5))
+        self.assertEqual(len([n for n in traced.graph.nodes if n.target == torch.ops.aten.t.default]), 0)
 
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_amp_cache(self):
+        layer = torch.nn.Conv2d(3, 3, 3).cuda()
+
+        def f(x, w):
+            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
+
+        inp = torch.randn(4, 3, 10, 10, device='cuda')
+        with torch.autocast('cuda'):
+            out_graph = make_fx(f)(inp, layer.weight).graph
+            out_graph2 = make_fx(f)(inp, layer.weight).graph
+
+        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
+        for a, b in zip(out_graph.nodes, out_graph2.nodes):
+            self.assertEqual(a.op, b.op)
+
+    def test_has_proxy(self):
+        foo = torch.randn(5)
+
+        def f(x):
+            self.assertFalse(has_proxy(foo))
+            self.assertTrue(has_proxy(x))
+            y = x.cos()
+            self.assertTrue(has_proxy(y))
+            return y
+
+        self.assertFalse(has_proxy(torch.randn(5)))
+        make_fx(f)(torch.randn(5))
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -662,6 +732,12 @@ class TestFakeProxyTensor(TestCase):
         x, y = torch.randn(2), torch.randn(2)
         self.assertEqual(g(x, y), f(x, y))
 
+def _get_node(fx_g, cond):
+    for n in fx_g.graph.nodes:
+        if cond(n):
+            return n
+    raise AssertionError
+
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
@@ -710,11 +786,36 @@ class TestSymbolicTracing(TestCase):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    size = a_1.size(0);  a_1 = None
-    mul = size * 2;  size = None
-    empty = torch.ops.aten.empty.SymInt([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    size_1 = empty.size(0)
-    return empty""")
+    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+    mul = sym_size * 2;  sym_size = None
+    empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    sym_size_1 = torch.ops.aten.sym_size(empty, 0)
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    sym_size_2 = torch.ops.aten.sym_size(detach, 0)
+    return detach""")
+
+    def test_symint_to_tensor(self):
+        def f(a):
+            return a / a.shape[0]
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    div = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
+    sym_size_1 = torch.ops.aten.sym_size(div, 0)
+    return div""")
+
+        r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size)
+    lt = sym_size < 0
+    eq = sym_size == sym_size;  sym_size = None
+    div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
+    sym_size_1 = torch.ops.aten.sym_size(div, 0)
+    return div""")
 
     def test_cat(self):
         def f(a, b):
@@ -748,14 +849,22 @@ def forward(self, a_1):
         self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
         self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
 
+    def test_symbolic_meta(self):
+        def f(a, b):
+            d = a.new_empty(a.shape[0] + b.shape[0])
+            return d
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
+        fx_g.graph.eliminate_dead_code()
+        fx_g.recompile()
+        meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
+        meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
+        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
 
 make_fx_failures = {
     # unknown
     xfail('allclose'),
     xfail('equal'),
-    xfail('linalg.eigvals'),
-    xfail('nn.functional.max_pool1d', device_type='cpu'),
     # empty
     skip('new_empty'),
     skip('empty_like'),
@@ -803,11 +912,10 @@ fake_tensor_failures = {
 symbolic_tensor_failures = {
     # Needs complex-value support
     xfail('polar'),
-    xfail('complex'),
     xfail('linalg.eig'),
+    xfail('linalg.eigvals'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
-    xfail('__rpow__', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
@@ -816,7 +924,6 @@ symbolic_tensor_failures = {
     xfail('_masked.cumsum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.log_softmax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('_masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, ...
     xfail('_masked.median', ''),  # aten.nanmedian.dim - couldn't find symbolic meta function/decomposition
     xfail('_masked.norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
@@ -827,7 +934,6 @@ symbolic_tensor_failures = {
     xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
     xfail('_masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
-    xfail('addbmm', ''),  # aten.addbmm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
@@ -854,7 +960,6 @@ symbolic_tensor_failures = {
     xfail('char', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('clamp_max', ''),  # Received type <class 'NoneType'> that is neither a tensor or a number!
     xfail('clone', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('constant_pad_nd', ''),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
@@ -867,7 +972,6 @@ symbolic_tensor_failures = {
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diag_embed', ''),  # aten.diag_embed.default - couldn't find symbolic meta function/decomposition
-    xfail('diagflat', ''),  # Tensors of type TensorImpl do not have numel
     xfail('diagonal', ''),  # aten.diagonal.default - couldn't find symbolic meta function/decomposition
     xfail('diagonal_scatter', ''),  # aten.diagonal_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
@@ -901,7 +1005,6 @@ symbolic_tensor_failures = {
     xfail('flatten', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('float', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('float_power', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('full_like', ''),  # aten.full_like.default - couldn't find symbolic meta function/decomposition
     xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
@@ -920,7 +1023,6 @@ symbolic_tensor_failures = {
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('int', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('inverse', ''),  # Tensors of type TensorImpl do not have numel
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('isreal', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
@@ -932,6 +1034,7 @@ symbolic_tensor_failures = {
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
+    xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
@@ -964,9 +1067,7 @@ symbolic_tensor_failures = {
     xfail('linalg.tensorinv', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.tensorsolve', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.vander', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.vecdot', ''),  # Could not run 'aten::vdot' with arguments from the 'Meta' backend. This could be ...
     xfail('linalg.vector_norm', ''),  # TensorImpl do not have numel
-    xfail('log_softmax', 'dtype'),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
@@ -981,7 +1082,6 @@ symbolic_tensor_failures = {
     xfail('matmul', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('max', 'reduction_with_dim'),  # aten.max.dim - couldn't find symbolic meta function/decomposition
-    xfail('mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
     xfail('meshgrid', 'list_of_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('meshgrid', 'variadic_tensors'),  # Tensors of type TensorImpl do not have numel
@@ -989,11 +1089,8 @@ symbolic_tensor_failures = {
     xfail('mm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
-    xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
-    xfail('nanmean', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('native_layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promot...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
@@ -1006,7 +1103,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.batch_norm', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.bilinear', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
-    xfail('nn.functional.binary_cross_entropy_with_logits', ''),  # aten.binary_cross_entropy_with_logits.default - couldn'...
     xfail('nn.functional.conv1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.conv2d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.conv_transpose1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decompo...
@@ -1026,8 +1122,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.glu', ''),  # aten.glu.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.group_norm', ''),  # 'torch._C.SymIntNode' and 'int'
-    xfail('nn.functional.hardsigmoid', ''),  # Received type <class 'NoneType'> that is neither a tensor or a number!
-    xfail('nn.functional.hardswish', ''),  # Received type <class 'NoneType'> that is neither a tensor or a number!
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.empty_like.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.huber_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.instance_norm', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1037,12 +1131,11 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'nearest'),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/d...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.kl_div', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type pro...
     xfail('nn.functional.l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.layer_norm', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type...
     xfail('nn.functional.linear', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
+    xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta function/decom...
@@ -1051,7 +1144,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.mse_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
-    xfail('nn.functional.multilabel_soft_margin_loss', ''),  # aten.new_empty.default - couldn't find symbolic meta functio...
     xfail('nn.functional.normalize', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'constant'),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
@@ -1063,10 +1155,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.poisson_nll_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.rrelu', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.soft_margin_loss', ''),  # aten.soft_margin_loss.default - couldn't find symbolic meta function/de...
-    xfail('nn.functional.softmin', 'with_dtype'),  # aten._to_copy.default - couldn't find symbolic meta function/decompos...
-    xfail('nn.functional.triplet_margin_loss', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing element...
-    xfail('nn.functional.triplet_margin_with_distance_loss', ''),  # Unexpected type <class 'torch.SymIntNode'> when com...
     xfail('nn.functional.unfold', ''),  # aten.im2col.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.upsample_bilinear', ''),  # aten.upsample_bilinear2d.vec - couldn't find symbolic meta function/de...
     xfail('nn.functional.upsample_nearest', ''),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/deco...
@@ -1091,9 +1179,7 @@ symbolic_tensor_failures = {
     xfail('rand_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
     xfail('randint_like', ''),  # aten.randint_like.default - couldn't find symbolic meta function/decomposition
     xfail('randn_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
-    xfail('ravel', ''),  # Tensors of type TensorImpl do not have numel
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
-    xfail('repeat', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('reshape', ''),  # Tensors of type TensorImpl do not have numel
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -1119,7 +1205,6 @@ symbolic_tensor_failures = {
     xfail('short', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('sinc', ''),  # aten.sinc.default - couldn't find symbolic meta function/decomposition
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
-    xfail('softmax', 'with_dtype'),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_j0', ''),  # aten.special_bessel_j0.default - couldn't find symbolic meta function/decomposition
@@ -1147,8 +1232,6 @@ symbolic_tensor_failures = {
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('std', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
-    xfail('std_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
@@ -1157,7 +1240,6 @@ symbolic_tensor_failures = {
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('tile', ''),  # aten.repeat.default - couldn't find symbolic meta function/decomposition
     xfail('topk', ''),  # aten.topk.default - couldn't find symbolic meta function/decomposition
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1165,18 +1247,19 @@ symbolic_tensor_failures = {
     xfail('tril', ''),  # aten.tril.default - couldn't find symbolic meta function/decomposition
     xfail('triu', ''),  # aten.triu.default - couldn't find symbolic meta function/decomposition
     xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
-    xfail('var_mean', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
-    xfail('var', ''),  # Unexpected type <class 'torch.SymIntNode'> when computing elementwise type promotion!
-    xfail('vdot', ''),  # aten.vdot.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
     xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('view', ''),  # Tensors of type TensorImpl do not have numel
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('where', ''),  # expected predicate to be bool, got torch.float32
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
+symbolic_tensor_segfaults = {
+    skip('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
+}
+
+symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
     def f(args, kwargs):

@@ -239,7 +239,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
     # Leader's signal is the first to be unblocked, after receiving all
     # followers' data objects.
     if is_leader:
-        worker_name_to_response_future_dict = dict()
+        worker_name_to_response_future_dict = {}
         for follower_name in worker_names - {leader_name}:
             fut = rpc_async(
                 follower_name,
