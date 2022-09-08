@@ -1166,23 +1166,20 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         dilation = 3
         padding = 2
         stride = 1
-        model_im2col = torch.nn.Unfold(kernel_size,
-                                       dilation=dilation,
-                                       padding=padding,
-                                       stride=stride)
+        model_im2col = torch.nn.Unfold(
+            kernel_size, dilation=dilation, padding=padding, stride=stride
+        )
         blocks = model_im2col(original_image_inputs)
 
-        model = torch.nn.Fold(output_size=output_size,
-                                     kernel_size=kernel_size,
-                                     dilation=dilation,
-                                     padding=padding,
-                                     stride=stride
+        model = torch.nn.Fold(
+            output_size=output_size, kernel_size=kernel_size, dilation=dilation,
+            padding=padding, stride=stride
         )
         f = io.BytesIO()
         torch.onnx.export(model,
-                         (blocks,),
-                         f,
-                         opset_version=18)
+                          (blocks,),
+                          f,
+                          opset_version=18)
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         self.assertTrue(onnx_model.graph.node[-1].op_type == "Col2Im")
