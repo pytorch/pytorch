@@ -9,7 +9,6 @@ import contextlib
 import copy
 import inspect
 import io
-import itertools
 import os
 import re
 import textwrap
