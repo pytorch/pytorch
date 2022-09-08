@@ -192,9 +192,10 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
     };
     auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
+    auto strides_len = static_cast<int64_t>(strides.size());
     const auto hash_coeffs_cpu = at::from_blob(
         reinterpret_cast<void*>(strides.data()),
-        {static_cast<int64_t>(strides.size())},
+        {strides_len},
         probably_coalesced._indices().options().device(kCPU).dtype(kLong))
       .to(kHash);
     return hash_coeffs_cpu.to(probably_coalesced.device());
