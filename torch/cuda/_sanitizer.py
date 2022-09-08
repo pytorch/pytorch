@@ -5,8 +5,8 @@ to determine if they are synchronized or not. When enabled in a python program a
 possible data race is detected, a detailed warning will be printed and the program
 will exit.
 
-It can be enabled either by importing this module and using
-:func:`enable_cuda_sanitizer()` or by exporting ``TORCH_CUDA_SANITIZER``
+It can be enabled either by importing this module and calling
+:func:`enable_cuda_sanitizer()` or by exporting the ``TORCH_CUDA_SANITIZER``
 environment variable.
 """
 
