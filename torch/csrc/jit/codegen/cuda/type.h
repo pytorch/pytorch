@@ -10,13 +10,12 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-enum class KernelIndexMode { INT32, INT64 };
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -35,6 +34,7 @@ enum class ValType {
   NamedScalar,
   Predicate,
   TensorIndex,
+  IntPair
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.
@@ -71,8 +71,17 @@ enum class DataType {
   BFloat16,
   ComplexFloat,
   ComplexDouble,
+  // Vectorized types, used for reinterpret casting views
+  // TODO: add more vectorized types
+  Double_2,
+  Float_2,
+  // Null
   Null
 };
+
+enum class KernelIndexMode { INT32, INT64 };
+
+DataType indexModeToDtype(KernelIndexMode index_mode);
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -82,6 +91,16 @@ bool isIntegralType(DataType dtype);
 bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 bool isComplexType(DataType dtype);
+// Returns if the datatype is a vector type
+bool isVectorType(DataType dtype);
+// Return the corresponding vector type
+DataType getVectorType(DataType dtype, size_t vec_size);
+// Return the vector size for the given vector type
+int getVectorSizeFromType(DataType dtype);
+// Return the corresponding type of a vector type
+DataType getTypeFromVectorType(DataType dtype);
+// Return the corresponding scalar of a complex type
+DataType getTypeFromComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -89,24 +108,33 @@ enum class ExprType {
   BinaryOp,
   TernaryOp,
   ReductionOp,
+  GroupedReductionOp,
   BroadcastOp,
   WelfordOp,
   MmaOp,
   TransposeOp,
+  ExpandOp,
   ShiftOp,
   GatherOp,
-  ViewDtypeOp,
   ViewOp,
+  LoadStoreOp,
   Split,
+  ViewAsScalar,
   Merge,
+  Swizzle2D,
+  Swizzle2DInt,
+  PairSelect,
   Allocate,
   BlockSync,
   GridSync,
+  CpAsyncWait,
+  CpAsyncCommit,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
   IfThenElse,
   GridReduction,
+  GroupedGridReduction,
   GridBroadcast,
   GridWelford,
   AllocateFusedReduction
@@ -130,15 +158,17 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
+  Imag,
   Silu,
   Lgamma,
   Log,
   Log10,
   Log1p,
   Log2,
-  EraseType,
+  BitCast,
   Neg,
   RandLike,
+  Real,
   Reciprocal,
   Relu,
   Rsqrt,
@@ -151,6 +181,9 @@ enum class UnaryOpType {
   Tan,
   Tanh,
   Trunc,
+
+  // Tools to help debugging
+  Print,
 
   // Might be a bitwise operator or boolean operator.
   Not,
@@ -231,8 +264,12 @@ enum class ParallelType {
   Unroll,
   Unswitch,
   Mma,
+  Group,
   Serial
 };
+
+TORCH_CUDA_CU_API std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except);
 
 static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::BIDx,
@@ -265,13 +302,40 @@ enum class MemoryType { Local, Shared, Global };
 enum class IterType {
   Iteration,
   Reduction,
-  BroadcastWithStride,
-  BroadcastWithoutStride,
+  Broadcast,
   Gather,
-  Stride
+  Stride,
+  VectorComponent
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };
+
+// Used for Iteration Domain mapping modes in ComputeAtMap
+enum class IdMappingMode { PERMISSIVE, EXACT, LOOP };
+
+static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
+    IdMappingMode::PERMISSIVE,
+    IdMappingMode::EXACT,
+    IdMappingMode::LOOP};
+
+// Used to annotate the special memory intrinsics that a loadstore
+//  op will be lowered to.
+enum class LoadStoreOpType { LdMatrix, LdMatrixTranspose, CpAsync };
+
+// Used to label what part of the double buffered iterdomain
+//  a for loop is materializing.
+enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
+
+//! Supported swizzle types,
+//!  corresponds to swizzles functions on the runtime cuda
+//!  naming it swizzle_2d to reserve the options to have a swizzle_1d.
+//!
+//!  TODO: unify with existing swizzle logic, currently
+//!    doesn't have the same type.
+enum class Swizzle2DType { NoSwizzle = 0, ZShape, Transpose, XOR, Scatter };
+
+//! Modes of swizzle, see [Note on swizzle mode].
+enum class SwizzleMode { NoSwizzle = 0, Data, Loop };
 
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
@@ -287,6 +351,7 @@ TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
 TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const PredicateType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
@@ -295,6 +360,15 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IdMappingMode);
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream&,
+    const LoadStoreOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream&,
+    const DoubleBufferLoopStage);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const Swizzle2DType&);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const SwizzleMode&);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);
@@ -323,6 +397,9 @@ TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
 
 TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
 
+// If the index type is known it will be automatically used here
+TORCH_CUDA_CU_API size_t dataTypeSize(DataType type, DataType index_type);
+
 enum class LaunchConfigType {
   Compatible,
   SharedMemory,
@@ -335,6 +412,10 @@ enum class LaunchConfigType {
 };
 
 const char* const kMagicZeroName = "nvfuser_zero";
+
+//! Maximum number of reductions that can be grouped together. The
+//! limit can be increased by extending struct Tuple define in tuple.cu.
+static constexpr int kMaxNumGroupedReductions = 8;
 
 } // namespace cuda
 } // namespace fuser

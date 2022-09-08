@@ -15,6 +15,11 @@
 #include <cublasLt.h>
 #endif
 
+#ifdef USE_ROCM
+#define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
+#define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
+#endif
+
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
       (X > 0 && X <= INT_MAX),               \
@@ -246,13 +251,17 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   float falpha = alpha;
   float fbeta = beta;
 #ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
                                    (void*)&fbeta, c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
-                                   0, 0));
+                                   0, flag));
 #else
   #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
@@ -392,6 +401,10 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
+  int flag = 0;
+#if USE_GEMM_FLAGS_FP16_ALT_IMPL
+  flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
+#endif
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,
       opa,
@@ -416,7 +429,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       rocblas_datatype_f32_r,
       rocblas_gemm_algo_standard,
       0,
-      0));
+      flag));
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
@@ -696,9 +709,11 @@ void gemm_and_bias(
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
+  // See https://github.com/pytorch/pytorch/issues/73328.
+  // Check https://docs.nvidia.com/cuda/cublas/index.html#cublassetworkspace .
+  // Recommended size of user-provided workspace is at least 4MiB (to match
+  // cuBLAS' default workspace pool).
+  size_t workspaceSize = 4 * 1024 * 1024;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
@@ -1149,7 +1164,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
+// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched on platforms other than cuda
 #ifdef CUDART_VERSION
 
 template <>
@@ -1310,67 +1325,6 @@ void getrfBatched<c10::complex<float>>(
       batchsize));
 }
 
-template <>
-void getriBatched<double>(
-    int n, double** dA_array, int ldda, int* ipiv_array, double** dC_array, int lddc, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
-}
-
-template <>
-void getriBatched<float>(
-    int n, float** dA_array, int ldda, int* ipiv_array, float** dC_array, int lddc, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
-}
-
-template <>
-void getriBatched<c10::complex<double>>(
-    int n,
-    c10::complex<double>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    c10::complex<double>** dC_array,
-    int lddc,
-    int* info_array,
-    int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasZgetriBatched(
-      handle,
-      n,
-      reinterpret_cast<cuDoubleComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      reinterpret_cast<cuDoubleComplex**>(dC_array),
-      lddc,
-      info_array,
-      batchsize));
-}
-
-template <>
-void getriBatched<c10::complex<float>>(
-    int n,
-    c10::complex<float>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    c10::complex<float>** dC_array,
-    int lddc,
-    int* info_array,
-    int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasCgetriBatched(
-      handle,
-      n,
-      reinterpret_cast<cuComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      reinterpret_cast<cuComplex**>(dC_array),
-      lddc,
-      info_array,
-      batchsize));
-}
 
 template <>
 void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {

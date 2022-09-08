@@ -1,6 +1,6 @@
-#include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/cuda/device_set.h>
 #include <ATen/core/functional.h>
+#include <torch/csrc/cuda/device_set.h>
+#include <torch/csrc/cuda/nccl.h>
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -14,7 +14,6 @@
 #include <sstream>
 #include <type_traits>
 #include <unordered_map>
-
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
@@ -50,7 +49,7 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
 }
 
 torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
-    switch (var) {
+  switch (var) {
     case ncclSuccess:
       return torch::cuda::nccl::ncclResult::Success;
     case ncclUnhandledCudaError:
@@ -99,7 +98,10 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
 
 ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
   if (!t.is_cuda()) {
-    TORCH_CHECK(false, "NCCL only supports CUDA tensors, but got a tensor on ", t.device());
+    TORCH_CHECK(
+        false,
+        "NCCL only supports CUDA tensors, but got a tensor on ",
+        t.device());
   }
   return to_nccl_data_type(t.scalar_type());
 }
@@ -120,24 +122,10 @@ static inline void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
-struct AutoNcclGroup {
-  AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(ncclGroupStart());
-#endif
-  }
-  ~AutoNcclGroup() {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(ncclGroupEnd());
-#endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-  }
-};
-
 void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
-  err << "NCCL Error " << static_cast<int>(status) << ": " << ncclGetErrorString(to_nccl_result(status));
+  err << "NCCL Error " << static_cast<int>(status) << ": "
+      << ncclGetErrorString(to_nccl_result(status));
   throw std::runtime_error(err.str());
 }
 
@@ -146,13 +134,13 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    NCCL_CHECK(
-      ncclCommInitAll(to_nccl_comm(comms.get()), devices.size(), devices.data()));
+    NCCL_CHECK(ncclCommInitAll(
+        to_nccl_comm(comms.get()), devices.size(), devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
     if (comms) {
-      for(const auto i : c10::irange(ndevices)) {
+      for (const auto i : c10::irange(ndevices)) {
         int dummy_var;
         if (cudaGetDevice(&dummy_var) != cudaSuccess) {
           /* there are cases when this destructor is called after the
@@ -185,16 +173,14 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static inline
-void check_tensor(
+static inline void check_tensor(
     const at::Tensor& input,
     const at::optional<at::Tensor>& output,
     int input_multiplier,
     int output_multiplier,
     int64_t ref_numel,
     ScalarType ref_dtype) {
-
-  auto check_one = [&](const at::Tensor &tensor) {
+  auto check_one = [&](const at::Tensor& tensor) {
     if (!tensor.is_cuda() || tensor.is_sparse()) {
       throw std::runtime_error(
           "input and output elements have to be cuda dense Tensors");
@@ -256,11 +242,12 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     auto input = inputs[i];
     auto output = outputs[i];
 
-    check_tensor(input, output, input_multiplier, output_multiplier, numel, dtype);
+    check_tensor(
+        input, output, input_multiplier, output_multiplier, numel, dtype);
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
@@ -287,13 +274,16 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     auto input = inputs[i];
 
     check_tensor(
-      input,
-      i == root ? at::optional<at::Tensor>{output} : at::nullopt,
-      input_multiplier, output_multiplier, numel, dtype);
+        input,
+        i == root ? at::optional<at::Tensor>{output} : at::nullopt,
+        input_multiplier,
+        output_multiplier,
+        numel,
+        dtype);
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
@@ -305,6 +295,20 @@ void check_inputs(
 }
 
 } // namespace detail
+
+AutoNcclGroup::AutoNcclGroup() {
+  (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  detail::NCCL_CHECK(ncclGroupStart());
+#endif
+}
+
+AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  detail::NCCL_CHECK(ncclGroupEnd());
+#endif
+  (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
+}
 
 bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
@@ -327,20 +331,18 @@ bool is_available(TensorList tensors) {
 
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
-  constexpr std::uint64_t ver = (((uint64_t) NCCL_MAJOR) << 32) |
-                                (((uint64_t) NCCL_MINOR) << 16) |
-                                ((uint64_t) NCCL_PATCH);
+  constexpr std::uint64_t ver = (((uint64_t)NCCL_MAJOR) << 32) |
+      (((uint64_t)NCCL_MINOR) << 16) | ((uint64_t)NCCL_PATCH);
   return ver;
 #elif defined(USE_NCCL)
   // return major version "1"
-  return ((uint64_t) 1) << 32;
+  return ((uint64_t)1) << 32;
 #else
   return 0;
 #endif
 }
 
-void get_unique_id(ncclUniqueId& id)
-{
+void get_unique_id(ncclUniqueId& id) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   NCCL_CHECK(ncclGetUniqueId(to_nccl_unique_id(&id)));
@@ -355,18 +357,14 @@ ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
   ncclComm_t comm;
   ncclUniqueId id = comm_id;
   NCCL_CHECK(ncclCommInitRank(
-    to_nccl_comm(&comm),
-    nranks,
-    *(to_nccl_unique_id(&id)),
-    rank));
+      to_nccl_comm(&comm), nranks, *(to_nccl_unique_id(&id)), rank));
   return comm;
 #else
   return nullptr;
 #endif
 }
 
-void comm_destroy(ncclComm_t comm)
-{
+void comm_destroy(ncclComm_t comm) {
   /*
    * TODO(T30279827) Temporarily disable calling ncclCommDestroy
    * Calling ncclCommDestroy while program exiting is undefined
@@ -437,7 +435,12 @@ void broadcast(
         ")");
     ncclComm_t comm = comms[i];
     NCCL_CHECK(ncclBcast(
-        tensors[i].data_ptr(), numel, data_type, 0, to_nccl_comm(comm), stream));
+        tensors[i].data_ptr(),
+        numel,
+        data_type,
+        0,
+        to_nccl_comm(comm),
+        stream));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -467,7 +470,7 @@ void reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -519,7 +522,7 @@ void all_reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -561,7 +564,7 @@ void reduce_scatter(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -602,7 +605,7 @@ void all_gather(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (const auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -612,21 +615,21 @@ void all_gather(
 
     ncclComm_t comm = comms_ref[i];
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      NCCL_CHECK(ncclAllGather(
-          inputs[i].data_ptr(),
-          outputs[i].data_ptr(),
-          count,
-          data_type,
-          to_nccl_comm(comm),
-          stream));
+    NCCL_CHECK(ncclAllGather(
+        inputs[i].data_ptr(),
+        outputs[i].data_ptr(),
+        count,
+        data_type,
+        to_nccl_comm(comm),
+        stream));
 #else
-      NCCL_CHECK(ncclAllGather(
-          inputs[i].data_ptr(),
-          count,
-          data_type,
-          outputs[i].data_ptr(),
-          to_nccl_comm(comm),
-          stream));
+    NCCL_CHECK(ncclAllGather(
+        inputs[i].data_ptr(),
+        count,
+        data_type,
+        outputs[i].data_ptr(),
+        to_nccl_comm(comm),
+        stream));
 #endif
   }
 #else
@@ -634,13 +637,15 @@ void all_gather(
 #endif
 }
 
-void all2all_single_equal_split(at::Tensor& input,
-             at::Tensor& output,
-             int size,
-             ncclComm_t _comm,
-             at::cuda::CUDAStream& stream) {
+void all2all_single_equal_split(
+    at::Tensor& input,
+    at::Tensor& output,
+    int size,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
+    (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
 
   int numranks;
@@ -648,19 +653,21 @@ void all2all_single_equal_split(at::Tensor& input,
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
-  auto* recvbuff = reinterpret_cast<char *>(output.data_ptr());
+  auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) && ROCM_VERSION >= 50000
-  NCCL_CHECK(ncclAllToAll(sendbuff , recvbuff , count,  type, comm, stream));
+  NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for(const auto r : c10::irange(numranks)) {
+  for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (count != 0) {
-      NCCL_CHECK(ncclSend(sendbuff + r * rankdiff, count, type, r, comm, stream));
-      NCCL_CHECK(ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
+      NCCL_CHECK(
+          ncclSend(sendbuff + r * rankdiff, count, type, r, comm, stream));
+      NCCL_CHECK(
+          ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
     }
   }
   NCCL_CHECK(ncclGroupEnd());
@@ -685,7 +692,8 @@ void all2all_single_unequal_split(
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
+    (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
 
   auto type = to_nccl_data_type(_type);
@@ -693,7 +701,7 @@ void all2all_single_unequal_split(
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
-  for(const auto r : c10::irange(numranks)) {
+  for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
     if (sendcounts[r] != 0) {
@@ -724,19 +732,21 @@ void all2all_single_unequal_split(
 #endif
 }
 
-void all2all(std::vector<at::Tensor>& outputTensors,
-             std::vector<at::Tensor>& inputTensors,
-             ncclComm_t _comm,
-             at::cuda::CUDAStream& stream) {
+void all2all(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
+    (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
   auto comm = to_nccl_comm(_comm);
 
   NCCL_CHECK(ncclGroupStart());
-  for(const auto r : c10::irange(outputTensors.size())) {
-    at::Tensor &input = inputTensors[r];
-    at::Tensor &output = outputTensors[r];
+  for (const auto r : c10::irange(outputTensors.size())) {
+    at::Tensor& input = inputTensors[r];
+    at::Tensor& output = outputTensors[r];
     if (input.numel() != 0) {
       NCCL_CHECK(ncclSend(
           input.data_ptr(),
@@ -813,7 +823,6 @@ void recv(
 #endif
 }
 
-
 void gather(
     const at::Tensor& inputs,
     std::vector<at::Tensor>& outputs,
@@ -821,7 +830,8 @@ void gather(
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
+    (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
@@ -835,11 +845,10 @@ void gather(
 
   NCCL_CHECK(ncclGroupStart());
 
-  if (cur_rank == root)
-  {
+  if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
-        auto* recvbuff =  reinterpret_cast<char*>(outputs[r].data_ptr());
+        auto* recvbuff = reinterpret_cast<char*>(outputs[r].data_ptr());
         NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
       } else {
         // on its own rank, simply copy from the input
@@ -866,7 +875,8 @@ void scatter(
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
+    (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
@@ -875,13 +885,12 @@ void scatter(
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
 
   NCCL_CHECK(ncclGroupStart());
-  if (cur_rank == root)
-  {
+  if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
-        const auto* sendbuff =  reinterpret_cast<char*>(inputs[r].data_ptr());
+        const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
         NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output
@@ -903,7 +912,6 @@ void scatter(
   AT_ERROR("PyTorch built without NCCL support");
 #endif
 }
-
 
 } // namespace nccl
 } // namespace cuda

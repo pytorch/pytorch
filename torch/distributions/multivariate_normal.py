@@ -5,6 +5,8 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
 
+__all__ = ['MultivariateNormal']
+
 
 def _batch_mv(bmat, bvec):
     r"""
@@ -90,6 +92,8 @@ class MultivariateNormal(Distribution):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> m = MultivariateNormal(torch.zeros(2), torch.eye(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
         tensor([-0.2102, -0.5429])

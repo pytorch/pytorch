@@ -10,6 +10,7 @@ sections with user provided statements.
 #include <chrono>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/utils/pybind.h>
 #include <pybind11/pybind11.h>
 #include <torch/extension.h>
 

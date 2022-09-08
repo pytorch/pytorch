@@ -16,8 +16,10 @@ bool compute_cpp_stack_traces_enabled() {
     if (strcmp(envar, "1") == 0) {
       return true;
     }
-    TORCH_WARN("ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ", envar,
-               " valid values are 0 or 1.");
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ",
+        envar,
+        " valid values are 0 or 1.");
   }
   return false;
 }

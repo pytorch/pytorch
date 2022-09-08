@@ -1,7 +1,13 @@
 import torch
 import warnings
-from typing import Any, Iterable, List, Tuple, Union
+import weakref
+from typing import Any, Iterable, List, Tuple
 
+__all__ = [
+    "checkpoint", "checkpoint_sequential", "CheckpointFunction",
+    "check_backward_validity", "detach_variable", "get_device_states",
+    "set_device_states",
+]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -51,6 +57,16 @@ def set_device_states(devices, states) -> None:
         with torch.cuda.device(device):
             torch.cuda.set_rng_state(state)
 
+def _get_autocast_kwargs():
+    gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
+                           "dtype": torch.get_autocast_gpu_dtype(),
+                           "cache_enabled": torch.is_autocast_cache_enabled()}
+
+    cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
+                           "dtype": torch.get_autocast_cpu_dtype(),
+                           "cache_enabled": torch.is_autocast_cache_enabled()}
+
+    return gpu_autocast_kwargs, cpu_autocast_kwargs
 
 class CheckpointFunction(torch.autograd.Function):
 
@@ -60,12 +76,7 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-        ctx.gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
-                                   "dtype": torch.get_autocast_gpu_dtype(),
-                                   "cache_enabled": torch.is_autocast_cache_enabled()}
-        ctx.cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
-                                   "dtype": torch.get_autocast_cpu_dtype(),
-                                   "cache_enabled": torch.is_autocast_cache_enabled()}
+        ctx.gpu_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs()
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
             # Don't eagerly initialize the cuda context by accident.
@@ -212,15 +223,18 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
-        use_reentrant(bool, optional, default=True): Use checkpointing
+            Default: ``True``
+        use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
             allows ``checkpoint`` to support additional functionality, such as
-            working as expected with ``torch.autograd.grad``. Note that future
+            working as expected with ``torch.autograd.grad`` and support for
+            keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
+            Default: ``True``
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -228,7 +242,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     """
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
-    if kwargs:
+    if kwargs and use_reentrant:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
@@ -237,7 +251,8 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         return _checkpoint_without_reentrant(
             function,
             preserve,
-            *args
+            *args,
+            **kwargs,
         )
 
 
@@ -272,13 +287,15 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
             functions (comprising the model) to run sequentially.
         segments: Number of chunks to create in the model
         input: A Tensor that is input to :attr:`functions`
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
+            Default: ``True``
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
 
     Example:
+        >>> # xdoctest: +SKIP("stub")
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
@@ -306,7 +323,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
                            preserve_rng_state=preserve)
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
-def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
+def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
     """Checkpointining without re-entrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
@@ -314,11 +331,14 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
+            Default: ``True``
         *args: Arguments to pass in to the given ``function``.
+        **kwargs: Keyword arguments to pass into the given ``function``.
     """
-    had_autocast_in_fwd = torch.is_autocast_enabled()
+    # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
+    gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
@@ -332,22 +352,39 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: List[Union[torch.Tensor, None]] = []
-    counter = 0
+    # Custom class to be able to take weak references
+    class Holder():
+        pass
+    # The Holder object for each of the saved object is saved directly on the
+    # SavedVariable and is cleared when reset_data() is called on it. We MUST make
+    # sure that this is the only object having an owning reference to ensure that
+    # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
+    # data is cleared.
+    storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    weak_holder_list = []
 
     def pack(x):
-        nonlocal counter
-        counter += 1
-        # TODO(varal7): Instead of returning indices, we can return things metadata (such as
+        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
         # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        return counter - 1
+        res = Holder()
+        weak_holder_list.append(weakref.ref(res))
+        return res
+
 
     def unpack(x):
+        unpack_counter = 0
         if len(storage) == 0:
-
             def inner_pack(inner):
-                storage.append(inner)
-                return None
+                nonlocal unpack_counter
+                unpack_counter += 1
+                # If the holder went out of scope, the SavedVariable is dead and so
+                # the value will never be read from the storage. Skip filling it.
+                if weak_holder_list[unpack_counter - 1]() is None:
+                    return
+                # Use detach here to ensure we don't keep the temporary autograd
+                # graph created during the second forward
+                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
+                return
 
             def inner_unpack(packed):
                 raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
@@ -363,14 +400,24 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                     torch.set_rng_state(fwd_cpu_state)
                     if had_cuda_in_fwd:
                         set_device_states(fwd_gpu_devices, fwd_gpu_states)
-                with torch.enable_grad(), torch.cuda.amp.autocast(had_autocast_in_fwd):
-                    with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                        _unused = function(*args)
+
+                with torch.enable_grad(), \
+                     torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+                     torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                     torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
+                    _unused = function(*args, **kwargs)
+
+        if x not in storage:
+            raise RuntimeError(
+                "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+                " recomputation being triggered in between, this is not currently supported. Please"
+                " open an issue with details on your use case so that we can prioritize adding this."
+            )
 
         return storage[x]
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-        output = function(*args)
+        output = function(*args, **kwargs)
         if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
             # Cuda was not initialized before running the forward, so we didn't
             # stash the CUDA state.

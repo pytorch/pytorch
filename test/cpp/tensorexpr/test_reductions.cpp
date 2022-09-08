@@ -50,8 +50,6 @@ TEST(Reductions, ReduceSum0D_1) {
 }
 
 TEST(Reductions, ReduceSum0D_2) {
-  const int M = 10;
-
   BufHandle b("b", {}, kFloat);
   std::vector<float> in(1);
   in[0] = 77.7;

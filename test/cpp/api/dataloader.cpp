@@ -63,8 +63,7 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
 // dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
 // contains 10, 5, 20 examples respectively.
 
-struct DummyChunkDataReader
-    : public datasets::ChunkDataReader<int> {
+struct DummyChunkDataReader : public datasets::ChunkDataReader<int> {
  public:
   using BatchType = datasets::ChunkDataReader<int>::ChunkType;
   using DataType = datasets::ChunkDataReader<int>::ExampleType;
@@ -621,8 +620,9 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   ~UnCopyableDataset() = default;
 
   Example<> get(size_t index) override {
-    return {torch::tensor({static_cast<int64_t>(index)}),
-            torch::tensor({static_cast<int64_t>(index)})};
+    return {
+        torch::tensor({static_cast<int64_t>(index)}),
+        torch::tensor({static_cast<int64_t>(index)})};
   }
 
   torch::optional<size_t> size() const override {
@@ -836,12 +836,10 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
   auto data_loader = torch::data::make_data_loader(
       TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
-  size_t i = 0;
   for (auto batch : *data_loader) {
     for (const auto j : c10::irange(kBatchSize)) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
-    i += 1;
   }
 }
 
@@ -1598,8 +1596,8 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
         counter += batch_size;
         std::vector<Example<>> batch(
             /*count=*/batch_size,
-            Example<>{torch::ones(batch_size + 1),
-                      torch::zeros(batch_size - 1)});
+            Example<>{
+                torch::ones(batch_size + 1), torch::zeros(batch_size - 1)});
         return batch;
       }
       return torch::nullopt;
@@ -1729,8 +1727,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
           datasets::ChunkDatasetOptions(prefetch_count, batch_size));
 
   auto data_loader = torch::data::make_data_loader(
-      dataset,
-      DataLoaderOptions(requested_batch_size).workers(0));
+      dataset, DataLoaderOptions(requested_batch_size).workers(0));
 
   std::string exception_msg =
       "The requested batch size does not match with the initialized batch "
@@ -1741,8 +1738,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
 }
 
 TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
-  struct DummyEmptyChunkDataReader
-      : datasets::ChunkDataReader<int> {
+  struct DummyEmptyChunkDataReader : datasets::ChunkDataReader<int> {
    public:
     using BatchType = datasets::ChunkDataReader<int>::ChunkType;
 
@@ -1859,7 +1855,9 @@ TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
   samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
 
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+      dataset.map(transforms::BatchLambda<
+                  DummyChunkDataReader::BatchType,
+                  DummyChunkDataReader::DataType>(
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
@@ -1900,10 +1898,10 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
           datasets::ChunkDatasetOptions(
               prefetch_count, batch_size, cache_size));
 
-  samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
-
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+      dataset.map(transforms::BatchLambda<
+                  DummyChunkDataReader::BatchType,
+                  DummyChunkDataReader::DataType>(
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
@@ -2043,7 +2041,6 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   const size_t prefetch_count = 1;
   const size_t batch_size = 10;
   const size_t dataloader_worker_count = 0;
-  const size_t save_interval = 2;
 
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
@@ -2223,9 +2220,8 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       std::vector<int> expected_result;
       {
         // construct expected result
-        int offset = 0;
-
-        for (const auto i : c10::irange((chunk_count + cross_chunk_shuffle_count - 1) /
+        for (const auto i : c10::irange(
+                 (chunk_count + cross_chunk_shuffle_count - 1) /
                  cross_chunk_shuffle_count)) {
           for (const auto j : c10::irange(chunk_size)) {
             (void)j; // Suppress unused variable warning
@@ -2274,8 +2270,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
   auto sorting_policy = [](std::vector<int>& raw_batch_data) {
     std::sort(raw_batch_data.begin(), raw_batch_data.end());
   };
-  std::function<void(std::vector<int>&)> policy_function =
-      sorting_policy;
+  std::function<void(std::vector<int>&)> policy_function = sorting_policy;
 
   const size_t prefetch_count = 1;
   const size_t cache_size = 10;

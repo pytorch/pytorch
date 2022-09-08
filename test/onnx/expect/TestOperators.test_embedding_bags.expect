@@ -3,8 +3,21 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "5"
+    output: "onnx::Loop_33"
     name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 9
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "5"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,12 +32,12 @@ graph {
   node {
     input: "input"
     output: "onnx::Gather_6"
-    name: "Shape_1"
+    name: "Shape_2"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_7"
-    name: "Constant_2"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -39,7 +52,7 @@ graph {
     input: "onnx::Gather_6"
     input: "onnx::Gather_7"
     output: "onnx::Unsqueeze_8"
-    name: "Gather_3"
+    name: "Gather_4"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -49,7 +62,7 @@ graph {
   }
   node {
     output: "onnx::Unsqueeze_9"
-    name: "Constant_4"
+    name: "Constant_5"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -65,14 +78,14 @@ graph {
     input: "onnx::Unsqueeze_8"
     input: "onnx::Unsqueeze_9"
     output: "onnx::Concat_10"
-    name: "Unsqueeze_5"
+    name: "Unsqueeze_6"
     op_type: "Unsqueeze"
   }
   node {
     input: "offsets"
     input: "onnx::Concat_10"
     output: "onnx::Slice_11"
-    name: "Concat_6"
+    name: "Concat_7"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -82,7 +95,7 @@ graph {
   }
   node {
     output: "onnx::Slice_12"
-    name: "Constant_7"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -96,7 +109,7 @@ graph {
   }
   node {
     output: "onnx::Slice_13"
-    name: "Constant_8"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -110,7 +123,7 @@ graph {
   }
   node {
     output: "onnx::Slice_14"
-    name: "Constant_9"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -124,7 +137,7 @@ graph {
   }
   node {
     output: "onnx::Slice_15"
-    name: "Constant_10"
+    name: "Constant_11"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -143,18 +156,18 @@ graph {
     input: "onnx::Slice_12"
     input: "onnx::Slice_15"
     output: "onnx::Shape_16"
-    name: "Slice_11"
+    name: "Slice_12"
     op_type: "Slice"
   }
   node {
     input: "onnx::Shape_16"
     output: "onnx::Gather_17"
-    name: "Shape_12"
+    name: "Shape_13"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_18"
-    name: "Constant_13"
+    name: "Constant_14"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -169,7 +182,7 @@ graph {
     input: "onnx::Gather_17"
     input: "onnx::Gather_18"
     output: "onnx::Loop_19"
-    name: "Gather_14"
+    name: "Gather_15"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -181,7 +194,7 @@ graph {
     input: "onnx::Loop_19"
     input: "onnx::Loop_33"
     output: "20"
-    name: "Loop_15"
+    name: "Loop_16"
     op_type: "Loop"
     attribute {
       name: "body"
@@ -190,7 +203,7 @@ graph {
           input: "onnx::Slice_11"
           input: "21"
           output: "23"
-          name: "Gather_16"
+          name: "Gather_17"
           op_type: "Gather"
           attribute {
             name: "axis"
@@ -202,7 +215,7 @@ graph {
           input: "onnx::Shape_16"
           input: "21"
           output: "24"
-          name: "Gather_17"
+          name: "Gather_18"
           op_type: "Gather"
           attribute {
             name: "axis"
@@ -212,7 +225,7 @@ graph {
         }
         node {
           output: "25"
-          name: "Constant_18"
+          name: "Constant_19"
           op_type: "Constant"
           attribute {
             name: "value"
@@ -228,12 +241,12 @@ graph {
           input: "23"
           input: "25"
           output: "26"
-          name: "Unsqueeze_19"
+          name: "Unsqueeze_20"
           op_type: "Unsqueeze"
         }
         node {
           output: "27"
-          name: "Constant_20"
+          name: "Constant_21"
           op_type: "Constant"
           attribute {
             name: "value"
@@ -249,7 +262,7 @@ graph {
           input: "24"
           input: "27"
           output: "28"
-          name: "Unsqueeze_21"
+          name: "Unsqueeze_22"
           op_type: "Unsqueeze"
         }
         node {
@@ -258,14 +271,14 @@ graph {
           input: "28"
           input: "5"
           output: "29"
-          name: "Slice_22"
+          name: "Slice_23"
           op_type: "Slice"
         }
         node {
           input: "weight"
           input: "29"
           output: "30"
-          name: "Gather_23"
+          name: "Gather_24"
           op_type: "Gather"
           attribute {
             name: "axis"
@@ -276,7 +289,7 @@ graph {
         node {
           input: "30"
           output: "31"
-          name: "ReduceMean_24"
+          name: "ReduceMean_25"
           op_type: "ReduceMean"
           attribute {
             name: "axes"
@@ -292,7 +305,7 @@ graph {
         node {
           input: "onnx::Loop_33"
           output: "32"
-          name: "Cast_25"
+          name: "Cast_26"
           op_type: "Cast"
           attribute {
             name: "to"
@@ -356,11 +369,6 @@ graph {
     name: "weight"
     raw_data: "\264\314\344\275\017A\376\276\313\374&>J\266a\277s\306\\=\212\032+?\211[t\275\344[\357\276Dk\\\276OKb?\234\'B\277A\334\274\2767N\257\276\320s\263\277\371+\244>:\314\202\277K\200L??\001\275\275\236u4\2774\032\315\277\214\004\224>Z\320\372>\267B\305\276\346G6\277N\265.\276\343\316\272\277t\364a>\201)|>p\223\251\277Qm2?\346\275)\277\354\235\233?\027X\277\277\253\206a?\354\335\226\277L\032o\277\251J\021\277\311\360\215\276\312\274\013\300\252\320\273>\220\"p?\267\020\000<R\262\240\276\343\016\224\2779\241\353?8;\202\277\023\020\234?E\370#>\222\233\314?\334\360?\275|t\303\277\214\351\000\300\3065\302\2775\206\306>X\251\227\277x\2160?U^\251?d\221\350?\237F.?\rp9?9X\004=/c\324\277SL\360\277\'\274<?t\375l?\342\270l?\240\352:>\332\356\226\275\211\035\241>*\271\204\277>\025W>\036K\035?\036\233\200=\035\313\250\276\017\003\346\277\374p_?\313WD?!\006\351\275\232\\q\277\230\007A?"
   }
-  initializer {
-    data_type: 9
-    name: "onnx::Loop_33"
-    raw_data: "\001"
-  }
   input {
     name: "input"
     type {
@@ -403,16 +411,6 @@ graph {
       }
     }
   }
-  input {
-    name: "onnx::Loop_33"
-    type {
-      tensor_type {
-        elem_type: 9
-        shape {
-        }
-      }
-    }
-  }
   output {
     name: "20"
     type {
@@ -431,5 +429,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

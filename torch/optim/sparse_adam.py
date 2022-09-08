@@ -2,6 +2,7 @@ import torch
 from . import _functional as F
 from .optimizer import Optimizer
 
+__all__ = ['SparseAdam']
 
 class SparseAdam(Optimizer):
     r"""Implements lazy version of Adam algorithm suitable for sparse tensors.
@@ -17,12 +18,14 @@ class SparseAdam(Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, maximize: bool = False):
         if not 0.0 < lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < eps:
@@ -47,7 +50,7 @@ class SparseAdam(Optimizer):
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
             )
 
-        defaults = dict(lr=lr, betas=betas, eps=eps)
+        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
         super(SparseAdam, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -55,7 +58,7 @@ class SparseAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -72,6 +75,7 @@ class SparseAdam(Optimizer):
             eps = group['eps']
             lr = group['lr']
             beta1, beta2 = group['betas']
+            maximize = group.get('maximize', False)
 
             for p in group['params']:
                 if p.grad is not None:
@@ -106,6 +110,7 @@ class SparseAdam(Optimizer):
                           beta1=beta1,
                           beta2=beta2,
                           lr=group['lr'],
-                          eps=group['eps'])
+                          eps=group['eps'],
+                          maximize=maximize)
 
         return loss

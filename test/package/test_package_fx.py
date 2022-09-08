@@ -125,7 +125,7 @@ class TestPackageFX(PackageTestCase):
 
     def test_package_fx_custom_tracer(self):
         from package_a.test_all_leaf_modules_tracer import TestAllLeafModulesTracer
-        from package_a.test_module import SimpleTest, ModWithTwoSubmodsAndTensor
+        from package_a.test_module import ModWithTwoSubmodsAndTensor, SimpleTest
 
         class SpecialGraphModule(torch.fx.GraphModule):
             def __init__(self, root, graph, info):

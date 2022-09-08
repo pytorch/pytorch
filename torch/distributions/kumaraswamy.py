@@ -6,6 +6,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all, euler_constant
 
+__all__ = ['Kumaraswamy']
 
 def _moments(a, b, n):
     """
@@ -22,6 +23,7 @@ class Kumaraswamy(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Kumaraswamy(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Kumaraswamy distribution with concentration alpha=1 and beta=1
         tensor([ 0.1729])

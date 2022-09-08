@@ -5,48 +5,82 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Pipeline.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
+struct QueryPoolConfig final {
+  uint32_t maxQueryCount;
+  uint32_t initialReserveSize;
+};
+
+struct ShaderDuration final {
+  uint32_t idx;
+
+  // Execution Properties
+  std::string kernel_name;
+  VkExtent3D global_workgroup_size;
+  VkExtent3D local_workgroup_size;
+
+  // Query indexes
+  uint32_t start_query_idx;
+  uint32_t end_query_idx;
+
+  // Timings
+  uint64_t start_time_ns;
+  uint64_t end_time_ns;
+  uint64_t execution_duration_ns;
+};
+
 class QueryPool final {
  public:
-  explicit QueryPool(const VkDevice& device, const bool is_timestamps_supported, const float timestamp_period_us);
+  explicit QueryPool(const VkDevice, const QueryPoolConfig&);
+
   QueryPool(const QueryPool&) = delete;
-  QueryPool(QueryPool&&) = default;
   QueryPool& operator=(const QueryPool&) = delete;
-  QueryPool& operator=(QueryPool&&) = default;
+
+  QueryPool(QueryPool&&) = delete;
+  QueryPool& operator=(QueryPool&&) = delete;
+
   ~QueryPool();
 
-public:
-  struct PerfInfo final {
-    std::string query_name;
-    int64_t start_time_us;
-    int64_t end_time_us;
-    int64_t execution_time_us;
-  };
+ private:
+  std::mutex mutex_;
 
-  struct Configuration final {
-    static constexpr uint32_t kTimestampsPerQuery = 2u;
-    static constexpr uint32_t kMaxQueryCount = 65536u;
-  };
-
-public:
-  bool is_enabled() const;
-  bool enable();
-  std::vector<QueryPool::PerfInfo> disable(const bool waitfor_allqueries = true);
-  int begin(const VkCommandBuffer& commandBuffer, const std::string& query_name);
-  void end(const VkCommandBuffer& commandBuffer, const int queryIndex);
-  std::vector<PerfInfo> result(const bool waitfor_allqueries) const;
-
-private:
   VkDevice device_;
-  bool is_timestamps_supported_;
-  float timestamp_period_us_;
+  QueryPoolConfig config_;
+
   VkQueryPool querypool_;
-  std::vector<std::string> query_names_;
+
+  std::vector<ShaderDuration> shader_log_;
+  size_t in_use_;
+
+ private:
+  uint32_t write_timestamp(const CommandBuffer&);
+
+  std::string generate_string_report();
+
+ public:
+  inline bool is_enabled() const {
+    return VK_NULL_HANDLE != querypool_;
+  }
+
+  void reset(const CommandBuffer&);
+
+  uint32_t shader_profile_begin(
+      const CommandBuffer&,
+      const std::string&,
+      const VkExtent3D,
+      const VkExtent3D);
+  void shader_profile_end(const CommandBuffer&, const uint32_t);
+
+  void extract_results();
+  void print_results();
+  uint64_t get_total_op_ns(std::string op_name);
+  void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
 };
 
 } // namespace api

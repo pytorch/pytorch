@@ -473,6 +473,128 @@ void gesvdjBatched<c10::complex<double>>(
 
 
 template<>
+void gesvdaStridedBatched_buffersize<float>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, float *A, int lda, long long int strideA,
+    float *S, long long int strideS, float *U, int ldu, long long int strideU, float *V, int ldv, long long int strideV,
+    int *lwork, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdaStridedBatched_bufferSize(
+    handle, jobz, rank, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv, strideV, lwork, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched_buffersize<double>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, double *A, int lda, long long int strideA,
+    double *S, long long int strideS, double *U, int ldu, long long int strideU, double *V, int ldv, long long int strideV,
+    int *lwork, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdaStridedBatched_bufferSize(
+    handle, jobz, rank, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv, strideV, lwork, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched_buffersize<c10::complex<float>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, c10::complex<float> *A, int lda, long long int strideA,
+    float *S, long long int strideS, c10::complex<float> *U, int ldu, long long int strideU,
+    c10::complex<float> *V, int ldv, long long int strideV,
+    int *lwork, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvdaStridedBatched_bufferSize(
+    handle, jobz, rank, m, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda, strideA, S, strideS,
+    reinterpret_cast<cuComplex*>(U),
+    ldu, strideU,
+    reinterpret_cast<cuComplex*>(V),
+    ldv, strideV, lwork, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched_buffersize<c10::complex<double>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, c10::complex<double> *A, int lda, long long int strideA,
+    double *S, long long int strideS, c10::complex<double> *U, int ldu, long long int strideU,
+    c10::complex<double> *V, int ldv, long long int strideV,
+    int *lwork, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvdaStridedBatched_bufferSize(
+    handle, jobz, rank, m, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda, strideA, S, strideS,
+    reinterpret_cast<cuDoubleComplex*>(U),
+    ldu, strideU,
+    reinterpret_cast<cuDoubleComplex*>(V),
+    ldv, strideV, lwork, batchSize
+  ));
+}
+
+
+template<>
+void gesvdaStridedBatched<float>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, float *A, int lda, long long int strideA,
+    float *S, long long int strideS, float *U, int ldu, long long int strideU, float *V, int ldv, long long int strideV,
+    float *work, int lwork, int *info, double *h_R_nrmF, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSgesvdaStridedBatched(
+    handle, jobz, rank, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv, strideV, work, lwork, info, h_R_nrmF, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched<double>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, double *A, int lda, long long int strideA,
+    double *S, long long int strideS, double *U, int ldu, long long int strideU, double *V, int ldv, long long int strideV,
+    double *work, int lwork, int *info, double *h_R_nrmF, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDgesvdaStridedBatched(
+    handle, jobz, rank, m, n, A, lda, strideA, S, strideS, U, ldu, strideU, V, ldv, strideV, work, lwork, info, h_R_nrmF, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched<c10::complex<float>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, c10::complex<float> *A, int lda, long long int strideA,
+    float *S, long long int strideS, c10::complex<float> *U, int ldu, long long int strideU,
+    c10::complex<float> *V, int ldv, long long int strideV,
+    c10::complex<float> *work, int lwork, int *info, double *h_R_nrmF, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCgesvdaStridedBatched(
+    handle, jobz, rank, m, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda, strideA, S, strideS,
+    reinterpret_cast<cuComplex*>(U),
+    ldu, strideU,
+    reinterpret_cast<cuComplex*>(V),
+    ldv, strideV,
+    reinterpret_cast<cuComplex*>(work),
+    lwork, info, h_R_nrmF, batchSize
+  ));
+}
+
+template<>
+void gesvdaStridedBatched<c10::complex<double>>(
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, c10::complex<double> *A, int lda, long long int strideA,
+    double *S, long long int strideS, c10::complex<double> *U, int ldu, long long int strideU,
+    c10::complex<double> *V, int ldv, long long int strideV,
+    c10::complex<double> *work, int lwork, int *info, double *h_R_nrmF, int batchSize
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZgesvdaStridedBatched(
+    handle, jobz, rank, m, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda, strideA, S, strideS,
+    reinterpret_cast<cuDoubleComplex*>(U),
+    ldu, strideU,
+    reinterpret_cast<cuDoubleComplex*>(V),
+    ldv, strideV,
+    reinterpret_cast<cuDoubleComplex*>(work),
+    lwork, info, h_R_nrmF, batchSize
+  ));
+}
+
+
+template<>
 void potrf<float>(
   cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float* A, int lda, float* work, int lwork, int* info
 ) {

@@ -1,11 +1,12 @@
-import collections
-
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
-    is_namedtuple as _is_namedtuple
+    _is_namedtuple
 )
+from typing import Dict, Any, List
+
+__all__ = []  # type: ignore[var-annotated]
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
@@ -37,22 +38,10 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(to_map, obj)))
-        if isinstance(obj, str):
-            # Needs to be checked, otherwise it's taken as a sequence infinitely.
-            # This is because the elements of a string are also strings, and so on.
-            return [obj]
-        if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
-            try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj))]  # type: ignore[call-arg]
-            except TypeError:
-                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                return [list(i) for i in zip(*map(to_map, obj))]
-        if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
-            try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]   # type: ignore[call-arg]
-            except TypeError:
-                # The mapping type may not support `__init__(iterable)`.
-                return [dict(i) for i in zip(*map(to_map, obj.items()))]
+        if isinstance(obj, list) and len(obj) > 0:
+            return [list(i) for i in zip(*map(to_map, obj))]
+        if isinstance(obj, dict) and len(obj) > 0:
+            return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
         return [obj]
 
     # Avoid reference cycle
@@ -85,7 +74,7 @@ def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
 def _verify_param_shape_across_processes(process_group, tensors, logger=None):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
-def _sync_params_and_buffers(
+def _sync_module_states(
     module,
     process_group,
     broadcast_bucket_size,
@@ -107,7 +96,47 @@ def _sync_params_and_buffers(
         if name not in params_and_buffers_to_ignore:
             module_states.append(buffer.detach())
 
+    _sync_params_and_buffers(
+        process_group,
+        module_states,
+        broadcast_bucket_size,
+        src
+    )
+
+def _sync_params_and_buffers(
+    process_group: dist.ProcessGroup,
+    module_states: List[torch.Tensor],
+    broadcast_bucket_size: int,
+    src: int,
+):
+    """
+    Synchronizes ``module_states`` (list of tensors) across all processes by
+    broadcasting them from rank 0.
+    """
     if len(module_states) > 0:
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
         )
+
+def _replace_by_prefix(
+    state_dict: Dict[str, Any],
+    old_prefix: str,
+    new_prefix: str,
+) -> None:
+    """
+    Replace all keys that match a given old_prefix with a new_prefix (in-place).
+
+    Usage::
+
+        state_dict = {"layer.xyz": torch.tensor(1)}
+        replace_by_prefix_(state_dict, "layer.", "module.layer.")
+        assert state_dict == {"module.layer.xyz": torch.tensor(1)}
+    """
+    if old_prefix == new_prefix:
+        raise ValueError("old_prefix and new_prefix must be distinct")
+    for key in list(state_dict.keys()):
+        if not key.startswith(old_prefix):
+            continue
+        new_key = new_prefix + key[len(old_prefix) :]
+        state_dict[new_key] = state_dict[key]
+        del state_dict[key]

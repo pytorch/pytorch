@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
 import inspect
 import contextlib
 from distutils.version import LooseVersion
@@ -76,7 +76,7 @@ def tf32_off():
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_precison = self.precision
+    old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
@@ -84,7 +84,7 @@ def tf32_on(self, tf32_precision=1e-5):
             yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precison
+        self.precision = old_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -180,4 +180,15 @@ def _check_cusparse_generic_available():
         min_supported_version = (11, 0)
     return version >= min_supported_version
 
+def _check_hipsparse_generic_available():
+    if not TEST_WITH_ROCM:
+        return False
+
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+
+
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
+TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()

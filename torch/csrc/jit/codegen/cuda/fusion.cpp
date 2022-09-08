@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -66,6 +67,12 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
 
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
+  for (auto inp : to->inputs_) {
+    inp->setIsFusionInput(true);
+  }
+  for (auto out : to->outputs_) {
+    out->setIsFusionOutput(true);
+  }
 
   // TODO: put this into ir_cloner instead
   for (const auto& entry : from->io_alias_) {
@@ -223,15 +230,6 @@ void Fusion::addOutput(Val* output) {
   all_tv_uses_valid_ = false;
 }
 
-void Fusion::addOutput(WelfordResult& wr) {
-  // Want to always make sure the avg gets added last
-  //  since avg will be the out() value of welfordOp,
-  //  and want to make it the top of the computeAt chain
-  addOutput(wr.var_sum);
-  addOutput(wr.n);
-  addOutput(wr.avg);
-}
-
 void Fusion::removeInput(Val* input) {
   auto find_input = std::find(inputs_.begin(), inputs_.end(), input);
   if (find_input != inputs_.end()) {
@@ -255,7 +253,11 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
 
   if (find_output != outputs_.end()) {
-    *find_output = replacement;
+    std::replace_if(
+        outputs_.begin(),
+        outputs_.end(),
+        [&output](Val* v) { return v == output; },
+        replacement);
 
     if (replacement->getValType().value() == ValType::TensorView) {
       replacement->setIsFusionOutput(true);
@@ -506,7 +508,19 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
+std::vector<Val*> Fusion::terminatingMathVals() {
+  VectorOfUniqueEntries<Val*> result;
+  auto used_vals = usedMathVals();
+  for (auto v : used_vals) {
+    // Locate the vals that are not expr outputs but have valid definitions.
+    if (unordered_uses(v).empty() && v->definition() != nullptr) {
+      result.pushBack(v);
+    }
+  }
+  return result.vector();
+}
+
+std::unordered_set<Expr*> Fusion::unordered_uses(const Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 

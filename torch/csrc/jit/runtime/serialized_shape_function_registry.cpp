@@ -1714,6 +1714,100 @@ def transpose(self: List[int],
   return output_size
 
 )=====")
++ std::string(R"=====(def conv_backwards(grad_output: List[int],
+    input: List[int],
+    weight: List[int],
+    biases: Optional[List[int]]) -> Tuple[List[int], List[int], List[int]]:
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  out0 = annotate(List[int], [])
+  for _2 in range(torch.len(weight)):
+    elem0 = weight[_2]
+    _3 = torch.append(out0, elem0)
+  return (out, out0, [grad_output[1]])
+
+def conv_forwards(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int) -> List[int]:
+  has_dilation = torch.gt(torch.len(dilation), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  if transposed:
+    weight_output_channels_dim = 1
+  else:
+    weight_output_channels_dim = 0
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[weight_output_channels_dim])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    if transposed:
+      kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+      _3 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
+      _4 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _5 = torch.add(torch.sub(_3, _4), kernel)
+      _6 = torch.append(output_size, torch.add(_5, 1))
+    else:
+      _7 = torch.mul(dilation_, torch.sub(weight[d], 1))
+      kernel0 = torch.add(_7, 1)
+      _8 = input[d]
+      _9 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _10 = torch.sub(torch.add(_8, _9), kernel0)
+      _11 = torch.floordiv(_10, stride[torch.sub(d, 2)])
+      _12 = torch.append(output_size, torch.add(_11, 1))
+  return output_size
+
+)=====")
++ std::string(R"=====(def conv_transpose2d_input(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]]=None,
+    stride: Optional[List[int]]=None,
+    padding: Optional[List[int]]=None,
+    output_padding: Optional[List[int]]=None,
+    groups: int=1,
+    dilation: Optional[List[int]]=None) -> List[int]:
+  if torch.__is__(stride, None):
+    stride0 = [1, 1]
+  else:
+    stride0 = unchecked_cast(List[int], stride)
+  if torch.__is__(padding, None):
+    padding0 = [0, 0]
+  else:
+    padding0 = unchecked_cast(List[int], padding)
+  if torch.__is__(dilation, None):
+    dilation0 = [1, 1]
+  else:
+    dilation0 = unchecked_cast(List[int], dilation)
+  has_dilation = torch.gt(torch.len(dilation0), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[1])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation0[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+    _3 = torch.mul(torch.sub(input[d], 1), stride0[torch.sub(d, 2)])
+    _4 = torch.mul(padding0[torch.sub(d, 2)], 2)
+    _5 = torch.add(torch.sub(_3, _4), kernel)
+    _6 = torch.append(output_size, torch.add(_5, 1))
+  return output_size
+
+)=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
     end_dim: int) -> List[int]:
@@ -2100,27 +2194,41 @@ def transpose(self: List[int],
   return _1
 
 )=====")
-+ std::string(R"=====(def mean_dim(self: List[int],
-    dims: List[int],
++ std::string(R"=====(def sum_mean_dim(self: List[int],
+    opt_dims: Optional[List[int]],
     keep_dim: bool,
     dt: Any) -> List[int]:
   out = annotate(List[int], [])
+  if torch.__is__(opt_dims, None):
+    _0, opt_dims0 = True, opt_dims
+  else:
+    opt_dims1 = unchecked_cast(List[int], opt_dims)
+    _0, opt_dims0 = torch.eq(torch.len(opt_dims1), 0), opt_dims1
+  if _0:
+    _1 = torch.len(self)
+    dims0 = annotate(List[int], [])
+    for _2 in range(_1):
+      _3 = torch.append(dims0, _2)
+    dims = dims0
+  else:
+    opt_dims2 = unchecked_cast(List[int], opt_dims0)
+    dims = opt_dims2
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _0 in range(torch.len(dims)):
-      reduce_dim = dims[_0]
-      _1 = torch.len(self)
-      if torch.le(_1, 0):
+    for _4 in range(torch.len(dims)):
+      reduce_dim = dims[_4]
+      _5 = torch.len(self)
+      if torch.le(_5, 0):
         dim_post_expr = 1
       else:
-        dim_post_expr = _1
+        dim_post_expr = _5
       min = torch.neg(dim_post_expr)
       max = torch.sub(dim_post_expr, 1)
       if torch.lt(reduce_dim, min):
-        _2 = True
+        _6 = True
       else:
-        _2 = torch.gt(reduce_dim, max)
-      if torch.__not__(_2):
+        _6 = torch.gt(reduce_dim, max)
+      if torch.__not__(_6):
         pass
       else:
         ops.prim.RaiseException("AssertionError: ")
@@ -2136,11 +2244,11 @@ def transpose(self: List[int],
       is_mean_dim = is_mean_dim0
     if is_mean_dim:
       if keep_dim:
-        _3 = torch.append(out, 1)
+        _7 = torch.append(out, 1)
       else:
         pass
     else:
-      _4 = torch.append(out, self[idx])
+      _8 = torch.append(out, self[idx])
   return out
 
 )=====")
@@ -2151,7 +2259,7 @@ def transpose(self: List[int],
   out = annotate(List[int], [])
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _1 in range(1):
+    for _1 in range(torch.len(_0)):
       reduce_dim = _0[_1]
       _2 = torch.len(self)
       if torch.le(_2, 0):
@@ -2372,6 +2480,145 @@ def transpose(self: List[int],
     _0 = out
   return _0
 
+def bmm(self: List[int],
+    mat2: List[int]) -> List[int]:
+  _0 = "AssertionError: bmm only supports 3D tensors"
+  _1 = "AssertionError: mismatching batch dimension"
+  _2 = "AssertionError: mismatching contracting dimension"
+  if torch.eq(torch.len(self), 3):
+    pass
+  else:
+    ops.prim.RaiseException(_0)
+  if torch.eq(torch.len(mat2), 3):
+    pass
+  else:
+    ops.prim.RaiseException(_0)
+  if torch.eq(self[0], mat2[0]):
+    pass
+  else:
+    ops.prim.RaiseException(_1)
+  if torch.eq(self[2], mat2[1]):
+    pass
+  else:
+    ops.prim.RaiseException(_2)
+  return [self[0], self[1], mat2[2]]
+
+def _shape_as_tensor(self: List[int]) -> List[int]:
+  return [torch.len(self)]
+
+)=====")
++ std::string(R"=====(def topk(self: List[int],
+    k: int,
+    dim: int=-1) -> Tuple[List[int], List[int]]:
+  _0 = "k ({}) is too big for dimension {} of size {}"
+  if torch.eq(torch.len(self), 0):
+    result = annotate(List[int], [])
+  else:
+    if torch.le(k, self[dim]):
+      pass
+    else:
+      _1 = torch.format(_0, k, dim, self[dim])
+      ops.prim.RaiseException(torch.add("AssertionError: ", _1))
+    result0 = annotate(List[int], [])
+    for _2 in range(torch.len(self)):
+      elem = self[_2]
+      _3 = torch.append(result0, elem)
+    _4 = torch._set_item(result0, dim, k)
+    result = result0
+  return (result, result)
+
+def nll_loss_forward(self: List[int],
+    target: List[int],
+    weight: Optional[List[int]],
+    reduction: int) -> Tuple[List[int], List[int]]:
+  self_dim = torch.len(self)
+  target_dim = torch.len(target)
+  if torch.lt(0, self_dim):
+    _0 = torch.le(self_dim, 2)
+  else:
+    _0 = False
+  if _0:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.le(target_dim, 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(self_dim, 1):
+    no_batch_dim = torch.eq(target_dim, 0)
+  else:
+    no_batch_dim = False
+  if no_batch_dim:
+    _1 = True
+  else:
+    _1 = torch.eq(self[0], target[0])
+  if _1:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  n_classes = self[-1]
+  if torch.__is__(weight, None):
+    _2 = True
+  else:
+    weight0 = unchecked_cast(List[int], weight)
+    if torch.eq(torch.len(weight0), 1):
+      _3 = torch.eq(weight0[0], n_classes)
+    else:
+      _3 = False
+    _2 = _3
+  if _2:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(reduction, 0):
+    _4 = torch.eq(self_dim, 2)
+  else:
+    _4 = False
+  if _4:
+    reduction_shape = [self[0]]
+  else:
+    reduction_shape = annotate(List[int], [])
+  _5 = (reduction_shape, annotate(List[int], []))
+  return _5
+
+)=====")
++ std::string(R"=====(def native_layer_norm(input: List[int],
+    normalized_shape: List[int]) -> Tuple[List[int], List[int], List[int]]:
+  reduction_shape = annotate(List[int], [])
+  num_unreduced_dimensions = torch.sub(torch.len(input), torch.len(normalized_shape))
+  if torch.ge(num_unreduced_dimensions, 0):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  for i in range(num_unreduced_dimensions):
+    _0 = torch.append(reduction_shape, input[i])
+  _1 = torch.__range_length(num_unreduced_dimensions, torch.len(input), 1)
+  for _2 in range(_1):
+    _3 = torch.append(reduction_shape, 1)
+  out = annotate(List[int], [])
+  for _4 in range(torch.len(input)):
+    elem = input[_4]
+    _5 = torch.append(out, elem)
+  _6 = (out, reduction_shape, reduction_shape)
+  return _6
+
+def native_batch_norm(input: List[int],
+    weight: Optional[List[int]],
+    bias: Optional[List[int]],
+    running_mean: Optional[List[int]],
+    running_var: Optional[List[int]],
+    training: bool) -> Tuple[List[int], List[int], List[int]]:
+  if training:
+    _size = [input[1]]
+  else:
+    _size = [0]
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    _1 = torch.append(out, elem)
+  return (out, _size, _size)
+
 )=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
@@ -2523,6 +2770,16 @@ def transpose(self: List[int],
     _6 = torch.append(out, elem)
   return out
 
+def nonzero_lower_bound(input: List[int]) -> List[int]:
+  return [0, torch.len(input)]
+
+def nonzero_upper_bound(input: List[int]) -> List[int]:
+  numel = 1
+  for _0 in range(torch.len(input)):
+    elem = input[_0]
+    numel = torch.mul(numel, elem)
+  return [numel, torch.len(input)]
+
 )=====")
 ;
 
@@ -2530,6 +2787,7 @@ def transpose(self: List[int],
 const std::string& GetSerializedShapeFunctions() {
   return shape_funcs;
 }
+
 
 const OperatorMap<std::string>& GetShapeFunctionMappings() {
  static const OperatorMap<std::string> shape_mappings {
@@ -2568,14 +2826,17 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
+    {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
+    {"aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", "conv_forwards"},
+    {"aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", "conv_transpose2d_input"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
-    {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-    {"aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+    {"aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
+    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
     {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
@@ -2586,9 +2847,23 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::dequantize(Tensor self) -> Tensor", "unary"},
     {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
     {"aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", "argmax"},
+    {"aten::bmm(Tensor self, Tensor mat2) -> Tensor", "bmm"},
+    {"aten::_shape_as_tensor(Tensor self) -> Tensor", "_shape_as_tensor"},
+    {"aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)", "topk"},
+    {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
+    {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
+    {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
+  };
+
+  return shape_mappings;
+}
+
+const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings() {
+ static const OperatorMap<std::pair<std::string, std::string>> shape_mappings {
+    {"aten::nonzero(Tensor self) -> (Tensor)", {"nonzero_lower_bound", "nonzero_upper_bound"}},
   };
 
   return shape_mappings;

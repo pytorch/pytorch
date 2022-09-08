@@ -71,9 +71,7 @@ def _cast(value, dtype):
 # this also works:
 #     @custom_fwd(cast_inputs=torch.float)
 #     def forward(...):
-# TODO:  when python 2 support is dropped, change the signature to
-# def custom_fwd(fwd=None, *, cast_inputs=None) with internal changes following the link above.
-def custom_fwd(fwd=None, **kwargs):
+def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
@@ -90,18 +88,7 @@ def custom_fwd(fwd=None, **kwargs):
         :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
     """
     if fwd is None:
-        if len(kwargs) == 0:
-            cast_inputs = None
-        else:
-            assert len(kwargs) == 1
-            cast_inputs = kwargs["cast_inputs"]
         return functools.partial(custom_fwd, cast_inputs=cast_inputs)
-
-    if len(kwargs) == 0:
-        cast_inputs = None
-    else:
-        assert len(kwargs) == 1
-        cast_inputs = kwargs["cast_inputs"]
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):

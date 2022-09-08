@@ -1,8 +1,8 @@
 import random
 import unittest
+from typing import Dict, List, Tuple
 
 from tools.testing.test_selections import calculate_shards
-from typing import Dict, List, Tuple
 
 
 class TestCalculateShards(unittest.TestCase):

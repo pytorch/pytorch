@@ -2,13 +2,14 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional
+from typing import Optional, Tuple
 
 import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
+from jit.test_models import MnistNet
 
 TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 
@@ -735,6 +736,184 @@ class TestAutocast(JitTestCase):
         y = fn_s(x)
 
         self.assertTrue(y.dtype == torch.float)
+
+    def test_ignore_amp(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.mm(x, x)
+
+        inp = torch.rand([10, 10], dtype=torch.float)
+        foo._set_ignore_amp(True)
+        with torch.cpu.amp.autocast():
+            foo(inp)
+            foo(inp)
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("_autocast_to_reduced").run(g)
+
+class convbn(torch.nn.Module):
+    def __init__(self, bias_enabled=True):
+        super(convbn, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 64, 7, stride=2, bias=bias_enabled)
+        self.bn = torch.nn.BatchNorm2d(64)
+
+    def forward(self, x):
+        return self.bn(self.conv(x))
+
+class TestJitTraceAutocast(JitTestCase):
+    def setUp(self):
+        super(TestJitTraceAutocast, self).setUp()
+        self.previous_default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float32)
+        self.models = [MnistNet(),
+                       convbn(bias_enabled=True),
+                       convbn(bias_enabled=False)]
+        self.inputs = [torch.randn(5, 1, 28, 28, device='cpu'),
+                       torch.randn(32, 3, 224, 224, device='cpu'),
+                       torch.randn(32, 3, 224, 224, device='cpu')]
+        self.previous_jit_autocast_pass = torch._C._jit_set_autocast_mode(False)
+
+    def tearDown(self):
+        torch._C._jit_set_autocast_mode(self.previous_jit_autocast_pass)
+        torch.set_default_dtype(self.previous_default_dtype)
+        super(TestJitTraceAutocast, self).tearDown()
+
+    def test_generate_autocast_jit_trace_model(self):
+        def test_generate_autocast_jit_trace_model(model, x):
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x)
+            traced_model = torch.jit.freeze(traced_model)
+        for i in range(self.models.__len__()):
+            test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_nchw_autocast_jit_trace_model(self):
+        def test_nchw_autocast_jit_trace_model(model, x):
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x)
+            traced_model = torch.jit.freeze(traced_model)
+            with torch.no_grad():
+                y = traced_model(x.clone())
+            with torch.cpu.amp.autocast(), torch.no_grad():
+                y2 = model(x.clone())
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+        for i in range(self.models.__len__()):
+            test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_nhwc_autocast_jit_trace_model(self):
+        def test_nhwc_autocast_jit_trace_model(model, x):
+            model = model.to(memory_format=torch.channels_last)
+            model.eval()
+            with torch.cpu.amp.autocast(cache_enabled=False), torch.no_grad():
+                traced_model = torch.jit.trace(model, x.to(memory_format=torch.channels_last))
+            traced_model = torch.jit.freeze(traced_model)
+            with torch.no_grad():
+                y = traced_model(x.clone().to(memory_format=torch.channels_last))
+            with torch.cpu.amp.autocast(), torch.no_grad():
+                y2 = model(x.clone().to(memory_format=torch.channels_last))
+            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+        for i in range(self.models.__len__()):
+            if self.inputs[i].size().__len__() == 5:
+                # NHWC 3D case not support yet
+                continue
+            test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_script_autocast_cpu(self):
+        def fn(x):
+            if torch.is_autocast_cpu_enabled():
+                return x.relu()
+            else:
+                return x.sin()
+
+        fn_s = torch.jit.script(fn)
+
+        x = torch.rand((4, 4)) - 0.5
+        with torch.cpu.amp.autocast():
+            self.assertEqual(fn_s(x), fn(x))
+
+        with torch.cpu.amp.autocast(enabled=True):
+            self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_script_autocast_cuda(self):
+        def fn(x):
+            if torch.is_autocast_enabled():
+                return x.relu()
+            else:
+                return x.sin()
+
+        fn_s = torch.jit.script(fn)
+
+        x = torch.rand((4, 4)) - 0.5
+        with torch.cpu.amp.autocast():
+            self.assertEqual(fn_s(x), fn(x))
+
+        with torch.cuda.amp.autocast(enabled=True):
+            self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+
+
+    def test_scripted_aliasing(self):
+        # torch.is_autocast_enabled should not be able to move inside of the autocast context.
+        def fn(x):
+            if torch.is_autocast_enabled():
+                y = True
+            else:
+                y = False
+            with torch.cuda.amp.autocast(enabled=True):
+                z = x.relu()
+            return y, z
+
+        fn_s = torch.jit.script(fn)
+        graph = fn_s.graph
+
+        aliasdb = graph.alias_db()
+
+        is_enabled_nodes = graph.findAllNodes("aten::is_autocast_enabled")
+        enter_nodes = graph.findAllNodes("prim::Enter")
+
+        self.assertEqual(len(is_enabled_nodes), 1)
+        self.assertEqual(len(enter_nodes), 1)
+
+        self.assertFalse(aliasdb.move_after_topologically_valid(is_enabled_nodes[0], enter_nodes[0]))
+
+
+    def test_script_autocast_enable_and_check(self):
+        def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
+            b1 = torch.is_autocast_cpu_enabled()
+            v1 = torch.mm(x, y)
+            with torch.cpu.amp.autocast(enabled=True):
+                b2 = torch.is_autocast_cpu_enabled()
+                v2 = torch.mm(x, y)
+                with torch.cpu.amp.autocast(enabled=False):
+                    b3 = torch.is_autocast_cpu_enabled()
+                    v3 = torch.mm(x, y)
+            return (v1, b1, v2, b2, v3, b3)
+
+        # bx = is_autocast_cpu_enabled() result should be False iff (vx = mm(x, y)).dtype is float
+        def check_fn_results(arr):
+            [v1, b1, v2, b2, v3, b3] = arr
+            self.assertTrue((v1.dtype == torch.float) != b1)
+            self.assertTrue((v2.dtype == torch.float) != b2)
+            self.assertTrue((v3.dtype == torch.float) != b3)
+
+        x = torch.rand((2, 2), dtype=torch.float)
+        y = torch.rand((2, 2), dtype=torch.float)
+
+        fn_s = torch.jit.script(fn)
+
+        with torch.cpu.amp.autocast(enabled=False):
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
+
+        with torch.cpu.amp.autocast(enabled=True):
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
+
 
 if __name__ == "__main__":
     run_tests()

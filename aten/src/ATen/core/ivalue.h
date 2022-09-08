@@ -555,8 +555,14 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) : tag(Tag::SymInt) {
-    payload.u.as_int = i.data();
+  IValue(c10::SymInt i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = i.toSymIntNodeImpl().release();
+    } else {
+      tag = Tag::Int;
+      payload.u.as_int = i.as_int_unchecked();
+    }
   }
 
   IValue(c10::SymIntArrayRef v);
@@ -565,9 +571,7 @@ public:
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const {
-    return c10::SymInt(payload.u.as_int);
-  }
+  c10::SymInt toSymInt() const;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -750,15 +754,17 @@ public:
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
-      *this = s.toDouble();
+      tag = Tag::Double;
+      payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
     } else if (s.isBoolean()) {
-      *this = s.toBool();
-    } else if (s.isIntegral(false)) {
-      *this = s.toLong();
+      tag = Tag::Bool;
+      payload.u.as_bool = s.toBool();
     } else {
-      TORCH_CHECK(false, "Unknown type in Scalar");
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
+      tag  = Tag::Int;
+      payload.u.as_int = s.toLong();
     }
   }
 
@@ -1070,7 +1076,7 @@ public:
       case Tag::Int:
         return false;
       case Tag::SymInt:
-        return false;
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:

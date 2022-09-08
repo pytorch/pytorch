@@ -109,6 +109,23 @@ inline Tensor from_blob(
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
+    IntArrayRef strides,
+    int64_t storage_offset,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {},
+    const c10::optional<Device> target_device = c10::nullopt) {
+  return for_blob(data, sizes)
+      .strides(strides)
+      .storage_offset(storage_offset)
+      .deleter(deleter)
+      .options(options)
+      .target_device(target_device)
+      .make_tensor();
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
   return for_blob(data, sizes)

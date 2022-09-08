@@ -12,7 +12,7 @@
 
 #include <sstream>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -65,17 +65,15 @@ static void NvFuserScheduler_Reduction(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.reduction_params.has_value());
-  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
-  auto rparams = toString(compile_log.reduction_params.value());
-  auto lparams = toString(compile_log.launch_constraints.value());
+  auto rparams = toString(compile_log.params);
+  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(rparams + lparams);
 
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs({aten_input});
@@ -84,7 +82,7 @@ static void NvFuserScheduler_Reduction(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
@@ -107,14 +105,14 @@ static void Baseline_Reduction(
 
   // Sync everything up before we start
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = aten_input.sum({reduction_dim});
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   benchmark_state.SetBytesProcessed(
@@ -191,6 +189,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 512}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 512}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{1, 1024 * 1024}, {160, 320}})
@@ -212,6 +222,18 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1024, 1024 * 1024}, {2, 4 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Reduction_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 4 * 1024}, {1024, 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
