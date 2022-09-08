@@ -2532,7 +2532,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
 
   // Transpose of a tensor is a view operation.
   if (dim0 == dim1) {
-    return self.alias();
+    if (self.is_sparse_csr() || self.is_mkldnn()) {
+      return self.clone();
+    } else {
+      return self.alias();
+    }
   }
 
   if (self.is_mkldnn()) {
