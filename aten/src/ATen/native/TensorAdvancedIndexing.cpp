@@ -798,6 +798,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     }
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
+    auto slice_size = selfSlice.numel();
     auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
     auto self_dim_size = result.size(dim);
@@ -805,15 +806,51 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
-      for (const auto i : c10::irange(numel)) {
-          auto self_i = index_data[i];
-          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
-          iter.unsafe_replace_operand(0, self_data);
-          iter.unsafe_replace_operand(1, self_data);
-          iter.unsafe_replace_operand(2, source_data);
-          add_stub(iter.device_type(), iter, alpha);
+      std::vector<index_t> reorder_index(numel);
+      std::vector<index_t> reorder_index_i(numel);
+      std::multiset<index_t> dup;
+      int64_t l_p = 0, r_p = numel;
+      for (auto i : c10::irange(numel)) {
+        auto self_i = index_data[i];
+        dup.insert(self_i);
+      }
+      for (int64_t i = 0; i < numel; i ++) {
+        auto self_i = index_data[i];
+        if (dup.count(self_i) > 1) {
+          reorder_index[l_p] = self_i;
+          reorder_index_i[l_p] = i;
+          l_p ++;
+        } else {
+          r_p --;
+          reorder_index[r_p] = self_i;
+          reorder_index_i[r_p] = i;
+        }
+      }
+
+      TORCH_CHECK(l_p == r_p);
+      auto outer_looper = [&](int64_t start, int64_t end) {
+        auto sub_iter = TensorIterator(iter);
+        for (auto i = start; i < end; i++) {
+            auto self_i = reorder_index[i];
+            auto ii = reorder_index_i[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+            auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+            auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + ii * source_stride_bytes;
+            sub_iter.unsafe_replace_operand(0, self_data);
+            sub_iter.unsafe_replace_operand(1, self_data);
+            sub_iter.unsafe_replace_operand(2, source_data);
+            add_stub(iter.device_type(), sub_iter, alpha);
+          }
+      };
+      // serial for the part with duplicate values
+      if (l_p > 0)
+        outer_looper(0, l_p);
+      // parallel for the part with unique values
+      if (l_p < numel) {
+        at::parallel_for(l_p, numel, at::internal::GRAIN_SIZE / (slice_size < 1 ? 1 : slice_size),
+          [&](int64_t start, int64_t end) {
+          outer_looper(start, end);
+        });
       }
     });
   }
