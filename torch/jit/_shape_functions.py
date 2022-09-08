@@ -1,13 +1,21 @@
-from typing import List, Any, Optional, Union, Dict, Callable
+from typing import List, Any, Optional, Union, Dict, Callable, Tuple
 import math
 number = Union[int, float]
 # flake8: noqa
 
 ###
 # There are generated files that depend on this file
-# To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# To re-generate, please run from the root of the repo:
+# python torchgen/shape_functions/gen_jit_shape_functions.py
+
+# How to test:
+# After regenerating files, compile PyTorch.
+# Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
+# If you have enabled opinfo testing for the op, also run:
+# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# to reproduce errors from opinfo tests.
+
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
@@ -153,8 +161,13 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
     return view(self, sizes)
 
 
-def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
+def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
+    if opt_dims is None or len(opt_dims) == 0:
+        dims: List[int] = list(range(len(self)))
+    else:
+        dims = opt_dims
+
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
@@ -168,7 +181,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     return out
 
 def max_dim(self: List[int], dim: int, keep_dim: bool):
-    out = mean_dim(self, [dim], keep_dim, None)
+    out = sum_mean_dim(self, [dim], keep_dim, None)
     return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
@@ -724,6 +737,51 @@ def conv2d(
     assert len(input) == 4
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
+def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], biases:Optional[List[int]]):
+    # Bias gradient is always generated regardess of if biases is supplied
+    return _copy(input), _copy(weight), [grad_output[1]]
+
+def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[List[int]] = None, stride: Optional[List[int]] = None, padding: Optional[List[int]] = None, output_padding: Optional[List[int]] = None, groups: int = 1, dilation: Optional[List[int]] = None) -> List[int]:
+    if stride is None:
+        stride = [1, 1]
+    if padding is None:
+        padding = [0, 0]
+    if output_padding is None:
+        output_padding = [0, 0]
+    if dilation is None:
+        dilation = [1, 1]
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 1
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        kernel = dilation_ * (weight[d] - 1)
+        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+    return output_size
+
+def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int) -> List[int]:
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 1 if transposed else 0
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        if transposed:
+            kernel = dilation_ * (weight[d] - 1)
+            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+        else:
+            kernel = dilation_ * (weight[d] - 1) + 1
+            output_size.append((input[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
+    return output_size
 
 def batch_norm(
     input: List[int],
@@ -844,6 +902,12 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         shape.append(input[i])
     return shape
 
+def nonzero_lower_bound(input: List[int]):
+    return [0, len(input)]
+
+def nonzero_upper_bound(input: List[int]):
+    return [numel(input), len(input)]
+
 def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
     dim = maybe_wrap_dim(dim, len(self))
     out: List[int] = []
@@ -860,27 +924,106 @@ def argmax(self: List[int], dim: Optional[int] = None, keepdim: bool = False) ->
         return []
     return _reduce_along_dim(self, dim, keepdim)
 
-shape_compute_graph_mapping : Dict[str, torch._C.ScriptFunction] = {}
-script_func_map: Dict[Callable, torch._C.ScriptFunction] = {}
+def bmm(self: List[int], mat2: List[int]) -> List[int]:
+    assert len(self) == 3, "bmm only supports 3D tensors"
+    assert len(mat2) == 3, "bmm only supports 3D tensors"
+    assert self[0] == mat2[0], "mismatching batch dimension"
+    assert self[2] == mat2[1], "mismatching contracting dimension"
+    return [self[0], self[1], mat2[2]]
+
+def _shape_as_tensor(self: List[int]) -> List[int]:
+    return [len(self)]
+
+def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
+    if len(self) == 0:
+        result: List[int] = []
+    else:
+        assert k <= self[dim], f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        result = _copy(self)
+        result[dim] = k
+    return result, result
+
+def nll_loss_forward(self: List[int], target: List[int], weight: Optional[List[int]], reduction: int) -> Tuple[List[int], List[int]]:
+    # This is taken shamelessly from the meta function in LossNLL.cpp
+    self_dim = len(self)
+    target_dim = len(target)
+    assert 0 < self_dim <= 2
+    assert target_dim <= 1
+    no_batch_dim = self_dim == 1 and target_dim == 0
+    assert no_batch_dim or (self[0] == target[0])
+    n_classes = self[-1]
+    scalar_shape: List[int] = []
+    assert weight is None or (len(weight) == 1 and weight[0] == n_classes)
+    if reduction == 0 and self_dim == 2:
+        reduction_shape = [self[0]]
+    else:
+        reduction_shape = scalar_shape
+    return reduction_shape, scalar_shape
+
+def native_layer_norm(input: List[int], normalized_shape: List[int]) -> Tuple[List[int], List[int], List[int]]:
+    reduction_shape: List[int] = []
+    num_unreduced_dimensions = len(input) - len(normalized_shape)
+    assert num_unreduced_dimensions >= 0
+    for i in range(num_unreduced_dimensions):
+        reduction_shape.append(input[i])
+    for i in range(num_unreduced_dimensions, len(input)):
+        reduction_shape.append(1)
+    return _copy(input), reduction_shape, reduction_shape
+
+def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optional[List[int]], running_mean: Optional[List[int]], running_var: Optional[List[int]], training: bool) -> Tuple[List[int], List[int], List[int]]:
+    if training:
+        _size = [input[1]]
+    else:
+        _size = [0]
+    return _copy(input), _size, _size
+
+"""
+Currently deferring the enabling of this, as part of the propoasal to suspend
+adding ops.
+There are currently cases in the test case where this is being called
+in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
+opinfo test). The behavoir of index is significantly dependent on the inputs.
+
+This could be an error with how we are matching up shape functions, or that this
+function needs to just implement everything.
+
+def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+    assert len(indices) <= len(self), "More indices than dimensions to index"
+    broadcasted_shape: List[int] = []
+    for index_tensor_shape in indices:
+        if index_tensor_shape is not None:
+            broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+    return broadcasted_shape
+"""
+
+ScriptFn = torch._C.ScriptFunction
+shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
+bounded_compute_graph_mapping : Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
+script_func_map: Dict[Callable, ScriptFn] = {}
+
+def process_func(func: Callable):
+    if func not in script_func_map:
+        scripted_func = torch.jit.script(func)
+
+        torch._C._jit_pass_inline(scripted_func.graph)
+
+        for _ in range(2):
+            torch._C._jit_pass_peephole(scripted_func.graph)
+            torch._C._jit_pass_constant_propagation(scripted_func.graph)
+
+        script_func_map[func] = scripted_func
+    return script_func_map[func]
+
 
 def add_shape_compute_mapping(operator_schema: str, func: Callable):
     global shape_compute_graph_mapping
-    global shape_compute_graph_set
 
-    if func in script_func_map:
-        shape_compute_graph_mapping[operator_schema] = script_func_map[func]
-        return
+    shape_compute_graph_mapping[operator_schema] = process_func(func)
 
-    scripted_func = torch.jit.script(func)
-
-    torch._C._jit_pass_inline(scripted_func.graph)
-
-    for _ in range(2):
-        torch._C._jit_pass_peephole(scripted_func.graph)
-        torch._C._jit_pass_constant_propagation(scripted_func.graph)
-
-    script_func_map[func] = scripted_func
-    shape_compute_graph_mapping[operator_schema] = scripted_func
+def add_bounded_compute_mapping(operator_schema: str, lower_bound_func: Callable, upper_bound_func: Callable):
+    # Adds a shape compute function for both upper and lower bounds
+    fns = (process_func(lower_bound_func), process_func(upper_bound_func))
+    bounded_compute_graph_mapping[operator_schema] = fns
 
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
 add_shape_compute_mapping("aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary)
@@ -918,14 +1061,17 @@ add_shape_compute_mapping("aten::conv1d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", conv2d)
 add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", batch_norm)
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
+add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
+add_shape_compute_mapping("aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", conv_forwards)
+add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", conv_transpose2d_input)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
-add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
-add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
+add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
 add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", max_dim)
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
@@ -936,6 +1082,13 @@ add_shape_compute_mapping("aten::quantize_per_tensor.tensor_qparams(Tensor self,
 add_shape_compute_mapping("aten::dequantize(Tensor self) -> Tensor", unary)
 add_shape_compute_mapping("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", broadcast)
 add_shape_compute_mapping("aten::argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor", argmax)
+add_shape_compute_mapping("aten::bmm(Tensor self, Tensor mat2) -> Tensor", bmm)
+add_shape_compute_mapping("aten::_shape_as_tensor(Tensor self) -> Tensor", _shape_as_tensor)
+add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)", topk)
+add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
+add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
+add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+# add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed
@@ -944,3 +1097,6 @@ add_shape_compute_mapping("aten::where.ScalarSelf(Tensor condition, Scalar self,
 add_shape_compute_mapping("aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", broadcast_inplace)
 
 # quantized_conv_prepack TODO
+
+# Shape Compute Fn with upper and lower bounds
+add_bounded_compute_mapping("aten::nonzero(Tensor self) -> (Tensor)", nonzero_lower_bound, nonzero_upper_bound)

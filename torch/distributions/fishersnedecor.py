@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['FisherSnedecor']
 
 class FisherSnedecor(Distribution):
     r"""
@@ -13,6 +14,7 @@ class FisherSnedecor(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
         tensor([ 0.2453])

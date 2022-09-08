@@ -103,7 +103,7 @@ struct ScalarTypeToCPPType;
     /* This is a workaround for the CUDA bug which prevents */               \
     /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
     /* ambiguous reference which can't to be resolved. For some reason it */ \
-    /* cant pick between at::detail and at::cuda::detail. */                 \
+    /* can't pick between at::detail and at::cuda::detail. */                \
     /* For repro example, please see: */                                     \
     /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
     /* TODO: remove once the bug is fixed. */                                \
@@ -113,6 +113,9 @@ struct ScalarTypeToCPPType;
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 #undef SPECIALIZE_ScalarTypeToCPPType
+
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
 
 } // namespace impl
 
@@ -336,6 +339,10 @@ static inline ScalarType toRealValueType(ScalarType t) {
 
 static inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
+    case ScalarType::BFloat16:
+      // BFloat16 has range equivalent to Float,
+      // so we map it to ComplexFloat.
+      return ScalarType::ComplexFloat;
     case ScalarType::Half:
       return ScalarType::ComplexHalf;
     case ScalarType::Float:

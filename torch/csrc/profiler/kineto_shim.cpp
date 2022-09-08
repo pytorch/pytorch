@@ -6,6 +6,8 @@
 #include <libkineto.h>
 #endif
 
+#include <c10/util/Exception.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -48,6 +50,17 @@ const DeviceAndResource kineto_ids() {
 #endif // USE_KINETO
 }
 
+void addMetadata(
+    const activity_t* activity,
+    const std::string& key,
+    const std::string& value) {
+#ifdef USE_KINETO
+  // ActivityTraceInterface returns const pointers, so we have to cast away the
+  // constness to add metadata.
+  const_cast<activity_t*>(activity)->addMetadata(key, value);
+#endif // USE_KINETO
+}
+
 TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 #ifdef USE_KINETO
     : cpu_trace_(std::make_unique<libkineto::CpuTraceBuffer>()) {
@@ -60,56 +73,29 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
-void TraceWrapper::addCPUActivity(
+TraceWrapper::~TraceWrapper() = default;
+
+activity_t* TraceWrapper::addCPUActivity(
     const std::string& name,
-    const uint8_t scope,
+    const libkineto::ActivityType type,
     const DeviceAndResource device_and_resource,
     const uint64_t correlation_id,
     const int64_t start_time,
     const int64_t end_time) {
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
-  auto type = ((at::RecordScope)scope == at::RecordScope::USER_SCOPE)
-    ? libkineto::ActivityType::USER_ANNOTATION
-    : libkineto::ActivityType::CPU_OP;
-  cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, type, name));
-  auto& act = cpu_trace_->activities.back();
+  cpu_trace_->emplace_activity(cpu_trace_->span, type, name);
+  auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
   act.id = correlation_id;
   act.startTime = start_time;
-  act.endTime = end_time;
-#endif // USE_KINETO
-}
-
-void TraceWrapper::addMemoryUsageActivity(
-    const std::string& name,
-    const DeviceAndResource device_and_resource,
-    const int64_t time,
-    const c10::Device device,
-    const void* ptr,
-    const int64_t alloc_size,
-    const int64_t total_allocated,
-    const int64_t total_reserved) {
-#ifdef USE_KINETO
-  TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
-  cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, libkineto::ActivityType::CPU_INSTANT_EVENT, name));
-  auto& act = cpu_trace_->activities.back();
-  act.device = device_and_resource.device;
-  act.resource = device_and_resource.resource;
-  act.startTime = time;
-  act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
-  act.addMetadata("Device Id", std::to_string(device.index()));
-  act.addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
-  act.addMetadata("Bytes", std::to_string(alloc_size));
-  if (total_allocated >= 0) {
-    act.addMetadata("Total Allocated", std::to_string(total_allocated));
+  if (type != libkineto::ActivityType::CPU_INSTANT_EVENT) {
+    act.endTime = end_time;
   }
-  if (total_reserved >= 0) {
-    act.addMetadata("Total Reserved", std::to_string(total_reserved));
-  }
+  return cpu_trace_->activities.back().get();
+#else
+  return nullptr;
 #endif // USE_KINETO
 }
 
@@ -129,7 +115,7 @@ TraceWrapper::operator bool() const {
 }
 
 ActivityTraceWrapper::ActivityTraceWrapper(
-    std::unique_ptr<interface_trace_t> trace)
+    std::unique_ptr<interface_trace_t>&& trace)
     : trace_(std::move(trace)), saved_{false} {}
 
 ActivityTraceWrapper::operator bool() const {
@@ -159,18 +145,18 @@ class ExperimentalConfigWrapper {
  public:
   explicit ExperimentalConfigWrapper(
       const torch::profiler::impl::ExperimentalConfig& config)
-    : config_(config) {}
+      : config_(config) {}
 
-  bool assertValid(
-    const ActivitySet& activities) {
+  bool assertValid(const ActivitySet& activities) {
     // Kineto supports reading performance events per kernel/iteration
     // using CUPTI Range based profiler API. In this mode however we
     // do not trace CPU or GPU events.
     bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
-    if (cupti_range_profiler && activities.count(
-          torch::autograd::profiler::ActivityType::CPU)) {
-      LOG(WARNING) << "Cannot run range profiler with CPU activities, please only"
-                   << " use CUDA activity type";
+    if (cupti_range_profiler &&
+        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
+      LOG(WARNING)
+          << "Cannot run range profiler with CPU activities, please only"
+          << " use CUDA activity type";
       return false;
     }
     return cupti_range_profiler;
@@ -178,30 +164,30 @@ class ExperimentalConfigWrapper {
 
   void prepareTraceWithExperimentalOptions() {
 #ifdef USE_KINETO
-  std::set<libkineto::ActivityType> k_activities{
-    libkineto::ActivityType::CUDA_PROFILER_RANGE};
+    std::set<libkineto::ActivityType> k_activities{
+        libkineto::ActivityType::CUDA_PROFILER_RANGE};
 
-  const size_t num_metrics = config_.profiler_metrics.size();
-  std::stringstream configss;
+    const size_t num_metrics = config_.profiler_metrics.size();
+    std::stringstream configss;
 
-  LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
+    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
 
-  configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-           << "CUPTI_PROFILER_METRICS=";
+    configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
+             << "CUPTI_PROFILER_METRICS=";
 
-  for (int i = 0; i < num_metrics; i++) {
-    configss << config_.profiler_metrics[i];
-    if (num_metrics > 1 && i < (num_metrics-1)) {
-      configss << ",";
+    for (int i = 0; i < num_metrics; i++) {
+      configss << config_.profiler_metrics[i];
+      if (num_metrics > 1 && i < (num_metrics - 1)) {
+        configss << ",";
+      }
     }
-  }
-  configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
-           << (config_.profiler_measure_per_kernel ? "true" : "false")
-           << "\n";
-  LOG(INFO) << "Generated config = " << configss.str();
+    configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
+             << (config_.profiler_measure_per_kernel ? "true" : "false")
+             << "\n";
+    LOG(INFO) << "Generated config = " << configss.str();
 
-  libkineto::api().activityProfiler().prepareTrace(
-      k_activities, configss.str());
+    libkineto::api().activityProfiler().prepareTrace(
+        k_activities, configss.str());
 #endif // USE_KINETO
   }
 
@@ -235,7 +221,7 @@ void prepareTrace(
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config.hasOptions() && configWrap.assertValid(activities)) {
+  if (config && configWrap.assertValid(activities)) {
     configWrap.prepareTraceWithExperimentalOptions();
     return;
   }
@@ -296,7 +282,6 @@ void recordThreadInfo() {
 
 namespace autograd {
 namespace profiler {
-#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // fallthrough
   switch (activity_type) {
@@ -315,13 +300,14 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PYTHON_FUNCTION:
       return c10::DeviceType::CPU;
     default: {
-      LOG(WARNING) << "Unknown activity type (" << (uint8_t)activity_type
-                   << "), assuming CPU device";
+      TORCH_WARN(
+          "Unknown activity type (",
+          (uint8_t)activity_type,
+          "), assuming CPU device");
       return c10::DeviceType::CPU;
     }
   }
 }
-#endif // USE_KINETO
 
 void addMetadataJson(const std::string& key, const std::string& value) {
 #ifdef USE_KINETO

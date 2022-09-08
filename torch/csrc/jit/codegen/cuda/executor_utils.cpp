@@ -28,13 +28,22 @@
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
+#include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
+
+#ifdef USE_ROCM
+#include <nvfuser_resources/array_rocm.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
+#include <nvfuser_resources/warp_rocm.h>
+#endif
 
 #ifndef USE_ROCM
 #include <cuda_occupancy.h>
@@ -51,7 +60,7 @@ namespace executor_utils {
 std::string kernelPreamble() {
   std::stringstream ss;
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
@@ -71,12 +80,18 @@ std::string kernelPreamble() {
 #define __align__(x) __attribute__((aligned(x)))
 #endif
   )";
+  // fp16 support is automatic, bf16 is not
+  ss << nvfuser_resources::bf16_support_rocm_cu;
 #endif
 
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::type_traits_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::array_cu;
+#else
+  ss << nvfuser_resources::array_rocm_cu;
+#endif
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
@@ -86,7 +101,11 @@ std::string kernelPreamble() {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
+#ifndef USE_ROCM
     ss << nvfuser_resources::block_sync_default_cu;
+#else
+    ss << nvfuser_resources::block_sync_default_rocm_cu;
+#endif
   }
   ss << nvfuser_resources::grid_sync_cu;
 
@@ -96,9 +115,15 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
+  ss << nvfuser_resources::memory_cu;
+#else
+  ss << nvfuser_resources::warp_rocm_cu;
+#endif
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -522,6 +547,13 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
 void validateAlignedVectorizeExtents(
     const VectorizedSetInfo& info,
     kir::ExpressionEvaluator& expr_eval) {
+  TORCH_INTERNAL_ASSERT(
+      !info.contig_root_ids.empty(),
+      "No root ID found for vectorization with ",
+      info.consumer_tv->toString(),
+      " and ",
+      info.producer_tv->toString());
+
   int64_t vectorized_merged_domain_extent = 1;
   for (auto id : info.contig_root_ids) {
     auto extent_val = expr_eval.evaluate(id->extent());
@@ -573,11 +605,13 @@ void validateAlignedVectorizedFusionInputOutput(
   bool still_rightmost = true;
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
-    // If this domain is contiguous, then not necessary to check the
-    // stride. Otherwise, stride must be 1 if it's rightmost or
-    // divisible by word_size.
+    const auto size = aten_tensor.sizes().at(i);
+    // If this domain is contiguous or size == 1, then not necessary to check
+    // the stride. Otherwise, stride must be 1 if it's rightmost or
+    // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || (still_rightmost && stride == 1) ||
+        stride == cur_contig_stride || size == 1 ||
+            (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
         tv->toString(),
@@ -590,9 +624,12 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    const auto size = aten_tensor.sizes().at(i);
     still_rightmost = still_rightmost && size == 1;
-    cur_contig_stride = stride * size;
+    // We do not update cur_contig_stride for size==1 dimensions,
+    // since we have specialized vectorization stride check for them
+    if (size != 1) {
+      cur_contig_stride = stride * size;
+    }
   }
 }
 
@@ -762,7 +799,33 @@ kir::ExpressionEvaluator bindKernelInputs(
 
       for (const auto dim : c10::irange(root_domain.size())) {
         const auto extent = root_domain[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
+        }
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
@@ -778,7 +841,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }
@@ -809,7 +872,7 @@ ExpressionEvaluator bindFusionInputs(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs do not match.");
 
-  ExpressionEvaluator evaluator(fusion);
+  ExpressionEvaluator expr_eval(fusion);
   auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
@@ -823,20 +886,46 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom =
+      auto root_domain =
           TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == (int64_t)root_dom.size(),
+          aten_tensor.ndimension() == (int64_t)root_domain.size(),
           "Something went wrong configuring launch. Inputs do not match.");
-      for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
+      for (const auto dim : c10::irange(root_domain.size())) {
+        const auto extent = root_domain[dim]->extent();
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
+        }
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
         TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
-        const auto prev_value = evaluator.evaluate(extent);
+        const auto prev_value = expr_eval.evaluate(extent);
         if (prev_value.has_value()) {
           TORCH_CHECK(
               *prev_value == value,
@@ -844,10 +933,10 @@ ExpressionEvaluator bindFusionInputs(
               extent,
               " to ",
               value,
-              "but it's already set to ",
+              " but it's already set to ",
               *prev_value);
         } else {
-          evaluator.bind(extent, value);
+          expr_eval.bind(extent, value);
         }
       }
     } else if (
@@ -857,10 +946,10 @@ ExpressionEvaluator bindFusionInputs(
           aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
           "fusion expected Scalar Int inputs, but found",
           aten_inputs[i].type()->str());
-      evaluator.bind(inputs[i], aten_inputs[i].toInt());
+      expr_eval.bind(inputs[i], aten_inputs[i].toInt());
     }
   }
-  return evaluator;
+  return expr_eval;
 }
 
 void initializeCudaContext() {
@@ -875,13 +964,20 @@ void initializeCudaContext() {
   }
 }
 
-NvrtcFunction nvrtcCompile(
+std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
+  if (isOptionDisabled(DisableOption::ArchCheck)) {
+    TORCH_WARN(
+        "NVFuser Compile: arch check disabled, should not compile any kernel");
+  }
+
   initializeCudaContext();
+
+  std::stringstream ptxas_log;
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
@@ -892,9 +988,12 @@ NvrtcFunction nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
+    std::stringstream ss;
+    ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
@@ -903,7 +1002,7 @@ NvrtcFunction nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
@@ -928,27 +1027,33 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
-#ifdef __HIP_PLATFORM_HCC__
-  if (disable_fma && atoi(disable_fma)) {
+  const bool disable_fma = isOptionDisabled(DisableOption::Fma);
+#ifdef USE_ROCM
+  if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
   }
 #else
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     args.push_back("--fmad=false");
   } else {
     args.push_back("--fmad=true");
   }
 #endif
-
-#ifndef NDEBUG
   // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
+  if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
+    args.push_back("-lineinfo");
+    args.push_back("-G");
+    args.push_back("--dopt=on");
+  }
+#ifdef NDEBUG
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
+
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
+    args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
+  }
 
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
@@ -960,7 +1065,8 @@ NvrtcFunction nvrtcCompile(
   std::vector<char> info_log;
   unsigned int log_size = 8196;
 
-  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog) ||
+      isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     // show register usage in compilation log
     if (compile_to_sass) {
       args.push_back("--ptxas-options");
@@ -981,6 +1087,12 @@ NvrtcFunction nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");
@@ -1022,7 +1134,6 @@ NvrtcFunction nvrtcCompile(
     // The maximum possible count allowed by ptxas is 255
     max_register = static_cast<uint32_t>(
         std::min(effective_max_reg_per_warp / warp_size, 255));
-
     if (compile_to_sass) {
       max_register_usage += std::to_string(max_register);
       args.push_back("--ptxas-options");
@@ -1031,6 +1142,12 @@ NvrtcFunction nvrtcCompile(
       options.push_back(CU_JIT_MAX_REGISTERS);
       option_vals.push_back((void*)(intptr_t)max_register);
     }
+
+    ptxas_log << "\nCompile options: ";
+    for (auto arg : args) {
+      ptxas_log << arg << " ";
+    }
+    ptxas_log << " ; block size=" << opt_block_size.value() << "\n";
   }
 #endif
 
@@ -1043,26 +1160,21 @@ NvrtcFunction nvrtcCompile(
     const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
         program, args.size(), args.data());
 
-    if (result != NVRTC_SUCCESS) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+    size_t logsize = 0;
+    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
 
+    std::vector<char> log(logsize);
+    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+    if (result != NVRTC_SUCCESS) {
       TORCH_INTERNAL_ASSERT(
           false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
-    } else if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
-
-      std::cout << log.data() << std::endl;
     }
 
+    ptxas_log << log.data() << std::endl;
+    if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+      std::cout << log.data() << std::endl;
+    }
     AT_CUDA_NVRTC_CHECK(result);
   }
 
@@ -1098,7 +1210,7 @@ NvrtcFunction nvrtcCompile(
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
@@ -1203,7 +1315,11 @@ NvrtcFunction nvrtcCompile(
       compiled_kernel_.module,
       lowered_kernel_name));
 
-  return compiled_kernel_;
+  TORCH_CHECK(
+      !isOptionDisabled(DisableOption::ArchCheck),
+      "NVFuser Compile: arch check disabled, should not return any compiled kernel");
+
+  return {compiled_kernel_, ptxas_log.str()};
 }
 
 namespace caching {
@@ -1274,8 +1390,8 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
           // Want to keep the broadcast dimensions if they are not resolved
           // TODO: piping down the parallel dimension map here would
           //  be helpful
-          auto& parallel_map = lower->caParallelMap();
-          if (parallel_map.getConcreteMappedID(id) == id) {
+          if (lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP) ==
+              id) {
             parallel_ids.push_back(id);
           }
         } else {
@@ -1321,16 +1437,14 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
-  auto& parallel_map = lower->caParallelMap();
+  const auto& ca_map = lower->caMap();
   std::vector<IterDomain*> mapped;
   bool is_tidx_warp_padded = lower->getWarpPaddedParallelInfo().is_tidx_padded;
 
   for (auto id : parallel_binding_ids) {
     if (std::any_of(
-            mapped.begin(),
-            mapped.end(),
-            [id, &parallel_map](IterDomain* mapped_id) {
-              return parallel_map.areMapped(mapped_id, id);
+            mapped.begin(), mapped.end(), [id, &ca_map](IterDomain* mapped_id) {
+              return ca_map->areMapped(mapped_id, id, IdMappingMode::LOOP);
             })) {
       if (id->getParallelType() != ParallelType::TIDx || !is_tidx_warp_padded) {
         continue;
@@ -1338,7 +1452,8 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     }
 
     insertParallelExtent(
-        parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+        ca_map->getConcreteMappedID(id, IdMappingMode::LOOP),
+        parallel_iter_extents_ptr);
     mapped.push_back(id);
   }
 

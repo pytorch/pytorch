@@ -2,6 +2,8 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
+
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -12,7 +14,9 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/naming.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -38,119 +42,147 @@ void initONNXBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def(
           "_jit_pass_onnx_assign_output_shape",
-          [](std::shared_ptr<Graph>& graph,
-             const std::vector<at::Tensor>& tensors,
-             const python::IODescriptor& desc,
-             bool onnx_shape_inference,
-             bool is_script) {
-            ONNXAssignOutputShape(
-                graph, tensors, desc, onnx_shape_inference, is_script);
-          })
-      .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 const std::vector<at::Tensor>& tensors,
+                 const python::IODescriptor& desc,
+                 bool onnx_shape_inference,
+                 bool is_script) {
+                ONNXAssignOutputShape(
+                    graph, tensors, desc, onnx_shape_inference, is_script);
+              }))
+      .def(
+          "_jit_pass_onnx_function_substitution",
+          wrap_pybind_function(ONNXFunctionCallSubstitution))
+      .def(
+          "_jit_pass_onnx_autograd_function_process",
+          wrap_pybind_function(ONNXAutogradFunctionProcess))
       .def(
           "_jit_pass_onnx_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             int opset_version,
-             bool fixed_batch_size) {
+          ::torch::wrap_pybind_function([](std::shared_ptr<Graph>& graph,
+                                           int opset_version,
+                                           bool fixed_batch_size) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
-          })
-      .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
+          }))
+      .def(
+          "_jit_pass_onnx_preprocess",
+          ::torch::wrap_pybind_function(PreprocessForONNX))
       .def(
           "_jit_pass_onnx_eval_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph, paramsDict);
-            return paramsDict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& paramsDict) {
+                EvalPeepholeONNX(graph, paramsDict);
+                return paramsDict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
-          CastAllConstantToFloating)
+          ::torch::wrap_pybind_function(CastAllConstantToFloating))
       .def(
           "_jit_pass_onnx_constant_fold",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             int opset_version) {
-            ConstantFoldONNX(
-                graph,
-                paramsDict,
-                opset_version); // overload resolution
-            return paramsDict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& paramsDict,
+                 int opset_version) {
+                ConstantFoldONNX(
+                    graph,
+                    paramsDict,
+                    opset_version); // overload resolution
+                return paramsDict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_eliminate_unused_items",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EliminateUnusedItemsONNX(
-                graph->block(),
-                paramsDict); // overload resolution
-            return paramsDict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& paramsDict) {
+                EliminateUnusedItemsONNX(
+                    graph->block(),
+                    paramsDict); // overload resolution
+                return paramsDict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_scalar_type_analysis",
-          [](std::shared_ptr<Graph>& graph,
-             bool lowprecision_cast,
-             int opset_version) {
+          ::torch::wrap_pybind_function([](std::shared_ptr<Graph>& graph,
+                                           bool lowprecision_cast,
+                                           int opset_version) {
             return ScalarTypeAnalysisForONNX(
                 graph, lowprecision_cast, opset_version);
-          },
+          }),
           py::arg("graph"),
           py::arg("lowprecision_cast") = true,
           py::arg("opset_version"))
       .def(
-          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx",
+          ::torch::wrap_pybind_function(RemoveInplaceOpsForONNX))
       .def(
           "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(n, params_dict, opset_version);
-          })
+          ::torch::wrap_pybind_function(
+              [](Node* n,
+                 std::map<std::string, IValue>& params_dict,
+                 int opset_version) {
+                ONNXShapeTypeInference(n, params_dict, opset_version);
+              }))
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(graph, params_dict, opset_version);
-          })
-      .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
-      .def("_jit_pass_onnx_lint", ONNXLintGraph)
-      .def("_jit_pass_onnx_function_extraction", torch::jit::onnx::ONNXFunctionExtraction)
-      .def("_jit_pass_onnx_block", BlockToONNX)
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& params_dict,
+                 int opset_version) {
+                ONNXShapeTypeInference(graph, params_dict, opset_version);
+              }))
+      .def(
+          "_jit_pass_onnx_set_dynamic_input_shape",
+          ::torch::wrap_pybind_function(ONNXSetDynamicInputShape))
+      .def("_jit_pass_onnx_lint", torch::wrap_pybind_function(ONNXLintGraph))
+      .def(
+          "_jit_pass_onnx_function_extraction",
+          ::torch::wrap_pybind_function(
+              torch::jit::onnx::ONNXFunctionExtraction))
+      .def("_jit_pass_onnx_block", torch::wrap_pybind_function(BlockToONNX))
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             bool caffe2) {
-            UnpackQuantizedWeights(graph, paramsDict, caffe2);
-            return paramsDict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& paramsDict,
+                 bool caffe2) {
+                UnpackQuantizedWeights(graph, paramsDict, caffe2);
+                return paramsDict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_quantization_insert_permutes",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            insertPermutes(graph, paramsDict);
-            return paramsDict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue>& paramsDict) {
+                insertPermutes(graph, paramsDict);
+                return paramsDict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_onnx_list_model_parameters",
-          [](Module& module) { return list_module_parameters(module); })
-      .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+          ::torch::wrap_pybind_function(
+              [](Module& module) { return list_module_parameters(module); }))
       .def(
-          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
-      .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
+          "_jit_pass_prepare_division_for_onnx",
+          ::torch::wrap_pybind_function(PrepareDivisionForONNX))
+      .def(
+          "_jit_onnx_convert_pattern_from_subblock",
+          ::torch::wrap_pybind_function(ConvertPatternFromSubblock))
+      .def(
+          "_jit_pass_fixup_onnx_controlflow_node",
+          ::torch::wrap_pybind_function(FixupONNXControlflowNode))
       .def(
           "_jit_pass_onnx_deduplicate_initializers",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue> params_dict,
-             bool is_train) {
-            DeduplicateInitializers(graph, params_dict, is_train);
-            return params_dict;
-          },
+          ::torch::wrap_pybind_function(
+              [](std::shared_ptr<Graph>& graph,
+                 std::map<std::string, IValue> params_dict,
+                 bool is_train) {
+                DeduplicateInitializers(graph, params_dict, is_train);
+                return params_dict;
+              }),
           pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_clear_scope_records",
@@ -171,9 +203,11 @@ void initONNXBindings(PyObject* module) {
           [](std::string stream_name = "stdout") -> void {
             std::shared_ptr<std::ostream> out;
             if (stream_name == "stdout") {
-              out = std::shared_ptr<std::ostream>(&std::cout, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cout, [](std::ostream*) {});
             } else if (stream_name == "stderr") {
-              out = std::shared_ptr<std::ostream>(&std::cerr, [](std::ostream*){});
+              out = std::shared_ptr<std::ostream>(
+                  &std::cerr, [](std::ostream*) {});
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as `stream_name`" << std::endl;
@@ -192,7 +226,17 @@ void initONNXBindings(PyObject* module) {
               out << std::endl;
             }
           },
-          "Write `args` to the previously specified ONNX log stream.");
+          "Write `args` to the previously specified ONNX log stream.")
+      .def(
+          "_jit_pass_onnx_assign_scoped_names_for_node_and_value",
+          ::torch::wrap_pybind_function(
+              ::torch::jit::onnx::AssignScopedNamesForNodeAndValue),
+          "Assign informative scoped names for nodes and values.")
+      .def(
+          "_jit_onnx_create_full_scope_name",
+          ::torch::wrap_pybind_function(
+              ::torch::jit::onnx::ONNXScopeName::createFullScopeName),
+          "Create a full scope name from class name and variable name.");
 
   m.def(
       "_check_onnx_proto",

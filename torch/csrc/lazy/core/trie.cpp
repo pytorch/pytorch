@@ -10,13 +10,14 @@
 namespace torch {
 namespace lazy {
 namespace {
+
 void TraverseTrie(TrieNode* node, std::stringstream& ss) {
   if (!node) {
     return;
   }
   if (node->ir_node) {
     ss << node->unique_id << "[label=\"" << node->ir_node->op().ToString()
-        << "\"]\n";
+       << ", " << node->hit_counter << " hits\"]\n";
   }
   for (auto& successor : node->successors) {
     ss << node->unique_id << " -> " << successor->unique_id << "\n";
@@ -30,16 +31,19 @@ TrieCache* TrieCache::Get() {
   return trie;
 }
 
-TrieCache::TrieCache() : root_(std::make_shared<TrieNode>()), current_(root_.get()) {}
+TrieCache::TrieCache()
+    : root_(std::make_shared<TrieNode>()), current_(root_.get()) {}
 
 TrieNode* TrieCache::Current() const {
   return current_;
 }
 
-void TrieCache::SetCurrent(std::deque<std::shared_ptr<TrieNode>>::iterator iter) {
+void TrieCache::SetCurrent(
+    std::list<std::shared_ptr<TrieNode>>::iterator& iter) {
   auto& successors = current_->successors;
   // Update current_ before iter gets destroyed
   current_ = (*iter).get();
+
   // Insert this node to the front of its parent's successor list
   if (iter != successors.begin()) {
     successors.push_front(std::move(*iter));
@@ -63,6 +67,7 @@ void TrieCache::Insert(NodePtr ir_node) {
 }
 
 void TrieCache::Clear() {
+  ResetCurrent();
   // Clear at the root level should be sufficient because all the nodes
   // are created as shared_ptr.
   root_->successors.clear();

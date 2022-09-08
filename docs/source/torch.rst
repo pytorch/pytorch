@@ -96,6 +96,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_add
     index_copy
+    index_reduce
     index_select
     masked_select
     movedim
@@ -222,6 +223,8 @@ Parallelism
     set_num_threads
     get_num_interop_threads
     set_num_interop_threads
+
+.. _torch-rst-local-disable-grad:
 
 Locally disabling gradient computation
 --------------------------------------
@@ -530,6 +533,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex
@@ -610,6 +614,10 @@ Utilities
     vmap
     _assert
 
+Operator Tags
+------------------------------------
+.. autoclass:: Tag
+    :members:
 
 .. Empty submodules added only for tracking.
 .. py:module:: torch.contrib

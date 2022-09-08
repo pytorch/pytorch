@@ -54,9 +54,19 @@ class TestMHADeviceType(TestCase):
                     def simple_transform_bias_rescale_qkv(qkv, bias):
                         (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
                         (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
+
+                        def embiggen(x):
+                            if not use_nt:
+                                return x
+                            b, t, d = x.size()
+                            t = t + (8 - t % 8) % 8
+                            newsize = (b, t, d)
+                            new_x = torch.zeros(newsize, device=device, dtype=dtype)
+                            new_x[:x.size()[0], :x.size()[1], :x.size()[2]] = x
+                            return new_x
                         return tuple(
-                            x.reshape(
-                                (bs, sl, num_heads, embed_dim // num_heads)
+                            embiggen(x).reshape(
+                                (bs, -1, num_heads, embed_dim // num_heads)
                             ).transpose(2, 1)
                             for x in (
                                 (q + q_bias) / math.sqrt(embed_dim // num_heads),
@@ -163,6 +173,7 @@ class TestMHADeviceType(TestCase):
                     key_padding_mask,
                     need_weights=need_weights,
                     average_attn_weights=average_attn_weights,
+                    mask_type=1,   # mask_type = 1 => src_key_padding_mask, mask_type = 0 => src_mask
                 )
 
         npt = NativeMHA(

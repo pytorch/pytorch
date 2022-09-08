@@ -1,8 +1,9 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/utils/structseq.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/structseq.h>
 
 namespace six {
 
@@ -12,7 +13,8 @@ namespace six {
 // by a pytorch operator.
 
 inline bool isStructSeq(pybind11::handle input) {
-  return pybind11::cast<std::string>(input.get_type().attr("__module__")) == "torch.return_types";
+  return pybind11::cast<std::string>(input.get_type().attr("__module__")) ==
+      "torch.return_types";
 }
 
 inline bool isStructSeq(PyObject* obj) {
@@ -32,19 +34,19 @@ inline bool isTuple(PyObject* obj) {
 
 // maybeAsTuple: if the input is a structseq, then convert it to a tuple
 //
-// On Python 3, structseq is a subtype of tuple, so these APIs could be used directly.
-// But on Python 2, structseq is not a subtype of tuple, so we need to manually create a
-// new tuple object from structseq.
-inline THPObjectPtr maybeAsTuple(PyStructSequence *obj) {
+// On Python 3, structseq is a subtype of tuple, so these APIs could be used
+// directly. But on Python 2, structseq is not a subtype of tuple, so we need to
+// manually create a new tuple object from structseq.
+inline THPObjectPtr maybeAsTuple(PyStructSequence* obj) {
   Py_INCREF(obj);
-  return THPObjectPtr((PyObject *)obj);
+  return THPObjectPtr((PyObject*)obj);
 }
 
-inline THPObjectPtr maybeAsTuple(PyObject *obj) {
+inline THPObjectPtr maybeAsTuple(PyObject* obj) {
   if (isStructSeq(obj))
-    return maybeAsTuple((PyStructSequence *)obj);
+    return maybeAsTuple((PyStructSequence*)obj);
   Py_INCREF(obj);
   return THPObjectPtr(obj);
 }
 
-}  // namespace six
+} // namespace six

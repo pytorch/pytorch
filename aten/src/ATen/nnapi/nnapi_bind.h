@@ -36,7 +36,20 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     NnapiCompilation() = default;
     ~NnapiCompilation() override = default;
 
-    TORCH_API void init(at::Tensor serialized_model_tensor, std::vector<at::Tensor> parameter_buffers);
+    // only necessary for older models that still call init()
+    TORCH_API void init(
+      at::Tensor serialized_model_tensor,
+      std::vector<at::Tensor> parameter_buffers
+    );
+
+    TORCH_API void init2(
+      at::Tensor serialized_model_tensor,
+      std::vector<at::Tensor> parameter_buffers,
+      int64_t compilation_preference,
+      bool relax_f32_to_f16
+    );
+
+
     TORCH_API void run(std::vector<at::Tensor> inputs, std::vector<at::Tensor> outputs);
     static void get_operand_type(const at::Tensor& t, ANeuralNetworksOperandType* operand, std::vector<uint32_t>* dims);
 

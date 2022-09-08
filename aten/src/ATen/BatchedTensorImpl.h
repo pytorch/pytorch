@@ -24,8 +24,8 @@ constexpr int64_t kBatchDimsStackSize = 5;
 // vmap. It is a (level, dim) tuple, with the `dim` indicating which dimension
 // is being vmap'ed over and the `level` being an identifier for which vmap
 // said dimension was created inside. The `dim` corresponds to a "physical
-// dim" - it is a dimension index on the underlying physical tensor that is being
-// vmapped over.
+// dim" - it is a dimension index on the underlying physical tensor that is
+// being vmapped over.
 struct BatchDim {
   BatchDim(int64_t level, int64_t dim) : dim_(dim), level_(level) {}
   int64_t dim() const {
@@ -34,6 +34,7 @@ struct BatchDim {
   int64_t level() const {
     return level_;
   }
+
  private:
   int64_t dim_;
   int64_t level_;
@@ -46,27 +47,32 @@ using BatchDimsRef = ArrayRef<BatchDim>;
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 //
-// The batch dimensions are treated as being "private"; they are not user-visible.
-// For example, in the following Tensor,
+// The batch dimensions are treated as being "private"; they are not
+// user-visible. For example, in the following Tensor,
 //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2, dim=1)])
 // dimensions 0 and 1 are batch dimensions.
 //
 // bt.sizes() returns (5, 7); bt.sum(0) performs a reduction over the (public)
-// dim 0, which is equivalent to dim 3 in the underlying ones(2, 3, 5, 7) tensor.
+// dim 0, which is equivalent to dim 3 in the underlying ones(2, 3, 5, 7)
+// tensor.
 struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   explicit BatchedTensorImpl(Tensor value, BatchDims bdims);
 
   // Returns a reference to BatchDims that represent which dimensions of this
   // tensor are private.
-  BatchDimsRef bdims() const { return bdims_; }
+  BatchDimsRef bdims() const {
+    return bdims_;
+  }
 
   // BatchedTensorImpl wraps a Tensor
-  const Tensor& value() const { return value_; };
+  const Tensor& value() const {
+    return value_;
+  };
 
-  // Given a public dimension index, return the dimension index in the underlying
-  // value() tensor.
-  // For example, if we have
-  //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2, dim=2)])
+  // Given a public dimension index, return the dimension index in the
+  // underlying value() tensor. For example, if we have
+  //    bt = BatchedTensorImpl(ones(2, 3, 5, 7), [(lvl=1, dim=0), (lvl=2,
+  //    dim=2)])
   // bt.actualDim(0) -> 1
   // bt.actualDim(1) -> 3
   // bt.actualDim(2) -> Error
@@ -74,7 +80,8 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 
   // We have to override this because we opted into CustomStrides
   IntArrayRef strides_custom() const override;
-  // Override a bunch of methods inherited from TensorImpl to return error messages.
+  // Override a bunch of methods inherited from TensorImpl to return error
+  // messages.
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
@@ -91,8 +98,9 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   Tensor value_;
 
   // Note: [BatchedTensorImpl levels invariant]
-  // There is an invariant that the BatchDims must be stored in increasing `level`
-  // order. That is, for i < j, bdims_[i].level must be less than bdims_[j].level.
+  // There is an invariant that the BatchDims must be stored in increasing
+  // `level` order. That is, for i < j, bdims_[i].level must be less than
+  // bdims_[j].level.
   BatchDims bdims_;
 };
 
@@ -116,7 +124,8 @@ inline BatchedTensorImpl* maybeGetBatchedImpl(Tensor tensor) {
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.
-inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(BatchDimsRef bdims) {
+inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(
+    BatchDimsRef bdims) {
   std::bitset<kVmapMaxTensorDims> is_bdim;
   for (const auto& bdim : bdims) {
     is_bdim.set(bdim.dim());
@@ -148,5 +157,4 @@ TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
 // See NOTE: [vmap-incompatible in-place operations] for the definition of this.
 TORCH_API bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other);
 
-
-}
+} // namespace at

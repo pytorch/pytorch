@@ -4,7 +4,7 @@ import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
 from torch.ao.quantization.quantization_mappings import (
@@ -27,6 +27,22 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+_DEFAULT_CUSTOM_CONFIG_DICT = {
+    'float_to_observed_custom_module_class': {
+        nn.LSTM: nn.quantizable.LSTM,
+        nn.MultiheadAttention: nn.quantizable.MultiheadAttention,
+    },
+    'observed_to_quantized_custom_module_class': {
+        nn.quantizable.LSTM: nn.quantized.LSTM,
+        nn.quantizable.MultiheadAttention: nn.quantized.MultiheadAttention,
+    }
+}
+
+def get_default_custom_config_dict():
+    r"""Defines the default custom config dict.
+    """
+    return _DEFAULT_CUSTOM_CONFIG_DICT
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
@@ -261,7 +277,7 @@ def prepare(model, inplace=False, allow_list=None,
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
     if prepare_custom_config_dict is None:
-        prepare_custom_config_dict = {}
+        prepare_custom_config_dict = get_default_custom_config_dict()
     custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
 
     if not inplace:
@@ -543,7 +559,7 @@ def _convert(
         mapping = get_default_static_quant_reference_module_mappings() if is_reference \
             else get_default_static_quant_module_mappings()
     if convert_custom_config_dict is None:
-        convert_custom_config_dict = {}
+        convert_custom_config_dict = get_default_custom_config_dict()
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
 
     if not inplace:

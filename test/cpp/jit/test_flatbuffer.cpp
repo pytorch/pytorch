@@ -31,14 +31,19 @@
 namespace torch {
 namespace jit {
 
+namespace {
 mobile::Module parse_mobile_module(
     void* data,
-    size_t,
+    size_t size,
     bool should_copy_tensor_memory = false) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(
-      flatbuffer_module, c10::nullopt, should_copy_tensor_memory);
+  return parse_and_initialize_mobile_module(
+      static_cast<char*>(data),
+      size,
+      /*device=*/c10::nullopt,
+      /*extra_files=*/nullptr,
+      should_copy_tensor_memory);
 }
+} // namespace
 
 TEST(FlatbufferTest, UpsampleNearest2d) {
   Module m("m");
@@ -62,7 +67,7 @@ TEST(FlatbufferTest, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   auto res2 = bc2.forward(inputs);
   auto resd2 = res2.toTensor();
   ASSERT_TRUE(resd2.equal(refd));
@@ -90,9 +95,7 @@ TEST(FlatbufferTest, UpsampleNearest2dWithCopyTensorMemory) {
   ASSERT_TRUE(resd.equal(refd));
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
-
-  buff = flatbuffers::DetachedBuffer();
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size(), true);
 
   auto res2 = bc2.forward(inputs);
   auto resd2 = res2.toTensor();
@@ -115,7 +118,7 @@ TEST(FlatbufferTest, CheckAttrAccess) {
   AT_ASSERT(!mobile_optimized);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   auto mobile_optimized2 = bc2.attr("mobile_optimized", false).toBool();
   AT_ASSERT(!mobile_optimized2);
 }
@@ -163,7 +166,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
     AT_ASSERT(resd == refd);
 
     auto buff = save_mobile_module_to_bytes(bc);
-    mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+    mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
     const auto& test_func2 = bc2.get_method("test_func");
     IValue res2;
     for (int i = 0; i < 3; ++i) {
@@ -174,7 +177,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#if !defined(FB_XPLAT_BUILD)
 TEST(FlatbufferTest, FlatbufferBackPortTest) {
   Module m("m");
   m.define(R"(
@@ -188,7 +191,7 @@ TEST(FlatbufferTest, FlatbufferBackPortTest) {
   bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
   ASSERT_TRUE(backPortSuccess);
 }
-#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
@@ -207,7 +210,6 @@ TEST(FlatbufferTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
 
   std::unordered_map<std::string, std::string> loaded_extra_files;
-#if defined ENABLE_FLATBUFFER
   std::stringstream ss;
   module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
 
@@ -219,17 +221,6 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   // load it twice using the same stream
   auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
-#else
-  CompilationOptions options;
-  mobile::Module bc = jitModuleToMobile(*module, options);
-  auto buff = save_mobile_module_to_bytes(bc, extra_files);
-
-  loaded_extra_files["metadata.json"] = "";
-  auto* flatbuffer_module =
-      mobile::serialization::GetMutableModule(buff.data());
-
-  parseExtraFiles(flatbuffer_module, loaded_extra_files);
-#endif
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -267,7 +258,7 @@ TEST(FlatbufferTest, Conv) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 3; ++i) {
     res = bc2.get_method("forward")(inputs);
   }
@@ -309,8 +300,7 @@ TEST(FlatbufferTest, ConvWithCopyTensorMemory) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
-  buff = flatbuffers::DetachedBuffer();
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size(), true);
 
   for (int i = 0; i < 3; ++i) {
     res = bc2.get_method("forward")(inputs);
@@ -340,7 +330,7 @@ TEST(FlatbufferTest, Inline) {
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
@@ -365,8 +355,7 @@ TEST(FlatbufferTest, InlineWithCopyTensorMemory) {
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
-  buff = flatbuffers::DetachedBuffer();
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size(), true);
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
@@ -389,7 +378,7 @@ TEST(FlatbufferTest, Tuple) {
   AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   output = bc2.get_method("forward")(inputs);
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
@@ -411,7 +400,7 @@ TEST(FlatbufferTest, Dict) {
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   output = bc2.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
@@ -442,7 +431,7 @@ TEST(FlatbufferTest, Prim) {
   AT_ASSERT(resi == refi);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 3; ++i) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
@@ -478,7 +467,7 @@ TEST(FlatbufferTest, PrimScalar) {
   AT_ASSERT(resi == refi);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 3; ++i) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
@@ -505,7 +494,7 @@ TEST(FlatbufferTest, WrongMethodName) {
       bc.get_method("forward")(inputs), "is not defined");
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   ASSERT_THROWS_WITH_MESSAGE(
       bc2.get_method("forward")(inputs), "is not defined");
 }
@@ -546,7 +535,7 @@ TEST(FlatbufferTest, SetState) {
   AT_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 3; ++i) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto bcinputs = inputs;
@@ -643,7 +632,7 @@ TEST(FlatbufferTest, BuiltinClass) {
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   std::string expected = "Hello! Your tensor has 12 elements!";
   auto res =
       bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
@@ -670,7 +659,7 @@ TEST(FlatbufferTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   res = bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   str = res.toStringRef();
@@ -710,7 +699,7 @@ TEST(FlatbufferTest, Eval) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   bc2.eval();
   for (int i = 0; i < 3; ++i) {
     res = bc2.get_method("forward")(inputs);
@@ -734,7 +723,7 @@ TEST(FlatbufferTest, FindWrongMethodName) {
   ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   ASSERT_TRUE(bc2.find_method("forward") == c10::nullopt);
 }
 
@@ -767,7 +756,7 @@ TEST(FlatbufferTest, FindAndRunMethod) {
   AT_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
 
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
@@ -802,7 +791,7 @@ TEST(FlatbufferTest, RunMethodVariadic) {
   AT_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   res = bc.run_method("add_three", inputx, inputy);
   resd = res.toTensor().item<float>();
   AT_ASSERT(resd == refd);
@@ -836,7 +825,7 @@ TEST(FlatbufferTest, DuplicateSetState) {
   ASSERT_EQ(methods.size(), expected_n);
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   const auto methods2 = bc.get_methods();
   ASSERT_EQ(methods2.size(), expected_n);
 }
@@ -868,7 +857,7 @@ TEST(FlatbufferTest, OpNameExportFetchRootOperators) {
       << "Expected the root operator lists to be the same";
 
   auto buff = save_mobile_module_to_bytes(ptl_model);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   operator_names = torch::jit::mobile::_export_operator_list(bc2);
   EXPECT_EQ(operator_names, expected_operator_names)
       << "Expected the root operator lists to be the same";
@@ -904,7 +893,7 @@ TEST(FlatbufferTest, DefaultArgsConv) {
   AT_ASSERT(output.equal(outputref));
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 1; ++i) {
     res = bc2.get_method("forward")(inputs);
   }
@@ -931,7 +920,7 @@ void testLiteModuleCompareResultTensors(
   AT_ASSERT(output.equal(outputref));
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   for (int i = 0; i < 3; ++i) {
     res = bc2.get_method(method_name)(inputs);
   }
@@ -1122,7 +1111,7 @@ TEST(FlatbufferTest, DefaultArgsWithOutArg) {
   AT_ASSERT(input_x.equal(4 * torch::ones({})));
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   auto input_x2 = 2 * torch::ones({});
   auto input_h2 = torch::ones({});
   m.run_method("forward", input_x2, input_h2);
@@ -1201,7 +1190,7 @@ TEST(FlatbufferTest, OperatorSize1) {
       func.get_code().operators_.size());
 
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   const auto& func2 = bc.get_method("forward").function();
   ASSERT_EQ(
       func2.get_code().operator_input_sizes_.size(),
@@ -1220,7 +1209,7 @@ TEST(FlatbufferTest, BoolAndDoubleList) {
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
   auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
 
   // if the variables read are wrong type the conversion will raise exception
   auto boolval = bc2.attr("bool_list", {}).toBoolList().get(0);
@@ -1264,7 +1253,7 @@ TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
         func.get_code().operators_.size());
 
     auto buff = save_mobile_module_to_bytes(bc);
-    mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+    mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
     const auto& func2 = bc.get_method("test_func").function();
     ASSERT_EQ(
         func2.get_code().operator_input_sizes_.size(),
@@ -1272,18 +1261,18 @@ TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
   }
 }
 
-Module jitModuleFromBuffer(void* data) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  FlatbufferLoader loader;
-  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
-  ExtraFilesMap files;
-  std::vector<IValue> constants;
-  loader.extractJitSourceAndConstants(&files, &constants);
-  return jitModuleFromSourceAndConstants(
-      mobilem._ivalue(), files, constants, 8);
+Module jitModuleFromBuffer(void* data, size_t size) {
+  // Make a copy of the data so we can use the existing API, which takes
+  // ownership. The `data` param might point into the middle of a buffer, so we
+  // can't safely take ownership of it directly.
+  // @nolint CLANGTIDY cppcoreguidelines-no-malloc
+  std::shared_ptr<char> copy(static_cast<char*>(malloc(size)), free);
+  memcpy(copy.get(), data, size);
+
+  ExtraFilesMap extra_files;
+  return parse_and_initialize_jit_module(std::move(copy), size, extra_files);
 }
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -1315,10 +1304,10 @@ TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   Module m("m");
   m.register_attribute("mobile_optimized", BoolType::get(), true);
   auto data = save_jit_module_to_bytes(m);
-  Module m2 = jitModuleFromBuffer(data.data());
+  Module m2 = jitModuleFromBuffer(data->data(), data->size());
   bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
   AT_ASSERT(mobile_optimized);
-  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+  mobile::Module m3 = parse_mobile_module(data->data(), data->size());
   mobile_optimized = m3.attr("mobile_optimized", false).toBool();
   AT_ASSERT(mobile_optimized);
 }
@@ -1355,7 +1344,7 @@ TEST(TestSourceFlatbuffer,
     auto ref = m.run_method("test_func", minput);
 
     auto data = save_jit_module_to_bytes(m);
-    Module m2 = jitModuleFromBuffer(data.data());
+    Module m2 = jitModuleFromBuffer(data->data(), data->size());
     const auto& test_func = m2.get_method("test_func");
     IValue res;
     for (int i = 0; i < 3; ++i) {
@@ -1365,7 +1354,7 @@ TEST(TestSourceFlatbuffer,
     auto refd = ref.toTensor().item<float>();
     AT_ASSERT(resd == refd);
 
-    mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+    mobile::Module m3 = parse_mobile_module(data->data(), data->size());
     const auto& test_func3 = m3.get_method("test_func");
     for (int i = 0; i < 3; ++i) {
       res = test_func3({minput});
@@ -1375,7 +1364,6 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
-#endif
 
 #if !defined FB_XPLAT_BUILD
 // The following test run in fbcode only
@@ -1800,6 +1788,133 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 }
 
 #endif // !defined(FB_XPLAT_BUILD)
+
+//
+// Tests that need access to internal flatbuffers types/functions.
+// Do not add any other tests after this section.
+//
+
+} // namespace jit
+} // namespace torch
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
+namespace torch {
+namespace jit {
+
+#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
+namespace flatbuffers = flatbuffers_fbsource;
+#endif
+/**
+ * An Allocator that can only deallocate (using delete []), counting
+ * the number of times that it has been asked to deallocate.
+ */
+class TestAllocator : public flatbuffers::Allocator {
+ public:
+  /**
+   * *deallocate_call_count will be incremented whenever deallocate() is called.
+   */
+  explicit TestAllocator(int* deallocate_call_count)
+      : deallocate_call_count_(deallocate_call_count) {}
+
+  void deallocate(uint8_t* p, size_t /*size*/) override {
+    *deallocate_call_count_ += 1;
+    delete[] p;
+  }
+
+  uint8_t* allocate(size_t) override {
+    TORCH_CHECK(false, "allocate() should not be called");
+  }
+  uint8_t* reallocate_downward(uint8_t*, size_t, size_t, size_t, size_t)
+      override {
+    TORCH_CHECK(false, "reallocate_downward() should not be called");
+  }
+
+ private:
+  int* deallocate_call_count_;
+};
+
+/// Provides access to DetachedBuffer::destroy().
+struct DetachedBufferTestingFriend {
+  /// Returns a UniqueDetachedBuffer that wraps the provided DetachedBuffer.
+  /// A copy of similar code in flatbuffer_serializer.cpp.
+  static DetachedBuffer::UniqueDetachedBuffer make_unique_detached_buffer(
+      DetachedBuffer* buf) {
+    return DetachedBuffer::UniqueDetachedBuffer(buf, DetachedBuffer::destroy);
+  }
+};
+
+TEST(FlatbufferTest, DetachedBufferSmoke) {
+  // Use a custom Allocator to watch the lifecycle of a
+  // flatbuffers::DetachedBuffer.
+  int deallocate_call_count = 0;
+  TestAllocator alloc(&deallocate_call_count);
+
+  // Data for the buffer. TestAllocator will free it with `delete []`.
+  constexpr size_t data_size = 4;
+  uint8_t* data = new uint8_t[data_size];
+
+  // An internal buffer on the stack that owns the data.
+  flatbuffers::DetachedBuffer fb_buf_local(
+      &alloc, /*own_allocator=*/false, data, data_size, data, data_size);
+  EXPECT_EQ(fb_buf_local.data(), data);
+  EXPECT_EQ(fb_buf_local.size(), data_size);
+
+  // Mimic the code inside save_mobile_module_to_bytes by transferring ownership
+  // to a heap object.
+  auto fb_buf_ptr = new flatbuffers::DetachedBuffer(std::move(fb_buf_local));
+  // The data should not have been deleted yet.
+  EXPECT_EQ(deallocate_call_count, 0);
+  // The new object points to the data.
+  EXPECT_EQ(fb_buf_ptr->data(), data);
+  EXPECT_EQ(fb_buf_ptr->size(), data_size);
+  // The old object points to nothing.
+  // @lint-ignore CLANGTIDY bugprone-use-after-move
+  EXPECT_EQ(fb_buf_local.data(), nullptr);
+  // @lint-ignore CLANGTIDY bugprone-use-after-move
+  EXPECT_EQ(fb_buf_local.size(), 0);
+
+  // The top-level torch::jit::DetachedBuffer.
+  auto wrapped_buf =
+      new DetachedBuffer(fb_buf_ptr->data(), fb_buf_ptr->size(), fb_buf_ptr);
+  EXPECT_EQ(wrapped_buf->data(), data);
+  EXPECT_EQ(wrapped_buf->size(), data_size);
+
+  // The unique_ptr that owns the torch::jit::DetachedBuffer and its contents.
+  {
+    DetachedBuffer::UniqueDetachedBuffer unique_buf =
+        DetachedBufferTestingFriend::make_unique_detached_buffer(wrapped_buf);
+    EXPECT_EQ(unique_buf->data(), data);
+    EXPECT_EQ(unique_buf->size(), data_size);
+
+    // The data should not have been deleted yet.
+    EXPECT_EQ(deallocate_call_count, 0);
+  }
+
+  // Now that the unique_ptr is out of scope, the data should have been deleted.
+  EXPECT_EQ(deallocate_call_count, 1);
+}
+
+TEST(FlatbufferTest, DetachedBufferNullOwner) {
+  // a torch::jit::DetachedBuffer with a null internal owner.
+  std::vector<uint8_t> data(4);
+  auto wrapped_buf = new DetachedBuffer(data.data(), data.size());
+
+  // A unique_ptr that owns the torch::jit::DetachedBuffer and its contents.
+  {
+    DetachedBuffer::UniqueDetachedBuffer unique_buf =
+        DetachedBufferTestingFriend::make_unique_detached_buffer(wrapped_buf);
+    EXPECT_EQ(unique_buf->data(), data.data());
+    EXPECT_EQ(unique_buf->size(), data.size());
+  }
+
+  // The DetachedBuffer should have been destroyed when the UniqueDetachedBuffer
+  // went out of scope. If we didn't crash or get any ASAN warnings, we should
+  // be good.
+}
+
+//
+// Do not add tests here unless they require flatbuffers types. See comment at
+// the beginning of this section.
+//
 
 } // namespace jit
 } // namespace torch

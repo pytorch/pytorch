@@ -410,7 +410,7 @@ See the ``symbolic_opset*.py`` files for more examples.
 torch.autograd.Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the operator is a sub-class of :class:`torch.autograd.Function`, there are two ways
+If the operator is a sub-class of :class:`torch.autograd.Function`, there are three ways
 to export it.
 
 Static Symbolic Method
@@ -426,7 +426,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
             return input.clamp(min=0)
 
         @staticmethod
-        def symbolic(g: torch._C.graph, input: torch._C.Value) -> torch._C.Value:
+        def symbolic(g: torch._C.Graph, input: torch._C.Value) -> torch._C.Value:
             return g.op("Clip", input, g.op("Constant", value_t=torch.tensor(0, dtype=torch.float)))
 
 PythonOp Symbolic
@@ -487,6 +487,32 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
 
     from torch.onnx import register_custom_op_symbolic
     register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+
+Inline Autograd Function
+~~~~~~~~~~~~~~~~~~~~~~~~
+In cases where a static symbolic method is not provided for its subsequent autograd.Function
+or where a function to register prim::PythonOp as custom symbolic functions is not provided,
+torch.onnx.export tries to inline the graph that corresponds to that autograd.Function such that
+this function is broken down into individual operators that were used within the function.
+The export should be successful as long as these individual operators are supported. For example::
+
+    class MyLogExp(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input: torch.Tensor) -> torch.Tensor:
+            ctx.save_for_backward(input)
+            h = input.exp()
+            return h.log().log()
+
+There is no static symbolic method present for this model, yet it is exported as follows::
+
+    graph(%input : Float(1, strides=[1], requires_grad=0, device=cpu)):
+        %1 : float = onnx::Exp[](%input)
+        %2 : float = onnx::Log[](%1)
+        %3 : float = onnx::Log[](%2)
+        return (%3)
+
+In order to avoid inlining of autograd.Functions, model should be exported with
+operator_export_type set to ONNX_FALLTHROUGH or ONNX_ATEN_FALLBACK mode
 
 Custom operators
 ^^^^^^^^^^^^^^^^
@@ -570,27 +596,9 @@ Q: How to export models with primitive type inputs (e.g. int, float)?
 Q: Does ONNX support implicit scalar datatype casting?
 
   No, but the exporter will try to handle that part. Scalars are exported as constant tensors.
-  The exporter will try to figure out the right datatype for scalars. However when it is unable
-  to do so, you will need to manually specify the datatype. This often happens with
-  scripted models, where the datatypes are not recorded. For example::
-
-    class ImplicitCastType(torch.jit.ScriptModule):
-        @torch.jit.script_method
-        def forward(self, x):
-            # Exporter knows x is float32, will export "2" as float32 as well.
-            y = x + 2
-            # Currently the exporter doesn't know the datatype of y, so
-            # "3" is exported as int64, which is wrong!
-            return y + 3
-            # To fix, replace the line above with:
-            # return y + torch.tensor([3], dtype=torch.float32)
-
-    x = torch.tensor([1.0], dtype=torch.float32)
-    torch.onnx.export(ImplicitCastType(), x, "implicit_cast.onnx",
-                      example_outputs=ImplicitCastType()(x))
-
-  We are trying to improve the datatype propagation in the exporter such that implicit casting
-  is supported in more cases.
+  The exporter will figure out the right data type for scalars. In rare cases when it is unable
+  to do so, you will need to manually specify the datatype with e.g. `dtype=torch.float32`.
+  If you see any errors, please [create a GitHub issue](https://github.com/pytorch/pytorch/issues).
 
 Q: Are lists of Tensors exportable to ONNX?
 
@@ -623,3 +631,4 @@ Classes
     :template: classtemplate.rst
 
     SymbolicContext
+    JitScalarType

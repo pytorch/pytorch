@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 
 from . import default_hooks as default
+from torch.distributed import distributed_c10d
 
 __all__ = [
     "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
@@ -264,6 +265,33 @@ class PowerSGDState(object):
         # Turn on if compression / decompression computation is a bottleneck.
         self.batch_tensors_with_same_shape = batch_tensors_with_same_shape
 
+    def __getstate__(self):
+        r"""
+        Returns a ``Dict[str, Any]`` which will be pickled and saved.
+        ``process_group`` is not serializable and excluded from
+        a returned state.
+        """
+        logger.warning(
+            "NOTE: Process group is not serializable and excluded from a saved state."
+        )
+        return {
+            slot: getattr(self, slot)
+            for slot in self.__slots__ if slot != "process_group"
+        }
+
+    def __setstate__(self, state):
+        r"""
+        Takes a provided ``state`` and retrieves ``PowerSGDState``.
+        ``process_group`` is set to default.
+        """
+        self.process_group = distributed_c10d._get_default_group()
+        logger.warning(
+            "NOTE: Process group will be set to a default group (i.e. the world size).\
+                If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
+        )
+        for slot, value in state.items():
+            setattr(self, slot, value)
+
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
@@ -351,6 +379,7 @@ def powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
                                   start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
@@ -659,6 +688,7 @@ def batched_powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
     """  # noqa: B950

@@ -1,5 +1,6 @@
 import builtins
 import importlib
+import importlib.machinery
 import inspect
 import io
 import linecache
@@ -7,7 +8,7 @@ import os.path
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Callable, cast, Dict, Iterable, List, Optional, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -21,11 +22,24 @@ from ._importlib import (
     _resolve_name,
     _sanity_check,
 )
-from ._mangling import PackageMangler, demangle
+from ._mangling import demangle, PackageMangler
 from ._package_unpickler import PackageUnpickler
-from .file_structure_representation import Directory, _create_directory_from_file_list
+from .file_structure_representation import _create_directory_from_file_list, Directory
 from .glob_group import GlobPattern
 from .importer import Importer
+
+__all__ = ["PackageImporter"]
+
+
+# This is a list of imports that are implicitly allowed even if they haven't
+# been marked as extern. This is to work around the fact that Torch implicitly
+# depends on numpy and package can't track it.
+# https://github.com/pytorch/MultiPy/issues/46
+IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
+    "numpy",
+    "numpy.core",
+    "numpy.core._multiarray_umath",
+]
 
 
 class PackageImporter(Importer):
@@ -45,7 +59,6 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
-    torch._C._log_api_usage_once("torch.package.PackageImporter")
 
     modules: Dict[str, types.ModuleType]
 
@@ -67,6 +80,8 @@ class PackageImporter(Importer):
         Raises:
             ImportError: If the package will use a disallowed module.
         """
+        torch._C._log_api_usage_once("torch.package.PackageImporter")
+
         self.zip_reader: Any
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = "<pytorch_file_reader>"
@@ -219,9 +234,9 @@ class PackageImporter(Importer):
                     )
                 storage = loaded_storages[key]
                 # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with _TypedStorage
-                return torch.storage._TypedStorage(
-                    wrap_storage=storage._untyped(), dtype=dtype
+                # stop wrapping with TypedStorage
+                return torch.storage.TypedStorage(
+                    wrap_storage=storage.untyped(), dtype=dtype
                 )
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
@@ -359,6 +374,9 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         for atom in name.split("."):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
+                if name in IMPLICIT_IMPORT_ALLOWLIST:
+                    module = self.modules[name] = importlib.import_module(name)
+                    return module
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
                     f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
@@ -405,6 +423,7 @@ class PackageImporter(Importer):
     def _do_find_and_load(self, name):
         path = None
         parent = name.rpartition(".")[0]
+        module_name_no_parent = name.rpartition(".")[-1]
         if parent:
             if parent not in self.modules:
                 self._gcd_import(parent)
@@ -412,11 +431,37 @@ class PackageImporter(Importer):
             if name in self.modules:
                 return self.modules[name]
             parent_module = self.modules[parent]
+
             try:
                 path = parent_module.__path__  # type: ignore[attr-defined]
+
             except AttributeError:
-                msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
-                raise ModuleNotFoundError(msg, name=name) from None
+                # when we attempt to import a package only containing pybinded files,
+                # the parent directory isn't always a package as defined by python,
+                # so we search if the package is actually there or not before calling the error.
+                if isinstance(
+                    parent_module.__loader__,
+                    importlib.machinery.ExtensionFileLoader,
+                ):
+                    if name not in self.extern_modules:
+                        msg = (
+                            _ERR_MSG
+                            + "; {!r} is a c extension module which was not externed. C extension modules \
+                            need to be externed by the PackageExporter in order to be used as we do not support interning them.}."
+                        ).format(name, name)
+                        raise ModuleNotFoundError(msg, name=name) from None
+                    if not isinstance(
+                        parent_module.__dict__.get(module_name_no_parent),
+                        types.ModuleType,
+                    ):
+                        msg = (
+                            _ERR_MSG
+                            + "; {!r} is a c extension package which does not contain {!r}."
+                        ).format(name, parent, name)
+                        raise ModuleNotFoundError(msg, name=name) from None
+                else:
+                    msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
+                    raise ModuleNotFoundError(msg, name=name) from None
 
         module = self._load_module(name, parent)
 
@@ -636,14 +681,14 @@ _package_imported_modules: WeakValueDictionary = WeakValueDictionary()
 _orig_getfile = inspect.getfile
 
 
-def patched_getfile(object):
+def _patched_getfile(object):
     if inspect.isclass(object):
         if object.__module__ in _package_imported_modules:
             return _package_imported_modules[object.__module__].__file__
     return _orig_getfile(object)
 
 
-inspect.getfile = patched_getfile
+inspect.getfile = _patched_getfile
 
 
 class _PackageResourceReader:

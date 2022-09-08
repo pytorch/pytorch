@@ -39,7 +39,7 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
-    graph = torch._C.parse_ir(ir)
+    graph = torch._C.parse_ir(ir, parse_tensor_constants=True)
     graph.makeMultiOutputIntoTuple()
     inputs = []
     for inp in graph.inputs():
@@ -50,6 +50,8 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
         elif isinstance(inp.type(), torch._C.TensorType):
             tensorType = cast(torch._C.TensorType, inp.type())
             inputs.append(make_tensor_from_type(tensorType))
+        elif isinstance(inp.type(), torch._C.BoolType):
+            inputs.append(random.randint(0, 1) == 1)
         else:
             raise NotImplementedError(f"A default value is not implemented for type {inp.type()}")
 

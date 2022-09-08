@@ -6,13 +6,17 @@ import unittest
 
 import torch
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
+from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
 )
+from torch.testing._creation import (
+    float_to_corresponding_complex_type_map
+)
+
 
 import numpy as np
 
@@ -119,6 +123,87 @@ class TestTypePromotion(TestCase):
         # not a "wrapped number"
         other = torch.tensor(5.5, dtype=torch.double, device=device)
         self.assertEqual((a + other).dtype, torch.complex64)
+
+        def make_scalar_tensor(dtype):
+            return make_tensor((), dtype=dtype, device=device)
+
+        def make_1d_tensor(dtype):
+            return make_tensor((3,), dtype=dtype, device=device)
+
+        def complex_scalar_tensor_test(s, t):
+            # As per type promotion rules,
+            # Complex Scalar and Float Tensor -> Complex Tensor with Value type of Float Tensor
+            # Complex Scalar and Integral Tensor -> Complex Tensor with Value type of Complex Scalar
+
+            if t.dtype.is_floating_point:
+                # defaults to return complex64 (for bfloat16)
+                expected_dtype = float_to_corresponding_complex_type_map.get(t.dtype, torch.complex64)
+            else:  # integral tensor
+                if isinstance(s, torch.Tensor):
+                    expected_dtype = s.dtype
+                else:
+                    expected_dtype = float_to_corresponding_complex_type_map[torch.get_default_dtype()]
+            self.assertEqual((s * t).dtype, expected_dtype)
+            self.assertEqual((t * s).dtype, expected_dtype)
+            self.assertEqual(torch.result_type(s, t), expected_dtype)
+            self.assertEqual(torch.result_type(t, s), expected_dtype)
+
+        if torch.device(device).type != 'xla':
+            # chalf is not supported on XLA
+            s = make_scalar_tensor(dtype=torch.chalf)
+            # Same Value type
+            t = make_1d_tensor(dtype=torch.half)
+            # 0-D Tensor X 1-D Tensor
+            complex_scalar_tensor_test(s, t)
+            # Python Scalar X 1-D Tensor
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Higher Value Type
+            t = make_1d_tensor(dtype=torch.float)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Special Case
+            t = make_1d_tensor(dtype=torch.bfloat16)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+            # Integral Tensor
+            t = make_1d_tensor(dtype=torch.long)
+            complex_scalar_tensor_test(s, t)
+            complex_scalar_tensor_test(s.item(), t)
+
+        # CFloat Scalar
+        s = make_scalar_tensor(dtype=torch.cfloat)
+        # Lower Value type than CFloat
+        t = make_1d_tensor(dtype=torch.half)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Higher Value type than CFloat
+        t = make_1d_tensor(dtype=torch.double)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Integral Tensor
+        t = make_1d_tensor(dtype=torch.long)
+        # 0-D Tensor X 1-D Tensor
+        complex_scalar_tensor_test(s, t)
+        # Python Scalar X 1-D Tensor
+        complex_scalar_tensor_test(s.item(), t)
+
+        # CDouble Scalar
+        s = make_scalar_tensor(dtype=torch.cdouble)
+
+        # Lower Value type than CDouble
+        t = make_1d_tensor(dtype=torch.float)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
+
+        # Special Case
+        t = make_1d_tensor(dtype=torch.bfloat16)
+        complex_scalar_tensor_test(s, t)
+        complex_scalar_tensor_test(s.item(), t)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
@@ -236,16 +321,16 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_alternate_result(self, device):
-        f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=device)
+        x = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=device)
         o = torch.tensor([0, 0, 0, 0], dtype=torch.long, device=device)
         self.assertRaisesRegex(RuntimeError,
                                "can't be cast to",
-                               lambda: torch.add(f, f, out=o))
+                               lambda: torch.add(x, x, out=o))
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=device)
-        torch.add(f, f, out=d)
+        torch.add(x, x, out=d)
         self.assertEqual(d.dtype, torch.double)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f + f, d)
+        x = x.to(torch.double)
+        self.assertEqual(x + x, d)
 
     @float_double_default_dtype
     def test_mixed_type_backward(self, device):
@@ -254,8 +339,8 @@ class TestTypePromotion(TestCase):
         tens = f * ten
         s = (tens + 2).sum()
         s.backward()
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f.grad, tens)
+        expected = f.grad.to(torch.double)
+        self.assertEqual(tens, expected)
 
         # If we don't convert the returned grad_input to the actual input type
         # we get an error like:
@@ -359,8 +444,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.arange(False, True, device=device), expected)
         self.assertEqual(torch.arange(True, device=device), expected)
         expected = torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=device)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(torch.arange(False, True, 0.5, device=device), expected)
+        self.assertEqual(torch.arange(False, True, 0.5, device=device), expected)
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
@@ -731,8 +815,9 @@ class TestTypePromotion(TestCase):
         suffix = '_' if inplace else ''
         err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
 
-        def op(t1, t2):
-            return getattr(t1, op_name + suffix)(t2)
+        def op(t1, t2, suf=None):
+            suf = suffix if suf is None else suf
+            return getattr(t1, op_name + suf)(t2)
 
         add_sub = op_name == 'add' or op_name == 'sub'
 
@@ -767,21 +852,25 @@ class TestTypePromotion(TestCase):
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
 
         # Test op(dense, sparse)
-        if add_sub:
+        if add_sub or op_name == 'mul':
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
+            dense_sparse = dense_sparse.to_dense() if dense_sparse.is_sparse else dense_sparse
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
-        # Test op(sparse, dense) not supported for any ops:
+        # Test op(sparse, dense) not supported for all ops but 'mul'.
         # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
         # sparse division only supports division by a scalar
-        # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
-        self.assertRaises(RuntimeError, lambda: op(s1, d2))
+        if op_name != 'mul':
+            self.assertRaises(RuntimeError, lambda: op(s1, d2))
+        else:
+            # No type promotions for inplace operations, hence suf=''
+            op(s1, d2, suf='')
 
         # Test op(sparse, scalar)
         if not add_sub and not (self.device_type == 'cpu' and dtype1 == torch.half):
@@ -933,6 +1022,13 @@ class TestTypePromotion(TestCase):
 
             res_dtype = torch.result_type(x, y)
             expected_res = torch.tensor(x_vals + y_vals, device=device, dtype=res_dtype)
+            res = torch.cat([x, y])
+            self.assertEqual(res, expected_res, exact_dtype=True)
+
+            # cat: full and an empty tensor.
+            y = torch.tensor([], device=device, dtype=y_dtype)
+            res_dtype = torch.result_type(x, y)
+            expected_res = torch.tensor(x_vals + [], device=device, dtype=res_dtype)
             res = torch.cat([x, y])
             self.assertEqual(res, expected_res, exact_dtype=True)
 

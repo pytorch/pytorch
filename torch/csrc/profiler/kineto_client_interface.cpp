@@ -18,28 +18,41 @@ class LibKinetoClient : public libkineto::ClientInterface {
     reportInputShapes_ = setupOpInputsCollection;
   }
 
+#ifdef USE_KINETO_MIN_CHANGE
+  void start(bool withStack) override {
+    ProfilerConfig cfg {
+      ProfilerState::KINETO_ONDEMAND,
+          /*report_input_shapes=*/reportInputShapes_,
+          /*profile_memory=*/false,
+          /*with_stack=*/withStack,
+#else
   void start() override {
     ProfilerConfig cfg{
         ProfilerState::KINETO_ONDEMAND,
-        reportInputShapes_,
-        false,
-        false,
-        false,
-        false};
+        /*report_input_shapes=*/reportInputShapes_,
+        /*profile_memory=*/false,
+        /*with_stack=*/false,
+#endif
+          /*with_flops=*/false,
+          /*with_modules=*/false
+    };
     std::set<ActivityType> activities{ActivityType::CPU};
-    auto scopes = {at::RecordScope::FUNCTION, at::RecordScope::USER_SCOPE};
+    std::unordered_set<at::RecordScope> scopes;
+    scopes.insert(at::RecordScope::FUNCTION);
+    scopes.insert(at::RecordScope::USER_SCOPE);
+    scopes.insert(at::RecordScope::BACKWARD_FUNCTION);
     enableProfiler(cfg, activities, scopes);
   }
 
   void stop() override {
     (void)disableProfiler();
   }
+
  private:
   bool reportInputShapes_{true};
 };
 
 } // namespace
-
 
 } // namespace impl
 } // namespace profiler

@@ -295,6 +295,8 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 
 namespace {
 
+c10::optional<int64_t> sym_dim = c10::nullopt;
+
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void assertShapeEqual(c10::SymbolicShape& a, c10::SymbolicShape& e) {
   auto a_canonical = CanonicalizedSymbolicShape(a);
@@ -328,7 +330,6 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
   c10::IValue const_size_2 = std::vector<int64_t>{1, 56, 56};
 
   // Check vector initializer list syntax
-  c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss_concrete =
       std::vector<c10::optional<int64_t>>{1, 56, 56};
   c10::SymbolicShape ss1 = std::vector<c10::optional<int64_t>>{sym_dim, 56, 56};
@@ -361,6 +362,22 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
   assertShapeEqual(res, {sym_dim, 64, sym_dim, sym_dim});
 }
 
+TEST(ShapeAnalysisTest, BoundedSymbolicShapes) {
+  auto schema = getSchema("aten::nonzero(Tensor self) -> (Tensor)");
+
+  // Test that we generate symbolic shapes for the output of a nonzero op
+  c10::IValue const_size_1 = std::vector<int64_t>{5, 10};
+  auto res =
+      calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{const_size_1});
+  assertShapeEqual(res, {sym_dim, 2});
+
+  // Test that nonzero can also create concrete shapes
+  c10::IValue const_size_2 = std::vector<int64_t>({1, 0});
+  res =
+      calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{const_size_2});
+  assertShapeEqual(res, {0, 2});
+}
+
 TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   clear_shape_cache();
   auto schema = getSchema("aten::mm(Tensor self, Tensor mat2) -> Tensor");
@@ -369,7 +386,6 @@ TEST(ShapeAnalysisTest, SymbolicShapeCaching) {
   c10::IValue const_size_2 = std::vector<int64_t>{64, 56};
   c10::IValue const_size_3 = std::vector<int64_t>{64, 20};
 
-  c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
   c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
   c10::SymbolicShape ss3 = c10::SymbolicShape({sym_dim, sym_dim});
@@ -422,7 +438,6 @@ TEST(ShapeAnalysisTest, ShapeCacheMultipleFns) {
 
   c10::IValue const_int = 1;
 
-  c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
 
   auto res = calculateSymbolicShapesOnOp(squeeze_op, {ss1, const_int});
@@ -462,7 +477,6 @@ TEST(ShapeAnalysisTest, TestShapeMultipleReturns) {
   c10::IValue const_int = 1;
   c10::IValue false_ival = false;
 
-  c10::optional<int64_t> sym_dim = c10::nullopt;
   c10::SymbolicShape ss1 = c10::SymbolicShape({sym_dim, 64});
   c10::SymbolicShape ss2 = c10::SymbolicShape({sym_dim, 64});
 
