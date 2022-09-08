@@ -393,8 +393,7 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor diagonal_backward_batching_rule(const Tensor& grad, SymIntArrayRef input_sym_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto input_sizes = c10::asIntArrayRefSlow(input_sym_sizes);
+Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   auto dim1_physical = getGradInputPhysicalDim(dim1, input_sizes, grad_physical.numBatchDims());
@@ -601,14 +600,9 @@ bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& oth
 // >>> z = [x[i].as_strided([1], [1], 1 + x[i].storage_offset() - 1) for i in range(4)]
 Tensor as_strided_batching_rule(
     const Tensor& tensor,
-    SymIntArrayRef sym_sizes,
-    SymIntArrayRef sym_strides,
-    optional<c10::SymInt> sym_storage_offset) {
-  // TODO: fix me
-  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
-  auto strides = c10::asIntArrayRefSlow(sym_strides);
-  auto storage_offset = sym_storage_offset.has_value() ? c10::make_optional(sym_storage_offset->expect_int()) : c10::nullopt;
-
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    optional<int64_t> storage_offset) {
   auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
   auto physical_sizes = physical_view.getPhysicalShape(sizes);
@@ -1002,14 +996,12 @@ Tensor new_empty_batching_rule(
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
-    c10::SymIntArrayRef sym_size,
-    c10::SymIntArrayRef sym_stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
-  auto size = asIntArrayRefSlow(sym_size);
-  auto stride = asIntArrayRefSlow(sym_stride);
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 

@@ -483,13 +483,9 @@ static void checkBasicAsStridedValidForSlice(
 // >>> z = [x[i].as_strided([1], [1], 1 + x[i].storage_offset() - 1) for i in range(4)]
 Tensor as_strided_batching_rule(
     const Tensor& tensor,
-    c10::SymIntArrayRef sym_sizes,
-    c10::SymIntArrayRef sym_strides,
-    optional<c10::SymInt> sym_storage_offset) {
-  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
-  auto strides = c10::asIntArrayRefSlow(sym_strides);
-  auto storage_offset = sym_storage_offset.has_value() ? c10::make_optional(sym_storage_offset->expect_int()) : c10::nullopt;
-
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    optional<int64_t> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     return at::as_strided(tensor, sizes, strides, storage_offset);
@@ -701,14 +697,12 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
-    c10::SymIntArrayRef sym_size,
-    c10::SymIntArrayRef sym_stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
-  auto size = asIntArrayRefSlow(sym_size);
-  auto stride = asIntArrayRefSlow(sym_stride);
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
     return self.new_empty_strided(
