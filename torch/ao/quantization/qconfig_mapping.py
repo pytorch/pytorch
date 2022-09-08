@@ -118,9 +118,9 @@ def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     Return the default QConfigMapping for post training quantization.
 
     Args:
-      * `backend` : the quantization backend for the default qconfig mapping, should be
+      * ``backend`` : the quantization backend for the default qconfig mapping, should be
          one of ["fbgemm", "qnnpack"]
-      * `version` : the version for the default qconfig mapping
+      * ``version`` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
     return _get_default_qconfig_mapping(False, backend, version)
@@ -130,9 +130,9 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
     Return the default QConfigMapping for quantization aware training.
 
     Args:
-      * `backend` : the quantization backend for the default qconfig mapping, should be
+      * ``backend`` : the quantization backend for the default qconfig mapping, should be
          one of ["fbgemm", "qnnpack"]
-      * `version` : the version for the default qconfig mapping
+      * ``version`` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
@@ -143,11 +143,11 @@ class QConfigMapping:
 
     The user can specify QConfigs using the following methods (in increasing match priority):
 
-        `set_global` : sets the global (default) QConfig
-        `set_object_type` : sets the QConfig for a given module type, function, or method name
-        `set_module_name_regex` : sets the QConfig for modules matching the given regex string
-        `set_module_name` : sets the QConfig for modules matching the given module name
-        `set_module_name_object_type_order` : sets the QConfig for modules matching a combination
+        ``set_global`` : sets the global (default) QConfig
+        ``set_object_type`` : sets the QConfig for a given module type, function, or method name
+        ``set_module_name_regex`` : sets the QConfig for modules matching the given regex string
+        ``set_module_name`` : sets the QConfig for modules matching the given module name
+        ``set_module_name_object_type_order`` : sets the QConfig for modules matching a combination
         of the given module name, object type, and the index at which the module appears
 
     Example usage::
@@ -236,12 +236,16 @@ class QConfigMapping:
     # TODO: remove this
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert this `QConfigMapping` to a dictionary with the following keys:
+        Convert this ``QConfigMapping`` to a dictionary with the following keys:
 
             "" (for global QConfig)
+
             "object_type"
+
             "module_name_regex"
+
             "module_name"
+
             "module_name_object_type_order"
 
         The values of this dictionary are lists of tuples.
@@ -260,12 +264,16 @@ class QConfigMapping:
     @classmethod
     def from_dict(cls, qconfig_dict: Dict[str, Any]) -> QConfigMapping:
         """
-        Create a `QConfigMapping` from a dictionary with the following keys (all optional):
+        Create a ``QConfigMapping`` from a dictionary with the following keys (all optional):
 
             "" (for global QConfig)
+
             "object_type"
+
             "module_name_regex"
+
             "module_name"
+
             "module_name_object_type_order"
 
         The values of this dictionary are expected to be lists of tuples.
