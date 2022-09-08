@@ -168,7 +168,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     for (const auto i : c10::irange(strides_len)) {
       hash_coeffs_cpu[i] = strides[i];
     }
-    return hash_coeffs_cpu.to(probably_coalesced.device());
+    Tensor hash_coeffs = hash_coeffs_cpu.to(probably_coalesced.device());
+    return hash_coeffs;
   }();
 
   const auto nnz_arange = at::arange(
