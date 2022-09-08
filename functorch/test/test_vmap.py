@@ -45,7 +45,7 @@ import types
 from collections import namedtuple
 
 import functorch
-from functorch import vmap, grad, grad_and_value, jvp, vjp
+from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
 from functorch._C import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
@@ -3227,6 +3227,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -3289,6 +3290,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
         xfail('eig'),
@@ -3300,12 +3302,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.lstsq'),
-        xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('linalg.matrix_rank'),
-        xfail('linalg.matrix_rank', 'hermitian'),
-        xfail('linalg.pinv'),
-        xfail('linalg.pinv', 'hermitian'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
@@ -3524,6 +3520,24 @@ class TestVmapOperatorsOpInfo(TestCase):
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
+
+    def test_fill__Tensor(self, device):
+        # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
+        def test():
+            B = 2
+            args = (torch.randn(B, 3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (0, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (-1, 0))
+
+            args = (torch.randn(3, device=device), torch.randn(B))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (None, 0))
+
+            args = (torch.randn(3, B, device=device), torch.randn([]))
+            self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
+
+        check_vmap_fallback(self, test, Tensor.fill_)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -4416,7 +4430,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:
@@ -4461,6 +4475,19 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
+    def test_jacfwd_with_random(self):
+        # checks on behavior are above, this just checks that jacfwd respects
+        # the randomness param
+
+        x = torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+            jacfwd(torch.bernoulli)(x)
+
+        # x isn't batched so use bernoulli since it doesn't do inplace randomness
+        jacfwd(torch.bernoulli, randomness="same")(x)
+        jacfwd(torch.bernoulli, randomness="different")(x)
+
+
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
@@ -4493,7 +4520,6 @@ class TestTransformFailure(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
-
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)

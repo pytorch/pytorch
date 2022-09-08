@@ -24,10 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions,
+    nop, num_of_recompilations, default_partition, default_decompositions,
     memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
+from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
 from functorch_additional_op_db import additional_op_db
@@ -119,6 +119,27 @@ class TestPythonKey(AOTTestCase):
         fx_f = make_fx(vjp_fn)(cotangent, True, True)
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
+
+    def test_make_fx_functionalize(self, device):
+        from functorch.experimental import functionalize
+
+        def fn(a):
+            a = a * 2
+            a.relu_()
+            return a
+
+        a = torch.randn(3, device=device)
+        symbolic_gm = torch.fx.symbolic_trace(fn)
+        includes_method_relu_ = any(
+            str(n.target) == "relu_" for n in symbolic_gm.graph.nodes
+        )
+        self.assertTrue(includes_method_relu_)
+        # Also verifies fix for https://github.com/pytorch/pytorch/issues/84570
+        gm = make_fx(functionalize(symbolic_gm))(a)
+        includes_aten_relu = any(
+            n.target == torch.ops.aten.relu.default for n in gm.graph.nodes
+        )
+        self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
         # FIXME
@@ -348,6 +369,33 @@ class TestAOTAutograd(AOTTestCase):
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_batch_norm_amp(self):
+        device = "cuda"
+        input_dtype = torch.float16
+        param_dtype = torch.float32
+        weight, bias = [torch.ones(64, device=device, dtype=param_dtype, requires_grad=True) for _ in range(2)]
+        running_mean, running_var = [torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)]
+
+        def bn(x):
+            return torch.ops.aten.cudnn_batch_norm(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                False,
+                0.1,
+                1e-05,
+            )
+        inp = torch.ones(torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device)
+
+        ref = bn(inp)
+        cudnn_batch_norm_decomp = torch._decomp.get_decompositions({torch.ops.aten.cudnn_batch_norm})
+        aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
+        res = aot_fn(inp)
+        for a, b in zip(ref, res):
+            assert torch.allclose(a, b)
 
 
 
@@ -364,7 +412,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
-        xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('trapezoid'),
         xfail('trapz'),
@@ -653,6 +700,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
         res = aot_mod(*inputs)
+        res[0].sum().backward()
 
 
 only_for = ("cpu")
