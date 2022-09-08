@@ -39,6 +39,25 @@
   - Lint
   - pull
 
+- name: PrimTorch+NVFuser
+  patterns:
+  - test/test_ops.py
+  - test/test_prims.py
+  - torch/_prims/**
+  - torch/_prims_common/**
+  - torch/_refs/**
+  - torch/testing/_internal/common_methods_invocations.py
+  approved_by:
+  - IvanYashchuk
+  - jjsjann123
+  - kevinstephano
+  - mruberry
+  - ngimel
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
 - name: OSS CI
   patterns:
   - .github/**
