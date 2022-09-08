@@ -654,6 +654,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
   py::str snapshot_s = "snapshot";
+  py::str oom_s = "oom";
+
   for (const auto& traceInfo : snapshot.device_traces) {
     py::list trace;
     for (const auto& te : traceInfo) {
@@ -665,6 +667,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       if (te.action() != c10::cuda::CUDACachingAllocator::TraceEntry::SNAPSHOT) {
         trace_entry[addr_s] = te.addr_;
         trace_entry[size_s] = te.size();
+        trace_entry[stream_s] = int64_t(te.stream_);
       }
       switch (te.action()) {
         case c10::cuda::CUDACachingAllocator::TraceEntry::ALLOC: {
@@ -675,6 +678,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         } break;
         case c10::cuda::CUDACachingAllocator::TraceEntry::SEGMENT_ALLOC: {
           trace_entry[action_s] = segment_alloc_s;
+        } break;
+        case c10::cuda::CUDACachingAllocator::TraceEntry::OOM: {
+          trace_entry[action_s] = oom_s;
         } break;
         case c10::cuda::CUDACachingAllocator::TraceEntry::SEGMENT_FREE: {
           trace_entry[action_s] = segment_free_s;
@@ -713,9 +719,9 @@ PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
 PyObject* THCPModule_attachOutOfMemoryObserver(PyObject* _unused, PyObject* observer) {
   HANDLE_TH_ERRORS
   Py_XINCREF(observer);
-  auto obs = [observer](int device) {
+  auto obs = [observer](int64_t device, int64_t alloc, int64_t device_allocated, int64_t device_free) {
     py::gil_scoped_acquire g;
-    PyObject* result = PyObject_CallFunction(observer, "i", device);
+    PyObject* result = PyObject_CallFunction(observer, "LLLL", device, alloc, device_allocated, device_free);
     if (!result) {
       throw py::error_already_set();
     }

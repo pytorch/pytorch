@@ -21,7 +21,7 @@
 #include <regex>
 #include <set>
 #include <vector>
-
+#include <iostream>
 namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
@@ -633,8 +633,12 @@ class DeviceCachingAllocator {
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
               alloc_block(params, true));
-      if (block_found && context) {
-        record_trace(TraceEntry::SEGMENT_ALLOC, int64_t(params.block->ptr), params.block->size, context);
+      if (context) {
+        if (block_found) {
+          record_trace(TraceEntry::SEGMENT_ALLOC, int64_t(params.block->ptr), params.block->size, params.stream(), context);
+        } else {
+          record_trace(TraceEntry::OOM, 0, params.size(), params.stream(), context);
+        }
       }
     }
 
@@ -662,7 +666,7 @@ class DeviceCachingAllocator {
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
       for (const auto & obs : oom_observers_) {
-        obs(device);
+        obs(device, alloc_size, set_fraction ? allowed_memory_maximum : device_total, device_free);
       }
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
@@ -767,7 +771,7 @@ class DeviceCachingAllocator {
       if (!block->history_last) {
         block->history_last = block->history.get();
       }
-      record_trace(TraceEntry::ALLOC, int64_t(block->ptr), orig_size, block->history->context);
+      record_trace(TraceEntry::ALLOC, int64_t(block->ptr), orig_size, block->stream, block->history->context);
     }
 
     bool inserted = active_blocks.insert(block).second;
@@ -811,7 +815,7 @@ class DeviceCachingAllocator {
       update_stat(stats.allocated_bytes[stat_type], -block->size);
     });
     if (block->history) {
-      record_trace(TraceEntry::FREE, int64_t(block->ptr), block->history->real_size, block->history->context);
+      record_trace(TraceEntry::FREE, int64_t(block->ptr), block->history->real_size, block->stream, block->history->context);
     }
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
@@ -998,7 +1002,7 @@ class DeviceCachingAllocator {
 
 
     if (context_recorder_.load()) {
-      record_trace(TraceEntry::SNAPSHOT, 0, total_active, nullptr);
+      record_trace(TraceEntry::SNAPSHOT, 0, total_active, 0, nullptr);
     }
     return result;
   }
@@ -1535,7 +1539,7 @@ class DeviceCachingAllocator {
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
     if (block->history) {
-      record_trace(TraceEntry::SEGMENT_FREE, int64_t(block->ptr), block->size, block->history->context);
+      record_trace(TraceEntry::SEGMENT_FREE, int64_t(block->ptr), block->size, block->stream, block->history->context);
     }
     pool->blocks.erase(block);
     delete block;
@@ -1668,8 +1672,8 @@ class DeviceCachingAllocator {
     }
   }
 
-  void record_trace(TraceEntry::Action action, int64_t addr, size_t size, std::shared_ptr<Context> context) {
-    auto te = TraceEntry(action, addr, size, nullptr/*std::move(context)*/);
+  void record_trace(TraceEntry::Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context) {
+    auto te = TraceEntry(action, addr, size, stream, nullptr/*std::move(context)*/);
     if (alloc_trace->size() < ALLOC_TRACE_MAX) {
       alloc_trace->emplace_back(te);
     } else {

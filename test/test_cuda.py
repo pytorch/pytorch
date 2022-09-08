@@ -4457,7 +4457,8 @@ class TestCudaComm(TestCase):
 
     def test_notifies_oom(self):
         x = False
-        def cb(device):
+        def cb(device, alloc, device_alloc, device_free):
+            print(device, alloc, device_alloc, device_free)
             print(torch.cuda.memory._snapshot())
             nonlocal x
             x = True

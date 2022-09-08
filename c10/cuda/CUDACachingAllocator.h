@@ -132,13 +132,14 @@ struct SegmentInfo {
 };
 
 struct TraceEntry {
-  enum Action {ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT};
-  TraceEntry(Action action, int64_t addr, size_t size, std::shared_ptr<Context> context=nullptr)
-  : addr_(addr), context_(context) {
+  enum Action {ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM};
+  TraceEntry(Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context=nullptr)
+  : addr_(addr), context_(context), stream_(stream) {
     action_size_ = size | (size_t(action) << 48);
   }
   int64_t addr_;
   std::shared_ptr<Context> context_;
+  cudaStream_t stream_;
   Action action() const {
     return Action(action_size_ >> 48);
   }
@@ -185,7 +186,7 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
-using OutOfMemoryObserver = std::function<void(int device)>;
+using OutOfMemoryObserver = std::function<void(int64_t device, int64_t allocated, int64_t device_total, int64_t device_free)>;
 C10_CUDA_API void attachOutOfMemoryObserver(OutOfMemoryObserver observer);
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
