@@ -2815,7 +2815,13 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     def _get_default_group(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
@@ -2832,6 +2838,12 @@ class CompilerTest(test_c10d_common.CompilerTest):
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_work_wait_gpu(self):
         self._test_reduce_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_work_wait_gpu(self):
+        self._test_broadcast_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
