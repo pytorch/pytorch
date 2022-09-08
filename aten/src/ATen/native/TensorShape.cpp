@@ -2644,13 +2644,13 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_compressed_transpose(self, dim0, dim1);
   }
 
-  // Transpose of a tensor is a view operation.
-  if (dim0 == dim1) {
-    return self;
-  }
-
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose(self, dim0, dim1);
+  }
+
+  // Transpose of a tensor is a view operation.
+  if (dim0 == dim1) {
+    return self.alias();
   }
 
   DimVector sizes(self.sizes().begin(), self.sizes().end());
@@ -3216,7 +3216,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
 Tensor detach(const Tensor& self) {
