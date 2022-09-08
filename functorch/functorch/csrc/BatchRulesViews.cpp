@@ -505,14 +505,6 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
   return std::make_tuple(at::diag_embed(self_, offset, dim1, dim2), 0);
 }
 
-// We need to write a real batching rule to fully support symint.
-// This requires symint variants of other operations, like `view`,
-// which don't exist yet.
-Tensor expand_symint_decomp_hack(const Tensor& self, SymIntArrayRef packed_size, bool implicit) {
-   auto size = asIntArrayRefSlow(packed_size);
-   return self.expand(size, implicit);
-}
-
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
