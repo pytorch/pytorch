@@ -140,7 +140,7 @@ def _new_node(
     node = g.create(f"{namespace}::{op}", args, outputs)
     skip_attrs = {"inplace", "aten"}
     for k, v in sorted(kwargs.items()):
-        if k == skip_attrs:
+        if k in skip_attrs:
             continue
         _add_attribute(node, k, v, aten=aten)
     return node
