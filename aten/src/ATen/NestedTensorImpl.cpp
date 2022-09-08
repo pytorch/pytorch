@@ -39,7 +39,7 @@ inline void validate_nested_tensor_metadata(
 inline c10::DispatchKeySet generate_nested_key_set_from_buffer(
     const at::Tensor& buffer) {
   auto nested_key_set = buffer.key_set();
-  const bool Autograd = nested_key_set.has_any(c10::autograd_dispatch_keyset);
+  const bool has_autograd = nested_key_set.has_any(c10::autograd_dispatch_keyset);
   // Remove non_nested tensor specific keys
   nested_key_set = nested_key_set -
       c10::DispatchKeySet{c10::DispatchKey::Dense, c10::DispatchKey::Autograd};
@@ -48,7 +48,7 @@ inline c10::DispatchKeySet generate_nested_key_set_from_buffer(
   nested_key_set =
       nested_key_set | c10::DispatchKeySet{c10::DispatchKey::NestedTensor};
   nested_key_set =
-      Autograd ? nested_key_set | c10::autograd_nested : nested_key_set;
+      has_autograd ? nested_key_set | c10::autograd_nested : nested_key_set;
   return nested_key_set;
 }
 
