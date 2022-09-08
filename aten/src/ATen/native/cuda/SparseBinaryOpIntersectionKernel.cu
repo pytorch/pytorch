@@ -26,9 +26,10 @@ Tensor& _mul_sparse_sparse_out_cuda(
     const Tensor& x,
     const Tensor& y,
     Tensor& result) {
-  return _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, MulOp>(
+  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, MulOp>(
       result, x, y
   );
+  return result;
 }
 
 }}
