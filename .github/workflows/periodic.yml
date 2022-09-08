@@ -162,6 +162,12 @@ jobs:
     with:
       build-environment: win-vs2019-cuda11.7-py3
       cuda-version: "11.7"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
 
   win-vs2019-cuda11_7-py3-test:
     name: win-vs2019-cuda11.7-py3
@@ -170,12 +176,7 @@ jobs:
     with:
       build-environment: win-vs2019-cuda11.7-py3
       cuda-version: "11.7"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
-        ]}
+      test-matrix: ${{ needs.win-vs2019-cuda11_7-py3-build.outputs.test-matrix }}
 
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
