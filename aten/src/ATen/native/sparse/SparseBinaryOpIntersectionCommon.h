@@ -155,10 +155,10 @@ void _sparse_binary_op_intersection_kernel_impl(
   // is a perfect hash function (no collisions ever).
   const auto kHash = std::is_same<hash_t, int64_t>::value ? kLong : kInt;
   const auto hash_coeffs = [&]() -> Tensor {
-    const auto broadcasted_sparse_dim_shape = std::vector<int64_t> {
+    const auto broadcasted_sparse_dim_shape = std::vector<int64_t>(
       broadcasted_shape.begin(),
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
-    };
+    );
     auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
     auto strides_len = static_cast<int64_t>(strides.size());
     auto hash_coeffs = at::empty(
