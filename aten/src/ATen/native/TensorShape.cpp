@@ -3216,18 +3216,6 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  if (self.is_sparse_csr()) {
-    return new_with_dims_and_tensor_sparse(
-      self.sparse_dim(),
-      self.dense_dim(),
-      self.sizes(),
-      self.indices(),
-      self.values(),
-      optTypeMetaToScalarType(self.options().dtype_opt()),
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
-  }
   return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
