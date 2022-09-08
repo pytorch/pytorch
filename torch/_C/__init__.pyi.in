@@ -169,7 +169,13 @@ class SymIntNode(object):
     def get_pyobj(self) -> Any: ...
 
     @staticmethod
-    def new_symint(self) -> SymIntNode: ...
+    def new_symint(obj) -> SymIntNode: ...
+
+class SymFloatNode(object):
+    def get_pyobj(self) -> Any: ...
+
+    @staticmethod
+    def new_symfloat(obj) -> SymFloatNode: ...
 
 # Defined in torch/csrc/jit/passes/xnnpack_rewrite.h
 class MobileOptimizerType:
@@ -623,6 +629,13 @@ class Graph:
     ...
 
 
+# Defined in torch/aten/src/ATen/core/alias_info.h
+class AliasInfo:
+    is_write: _bool
+    before_set: Set[str]
+    after_set: Set[str]
+
+
 # Defined in torch/aten/src/ATen/core/function_schema.h
 class Argument:
     name: str
@@ -631,6 +644,7 @@ class Argument:
     def has_default_value(self) -> _bool: ...
     kwarg_only : _bool
     is_out: _bool
+    alias_info: Optional[AliasInfo]
     ...
 class FunctionSchema:
     arguments: List[Argument]
