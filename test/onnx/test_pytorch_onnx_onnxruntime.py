@@ -12375,7 +12375,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @common_utils.parametrize(
         "module_class",
-        (IfNoneOutput, IfNoneInput, LoopNoneOutput),
+        (IfNoneOutput, IfNoneInput, LoopNoneOutput, LoopNoneInput),
         name_fn=lambda module_class: module_class.__name__,
     )
     @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
