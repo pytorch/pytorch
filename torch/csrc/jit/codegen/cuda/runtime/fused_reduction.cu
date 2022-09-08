@@ -640,7 +640,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduce<Func, Types...>(
+    reduce(
         RefTuple<Types...> out,
         const ConstRefTuple<Types...>& inp,
         VolatilePtrTuple<Types...> global_work_buffer,
@@ -1056,7 +1056,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduce<Func, Types...>(
+    reduce(
         RefTuple<Types...> out,
         const ConstRefTuple<Types...>& inp,
         VolatilePtrTuple<Types...> global_work_buffer,
@@ -1113,7 +1113,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduceGroup<DataTypes..., Funcs..., BoolTypes...>(
+    reduceGroup(
         RefTuple<DataTypes...> out,
         const ConstRefTuple<DataTypes...>& inp,
         VolatilePtrTuple<DataTypes...> global_work_buffer,
@@ -1298,7 +1298,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduceGroup<DataTypes..., Funcs..., BoolTypes...>(
+    reduceGroup(
         RefTuple<DataTypes...> out,
         const ConstRefTuple<DataTypes...>& inp,
         VolatilePtrTuple<DataTypes...> global_work_buffer,
@@ -1358,7 +1358,7 @@ __device__ __inline__ LocalTuple<DataTypes...> ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduceGroupBlock<BLOCK_BROADCAST, DataTypes..., Funcs..., BoolTypes...>(
+    reduceGroupBlock(
         const ConstRefTuple<DataTypes...>& inp,
         const LocalTuple<DataTypes...>& init_val,
         void* shared_mem,
@@ -1434,7 +1434,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    reduceGroupLastBlock<DataTypes..., Funcs..., BoolTypes...>(
+    reduceGroupLastBlock(
         RefTuple<DataTypes...>& out,
         const VolatilePtrTuple<DataTypes...>& global_work_buffer,
         const LocalTuple<DataTypes...>& init_val,

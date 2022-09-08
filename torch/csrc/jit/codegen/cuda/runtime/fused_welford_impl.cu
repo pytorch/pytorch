@@ -265,7 +265,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    welfordGroup<NumArgs, DataType, IndexType>(
+    welfordGroup(
         typename MakeRefTuple<NumArgs, DataType>::type out_avg,
         typename MakeRefTuple<NumArgs, DataType>::type out_var,
         typename MakeRefTuple<NumArgs, IndexType>::type out_N,
@@ -465,7 +465,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    welfordGroupBlock<BLOCK_BROADCAST, NumVals, DataType, IndexType>(
+    welfordGroupBlock(
         LocalWelfordTripletTuple<NumVals, DataType, IndexType>& block_result,
         const ConstRefWelfordTripletTuple<NumVals, DataType, IndexType>& inp,
         PtrTuple<DataType, DataType, IndexType> shared_buf,
@@ -534,7 +534,7 @@ __device__ __inline__ void ParallelReduce<
     Z_THREAD,
     PERSISTENT_REDUCTION,
     BROADCAST>::
-    welfordGroupLastBlock<NumVals, DataType, IndexType>(
+    welfordGroupLastBlock(
         RefWelfordTripletTuple<NumVals, DataType, IndexType>& out,
         const VolatilePtrWelfordTripletTuple<NumVals, DataType, IndexType>&
             global_work_buffer,
