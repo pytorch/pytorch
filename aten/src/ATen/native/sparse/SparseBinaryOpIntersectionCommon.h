@@ -161,7 +161,7 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     };
     auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
     auto strides_len = static_cast<int64_t>(strides.size());
-    const auto hash_coeffs_cpu = at::from_blob(
+    auto hash_coeffs_cpu = at::from_blob(
         reinterpret_cast<void*>(strides.data()),
         {strides_len},
         probably_coalesced._indices().options().device(kCPU).dtype(kLong))
