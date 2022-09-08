@@ -266,7 +266,7 @@ class TestPrims(TestCase):
             return torch.digamma(a)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
+            gm = make_fx(func)(a)
 
         # Check that the torch.digamma is not replaced with torch.ops.prims.digamma
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
@@ -286,7 +286,7 @@ class TestPrims(TestCase):
             return torch.sigmoid(torch.digamma(a))
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func, decomposition_table=torch._prims.context.nvfuser_decomp_table())(a)
+            gm = make_fx(func)(a)
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_sigmoid = any(
@@ -627,8 +627,16 @@ class TestDecomp(TestCase):
         with TorchRefsNvfuserCapabilityMode() as mode:
             self.assertFalse(fn0(x, y, 0.3, False))
 
+            # Autocast context has C++ level ATen calls that are hidden from
+            # TorchRefsNvfuserCapabilityMode that works only on Python level.
+            # The first call to make_fx records autocast C++ calls directly and
+            # doesn't have the chance to translate to nvprims. After the first
+            # call, "gm" contains explicit calls to torch.ops.aten and nothing
+            # is hidden, so the second call to make_fx actually translates
+            # recorded autocast dtype conversions to nvprims.
             with torch.autocast("cuda"):
-                gm = make_fx(fn1, decomposition_table=torch._prims.context.nvfuser_decomp_table())(x)
+                gm = make_fx(fn1)(x)
+            gm = make_fx(gm)(x)
             call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
             includes_aten_to_copy = any(
                 torch.ops.aten._to_copy.default == node.target
