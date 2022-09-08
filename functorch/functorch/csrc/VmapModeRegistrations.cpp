@@ -13,6 +13,11 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+// functorch's vmap has two Dispatch Keys that implement it:
+// FuncTorchBatched and FuncTorchVmapMode. This file contains registrations for
+// FuncTorchVmapMode -- these registrations are to error out on operations
+// that we don't support on regular Tensors.
+
 namespace at {
 namespace functorch {
 
