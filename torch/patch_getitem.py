@@ -1,5 +1,5 @@
 from torch.autograd.grad_mode import F
-from typing import List, Union
+from typing import Iterable, List, Optional, Union
 import torch
 import warnings
 from torch._prims_common.wrappers import out_wrapper
@@ -325,6 +325,114 @@ def matmul(tensor1, tensor2):
 
 torch.matmul = matmul
 torch.Tensor.matmul = matmul
+
+def infer_size_dv(shape, numel):
+    res = list(shape)
+
+    newsize = 1
+    infer_dim = None
+    ndim = len(shape)
+    for dim in range(ndim):
+        if shape[dim] == -1:
+            if infer_dim:
+                raise RuntimeError("only one dimension can be inferred")
+            infer_dim = dim
+        elif shape[dim] >= 0:
+            newsize *= shape[dim]
+        else:
+            raise RuntimeError(f"invalid shape dimension {shape[dim]}")
+
+    if numel == newsize or (infer_dim and newsize > 0 and numel % newsize == 0):
+        if infer_dim:
+            if newsize == 0:
+                raise RuntimeError(f"cannot reshape tensor of 0 elements into shape {shape}" +
+                                   "because the unspecified dimension size -1 can be any" +
+                                   "value and is ambiguous")
+            res[infer_dim] = numel // newsize
+
+        return res
+
+    raise RuntimeError(f"{shape} is invalid for input of size {numel}")
+
+def computeStride(oldshape, oldstride, newshape):
+    if len(oldshape) == 0:
+        return [1] * len(newshape)
+
+    numel = 1
+    for s in oldshape:
+        numel *= s
+
+    if numel == 0 and oldshape == newshape:
+        return list(oldstride)
+
+    newstride = [1] * len(newshape)
+    if numel == 0:
+        for view_d in range(len(newshape) - 1, -1, -1):
+            if view_d == len(newshape) - 1:
+                newstride[view_d] = 1
+            else:
+                newstride[view_d] = max(newshape[view_d + 1], 1) * newstride[view_d+1]
+
+        return newstride
+
+    view_d = len(newshape) - 1;
+    chunk_base_stride = oldstride[-1]
+    tensor_numel = 1
+    view_numel = 1
+    for tensor_d in range(len(oldshape) - 1,  -1, -1):
+        tensor_numel *= oldshape[tensor_d]
+
+        if (tensor_d == 0) or (oldshape[tensor_d - 1] != 1 and
+            oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride):
+            while view_d >= 0 and (view_numel < tensor_numel or newshape[view_d] == 1): 
+                    newstride[view_d] = view_numel * chunk_base_stride
+                    view_numel *= newshape[view_d]
+                    view_d -= 1
+            
+            if view_numel != tensor_numel:
+                return None
+            
+            if tensor_d > 0:
+                chunk_base_stride = oldstride[tensor_d - 1]
+                tensor_numel = 1
+                view_numel = 1
+    
+  
+    if view_d != -1:
+        return None
+  
+    return newstride
+
+
+def reshape(self, proposed_shape: List[int]):
+  print (f"In reshape {type(self)}")
+  if self.is_sparse:
+    # TODO: not sure what else to do here?
+    raise RuntimeError("reshape is not implemented for sparse tensors")
+
+  proposed_shape = proposed_shape if isinstance(proposed_shape, Iterable) else [proposed_shape]
+  shape = infer_size_dv(proposed_shape, self.numel())
+
+  if self.device.type == 'mkldnn':
+    # TODO: is this what we should be doing?
+    raise RuntimeError("reshape is not implemented for sparse tensors")
+
+
+  stride: Optional[List[int]] = computeStride(self.size(), self.stride(), shape)
+
+  if stride:
+    # TODO: we should probably keep these device checks? 
+    if (not self.device.type == 'xla' and  not self.device.type == 'lazy' and  not self.device.type == 'ipu'):
+      # this already has a decomp
+      return torch.ops.aten._reshape_alias(self, shape, stride)
+    else:
+      return self.view(shape)
+
+  # TODO: replacing _unsafe_view with view
+  return self.view(self.clone(torch.contiguous_format), shape)
+
+torch.reshape = reshape
+torch.Tensor.reshape = reshape
 
 if __name__ == '__main__':
     t = torch.rand(3, 4, 5)

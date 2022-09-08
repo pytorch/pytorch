@@ -284,5 +284,5 @@ _register_jit_decomposition_for_jvp(torch.ops.aten._log_softmax_backward_data.de
 _register_jit_decomposition_for_jvp(torch.ops.aten._softmax_backward_data.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.log_sigmoid_forward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.native_layer_norm_backward.default)
-_register_jit_decomposition_for_jvp(torch.ops.aten.native_batch_norm_backward.default)
+#_register_jit_decomposition_for_jvp(torch.ops.aten.native_batch_norm_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.cudnn_batch_norm_backward.default)

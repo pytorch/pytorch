@@ -1354,5 +1354,14 @@ only_for = ("cpu")
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
 
+class TestReshape(TestCase):
+
+    def test_reshape(self):
+
+        a = torch.rand(4, 4)
+        b = a.reshape((16, 1))
+        #b = torch.reshape(a, (16, 1))
+        print(b)
+
 if __name__ == '__main__':
     run_tests()
