@@ -21,7 +21,8 @@ class NNApi {
       const NetDef& run_net,
       Workspace* ws = nullptr,
       const PreferenceCode pref = ANEURALNETWORKS_PREFER_SUSTAINED_SPEED)
-      : preference_(pref),
+      : order_(StorageOrder::NHWC),
+        preference_(pref),
         run_net_(run_net),
         ws_(ws) {
     if (!loadNNApiLibrary()) {
@@ -42,6 +43,7 @@ class NNApi {
   ANeuralNetworksCompilation* compilation_{nullptr};
   ANeuralNetworksExecution* run_{nullptr};
   ANeuralNetworksEvent* run_end_{nullptr};
+  StorageOrder order_;
   PreferenceCode preference_;
   NetDef run_net_;
   Workspace ws_;
