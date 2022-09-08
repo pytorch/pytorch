@@ -3,6 +3,7 @@ import torch
 import torch.utils._pytree as pytree
 from typing import Dict, Any, List, Type
 import operator
+from functools import lru_cache
 
 try:
     import sympy  # type: ignore[import]
@@ -200,7 +201,7 @@ for method, _func in magic_methods.items():
             if isinstance(other, PySymInt):
                 other = other.expr
             # TODO: consider constant prop here
-            return PySymInt(func(self.expr, other), self.shape_env)
+            return PySymInt(sympy.expand(func(self.expr, other)), self.shape_env)
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymIntNode
@@ -259,13 +260,14 @@ class ShapeEnv(object):
         _ = self.create_shapes_for_args(args, shape_env=env)
         return all(guard.subs(env) == value for guard, value in self.guards)
 
-
+    @lru_cache(None)
     def evaluate_expr(self, expr):
-        const_expr = self.try_constantify(expr)
-        if const_expr is not None:
-            return const_expr
+        # const_expr = self.try_constantify(expr)
+        # if const_expr is not None:
+        #     return const_expr
 
-        expr = expr.simplify()
+        # expr = expr.simplify()
+        print(expr)
         concrete_val = expr.subs(self.shape_env)
 
         # Uncomment this to see what code triggered this guard.

@@ -222,7 +222,6 @@ def proxy_call(proxy_mode, func, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
 
     # If there are SymInts, we also should not consider this constant.
@@ -290,7 +289,8 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
+    traced_func = torch.ops.aten.reshape.default if func == torch.ops.aten.view.default else func
+    proxy_out = proxy_mode.tracer.create_proxy('call_function', traced_func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
     # This makes DCE marginally less likely to DCE inplace operations.
