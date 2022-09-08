@@ -19,6 +19,7 @@ CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
+
 # custom build with selected ops
 if [ -n "${SELECTED_OP_LIST}" ]; then
   SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
@@ -35,6 +36,32 @@ if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
 
+# Don't build artifacts we don't need
+CMAKE_ARGS+=("-DBUILD_TEST=OFF")
+CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+
+# If there exists env variable and it equals to 1, build lite interpreter.
+# Default behavior is to build full jit interpreter.
+# cmd:  BUILD_LITE_INTERPRETER=1 ./scripts/build_mobile.sh
+if [ "x${BUILD_LITE_INTERPRETER}" == "x1" ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+fi
+if [ "x${TRACING_BASED}" == "x1" ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+
+# Lightweight dispatch bypasses the PyTorch Dispatcher.
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_ROCM=OFF")
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
@@ -45,6 +72,10 @@ CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
+CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
+CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
+CMAKE_ARGS+=("-DUSE_BLAS=OFF")
 
 # Only toggle if VERBOSE=1
 if [ "${VERBOSE:-}" == '1' ]; then
