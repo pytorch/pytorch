@@ -21,10 +21,11 @@ if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
     dataclasses \
     pip
 else
+  # NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
   retry conda install -y \
-    mkl=2022.1.0 \
-    mkl-include=2022.1.0 \
-    numpy=1.22.3 \
+    mkl=2021.2.0 \
+    mkl-include=2021.2.0 \
+    numpy=1.18.5 \
     pyyaml=5.3 \
     setuptools=46.0.0 \
     cmake=3.22.1 \
