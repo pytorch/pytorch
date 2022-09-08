@@ -379,10 +379,6 @@ class DeviceContextArena {
   std::map<BackendDevice, DeviceContext*> device_contexts_;
 };
 
-bool ShouldSyncIrValue(const Value& ir_value) {
-  return ir_value->op() != ltc_not_supported;
-}
-
 // Return true if no tensor in the list has an underlying IR (leaf or
 // operation).
 bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
@@ -639,7 +635,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         tensors[i]->CurrentDataHandle() == nullptr) {
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
-        if (ShouldSyncIrValue(ir_value)) {
+        if (getBackend()->ShouldSyncTensor(tensors[i])) {
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
@@ -705,6 +701,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
       const BackendDevice& tensor_device = tensor->GetDevice();
       handle = getBackend()->CreateDataPlaceholder(
           tensor_device, std::move(tensor->shape()));
+
       tensor->SetDataHandle(handle, config.sync_ltc_data);
     }
     tensors_data.emplace_back(std::move(handle));
