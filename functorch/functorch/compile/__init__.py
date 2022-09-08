@@ -1,5 +1,4 @@
 from .._src.python_key import pythonkey_decompose
-from .._src.decompositions import register_decomposition, decomposition_table, get_decompositions
 from .._src.fx_minifier import minifier
 from .._src.aot_autograd import (
     aot_function,
