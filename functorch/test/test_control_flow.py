@@ -19,7 +19,7 @@ class TestControlFlow(TestCase):
 
 
 class TestControlFlowTraced(TestCase):
-    def test_cond_traced(self):
+    def test_cond_traced_not_nested(self):
         def true_fn(x):
             return x.sin()
 

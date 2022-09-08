@@ -7,7 +7,7 @@ DispatchKey = torch._C.DispatchKey
 
 def has_key(op, k):
     return (
-        torch._C._dispatch_has_kernel_for_dispatch_key(op.name, k)
+        torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), k)
         or k in op.py_kernels
     )
 
@@ -15,7 +15,7 @@ is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
 # Equivalent to computeDispatchTableEntryWithDebug
 # TODO: memoize this or something
-def resolve_key(op: torch._ops.OpOverload, k: DispatchKey):
+def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):
     # 1. (Direct) operator registration
     if has_key(op, k):
         return k
@@ -28,7 +28,7 @@ def resolve_key(op: torch._ops.OpOverload, k: DispatchKey):
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         return cand
     has_backend_kernel = (
-        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name, torch._C._dispatch_get_backend_keyset_from_autograd(k))
+        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k))
         or has_key(op, DispatchKey.CompositeExplicitAutograd)
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
@@ -39,7 +39,7 @@ def resolve_key(op: torch._ops.OpOverload, k: DispatchKey):
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name, torch._C._dispatch_autogradother_backends)
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
@@ -78,9 +78,6 @@ def python_dispatcher(op, ks, args, kwargs):
         print(op, ks, args, kwargs)
     """
     k = resolve_key(op, ks.highestPriorityTypeId())
-    if k in op.py_kernels:
-        return op.py_kernels[k](*args, **kwargs)
-    else:
-        return op._op_dk(k, *args, **kwargs)
+    return op.dispatch(k, *args, **kwargs)
 
 torch._C._set_python_dispatcher(python_dispatcher)
