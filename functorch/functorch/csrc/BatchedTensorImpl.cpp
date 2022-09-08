@@ -28,7 +28,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   TORCH_INTERNAL_ASSERT(false);
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
 
   const auto public_dims = value_.dim() - 1;
@@ -57,7 +57,7 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }
