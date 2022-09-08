@@ -5,7 +5,6 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/shape.h>
-#include <torch/csrc/lazy/core/tensor.h>
 #include <atomic>
 
 namespace torch {
@@ -40,8 +39,6 @@ class TORCH_API BackendImplInterface {
    * */
 
   virtual const IrBuilder* GetIrBuilder() const = 0;
-
-  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   /**
    * Data Transfer
