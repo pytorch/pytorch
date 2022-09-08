@@ -322,7 +322,7 @@ def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
     default_modules_path = [os.path.join(third_party_path, name) for name in [
                             "gloo", "cpuinfo", "tbb", "onnx",
-                            "foxi", "QNNPACK", "fbgemm"
+                            "foxi", "QNNPACK", "fbgemm", "cutlass"
                             ]]
     if not os.path.exists(git_modules_path):
         return default_modules_path
