@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1996,8 +1996,8 @@ def wrap_logical_op_with_cast_to(to_type):
 
 @_onnx_symbolic("aten::wrap_logical_op_with_negation")
 @_beartype.beartype
-def wrap_logical_op_with_negation(func):
-    @_beartype.beartype
+def wrap_logical_op_with_negation(func: Callable) -> Callable:
+    @functools.wraps(func)
     def wrap_with_not(g, input, other):
         return g.op("Not", func(g, input, other))
 
@@ -6182,7 +6182,7 @@ def prim_constant_chunk(g, self, chunks, dim):
             "prim::ConstantChunk", "unknown dimension size", self
         )
     split_size = (dim_size + chunks - 1) // chunks
-    return Prim.ConstantSplit(g, self, split_size, dim)
+    return prim_constant_split(g, self, split_size, dim)
 
 
 @_onnx_symbolic("prim::shape")
