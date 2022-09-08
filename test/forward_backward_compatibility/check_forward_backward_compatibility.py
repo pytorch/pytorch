@@ -120,7 +120,6 @@ ALLOW_LIST = [
     ("aten::segment_reduce", datetime.date(2022, 6, 30)),
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
-    ("c10d::broadcast", datetime.date(2022, 6, 25)),
     ("aten::.*functional", datetime.date(2022, 8, 1)),
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     ("aten::unflatten", datetime.date(2022, 8, 10)),
@@ -276,6 +275,7 @@ ALLOW_LIST = [
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
     # Distributed c10d ops are all going to be updated
     ("c10d::.*", datetime.date(2022, 10, 31)),
+    ("c10d::allgather_", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
