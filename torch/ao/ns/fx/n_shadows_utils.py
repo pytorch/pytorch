@@ -7,6 +7,7 @@ from torch.fx import (
 )
 
 from torch.ao.ns.fx.utils import (
+    # TODO(future PR): make this work correctly for methods
     get_target_type_str,
 )
 from torch.ao.ns.fx.ns_types import (
@@ -18,7 +19,7 @@ from torch.ao.quantization.fx.match_utils import MatchResult
 
 import collections
 import copy
-from typing import List, Dict, Set, Tuple, Callable, Any
+from typing import List, Dict, Set, Tuple, Callable, Any, Optional
 import operator
 
 SHADOW_NODE_NAME_PREFIX = 'shadow'
@@ -203,12 +204,15 @@ def _get_logger_for_subgraph(
     subgraph_candidate_idx: int,
     qconfig_str: str,
     logger_cls: Callable,
+    fqn: Optional[str],
 ) -> torch.nn.Module:
     """
     Given a model and a linear subgraph starting from `first_node` and
     ending with `last_node`, creates a logger for the end of this
     subgraph.
     """
+    if fqn is None:
+        fqn = ''
     logger_mod_orig = logger_cls(
         first_node.name,  # ref_node_name
         last_node.name,  # prev_node_name
@@ -219,7 +223,7 @@ def _get_logger_for_subgraph(
         NSSingleResultValuesType.NODE_OUTPUT.value,  # results_type
         0,  # index_within_arg
         0,  # index_of_arg
-        '',  # fqn (not supported for now)
+        fqn,  # fqn
         qconfig_str,
     )
     logger_mod_orig.enabled = False
@@ -232,13 +236,14 @@ def _add_logger_to_subgraph_wrapper(
     qconfig_str: str,
     logger_cls: Callable,
     ref_output_node: Node,
+    fqn: Optional[str],
 ) -> None:
     """
     Given a model which consists of a subgraph and nothing else, adds a logger
     to the end of this model. The logger takes `ref_output_node` as the reference
     output, and does the comparison during calibration time.
     """
-    first_node, last_node = None, None
+    first_node, last_node, first_non_ph_node = None, None, None
     for idx, node in enumerate(model.graph.nodes):  # type: ignore[union-attr, arg-type]
         if idx == 0:
             first_node = node
@@ -246,10 +251,13 @@ def _add_logger_to_subgraph_wrapper(
             # last node is the output, so we want the first
             # arg of the output
             last_node = node.args[0]
-    assert first_node is not None and last_node is not None
+        if first_non_ph_node is None and node.op != 'placeholder':
+            first_non_ph_node = node
+    assert first_node is not None and last_node is not None and \
+        first_non_ph_node is not None
     logger_mod = _get_logger_for_subgraph(
-        model, first_node, last_node, subgraph_idx,  # type: ignore[arg-type]
-        subgraph_candidate_idx, qconfig_str, logger_cls)
+        model, first_non_ph_node, last_node, subgraph_idx,  # type: ignore[arg-type]
+        subgraph_candidate_idx, qconfig_str, logger_cls, fqn)
     attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
     assert not hasattr(model, attr_name)
     setattr(model, attr_name, logger_mod)
@@ -486,16 +494,20 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
           'subgraph_0_0': [
             'values': [torch.tensor(...), ...], ...
             'ref_node_name': ...,
+            'ref_node_target_type': ...,
             'qconfig_str': ...,
             'comparisons': [], ...
             'comparison_fn_name': '',
+            'fqn': '...',
           ],
           'subgraph_0_1': [
             'values': [torch.tensor(...), ...], ...
             'ref_node_name': ...,
+            'ref_node_target_type': ...,
             'qconfig_str': ...,
             'comparisons': [torch.tensor(...), ...], ...
             'comparison_fn_name': '...',
+            'fqn': '...',
           ],
           ...
         },
@@ -507,23 +519,27 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
       'subgraph_0': {
         '0': {
           'ref_node_name': '...',
+          'ref_node_target_type': ...,
           'values': [torch.tensor(...), ...],
           'qconfig_str': None,
           'comparisons': [torch.tensor(...), ...], ...
           'comparison_fn_name': '...',
+          'fqn': '...',
         },
         '1': {
           'ref_node_name': '...',
+          'ref_node_target_type': ...,
           'values': [torch.tensor(...), ...],
           'qconfig_str': '...',
           'comparisons': [torch.tensor(...), ...], ...
           'comparison_fn_name': '...',
+          'fqn': '...',
         },
       },
     }
 
-    TODO(future PR): add ref_node_target_type, will be useful
     """
+    # print(results)
 
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
@@ -537,6 +553,8 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
 
         subgraph_results = {
             'ref_node_name': subgraph_candidate_results[0]['ref_node_name'],
+            'ref_node_target_type': subgraph_candidate_results[0]['ref_node_target_type'],
+            'fqn': subgraph_candidate_results[0]['fqn'],
             'values': subgraph_candidate_results[0]['values'],
             'qconfig_str': subgraph_candidate_results[0]['qconfig_str'],
             'comparisons': subgraph_candidate_results[0]['comparisons'],
@@ -558,17 +576,21 @@ def create_results_comparison(
       'subgraph_0': {
         '0': {
           'ref_node_name': '...',
+          'ref_node_target_type': ...,
           'values': [torch.tensor(...), ...],
           'qconfig_str': '',
           'comparisons': [],
           'comparison_fn_name': '',
+          'fqn': '...',
         },
         '1': {
           'ref_node_name': '...',
+          'ref_node_target_type': ...,
           'values': [torch.tensor(...), ...],
           'qconfig_str': '...',
           'comparisons': [torch.tensor(...), ...],
           'comparison_fn_name': 'sqnr',
+          'fqn': '...',
         },
       },
     }
@@ -577,6 +599,8 @@ def create_results_comparison(
     {
       'subgraph_0': {
         'ref_node_name': '...',
+        'ref_node_target_type': '...',
+        'fqn': '...',
         'candidates': {
           '1': {
             'qconfig_str': ...,
@@ -614,6 +638,8 @@ def create_results_comparison(
 
         results_comparison[subgraph_name] = {
             'ref_node_name': subgraph_results['0']['ref_node_name'],
+            'ref_node_target_type': subgraph_results['0']['ref_node_target_type'],
+            'fqn': subgraph_results['0']['fqn'],
             'candidates': candidates,
         }
 
@@ -628,6 +654,8 @@ def print_n_shadows_summary(
     {
       'subgraph_0': {
         'ref_node_name': 'linear1',
+        'ref_node_target_type': '...',
+        'fqn': '...',
         'candidates': {
           '1': {
             'qconfig_str': ...,
@@ -642,8 +670,8 @@ def print_n_shadows_summary(
 
     Prints:
 
-    subgraph_idx | ref_node_name | best_idx | 0    | 1    | ...
-    subgraph_0   | linear1       | 1        | 45.0 | 50.0 | ...
+    node_name | node_type | fqn | 0    | 1    | ...
+    linear1   | ...       | ... | 45.0 | 50.0 | ...
     """
 
     try:
@@ -662,19 +690,10 @@ def print_n_shadows_summary(
             for candidate_name, candidate in subgraph_data['candidates'].items()
         ]
 
-        # find top candidate
-        # for now assume high is good and low is bad
-        # TODO(future PR): make this configurable
-        best_val, best_candidate = -10000.0, None
-        for idx, val in enumerate(mean_all_candidates):
-            if val > best_val:
-                best_val = val
-                best_candidate = idx + 1
-
         data_row = [
-            subgraph_name,
             subgraph_data['ref_node_name'],
-            best_candidate,
+            subgraph_data['ref_node_target_type'],
+            subgraph_data['fqn'],
             *mean_all_candidates,
         ]
         results.append(data_row)
@@ -682,7 +701,7 @@ def print_n_shadows_summary(
     max_candidate_idx_len = -1
     for data_row in results:
         max_candidate_idx_len = max(max_candidate_idx_len, len(data_row[1]))
-    candidate_idx_headers = [str(x + 1) for x in range(max_candidate_idx_len)]
+    candidate_idx_headers = [str(x) for x in range(max_candidate_idx_len)]
 
-    headers = ['subgraph_idx', 'ref_node_name', 'best_idx', *candidate_idx_headers]
+    headers = ['node_name', 'node_type', 'fqn', *candidate_idx_headers]
     print(tabulate(results, headers=headers))

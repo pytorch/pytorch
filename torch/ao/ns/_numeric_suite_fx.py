@@ -106,6 +106,8 @@ from .fx.weight_utils import (
 from .fx.graph_passes import (
     add_loggers_to_model,
     create_a_shadows_b,
+    # TODO(before land): move to utils
+    _maybe_get_fqn,
 )
 
 from .fx.utils import (
@@ -790,6 +792,8 @@ def prepare_n_shadows_model(
 
     tracer = quantize_fx.QuantizationTracer([], [])
     mt = torch.fx.GraphModule(model, tracer.trace(model))
+    # this is necessary to ensure logger FQNs get populated
+    mt._node_name_to_scope = tracer.node_name_to_scope
 
     # run example input propagation, we need this to call prepare_fx on
     # individual subgraphs
@@ -874,6 +878,8 @@ def prepare_n_shadows_model(
                   f'{first_node.format_node()}, skipping')
             continue
 
+        fqn = _maybe_get_fqn(first_node, mt)
+
         for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
 
             if subgraph_candidate_idx == 0:
@@ -883,7 +889,7 @@ def prepare_n_shadows_model(
                 qconfig_str = ''
                 logger_mod_orig = _get_logger_for_subgraph(
                     mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
-                    qconfig_str, OutputLogger)
+                    qconfig_str, OutputLogger, fqn)
 
                 attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
                 assert not hasattr(mt, attr_name)
@@ -919,7 +925,7 @@ def prepare_n_shadows_model(
                 # get first and last nodes of the submodule
                 _add_logger_to_subgraph_wrapper(
                     orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
-                    str(qconfig), OutputComparisonLogger, last_node)
+                    str(qconfig), OutputComparisonLogger, last_node, fqn)
 
                 # add a call to prepare_fx on the wrapper module
                 orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
