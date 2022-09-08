@@ -334,7 +334,7 @@ def infer_size_dv(shape, numel):
     ndim = len(shape)
     for dim in range(ndim):
         if shape[dim] == -1:
-            if infer_dim:
+            if infer_dim is not None:
                 raise RuntimeError("only one dimension can be inferred")
             infer_dim = dim
         elif shape[dim] >= 0:
@@ -342,12 +342,15 @@ def infer_size_dv(shape, numel):
         else:
             raise RuntimeError(f"invalid shape dimension {shape[dim]}")
 
-    if numel == newsize or (infer_dim and newsize > 0 and numel % newsize == 0):
-        if infer_dim:
+    print(f"numel = {numel} nsz = {newsize} infer_dim = {infer_dim}")
+    if numel == newsize or ((infer_dim is not None) and newsize > 0 and numel % newsize == 0):
+        if infer_dim is not None:
             if newsize == 0:
                 raise RuntimeError(f"cannot reshape tensor of 0 elements into shape {shape}" +
                                    "because the unspecified dimension size -1 can be any" +
                                    "value and is ambiguous")
+            
+            print ("in infer_dim!!!")
             res[infer_dim] = numel // newsize
 
         return res
@@ -371,7 +374,7 @@ def computeStride(oldshape, oldstride, newshape):
             if view_d == len(newshape) - 1:
                 newstride[view_d] = 1
             else:
-                newstride[view_d] = max(newshape[view_d + 1], 1) * newstride[view_d+1]
+                newstride[view_d] = max(newshape[view_d + 1], 1) * newstride[view_d + 1]
 
         return newstride
 
