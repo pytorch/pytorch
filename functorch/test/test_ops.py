@@ -298,6 +298,7 @@ class TestOperators(TestCase):
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('to_sparse', ''),  # Could not run 'aten::sum.dim_IntList'
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -582,6 +583,7 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
+        xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
@@ -949,6 +951,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        skip('to_sparse', ''),  # non-dense output
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1043,6 +1046,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
+        xfail('to_sparse', ''),  # NYI
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
