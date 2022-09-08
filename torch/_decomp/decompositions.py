@@ -599,14 +599,25 @@ def slice(
     if not end:
         end = dimsize
 
-    canonical_start = max(min(start, dimsize), -dimsize) % dimsize
-    canonical_end = max(min(end, dimsize), -dimsize)
-    if canonical_end < 0:
-        canonical_end = canonical_end % dimsize
-    
+    if start < 0:
+        start += dimsize
+    if end < 0:
+        end += dimsize
+    if start < 0:
+        start = 0
+    elif start >= dimsize:
+        start = dimsize
+    if end < start:
+        end = start
+    elif end >= dimsize:
+        end = dimsize
+
+    canonical_start = start
+    canonical_end = end
+
     new_offset += canonical_start * self.stride()[dim]
-    
-    new_size[dim] = math.ceil((canonical_end - canonical_start) / step)
+
+    new_size[dim] = (canonical_end - canonical_start + step - 1) // step
 
     if step != 1:
         new_stride[dim] *= step
