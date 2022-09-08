@@ -267,7 +267,6 @@ class ShapeEnv(object):
         #     return const_expr
 
         # expr = expr.simplify()
-        print(expr)
         concrete_val = expr.subs(self.shape_env)
 
         # Uncomment this to see what code triggered this guard.
