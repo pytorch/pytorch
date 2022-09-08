@@ -607,7 +607,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
-        if not hasattr(f, '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
+        if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
             # FX doesn't support varargs, so we gotta fake up a wrapper
             # TODO: Would be nice to fix this at the source...
             func = fake_signature(f, len(phs))
