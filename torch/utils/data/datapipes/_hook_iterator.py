@@ -195,8 +195,13 @@ def hook_iterator(namespace, profile_name):
                     full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
                     if len(e.args) == 0:  # If an exception message doesn't exist
                         e.args = (f'\nThis exception is {full_msg}',)
-                    elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
-                        e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                    else:
+                        try:
+                            iter(e.args[0])  # Handles the case where `e.args[0]` is not iterable (often an `int`)
+                        except TypeError:
+                            e.args = (f'\nThis exception is {full_msg}',)
+                        if msg not in e.args[0] and single_iterator_msg not in e.args[0]:
+                            e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
                 raise
 
         namespace['__iter__'] = wrap_generator
