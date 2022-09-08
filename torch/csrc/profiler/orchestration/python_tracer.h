@@ -17,17 +17,6 @@ namespace impl {
 class RecordQueue;
 struct Result;
 namespace python_tracer {
-/*
-Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
-when we call the profiler from libtorch_python we need the profiler to be able
-to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
-
-In order to solve this dependency issue we define a virtual base and a function
-to register a getter. The python tracer then implements these functions and
-exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
-This pattern of registration for faux python dependencies in libtorch is common
-in the PyTorch codebase.
-*/
 
 using TraceKey = strong::type<
     uint64_t,
@@ -43,6 +32,17 @@ struct CompressedEvent {
   time_t enter_t_;
 };
 
+/*
+Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
+when we call the profiler from libtorch_python we need the profiler to be able
+to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
+
+In order to solve this dependency issue we define a virtual base and a function
+to register a getter. The python tracer then implements these functions and
+exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
+This pattern of registration for faux python dependencies in libtorch is common
+in the PyTorch codebase.
+*/
 struct TORCH_API PythonTracerBase {
   static PythonTracerBase& get();
   virtual ~PythonTracerBase() = default;
