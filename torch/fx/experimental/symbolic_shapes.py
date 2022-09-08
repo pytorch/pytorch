@@ -200,10 +200,7 @@ for method, _func in magic_methods.items():
             if isinstance(other, PySymInt):
                 other = other.expr
             # TODO: consider constant prop here
-
-            expr = func(self.expr, other)
-            concrete_val = expr.subs(self.shape_env.shape_env)
-            return PySymInt(sympy.Integer(concrete_val), self.shape_env)
+            return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymIntNode
