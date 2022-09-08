@@ -25747,6 +25747,51 @@ TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction2_CUDA) {
       fusion, {out}, {t0, t1}, {t1 + t0.squeeze(-1)}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionMappingRelation_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeConcreteTensor({1, 1});
+  TensorView* tv1 = makeConcreteTensor({-1, 1, 1});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = set(tv0);
+  auto tv3 = broadcast(tv2, {true, false, false});
+  auto tv4 = add(tv3, tv1);
+
+  fusion->addOutput(tv4);
+
+  tv4->merge(-2);
+  tv4->merge(-1);
+
+  tv0->computeAt(tv4, -1);
+  tv1->computeAt(tv4, -1);
+
+  ComputeAtMap ca_map(fusion);
+
+  // FIXME: This is the concerning part that would motivate some
+  //  more formalization on concrete/permissive mapping:
+  //   exact mapping should ideally imply permissive mapping.
+  auto tv4_inner_node = tv4->axis(0)->definition()->input(1)->as<IterDomain>();
+  TORCH_CHECK(
+      ca_map.areMapped(tv2->axis(0), tv4_inner_node, IdMappingMode::EXACT));
+  TORCH_CHECK(!ca_map.areMapped(
+      tv2->axis(0), tv4_inner_node, IdMappingMode::PERMISSIVE));
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1, 1}, options);
+  at::Tensor t1 = at::randn({2, 1, 1}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+  auto out = cg_outputs[0];
+
+  testValidate(
+      fusion, {out}, {t0, t1}, {t1 + t0.squeeze(0)}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
