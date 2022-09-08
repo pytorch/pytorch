@@ -350,7 +350,9 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
 def data_dep(fake_mode, func, *args, **kwargs):
-    raise DataDependentOutputException(func)
+    if fake_mode.throw_on_data_dependent_ops:
+        raise DataDependentOutputException(func)
+    return NotImplemented
 
 
 # Bool Indices get Expanded as Masks
@@ -624,10 +626,14 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         allow_fallback_kernels=True,
         allow_meta=False,
+        throw_on_data_dependent_ops=True,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         self.allow_meta = allow_meta
+
+        # TODO: delete arg and default to true. waiting on dynamo perf regression testing
+        self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
