@@ -614,7 +614,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
-            expected_regex="batch norm submodules will be wrapped as separate"
+            expected_regex="BatchNorm units will be wrapped as a separate"
         ):
             model = FSDP(
                 net,
@@ -627,9 +627,8 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # policy should not have wrapped any other submodules
         self.assertFalse(isinstance(model.fc1, FSDP))
         self.assertFalse(isinstance(model.fc2, FSDP))
-        no_mixed_precision = MixedPrecision()
-        self.assertEqual(no_mixed_precision, bn.mixed_precision)
-        self.assertNotEqual(no_mixed_precision, model.mixed_precision)
+        self.assertEqual(None, bn.mixed_precision)
+        self.assertNotEqual(None, model.mixed_precision)
 
         inp = torch.randn((1, 2), device='cuda')
         # Without FSDP BN mixed precision fix, this would result in

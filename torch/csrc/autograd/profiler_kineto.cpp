@@ -597,7 +597,9 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
            config.state == ProfilerState::ITT),
       "Can't disable Kineto profiler when it's not running");
 
-  state_ptr->removeCallback();
+  if (state_ptr->hasCallbackHandle()) {
+    at::removeCallback(state_ptr->callbackHandle());
+  }
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (state_ptr->config().state == ProfilerState::KINETO_ONDEMAND) {

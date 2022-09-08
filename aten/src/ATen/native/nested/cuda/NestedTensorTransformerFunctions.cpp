@@ -11,7 +11,6 @@
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
-#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at {
 namespace native {

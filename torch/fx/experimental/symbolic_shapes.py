@@ -13,7 +13,7 @@ aten = torch.ops.aten
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
-    "SymDispatchMode", "PySymFloat", "sym_float"
+    "SymDispatchMode"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -67,9 +67,10 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
+
 def is_symbolic_op(func):
     return func in [aten.sym_size.default, aten.dim.default,
-                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default
+                    aten.is_contiguous.default, aten.sym_stride.default
                     ]
 
 def handle_symbolic_op(func, args, kwargs):
@@ -80,11 +81,6 @@ def handle_symbolic_op(func, args, kwargs):
         return None
     if func == torch.ops.aten.dim.default:
         return len(args[0].shape)
-    if func == torch.ops.aten.sym_numel.default:
-        res = 1
-        for s in args[0].shape:
-            res = res * s
-        return res
     # TODO: hack, need to make is_contiguous calls symbolic (probably through computing on symbolic strides)
     if func == torch.ops.aten.is_contiguous.default:
         return True
@@ -100,11 +96,6 @@ def _handle_sym_dispatch(func, args, kwargs):
         return mode.__sym_dispatch__(func, types, args, kwargs)
     finally:
         SYM_FUNCTION_MODE = mode
-
-def sym_float(a):
-    if hasattr(a, '__sym_float__'):
-        return a.__sym_float__()
-    return float(a)
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -126,37 +117,13 @@ class PySymInt(object):
     def __str__(self):
         return f"{self.expr}"
 
-    def __repr__(self):
-        return f"{self.expr}"
-
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     # In the future we'll probably need some explicit way of allowing this
     def __int__(self):
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
-    def __sym_float__(self):
-        if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(sym_float, (self,), {})
-        # TODO: consider constant prop here
-        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
-        # not?
-        return PySymFloat(self.expr, self.shape_env)
-
     def __bool__(self):
         return bool(self.shape_env.evaluate_expr(self.expr))
-
-class PySymFloat:
-    def __init__(self, expr, shape_env, constant=None):
-        self.expr = expr
-        self.shape_env = shape_env
-        self.constant = constant
-
-    def wrap(self, num):
-        return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
-
-    def __str__(self):
-        return f"{self.expr}"
-
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -185,7 +152,6 @@ for method, _func in magic_methods.items():
                 return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
             if isinstance(other, PySymInt):
                 other = other.expr
-            # TODO: consider constant prop here
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
