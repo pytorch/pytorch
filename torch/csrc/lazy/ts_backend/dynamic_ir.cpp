@@ -34,14 +34,6 @@ SizeNode::SizeNode(Value input, size_t dim)
 int64_t SizeNode::getStaticValue() const {
   return dynamic_cast<const TsNode*>(operand(0).node)->shape(0).size(dim_);
 }
-bool SizeNode::isSymbolic() const {
-  auto symbolic_vec =
-      dynamic_cast<const TsNode*>(operand(0).node)->shape(0).is_symbolic();
-  if (!symbolic_vec.has_value()) {
-    return true;
-  }
-  return symbolic_vec->at(dim_);
-}
 
 std::string SizeNode::ToString() const {
   return "SizeNode";
@@ -59,10 +51,6 @@ int64_t SizeAdd::getStaticValue() const {
       DimCast(operand(1))->getStaticValue();
 }
 
-bool SizeAdd::isSymbolic() const {
-  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
-}
-
 std::string SizeAdd::ToString() const {
   return "SizeAdd";
 }
@@ -77,10 +65,6 @@ SizeMul::SizeMul(Value a, Value b)
 int64_t SizeMul::getStaticValue() const {
   return DimCast(operand(0))->getStaticValue() *
       DimCast(operand(1))->getStaticValue();
-}
-
-bool SizeMul::isSymbolic() const {
-  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
 }
 
 std::string SizeMul::ToString() const {
@@ -100,10 +84,6 @@ int64_t SizeDiv::getStaticValue() const {
       "Can't divide a dimension by zero");
   return DimCast(operand(0))->getStaticValue() /
       DimCast(operand(1))->getStaticValue();
-}
-
-bool SizeDiv::isSymbolic() const {
-  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
 }
 
 std::string SizeDiv::ToString() const {
