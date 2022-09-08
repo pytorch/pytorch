@@ -59,15 +59,9 @@ __all__ = [
     "pop",
     "prim_constant_chunk",
     "reflection_pad",
-    "reflection_pad1d",
-    "reflection_pad2d",
-    "reflection_pad3d",
     "relu6",
     "remainder",
     "replication_pad",
-    "replication_pad1d",
-    "replication_pad2d",
-    "replication_pad3d",
     "round",
     "scatter",
     "select",
@@ -81,13 +75,6 @@ __all__ = [
     "unbind",
     "unique_dim",
     "unsqueeze",
-    "upsample_bicubic2d",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
 ]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=11)
@@ -341,32 +328,37 @@ def pixel_shuffle(g, self, upscale_factor):
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bicubic2d",
+    decorate=[_apply_params("upsample_bicubic2d", 4, "cubic")],
+)
 @_beartype.beartype
-def _interpolate(name, dim, interpolate_mode):
+def _interpolate(name: str, dim: int, interpolate_mode: str):
     return symbolic_helper._interpolate_helper(name, dim, interpolate_mode)
-
-
-upsample_nearest1d = _onnx_symbolic("aten::upsample_nearest1d")(
-    _interpolate("upsample_nearest1d", 3, "nearest")
-)
-upsample_nearest2d = _onnx_symbolic("aten::upsample_nearest2d")(
-    _interpolate("upsample_nearest2d", 4, "nearest")
-)
-upsample_nearest3d = _onnx_symbolic("aten::upsample_nearest3d")(
-    _interpolate("upsample_nearest3d", 5, "nearest")
-)
-upsample_linear1d = _onnx_symbolic("aten::upsample_linear1d")(
-    _interpolate("upsample_linear1d", 3, "linear")
-)
-upsample_bilinear2d = _onnx_symbolic("aten::upsample_bilinear2d")(
-    _interpolate("upsample_bilinear2d", 4, "linear")
-)
-upsample_trilinear3d = _onnx_symbolic("aten::upsample_trilinear3d")(
-    _interpolate("upsample_trilinear3d", 5, "linear")
-)
-upsample_bicubic2d = _onnx_symbolic("aten::upsample_bicubic2d")(
-    _interpolate("upsample_bicubic2d", 4, "cubic")
-)
 
 
 @_onnx_symbolic("aten::__interpolate")
@@ -796,7 +788,9 @@ def constant_pad_nd(g, input, padding, value=None):
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
-@_onnx_symbolic("aten::reflection_pad")
+@_onnx_symbolic("aten::reflection_pad1d")
+@_onnx_symbolic("aten::reflection_pad2d")
+@_onnx_symbolic("aten::reflection_pad3d")
 @_beartype.beartype
 def reflection_pad(g, input, padding):
     mode = "reflect"
@@ -804,20 +798,14 @@ def reflection_pad(g, input, padding):
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
-@_onnx_symbolic("aten::replication_pad")
+@_onnx_symbolic("aten::replication_pad1d")
+@_onnx_symbolic("aten::replication_pad2d")
+@_onnx_symbolic("aten::replication_pad3d")
 @_beartype.beartype
 def replication_pad(g, input, padding):
     mode = "edge"
     paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
-
-
-reflection_pad1d = _onnx_symbolic("aten::reflection_pad1d")(reflection_pad)
-reflection_pad2d = _onnx_symbolic("aten::reflection_pad2d")(reflection_pad)
-reflection_pad3d = _onnx_symbolic("aten::reflection_pad3d")(reflection_pad)
-replication_pad1d = _onnx_symbolic("aten::replication_pad1d")(replication_pad)
-replication_pad2d = _onnx_symbolic("aten::replication_pad2d")(replication_pad)
-replication_pad3d = _onnx_symbolic("aten::replication_pad3d")(replication_pad)
 
 
 @_onnx_symbolic("aten::pad")

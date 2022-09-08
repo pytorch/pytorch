@@ -1,7 +1,7 @@
 import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import Callable, Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -36,12 +36,6 @@ __all__ = [
     "fmod",
     "isfinite",
     "isinf",
-    "max_pool1d_with_indices",
-    "max_pool1d",
-    "max_pool2d_with_indices",
-    "max_pool2d",
-    "max_pool3d_with_indices",
-    "max_pool3d",
     "nan_to_num",
     "quantize_per_tensor",
     "quantized_add_relu",
@@ -60,12 +54,6 @@ __all__ = [
     "slice",
     "sort",
     "topk",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
 ]
 
 
@@ -137,11 +125,67 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     )
 
 
+@_onnx_symbolic(
+    "aten::max_pool1d",
+    decorate=[
+        _apply_params(
+            "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool2d",
+    decorate=[
+        _apply_params(
+            "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool3d",
+    decorate=[
+        _apply_params(
+            "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool1d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool1d_with_indices",
+            torch.nn.modules.utils._single,
+            1,
+            return_indices=True,
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool2d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool2d_with_indices",
+            torch.nn.modules.utils._pair,
+            2,
+            return_indices=True,
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool3d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool3d_with_indices",
+            torch.nn.modules.utils._triple,
+            3,
+            return_indices=True,
+        )
+    ],
+)
 @_beartype.beartype
-def _max_pool(name, tuple_fn, ndims, return_indices):
+def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
-    @_beartype.beartype
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
@@ -190,38 +234,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             return r
 
     return symbolic_fn
-
-
-max_pool1d = _onnx_symbolic("aten::max_pool1d")(
-    _max_pool("max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False)
-)
-max_pool2d = _onnx_symbolic("aten::max_pool2d")(
-    _max_pool("max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False)
-)
-max_pool3d = _onnx_symbolic("aten::max_pool3d")(
-    _max_pool("max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False)
-)
-max_pool1d_with_indices = _onnx_symbolic("aten::max_pool1d_with_indices")(
-    _max_pool(
-        "max_pool1d_with_indices",
-        torch.nn.modules.utils._single,
-        1,
-        return_indices=True,
-    )
-)
-max_pool2d_with_indices = _onnx_symbolic("aten::max_pool2d_with_indices")(
-    _max_pool(
-        "max_pool2d_with_indices", torch.nn.modules.utils._pair, 2, return_indices=True
-    )
-)
-max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
-    _max_pool(
-        "max_pool3d_with_indices",
-        torch.nn.modules.utils._triple,
-        3,
-        return_indices=True,
-    )
-)
 
 
 @_onnx_symbolic(
@@ -281,6 +293,30 @@ def _avg_pool(name, tuple_fn):
     return symbolic_fn
 
 
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
 @_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
     @symbolic_helper.quantized_args(True, False, False)
@@ -300,26 +336,6 @@ def _interpolate(name, dim, interpolate_mode):
         return g.op("Resize", input, scales, mode_s=interpolate_mode)
 
     return symbolic_fn
-
-
-upsample_nearest1d = _onnx_symbolic("aten::upsample_nearest1d")(
-    _interpolate("upsample_nearest1d", 3, "nearest")
-)
-upsample_nearest2d = _onnx_symbolic("aten::upsample_nearest2d")(
-    _interpolate("upsample_nearest2d", 4, "nearest")
-)
-upsample_nearest3d = _onnx_symbolic("aten::upsample_nearest3d")(
-    _interpolate("upsample_nearest3d", 5, "nearest")
-)
-upsample_linear1d = _onnx_symbolic("aten::upsample_linear1d")(
-    _interpolate("upsample_linear1d", 3, "linear")
-)
-upsample_bilinear2d = _onnx_symbolic("aten::upsample_bilinear2d")(
-    _interpolate("upsample_bilinear2d", 4, "linear")
-)
-upsample_trilinear3d = _onnx_symbolic("aten::upsample_trilinear3d")(
-    _interpolate("upsample_trilinear3d", 5, "linear")
-)
 
 
 @_onnx_symbolic("aten::__interpolate")

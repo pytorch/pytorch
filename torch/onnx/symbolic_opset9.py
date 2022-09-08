@@ -244,18 +244,12 @@ __all__ = [
     "randn",
     "reciprocal",
     "reflection_pad",
-    "reflection_pad1d",
-    "reflection_pad2d",
-    "reflection_pad3d",
     "relu",
     "relu6",
     "remainder",
     "repeat_interleave",
     "repeat",
     "replication_pad",
-    "replication_pad1d",
-    "replication_pad2d",
-    "replication_pad3d",
     "reshape_as",
     "reshape",
     "roll",
@@ -305,12 +299,6 @@ __all__ = [
     "unsafe_split",
     "unsqueeze",
     "unused",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
     "var_mean",
     "var",
     "view_as",
@@ -1889,7 +1877,9 @@ def _pad_circular(g, input, pad):
     return cur
 
 
-@_onnx_symbolic("aten::reflection_pad")
+@_onnx_symbolic("aten::reflection_pad1d")
+@_onnx_symbolic("aten::reflection_pad2d")
+@_onnx_symbolic("aten::reflection_pad3d")
 @_beartype.beartype
 def reflection_pad(g, input, padding):
     mode = "reflect"
@@ -1900,7 +1890,9 @@ def reflection_pad(g, input, padding):
     )
 
 
-@_onnx_symbolic("aten::replication_pad")
+@_onnx_symbolic("aten::replication_pad1d")
+@_onnx_symbolic("aten::replication_pad2d")
+@_onnx_symbolic("aten::replication_pad3d")
 @_beartype.beartype
 def replication_pad(g, input, padding):
     mode = "edge"
@@ -1909,14 +1901,6 @@ def replication_pad(g, input, padding):
     return _op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
     )
-
-
-reflection_pad1d = _onnx_symbolic("aten::reflection_pad1d")(reflection_pad)
-reflection_pad2d = _onnx_symbolic("aten::reflection_pad2d")(reflection_pad)
-reflection_pad3d = _onnx_symbolic("aten::reflection_pad3d")(reflection_pad)
-replication_pad1d = _onnx_symbolic("aten::replication_pad1d")(replication_pad)
-replication_pad2d = _onnx_symbolic("aten::replication_pad2d")(replication_pad)
-replication_pad3d = _onnx_symbolic("aten::replication_pad3d")(replication_pad)
 
 
 @_onnx_symbolic("aten::pad")
@@ -1935,9 +1919,32 @@ def pad(g, input, pad, mode, value):
         raise errors.SymbolicValueError(f"Unrecognized padding mode {mode}", input)
 
 
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
 @_beartype.beartype
-def _interpolate(name, dim, interpolate_mode):
-    @_beartype.beartype
+def _interpolate(name: str, dim: int, interpolate_mode: str):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -1953,26 +1960,6 @@ def _interpolate(name, dim, interpolate_mode):
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
 
     return symbolic_fn
-
-
-upsample_nearest1d = _onnx_symbolic("aten::upsample_nearest1d")(
-    _interpolate("upsample_nearest1d", 3, "nearest")
-)
-upsample_nearest2d = _onnx_symbolic("aten::upsample_nearest2d")(
-    _interpolate("upsample_nearest2d", 4, "nearest")
-)
-upsample_nearest3d = _onnx_symbolic("aten::upsample_nearest3d")(
-    _interpolate("upsample_nearest3d", 5, "nearest")
-)
-upsample_linear1d = _onnx_symbolic("aten::upsample_linear1d")(
-    _interpolate("upsample_linear1d", 3, "linear")
-)
-upsample_bilinear2d = _onnx_symbolic("aten::upsample_bilinear2d")(
-    _interpolate("upsample_bilinear2d", 4, "linear")
-)
-upsample_trilinear3d = _onnx_symbolic("aten::upsample_trilinear3d")(
-    _interpolate("upsample_trilinear3d", 5, "linear")
-)
 
 
 @_onnx_symbolic("aten::__interpolate")

@@ -63,6 +63,39 @@ for block_listed_op in block_listed_operators:
     )
 
 
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
@@ -88,26 +121,6 @@ def _interpolate(name, dim, interpolate_mode):
         return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
 
     return symbolic_fn
-
-
-upsample_nearest1d = _onnx_symbolic("aten::upsample_nearest1d")(
-    _interpolate("upsample_nearest1d", 3, "nearest")
-)
-upsample_nearest2d = _onnx_symbolic("aten::upsample_nearest2d")(
-    _interpolate("upsample_nearest2d", 4, "nearest")
-)
-upsample_nearest3d = _onnx_symbolic("aten::upsample_nearest3d")(
-    _interpolate("upsample_nearest3d", 5, "nearest")
-)
-upsample_linear1d = _onnx_symbolic("aten::upsample_linear1d")(
-    _interpolate("upsample_linear1d", 3, "linear")
-)
-upsample_bilinear2d = _onnx_symbolic("aten::upsample_bilinear2d")(
-    _interpolate("upsample_bilinear2d", 4, "linear")
-)
-upsample_trilinear3d = _onnx_symbolic("aten::upsample_trilinear3d")(
-    _interpolate("upsample_trilinear3d", 5, "linear")
-)
 
 
 @_onnx_symbolic("aten::__interpolate")
@@ -138,7 +151,7 @@ def __interpolate(
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.
 def _try_cast_integer_to_float(g, *args):
-    floating_scalar_types = ["Half", "Float", "Double"]
+    floating_scalar_types = {"Half", "Float", "Double"}
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.

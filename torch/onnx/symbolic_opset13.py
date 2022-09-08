@@ -20,6 +20,15 @@ from torch.onnx._internal import _beartype, registration
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
 
 
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
 @_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
@@ -389,7 +398,10 @@ def _reduce_op_symbolic(onnx_op_name):
     return symbolic
 
 
-@_onnx_symbolic("aten::_reduce_with_dtype")
+@_onnx_symbolic(
+    "aten::sum",
+    decorate=[_apply_params("ReduceSum", "sum")],
+)
 @_beartype.beartype
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
@@ -424,10 +436,6 @@ def _reduce_with_dtype(onnx_op, name):
         return reduce_nodim, reduce_dim
 
     return reduce
-
-
-# TODO(justinchuby): Rename the op to avoid colliding with the builtin sum.
-sum = _onnx_symbolic("aten::sum")(_reduce_with_dtype("ReduceSum", "sum"))
 
 
 @_onnx_symbolic("aten::unsafe_chunk")
