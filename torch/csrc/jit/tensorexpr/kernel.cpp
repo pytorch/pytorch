@@ -742,8 +742,6 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         "After random transform:\n", std::to_string(l.root_stmt()), "\n");
   }
 
-  bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
-
   // For Block codegen we create a map of tensor dims before
   // inlining. Like GPU codegen we need to inline. But the order
   // where this analysis is run matters.
