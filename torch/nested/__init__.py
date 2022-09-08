@@ -12,7 +12,7 @@ Tensor = torch.Tensor
 
 to_padded_tensor = _add_docstr(_nested.nested_to_padded_tensor,
                                r"""
-to_padded_tensor(input, padding, output_size=None) -> Tensor
+to_padded_tensor(input, padding, output_size=None, out=None) -> Tensor
 
 Returns a new (non-nested) Tensor by padding the nested tensor.
 The leading entries will be filled with the nested data,
@@ -25,9 +25,12 @@ while the trailing entries will be padded.
 
 Args:
     padding (float): The padding value for the trailing entries.
+
+Keyword args:
     output_size (Tuple[int]): The size of the output tensor.
                               If given, it must be large enough to contain all nested data;
                               else, will infer by taking the max size of each nested sub-tensor along each dimension.
+    out (Tensor, optional): the output tensor.
 
 Example::
 

@@ -1356,10 +1356,6 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
-  self: _reshape_nested_backward(self, grad)
-  result: auto_linear
-
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
@@ -1394,8 +1390,12 @@
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  self: select_backward(grad, self.sizes(), dim, index)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: select_backward(grad, self.sizes(), dim, index)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_select_backward(grad, self, dim, index)
 
 - name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
@@ -1732,10 +1732,14 @@
   # linear
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
-# TODO: this derivative is not SymInt safe, need reshape_symint
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
-  self: grad.reshape(self.sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.reshape(self.sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.reshape_as(self)
+      result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
@@ -2694,14 +2698,14 @@
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
-  t: grad.to_padded_tensor(0, t.sizes())
+  t: nested_to_padded_tensor(grad, 0, t.sizes())
   mask: non_differentiable
 
 - name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
   cpu_nested_shape_example: non_differentiable
 
-- name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+- name: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
