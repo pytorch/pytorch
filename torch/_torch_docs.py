@@ -8102,9 +8102,11 @@ add_docstr(
     r"""
 narrow_copy(input, dim, start, length, *, out=None) -> Tensor
 
-Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
-dimension :attr:`dim` is input from :attr:`start` to ``start + length``. The
-returned tensor allocates new memory.
+Same as :meth:`Tensor.narrow` except returning a copy rather
+than shared storage.  This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.  Calling ``narrow_copy``
+with ``dimemsion > self.sparse_dim()`` will return a copy with the
+relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
 
 Args:
     input (Tensor): the tensor to narrow
@@ -8128,7 +8130,8 @@ Example::
 
 .. seealso::
 
-        :func:`torch.narrow` for a non copy version
+        :func:`torch.Tensor.narrow_copy` for the method variant
+        :func:`torch.narrow` for a non copy variant
 
 """,
 )
