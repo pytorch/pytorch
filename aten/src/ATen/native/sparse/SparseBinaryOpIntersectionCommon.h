@@ -73,7 +73,7 @@ template <
   typename binary_op_t,
   typename hash_t = int64_t,
   typename offset_t = int64_t>
-Tensor& _sparse_binary_op_intersection_kernel_impl(
+void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
     const Tensor& y_,
@@ -511,14 +511,12 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   // Since the matching beahavior of the algorithm respects the order of `source`, the result
   // will be as coalesced as `source` is, which is uncoalesced.
   res._coalesced_(source.is_coalesced() && probably_coalesced.is_coalesced());
-
-  return res;
 }
 
 template <
   template <typename func_t> class kernel_t,
   typename binary_op_t>
-Tensor& _sparse_binary_op_intersection_kernel_out(
+void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
@@ -550,25 +548,25 @@ Tensor& _sparse_binary_op_intersection_kernel_out(
   if (is_max_hash_32bits && is_max_offset_32bits) {
     using hash_t = int32_t;
     using offset_t = int32_t;
-    return _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
   else if (is_max_hash_32bits && !is_max_offset_32bits) {
     using hash_t = int32_t;
     using offset_t = int64_t;
-    return _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
   else if (!is_max_hash_32bits && is_max_offset_32bits) {
     using hash_t = int64_t;
     using offset_t = int32_t;
-    return _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
   else {
     using hash_t = int64_t;
     using offset_t = int64_t;
-    return _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
 }
