@@ -45,7 +45,7 @@ set_property(TARGET torch::magma
 # Check for Magma V2
 include(CheckPrototypeDefinition)
 check_prototype_definition(magma_get_sgeqrf_nb
-  "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
+  "magma_int_t magma_get_sgeqrf_nb( magma_int_t m);"
   "0"
   "magma.h"
   MAGMA_V2)
