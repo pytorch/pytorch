@@ -838,7 +838,7 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
-def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
+def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using forward-mode autodiff
@@ -854,6 +854,9 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
+        randomness(str): Flag indicating what type of randomness to use.
+            See :func:`vmap` for more detail. Allowed: "different", "same", "error".
+            Default: "error"
 
     Returns:
         Returns a function that takes in the same inputs as :attr:`func` and
@@ -957,7 +960,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
             _, jvp_out = output
             return jvp_out
 
-        results = vmap(push_jvp)(basis)
+        results = vmap(push_jvp, randomness=randomness)(basis)
         if has_aux:
             results, aux = results
             # aux is in the standard basis format, e.g. NxN matrix
