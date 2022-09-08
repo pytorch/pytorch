@@ -241,13 +241,11 @@ struct InputTensorRecord : RecordFunctor {
       std::vector<size_t> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      NvfDataType _dtype,
-      bool _is_cpu = false)
+      NvfDataType _dtype)
       : RecordFunctor({}, std::move(_outputs)),
         symbolic_sizes(std::move(_symbolic_sizes)),
         contiguous_info(std::move(_contiguous_info)),
-        dtype(_dtype),
-        is_cpu(_is_cpu) {}
+        dtype(_dtype) {}
   virtual ~InputTensorRecord() = default;
 
   void operator()(FusionDefinition& fd) final {
@@ -257,12 +255,6 @@ struct InputTensorRecord : RecordFunctor {
                   .shape(symbolic_sizes)
                   .dtype(dtype)
                   .build();
-
-    if (symbolic_sizes.empty() && is_cpu) {
-      tv->setCpuScalar(true);
-    } else {
-      TORCH_CHECK(!is_cpu, "cpu non-scalar tensor is not supported");
-    }
 
     fd.setFusionState(outputs.at(0), tv);
     fd.addInput(tv);
@@ -277,8 +269,6 @@ struct InputTensorRecord : RecordFunctor {
   std::vector<bool> contiguous_info;
   //! Tensor data type.
   NvfDataType dtype;
-  //! Tensor data type.
-  bool is_cpu;
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
