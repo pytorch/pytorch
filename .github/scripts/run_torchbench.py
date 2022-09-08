@@ -13,6 +13,7 @@ Testing environment:
 # 1. Does not reuse the build artifact in other CI workflows
 # 2. CI jobs are serialized because there is only one worker
 import os
+import boto3
 import git  # type: ignore[import]
 import pathlib
 import argparse
@@ -36,11 +37,21 @@ S3_BUCKET = "ossci-metrics"
 S3_PREFIX = "torchbench-pr-test"
 
 class S3Client:
-    def __init__(self, bucket):
-        pass
+    def __init__(self, bucket=S3_BUCKET, prefix=S3_PREFIX):
+        self.s3 = boto3.client('s3')
+        self.resource = boto3.resource('s3')
+        self.bucket = bucket
+        self.prefix = prefix
 
-    def upload_file(self, file_path, s3key):
+    def upload_file(self, file_path, filekey_prefix):
         assert file_path.is_file(), f"Specified file path {file_path} does not exist or not file."
+        file_name = file_path.name
+        s3_key = f"{self.prefix}/{filekey_prefix}/{file_name}"
+        print(f"Uploading file {file_name} to S3 with key: {s3_key}")
+        response = self.s3.upload_file(str(file_path), self.bucket, s3_key)
+        # make the object public
+        object_acl = self.resource.ObjectAcl(self.bucket, s3_key)
+        object_acl.put(ACL='public-read')
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
@@ -154,6 +165,10 @@ def process_upload_s3(result_dir):
     # upload all files to S3 bucket oss-ci-metrics
     files = [x for x in result_dir.iterdir() if x.is_file()]
     # upload file to S3 bucket
+    s3_client = S3Client()
+    filekey_prefix = result_dir.name
+    for f in files:
+        s3_client.upload_file(f, filekey_prefix)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
