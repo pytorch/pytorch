@@ -179,7 +179,7 @@ def native_layer_norm_backward(
         if len(outer_dim_indices) > 0:
             d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
-            d_bias = grad_out.clone()
+            d_bias = grad_out.view_as(grad_out)
     elif bias is not None:
         d_bias = torch.zeros_like(bias)  # should be None but doesn't work with vjp
     else:
