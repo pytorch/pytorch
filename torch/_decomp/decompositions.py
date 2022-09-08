@@ -1923,3 +1923,72 @@ def grid_sampler_2d(
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
         return cubic_interp1d(coeffs, ty)
+
+
+@register_decomposition(aten.mv)
+@pw_cast_for_opmath
+def mv(self, vec):
+    utils.check(
+        self.dim() == 2 and vec.dim() == 1,
+        lambda: f"matrix @ vector expected, got {self.dim()}, {vec.dim()}",
+    )
+    utils.check(
+        self.size(1) == vec.size(0),
+        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+    )
+    return (self * vec).sum(dim=1)
+
+
+@register_decomposition(aten.dot, disable_meta=True)
+@pw_cast_for_opmath
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    utils.check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+    utils.check(
+        self.dtype == other.dtype,
+        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    utils.check(self.numel() == other.numel(), numel_error)
+
+    return (self * other).sum()
+
+
+@register_decomposition(aten.binary_cross_entropy_with_logits)
+def binary_cross_entropy_with_logits(
+    self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
+):
+    max_val = (-self).clamp_min(0)
+    if pos_weight is not None:
+        log_weight = (pos_weight - 1) * target + 1
+        loss = (1 - target) * self + log_weight * (
+            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
+        )
+    else:
+        loss = (
+            (1 - target) * self
+            + max_val
+            + ((-max_val).exp() + (-self - max_val).exp()).log()
+        )
+
+    if weight is not None:
+        loss = loss * weight
+
+    return apply_loss_reduction(loss, reduction)
