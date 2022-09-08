@@ -3828,6 +3828,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.norm'),  # can accept vector inputs
+        xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
         xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
