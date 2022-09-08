@@ -2569,7 +2569,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
     utils.check(
         len(repeat_shape) >= len(a.shape),
-        lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+        lambda: "repeat: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
     )
 
     if len(repeat_shape) == 0:
@@ -2592,6 +2592,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
             dtype=a.dtype,
             device=a.device,
             requires_grad=a.requires_grad,
+            memory_format=utils.suggest_memory_format(a),
         )
 
     urtensor_shape = target_shape
