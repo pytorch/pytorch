@@ -9,7 +9,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten
+aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
