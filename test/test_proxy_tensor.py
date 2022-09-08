@@ -865,7 +865,6 @@ make_fx_failures = {
     # unknown
     xfail('allclose'),
     xfail('equal'),
-    xfail('linalg.eigvals'),
     # empty
     skip('new_empty'),
     skip('empty_like'),
@@ -914,6 +913,7 @@ symbolic_tensor_failures = {
     # Needs complex-value support
     xfail('polar'),
     xfail('linalg.eig'),
+    xfail('linalg.eigvals'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
