@@ -1,6 +1,7 @@
 import functools
 from enum import Enum
 from itertools import product
+import math
 from typing import Callable, Iterable, List, Optional, Tuple
 
 import torch
@@ -579,6 +580,38 @@ def slice_backward(
 ):
     grad_input = grad_output.new_zeros(input_sizes)
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
+
+@register_decomposition(aten.slice.Tensor)
+def slice(
+# Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step:  Optional[int] = 1,
+):
+    new_size = list(self.size())
+    new_stride = list(self.stride())
+    new_offset = self.storage_offset()
+    dimsize = self.size()[dim]
+    if not start:
+        start = 0
+    if not end:
+        end = dimsize
+
+    canonical_start = max(min(start, dimsize), -dimsize) % dimsize
+    canonical_end = max(min(end, dimsize), -dimsize)
+    if canonical_end < 0:
+        canonical_end = canonical_end % dimsize
+    
+    new_offset += canonical_start * self.stride()[dim]
+    
+    new_size[dim] = math.ceil((canonical_end - canonical_start) / step)
+
+    if step != 1:
+        new_stride[dim] *= step
+
+    return self.as_strided(new_size, new_stride, new_offset)
 
 
 @register_decomposition(aten.select_backward)

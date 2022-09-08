@@ -1329,6 +1329,7 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
         except Exception:
             continue
         new_out = wrapper_set_seed(new_f, args, kwargs)
+        print(f"new_out {new_out}, old_out {old_out}")
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
@@ -1348,6 +1349,40 @@ class TestProxyTensorOpInfo(TestCase):
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
+
+
+class TestProxyTensorManual(TestCase): 
+    def test_slice(self):
+        class SampleInput:
+            def __init__(self, input, args, kwargs={}):
+                self.input = input
+                self.args = args
+                self.kwargs = kwargs
+
+        class SliceOpInfo:
+            def op(self, *args, **kwargs):
+                return torch.ops.aten.slice(*args, **kwargs)
+
+            def sample_inputs(self, device, dtype, requires_grad):
+                for i in [
+                    SampleInput(
+                        input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
+                        args=(0,),
+                    ),
+                    SampleInput(
+                        input=torch.randn((2,3,4,5), device=device, dtype=dtype, requires_grad=requires_grad),
+                        args=(),
+                        kwargs={
+                            'dim': 2,
+                            'start': 1,
+                        }
+                    ),
+                ]:
+                    yield i
+        slice = SliceOpInfo()
+        _test_make_fx_helper(self, 'cpu', torch.float, slice, "real")
+        _test_make_fx_helper(self, 'cpu', torch.float, slice, "fake")
+        _test_make_fx_helper(self, 'cpu', torch.float, slice, "symbolic")
 
 
 only_for = ("cpu")
