@@ -106,7 +106,6 @@ __all__ = [
     "clone",
     "constant_pad_nd",
     "contiguous",
-    "convolution",
     "conv_tbc",
     "conv_transpose1d",
     "conv_transpose2d",
@@ -114,6 +113,7 @@ __all__ = [
     "conv1d",
     "conv2d",
     "conv3d",
+    "convolution",
     "cos",
     "cosine_similarity",
     "cross",
@@ -169,8 +169,8 @@ __all__ = [
     "index",
     "instance_norm",
     "is_floating_point",
-    "isnan",
     "is_pinned",
+    "isnan",
     "item",
     "kl_div",
     "layer_norm",
@@ -234,6 +234,7 @@ __all__ = [
     "one_hot",
     "ones_like",
     "ones",
+    "onnx_placeholder",
     "op_with_optional_float_cast",
     "overload_by_arg_count",
     "pad",
@@ -243,6 +244,24 @@ __all__ = [
     "pixel_unshuffle",
     "pow",
     "prelu",
+    "prim_constant_chunk",
+    "prim_constant_split",
+    "prim_constant",
+    "prim_data",
+    "prim_device",
+    "prim_dtype",
+    "prim_if",
+    "prim_layout",
+    "prim_list_construct",
+    "prim_list_unpack",
+    "prim_loop",
+    "prim_max",
+    "prim_min",
+    "prim_shape",
+    "prim_tolist",
+    "prim_tuple_construct",
+    "prim_unchecked_cast",
+    "prim_uninitialized",
     "prod",
     "rand_like",
     "rand",
@@ -578,7 +597,7 @@ def stack(g, tensor_list, dim):
 
 @_onnx_symbolic("aten::list")
 @_beartype.beartype
-def aten_list(g, self):
+def _list(g, self):
     return self
 
 
@@ -1362,7 +1381,7 @@ def floor(g, input):
 
 @_onnx_symbolic("aten::len")
 @_beartype.beartype
-def aten_len(g, self):
+def _len(g, self):
     sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
     return symbolic_helper._squeeze_helper(g, sz_0, [0])
 
@@ -4828,7 +4847,7 @@ def isnan(g, input):
 
 @_onnx_symbolic("aten::any")
 @_beartype.beartype
-def aten_any(g, *args):
+def _any(g, *args):
     # aten::any(Tensor self)
     if len(args) == 1:
         input = args[0]
@@ -4847,14 +4866,14 @@ def aten_any(g, *args):
 
 @_onnx_symbolic("aten::all")
 @_beartype.beartype
-def aten_all(g, *args):
+def _all(g, *args):
     input = g.op("Not", args[0])
     # aten::all(Tensor self)
     if len(args) == 1:
-        return g.op("Not", aten_any(g, input))
+        return g.op("Not", _any(g, input))
     # aten::all(Tensor self, int dim, bool keepdim)
     else:
-        return g.op("Not", aten_any(g, input, args[1], args[2]))
+        return g.op("Not", _any(g, input, args[1], args[2]))
 
 
 @_onnx_symbolic("aten::narrow")

@@ -60,6 +60,7 @@ __all__ = [
     "pad",
     "pixel_shuffle",
     "pop",
+    "prim_constant_chunk",
     "reflection_pad",
     "reflection_pad1d",
     "reflection_pad2d",
@@ -455,7 +456,7 @@ def masked_scatter(g, self, mask, source):
 
 @_onnx_symbolic("aten::len")
 @_beartype.beartype
-def aten_len(g, self):
+def _len(g, self):
     if (
         symbolic_helper._is_tensor_list(self)
         or self.node().kind() == "onnx::SplitToSequence"

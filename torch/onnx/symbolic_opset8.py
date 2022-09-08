@@ -136,7 +136,6 @@ def __interpolate(
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
-
 #       is lost after casting.
 def _try_cast_integer_to_float(g, *args):
     floating_scalar_types = ["Half", "Float", "Double"]
@@ -177,7 +176,6 @@ def _comparison_operator(g, input, other, op_name):
 
 
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
-
 #       integer input type not supported in opset8. Cast to float if possible.
 @_onnx_symbolic("aten::gt")
 def gt(g, input, other):
