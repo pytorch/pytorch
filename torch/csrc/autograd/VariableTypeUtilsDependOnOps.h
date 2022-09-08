@@ -32,7 +32,8 @@ Return run_jit_decomposition_with_args_for_jvp(
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunction<&jit::run_jit_decomposition>())
-      .call<Return, Args...>(opHandle, dispatchKeySet, std::forward<Args>(args)...);
+      .call<Return, Args...>(
+          opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 } // namespace impl
