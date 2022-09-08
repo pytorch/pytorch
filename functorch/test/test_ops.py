@@ -593,6 +593,7 @@ class TestOperators(TestCase):
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("svd_lowrank"),  # calls random op
         xfail("take"),  # vmap: inplace into a regular tensor
+        xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
