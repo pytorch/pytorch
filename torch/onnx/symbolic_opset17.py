@@ -25,6 +25,8 @@ from torch.onnx._internal import registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+__all__ = ["layer_norm"]
+
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
 
