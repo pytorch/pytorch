@@ -350,7 +350,9 @@ def onnx_symbolic(
         for opset_version in opset:
             registry.register(name, opset_version, decorated, custom=custom)
 
-        return decorated
+        # Return the original function because the decorators in "decorate" are only
+        # specific to the instance being registered.
+        return func
 
     return wrapper
 
