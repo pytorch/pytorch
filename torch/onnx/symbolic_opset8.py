@@ -39,7 +39,7 @@ from torch.onnx._internal import registration
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
 
-block_listed_operators = [
+block_listed_operators = (
     "nonzero",
     "where",
     "scatter",
@@ -55,7 +55,7 @@ block_listed_operators = [
     "repeat_interleave",
     "any",
     "all",
-]
+)
 
 for block_listed_op in block_listed_operators:
     _onnx_symbolic(f"aten::{block_listed_op}")(
@@ -302,7 +302,6 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
-@_onnx_symbolic("aten::_constant_fill")
 def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT

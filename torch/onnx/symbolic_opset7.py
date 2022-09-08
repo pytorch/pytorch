@@ -19,7 +19,7 @@ from torch.onnx._internal import registration
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=7)
 
-block_listed_operators = [
+block_listed_operators = (
     "scan",
     "expand",
     "expand_as",
@@ -30,7 +30,7 @@ block_listed_operators = [
     "max_pool1d_with_indices",
     "max_pool2d_with_indices",
     "max_pool3d_with_indices",
-]
+)
 
 
 # NOTE: max, min, sum, mean: broadcasting is not supported in opset 7.

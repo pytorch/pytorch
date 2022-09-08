@@ -27,9 +27,6 @@ __all__ = [
     "append",
     "arange",
     "argsort",
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
     "cat",
     "chunk",
     "clamp_max",
@@ -96,6 +93,15 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=11)
 
 
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
 @_onnx_symbolic("aten::hardtanh")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
@@ -114,7 +120,7 @@ def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
         "Constant",
         value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
-    return opset9.op_with_optional_float_cast(
+    return opset9._op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
     )
 
@@ -148,7 +154,7 @@ def clamp(g, self, min, max):
             symbolic_helper._get_tensor_rank(min) == 0
             and symbolic_helper._get_tensor_rank(max) == 0
         ):
-            return opset9.op_with_optional_float_cast(
+            return opset9._op_with_optional_float_cast(
                 g, "Clip", self, min, max, opset_before=12
             )
         else:
@@ -163,11 +169,11 @@ def clamp_min(g, self, min):
     min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
-        return opset9.op_with_optional_float_cast(
+        return opset9._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9.op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return opset9._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -178,17 +184,17 @@ def clamp_max(g, self, max):
     max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
-        return opset9.op_with_optional_float_cast(
+        return opset9._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9.op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return opset9._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
 @_onnx_symbolic("aten::relu6")
 @_beartype.beartype
 def relu6(g, input):
-    relu_ = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -335,7 +341,6 @@ def pixel_shuffle(g, self, upscale_factor):
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
-@_onnx_symbolic("aten::_interpolate")
 @_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
     return symbolic_helper._interpolate_helper(name, dim, interpolate_mode)
@@ -557,7 +562,18 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
     return u, inverse_indices, counts
 
 
-@_onnx_symbolic("aten::_avg_pool")
+@_onnx_symbolic(
+    "aten::avg_pool1d",
+    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
+)
+@_onnx_symbolic(
+    "aten::avg_pool2d",
+    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
+)
+@_onnx_symbolic(
+    "aten::avg_pool3d",
+    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
+)
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
     @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
@@ -598,17 +614,6 @@ def _avg_pool(name, tuple_fn):
         return output
 
     return symbolic_fn
-
-
-avg_pool1d = _onnx_symbolic("aten::avg_pool1d")(
-    _avg_pool("avg_pool1d", torch.nn.modules.utils._single)
-)
-avg_pool2d = _onnx_symbolic("aten::avg_pool2d")(
-    _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
-)
-avg_pool3d = _onnx_symbolic("aten::avg_pool3d")(
-    _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
-)
 
 
 @_onnx_symbolic("aten::unique_dim")
@@ -723,15 +728,16 @@ def unbind(g, self, dim=0, _outputs=None):
         return opset9.unbind(g, self, dim, _outputs)
 
 
-# Generate paddings in ONNX order based on pad in pytorch.
-# Args:
-#     input: the input tensor.
-#     pad: the paddings in pytorch.
-#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
-#          where m is in range [0, n].
-@_onnx_symbolic("aten::_prepare_onnx_paddings")
 @_beartype.beartype
 def _prepare_onnx_paddings(g, input, pad):
+    """Generate paddings in ONNX order based on pad in pytorch.
+
+    Args:
+        input: the input tensor.
+        pad: the paddings in pytorch.
+            The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
+            where m is in range [0, n].
+    """
     if (
         not symbolic_helper._is_packed_list(pad)
         and symbolic_helper._is_list(pad)
@@ -1104,7 +1110,6 @@ def __lshift_(g, self, other):
     return lshift
 
 
-@_onnx_symbolic("aten::_get_im2col_indices_along_dim")
 @_beartype.beartype
 def _get_im2col_indices_along_dim(
     g, input_d, kernel_size_d, dilation_d, padding_d, stride_d
@@ -1149,7 +1154,6 @@ def _get_im2col_indices_along_dim(
     return block_mask
 
 
-@_onnx_symbolic("aten::_get_im2col_padded_input")
 @_beartype.beartype
 def _get_im2col_padded_input(g, input, padding_h, padding_w):
     # Input is always 4-D tensor (N, C, H, W)
@@ -1159,7 +1163,6 @@ def _get_im2col_padded_input(g, input, padding_h, padding_w):
     return g.op("Pad", input, pad)
 
 
-@_onnx_symbolic("aten::_get_im2col_output_shape")
 @_beartype.beartype
 def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
     batch_dim = size(g, input, g.op("Constant", value_t=torch.tensor(0)))

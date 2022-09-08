@@ -28,9 +28,6 @@ from torch.onnx._internal import _beartype, registration
 
 
 __all__ = [
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
     "dequantize",
     "div",
     "embedding_bag",
@@ -75,6 +72,15 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=10)
 
 
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
 @_onnx_symbolic("aten::div")
 @_beartype.beartype
 def div(g, self, other, *args):
@@ -84,7 +90,6 @@ def div(g, self, other, *args):
         return _div_rounding_mode(g, self, other, *args)
 
 
-@_onnx_symbolic("aten::_div_rounding_mode")
 @symbolic_helper.parse_args("v", "v", "s")
 @_beartype.beartype
 def _div_rounding_mode(g, self, other, rounding_mode):
@@ -219,6 +224,18 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 )
 
 
+@_onnx_symbolic(
+    "aten::avg_pool1d",
+    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
+)
+@_onnx_symbolic(
+    "aten::avg_pool2d",
+    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
+)
+@_onnx_symbolic(
+    "aten::avg_pool3d",
+    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
+)
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
     @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
@@ -241,7 +258,7 @@ def _avg_pool(name, tuple_fn):
         )
         assert isinstance(padding, tuple)
         if count_include_pad:
-            input = opset9.op_with_optional_float_cast(
+            input = opset9._op_with_optional_float_cast(
                 g,
                 "Pad",
                 input,
@@ -262,17 +279,6 @@ def _avg_pool(name, tuple_fn):
         return output
 
     return symbolic_fn
-
-
-avg_pool1d = _onnx_symbolic("aten::avg_pool1d")(
-    _avg_pool("avg_pool1d", torch.nn.modules.utils._single)
-)
-avg_pool2d = _onnx_symbolic("aten::avg_pool2d")(
-    _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
-)
-avg_pool3d = _onnx_symbolic("aten::avg_pool3d")(
-    _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
-)
 
 
 @_beartype.beartype
@@ -327,7 +333,6 @@ def __interpolate(
     return g.op("Resize", input, scales, mode_s=mode)
 
 
-@_onnx_symbolic("aten::_slice")
 @_beartype.beartype
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:

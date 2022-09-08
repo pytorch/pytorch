@@ -374,7 +374,6 @@ def fake_quantize_per_tensor_affine(
     return g.op("DequantizeLinear", quantized, scale, zero_point)
 
 
-@_onnx_symbolic("aten::_reduce_op_symbolic")
 @_beartype.beartype
 def _reduce_op_symbolic(onnx_op_name):
     @_beartype.beartype

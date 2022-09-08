@@ -42,7 +42,6 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=12)
 
 
-@_onnx_symbolic("aten::_einsum_helper")
 @_beartype.beartype
 def _einsum_helper(g, equation, tensors):
     if not tensors:
@@ -86,7 +85,6 @@ def outer(g, input, other):
     return _einsum_helper(g, "i,j->ij", [input, other])
 
 
-@_onnx_symbolic("aten::_dropout_returns_masked_input_and_mask")
 @_beartype.beartype
 def _dropout_returns_masked_input_and_mask(
     g, input: torch._C.Value, p: float, train: bool
