@@ -18,7 +18,7 @@ Return run_jit_decomposition_with_args_for_jvp(
     c10::string_view name,
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
-    Args... args) {
+    Args&&... args) {
   bool has_decomp = jit::has_jit_decomposition(opHandle.schema());
 
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -32,7 +32,7 @@ Return run_jit_decomposition_with_args_for_jvp(
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunction<&jit::run_jit_decomposition>())
-      .call<Return, Args...>(opHandle, dispatchKeySet, args...);
+      .call<Return, Args...>(opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 } // namespace impl
