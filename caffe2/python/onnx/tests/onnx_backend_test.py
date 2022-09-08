@@ -188,8 +188,7 @@ backend_test.exclude('(test_layer_normalization_.*'
 
 # Unsupported ops in opset 18
 backend_test.exclude('(test_center_crop_pad_.*'
-                     ')')
-backend_test.exclude('(test_col2im*'
+                     '|test_col2im*'
                      ')')
 
 # Skip vgg to speed up CI
