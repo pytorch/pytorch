@@ -388,6 +388,68 @@ class FakeTensorTest(TestCase):
             self.checkType(b.new(device='cuda'), "cuda", [0])
 
 
+class FakeTensorConstHandling(TestCase):
+    def assertConst(self, *args):
+        for arg in args:
+            self.assertTrue(arg.constant is not None)
+
+    def assertNotConst(self, *args):
+        for arg in args:
+            self.assertTrue(arg.constant is None)
+
+    def test_simple(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor(4.)
+            self.assertEqual(x.item(), 4.)
+
+    def test_inplace_add(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor(4.)
+            y = x.add_(1)
+            self.assertEqual(x.item(), 5.)
+            self.assertEqual(y.item(), 5.)
+            self.assertConst(x, y)
+
+    def test_shared_storages(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor([4.])
+            y = x[:]
+
+            self.assertEqual(x.storage()._cdata, y.storage()._cdata)
+            self.assertEqual(x.constant.storage()._cdata, y.constant.storage()._cdata)
+
+    def test_constant_invalidation(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor([1.])
+            self.assertConst(x)
+            y = torch.rand([1])
+            x.add_(y)
+            self.assertNotConst(x)
+
+    def test_inplace_view_invalidation(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor([1])
+            self.assertConst(x)
+            x.resize_([2])
+            self.assertEqual(x.size(0), 2)
+            self.assertNotConst(x)
+
+    def test_shared_storage_invalidation(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor([1.])
+            y = x[:]
+            self.assertConst(x, y)
+            y.add_(torch.rand([1]))
+            self.assertNotConst(x, y)
+
+    def test_aliased_const_write(self):
+        with FakeTensorMode(const_tensors=True):
+            x = torch.tensor([1])
+            y = x.expand([4])
+            self.assertNotConst(y)
+            y[0] = 1
+            self.assertNotConst(x)
+
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
@@ -545,7 +607,6 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
-
 
 if __name__ == "__main__":
     run_tests()
