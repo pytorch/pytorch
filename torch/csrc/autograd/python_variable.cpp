@@ -262,6 +262,11 @@ struct ConcretePyInterpreterVTable final
   void trace_gpu_stream_creation(uintptr_t stream) const override {
     concrete_trace_cuda<trace_cuda_stream_creation_fn_name>(stream);
   }
+
+  static ConcretePyInterpreterVTable* instance() {
+    static ConcretePyInterpreterVTable s;
+    return &s;
+  }
 };
 
 // NOTE [PyInterpreter::decref takes an `is_tensor` arg]
@@ -306,9 +311,11 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
 class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
-      : impl_(new c10::impl::PyInterpreter(new ConcretePyInterpreterVTable())) {
-  }
-  // NB: intentionally leaks the memory
+      : impl_(new c10::impl::PyInterpreter(
+            ConcretePyInterpreterVTable::instance())) {}
+  // NB: intentionally leaks the PyInterpreter, as there may still be
+  // references to it that are live, living in objects that aren't being
+  // destructed while Python is being cleaned up.
   ~PyInterpreterHolder() {
     impl_->disarm();
   }
