@@ -25,7 +25,7 @@ namespace at {
 namespace native {
 namespace {
 
-__device__ inline int min(int a, int b) {
+__device__ inline int min(const int a, const int b) {
   return a <= b ? a : b;
 }
 
@@ -242,9 +242,9 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
   int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
+  int iendH = ::min((uint64_t) istartH+iH, height);
   int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
+  int iendW = ::min((uint64_t) istartW+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
