@@ -4900,22 +4900,15 @@ def error_inputs_flipud(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
                      error_regex="Input must be >= 1-d.")
 
-# TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
-    x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    lb = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    ub = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    shape = (S, M, S)
 
-    def detach(tensor):
-        return tensor.clone().detach_().requires_grad_(requires_grad)
-
-    return [
-        SampleInput(detach(x), args=(lb, ub)),
-        SampleInput(detach(x), args=(detach(lb[0]), detach(ub[0]))),
-        SampleInput(detach(x), args=(detach(lb[:, :1]),)),
-        SampleInput(detach(x), args=(None, ub)),
-        SampleInput(detach(x), args=(lb, None)),
-    ]
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape[1:]), make_arg(shape[1:])))
+    yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
+    yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
