@@ -101,7 +101,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 
 
 @_beartype.beartype
-def _block_op(b: _C.Block, opname: str, *args: _C.Value, **kwargs):
+def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
         namespace, op = opname.split("::")
     else:
