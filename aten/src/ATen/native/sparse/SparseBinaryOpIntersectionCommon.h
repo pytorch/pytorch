@@ -186,7 +186,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
   // it could be shown that the hash function is actually bijective and, hence,
   // is a perfect hash function (no collisions ever).
   const auto kHash = std::is_same<hash_t, int64_t>::value ? kLong : kInt;
-  const auto hash_coeffs = [&]() -> Tensor {
+  Tensor hash_coeffs;
+  {
     const auto broadcasted_sparse_dim_shape = std::vector<int64_t> {
       broadcasted_shape.begin(),
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
@@ -200,9 +201,8 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     for (const auto i : c10::irange(strides_len)) {
       hash_coeffs_cpu[i] = strides[i];
     }
-    Tensor hash_coeffs = hash_coeffs_cpu.to(probably_coalesced.device());
-    return hash_coeffs;
-  }();
+    hash_coeffs = hash_coeffs_cpu.to(probably_coalesced.device());
+  }
 
   const auto nnz_arange = at::arange(
       std::max(probably_coalesced._nnz(), source._nnz()),
