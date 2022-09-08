@@ -9,11 +9,34 @@
 #include <functorch/csrc/Constants.h>
 #include <functorch/csrc/DynamicLayer.h>
 
+// NOTE: [vmap plumbing]
+//
+// Here's how "batching rules" work.
+// - we register kernels to the Batched key
+// - these kernels have the same signatures as the original operators.
+//   For example, at::sin(Tensor self) accepts a Tensor, and the batched kernel
+//   must also accept a Tensor
+// - However, it is more natural for users to write a batching rule like the
+//   following: sin_batch_rule(Tensor self, optional<int> self_bdim)
+// - There is some codegenerated layer (the "plumbing") that wraps the user
+//   defined batching rule (e.g. sin_batch_rule) in a kernel that can be
+//   registered to the Batched key.
+//
+// The plumbing is responsible for wrapping a batching rule into a form that may
+// be registered as the kernel for the batched key.
+
 namespace at { namespace functorch {
 
+// Create a BatchedTensor given a tensor, bdim, and level
 Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level);
+
+// Given a Tensor that may or may not be a BatchedTensor, unwrap it.
+// If `tensor` is not a BatchedTensor, or is a BatchedTensor but the level
+// doesn't match, then this returns (tensor, nullopt).
+// Otherwise, it returns (unwrap(tensor), bdim).
 std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
 
+// Creates a vector of BatchedTensor
 std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level);
 
 // Returns True if ANY tensor in tensors is batched at level

@@ -8,6 +8,14 @@
 #include <ATen/Tensor.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
+// This file contains template metaprogramming things that are used for our
+// batching rules.
+//
+// See NOTE: [vmap plumbing] for more details on why this is necessary.
+// The plumbing has a bunch of metaprogramming hacks for determining the signature
+// of a batching rule from the signature of the operator, many of which use the
+// helper functions in this file.
+
 namespace at {
 namespace functorch {
 

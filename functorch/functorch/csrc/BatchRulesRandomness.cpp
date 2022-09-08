@@ -8,6 +8,12 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
+// This file contains batching rules for random operations. These are different
+// from our regular batching rules: regular batching rules get registered to the
+// FuncTorchBatched key, but batching rules for random operations get
+// registered to FuncTorchVmapMode. This is because we need to interpose on
+// random operations even if they're not on a BatchedTensor.
+
 namespace at {
 namespace functorch {
 

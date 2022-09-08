@@ -19,7 +19,10 @@
 #include <functorch/csrc/Constants.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
+// This file contains helper functions for batching rules.
+
 namespace at { namespace functorch {
+
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 

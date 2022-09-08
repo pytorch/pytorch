@@ -23,6 +23,10 @@ namespace functorch {
 
 // NOTE: [What is a batching rule?]
 //
+// NB: the following description only applies to this file and is about
+// the legacy (deprecated) batching rule API. Please see writing_batch_rules.md
+// for how to write new-style batching rules.
+//
 // This files contains batching rules written with the legacy (now-deprecated)
 // batching rule API.
 // Please try to use the new-style batching rule API (see writing_batch_rules.md)
@@ -60,13 +64,6 @@ namespace functorch {
 // batching behavior of your operation. The VmapTransform provides helper functions
 // to do steps (1), (2), and (4).
 // (see NOTE: [What is an VmapTransform?] in VmapTransforms.h)
-
-// Note: [Future plans]
-// The API for writing a batching rule isn't stable. In the future, we'd like
-// to think about the problem of translating these batching rules to TorchScript.
-// Ideally batching rules in eager mode vs TorchScript would look pretty similar,
-// if not use the same mechanism. In order to accomplish that we might have to
-// do some refactoring.
 
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {

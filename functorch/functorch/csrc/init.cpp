@@ -19,6 +19,8 @@
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
 
+// This file contains functorch's Python bindings.
+
 namespace at {
 namespace functorch {
 
