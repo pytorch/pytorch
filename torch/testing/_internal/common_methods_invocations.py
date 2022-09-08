@@ -38,11 +38,6 @@ import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
-
-# Make sure that decompositions used for test_forward_mode_AD and
-# test_fn_fwgrad_bwgrad are registered to the jit
-import torch._decomp.decompositions_for_jvp
-
 import torch._prims as prims  # noqa: F401
 
 from torch.utils._pytree import tree_flatten
@@ -3327,7 +3322,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
             kwargs=kwargs
         )
     # Without any optional args
-    # yield SampleInput(make_arg((1, 2)), args=((2,),))
+    yield SampleInput(make_arg((1, 2)), args=((2,),))
 
     # TODO: @krshrimali, once to_numpy method in SampleInput class is modified to take None inputs,
     # enable these inputs; see https://github.com/pytorch/pytorch/pull/63276#discussion_r691950400
