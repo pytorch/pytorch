@@ -84,8 +84,8 @@ This module contains QConfigMapping for configuring FX graph mode quantization.
     get_default_qconfig_mapping
     get_default_qat_qconfig_mapping
 
-torch.ao.quantization.backend_config.BackendConfig
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+torch.ao.quantization.backend_config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains BackendConfig, a config object that defines how quantization is supported
 in a backend. Currently only used by FX Graph Mode Quantization, but we may extend Eager Mode
@@ -102,6 +102,24 @@ Quantization to work with this as well.
     BackendPatternConfig
     DTypeConfig
     ObservationType
+
+torch.ao.quantization.fx.custom_config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module contains a few CustomConfig classes that's used in both eager mode and FX graph mode quantization
+
+
+.. currentmodule:: torch.ao.quantization.fx.custom_config
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    FuseCustomConfig
+    PrepareCustomConfig
+    ConvertCustomConfig
+    StandaloneModuleConfigEntry
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
