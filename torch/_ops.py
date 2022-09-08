@@ -3,15 +3,14 @@ import ctypes
 import sys
 import types
 from abc import ABC
-from typing import Dict
+from typing import Any, Dict
 
 import torch._C
 
 import torch.jit
 from torch import _utils_internal
-from torch._C import DispatchKey
-from torch.nn.functional import handle_torch_function
-from torch.overrides import has_torch_function
+from torch._C import DispatchKey  # type: ignore[attr-defined]
+from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten
 
 # Query `hasattr` only once.
@@ -38,9 +37,6 @@ class PyOperatorABC(ABC):
         pass
 
     def py_impl(self, dispatch_key, fn):
-        pass
-
-    def redispatch(self):
         pass
 
     def name(self):
@@ -83,16 +79,16 @@ class PyOperator(PyOperatorABC):
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     def name(self):
-        return name
+        return self.name
 
     # TODO(voz): Should rewrite fallthrough register as the impl for keys we do not specify
     # as opposed to being this sort of explicit thing where ops are a little too key aware...
     def _fallthrough_fn(self, operator, dispatch_key):
         def inner(*args, **kwargs):
-            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)  # type: ignore[attr-defined]
             all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
                 args, kwargs
-            )
+            )  # type: ignore[attr-defined]
             return self.dispatch(
                 all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
             )
@@ -340,7 +336,7 @@ class _OpNamespace(types.ModuleType):
         if self.name == "pyop":
             self.pyops = pyop_namespace
         else:
-            self.pyops = None
+            self.pyops = None  # type: ignore[assignment]
 
     def __getattr__(self, op_name):
         pyops = object.__getattribute__(self, "pyops")

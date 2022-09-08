@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 __all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
 
-DispatchKey = torch._C.DispatchKey
+DispatchKey = torch._C.DispatchKey # type: ignore[attr-defined]
 
 def has_key(op, k):
     return (
@@ -11,11 +11,11 @@ def has_key(op, k):
         or k in op.py_kernels
     )
 
-is_included_in_alias = torch._C._dispatch_is_included_in_alias
+is_included_in_alias = torch._C._dispatch_is_included_in_alias # type: ignore[attr-defined]
 
 # Equivalent to computeDispatchTableEntryWithDebug
 # TODO: memoize this or something
-def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):
+def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[valid-type]
     # 1. (Direct) operator registration
     if has_key(op, k):
         return k
@@ -28,18 +28,18 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         return cand
     has_backend_kernel = (
-        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k))
+        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k)) # type: ignore[attr-defined]
         or has_key(op, DispatchKey.CompositeExplicitAutograd)
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
-    if (k != DispatchKey.Undefined and is_included_in_alias(k, cand)) and has_key(op, cand) and not has_backend_kernel:
+    if (k != DispatchKey.Undefined and is_included_in_alias(k, cand)) and has_key(op, cand) and not has_backend_kernel: # type: ignore[attr-defined]
         return cand
     cand = DispatchKey.CompositeImplicitAutograd
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends) # type: ignore[attr-defined]
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
@@ -49,7 +49,7 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):
     if is_included_in_alias(k, cand) and has_key(op, cand):
         return cand
     # Backend fallback
-    if torch._C._dispatch_has_backend_fallback(k):
+    if torch._C._dispatch_has_backend_fallback(k): # type: ignore[attr-defined]
         # The dispatch key itself will implicitly route to backend fallback.
         # This is probably not great for the pure Python implementation.
         return k
@@ -57,7 +57,7 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):
 
 @contextmanager
 def no_python_dispatcher():
-    g = torch._C._DisablePythonDispatcher()
+    g = torch._C._DisablePythonDispatcher() # type: ignore[attr-defined]
     try:
         yield
     finally:
@@ -65,7 +65,7 @@ def no_python_dispatcher():
 
 @contextmanager
 def enable_python_dispatcher():
-    g = torch._C._EnablePythonDispatcher()
+    g = torch._C._EnablePythonDispatcher() # type: ignore[attr-defined]
     try:
         yield
     finally:
@@ -80,4 +80,4 @@ def python_dispatcher(op, ks, args, kwargs):
     k = resolve_key(op, ks.highestPriorityTypeId())
     return op.dispatch(k, *args, **kwargs)
 
-torch._C._set_python_dispatcher(python_dispatcher)
+torch._C._set_python_dispatcher(python_dispatcher) # type: ignore[attr-defined]
