@@ -180,6 +180,8 @@ def _communicate_optim_state(
             if not flat_param._is_sharded:  # type: ignore[attr-defined]
                 tensor_state[state_name] = value.cpu()
                 continue
+            if not value.is_cuda:
+                value = value.to(fsdp_module.compute_device)
             if tensor_buffer is None:
                 # Assume that positive-dimension tensor optimizer state
                 # has the same shape as the sharded flattened parameter
