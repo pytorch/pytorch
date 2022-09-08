@@ -113,9 +113,9 @@ class BackendConfig:
     A pattern in this context refers to a module, a functional, an operator, or a directed acyclic graph
     of the above. Each pattern supported on the target backend can be individually configured through
     :class:`~torch.ao.quantization.backend_config.BackendPatternConfig` in terms of:
-        (1) The supported input/output activation, weight, and bias data types
-        (2) How observers and quant/dequant ops are inserted in order to construct the reference pattern, and
-        (3) (Optionally) Fusion, QAT, and reference module mappings.
+    (1) The supported input/output activation, weight, and bias data types
+    (2) How observers and quant/dequant ops are inserted in order to construct the reference pattern, and
+    (3) (Optionally) Fusion, QAT, and reference module mappings.
 
     The format of the patterns is described in:
     https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md
