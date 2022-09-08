@@ -5,35 +5,31 @@ namespace profiler {
 namespace impl {
 namespace python_tracer {
 namespace {
-GetFn get_fn;
+MakeFn make_fn;
 
 struct NoOpPythonTracer : public PythonTracerBase {
-  static NoOpPythonTracer& singleton() {
-    static NoOpPythonTracer singleton_;
-    return singleton_;
-  }
-  void start(RecordQueue*) override {}
+  NoOpPythonTracer() = default;
+  ~NoOpPythonTracer() = default;
+
   void stop() override {}
-  void clear() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<time_t(approx_time_t)>,
       std::vector<CompressedEvent>&,
       time_t) override {
     return {};
   }
-  ~NoOpPythonTracer() = default;
 };
 } // namespace
 
-void registerTracer(GetFn get_tracer) {
-  get_fn = get_tracer;
+void registerTracer(MakeFn make_tracer) {
+  make_fn = make_tracer;
 }
 
-PythonTracerBase& PythonTracerBase::get() {
-  if (get_fn == nullptr) {
-    return NoOpPythonTracer::singleton();
+std::unique_ptr<PythonTracerBase> PythonTracerBase::make(RecordQueue* queue) {
+  if (make_fn == nullptr) {
+    return std::make_unique<NoOpPythonTracer>();
   }
-  return get_fn();
+  return make_fn(queue);
 }
 } // namespace python_tracer
 } // namespace impl
