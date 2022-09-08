@@ -13,7 +13,7 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 }
 
 bool UndefinedTensorImpl::is_contiguous_custom(MemoryFormat format) const {
-  TORCH_CHECK(false, "is_contiguous() called on an undefined Tensor");
+  return is_contiguous_default(format);
 }
 IntArrayRef UndefinedTensorImpl::strides_custom() const {
   TORCH_CHECK(false, "strides() called on an undefined Tensor");
