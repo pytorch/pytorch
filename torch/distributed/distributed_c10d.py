@@ -868,7 +868,7 @@ def _new_process_group_helper(
 
             backend_plugin = Backend._plugins[backend.upper()]
             creator_fn = backend_plugin.creator_fn
-            extended_api = Backend._plugins[backend.upper()].extended_api
+            extended_api = backend_plugin.extended_api
 
             if not extended_api:
                 pg = creator_fn(prefix_store, group_rank, group_size, timeout)
