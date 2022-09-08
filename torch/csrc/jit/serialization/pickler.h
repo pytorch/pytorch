@@ -60,7 +60,7 @@ enum class PickleOpCode : char {
   BINFLOAT = 'G',
 
   // Protocol 2
-  PROTO = '\x80',
+  PROTO = char('\x80'),
   NEWOBJ = '\x81',
   EXT1 = '\x82',
   EXT2 = '\x83',
@@ -78,7 +78,7 @@ enum class PickleOpCode : char {
   SHORT_BINBYTES = 'C',
 
   // Protocol 4
-  SHORT_BINUNICODE = '\x8c',
+  SHORT_BINUNICODE = char('\x8c'),
   BINUNICODE8 = '\x8d',
   BINBYTES8 = '\x8e',
   EMPTY_SET = '\x8f',
