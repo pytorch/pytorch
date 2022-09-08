@@ -18,7 +18,6 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_utils import IS_WINDOWS
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
@@ -34,9 +33,6 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
 from functorch.experimental import functionalize
-
-if not IS_WINDOWS:
-    from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -2171,41 +2167,6 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], yt.movedim(2, 0))
 
 
-class TestCustomFunction(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")
-    @onlyCPU
-    def test_basic(self, device):
-        called_impl = False
-        called_vjp = False
-
-        def my_sin_impl(args):
-            x, = args
-            nonlocal called_impl
-            called_impl = True
-            return x.sin(), x
-
-        def my_sin_vjp(args):
-            grad_y, result, x = args
-            nonlocal called_vjp
-            called_vjp = True
-            return (grad_y * 3 * x.cos(),)
-
-        def filter_fn(args):
-            return args[0]
-
-        my_sin = custom_vjp('my_sin', filter_fn, my_sin_impl, my_sin_vjp)
-
-        x = torch.tensor([1., 2.], requires_grad=True, device=device)
-
-        y = my_sin(x)
-        self.assertTrue(called_impl)
-
-        y.sum().backward()
-        self.assertTrue(called_vjp)
-
-        assert torch.allclose(x.grad, 3 * x.cos())
-
-
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
@@ -3467,11 +3428,6 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
-    globals(),
-    only_for=only_for,
-)
-instantiate_device_type_tests(
-    TestCustomFunction,
     globals(),
     only_for=only_for,
 )
