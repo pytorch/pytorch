@@ -118,9 +118,9 @@ def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     Return the default QConfigMapping for post training quantization.
 
     Args:
-      * `backend`: the quantization backend for the default qconfig mapping, should be
+      * `backend` : the quantization backend for the default qconfig mapping, should be
          one of ["fbgemm", "qnnpack"]
-      * `version`: the version for the default qconfig mapping
+      * `version` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
     return _get_default_qconfig_mapping(False, backend, version)
@@ -130,25 +130,25 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
     Return the default QConfigMapping for quantization aware training.
 
     Args:
-      * `backend`: the quantization backend for the default qconfig mapping, should be
+      * `backend` : the quantization backend for the default qconfig mapping, should be
          one of ["fbgemm", "qnnpack"]
-      * `version`: the version for the default qconfig mapping
+      * `version` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
 
 class QConfigMapping:
     """
-    Mapping from model ops to :class:`torch.ao.quantization.QConfig`s.
+    Mapping from model ops to :class:`torch.ao.quantization.QConfig` s.
 
     The user can specify QConfigs using the following methods (in increasing match priority):
 
-        `set_global`: sets the global (default) QConfig
-        `set_object_type`: sets the QConfig for a given module type, function, or method name
-        `set_module_name_regex`: sets the QConfig for modules matching the given regex string
-        `set_module_name`: sets the QConfig for modules matching the given module name
-        `set_module_name_object_type_order`: sets the QConfig for modules matching a combination
-            of the given module name, object type, and the index at which the module appears
+        `set_global` : sets the global (default) QConfig
+        `set_object_type` : sets the QConfig for a given module type, function, or method name
+        `set_module_name_regex` : sets the QConfig for modules matching the given regex string
+        `set_module_name` : sets the QConfig for modules matching the given module name
+        `set_module_name_object_type_order` : sets the QConfig for modules matching a combination
+        of the given module name, object type, and the index at which the module appears
 
     Example usage::
 
