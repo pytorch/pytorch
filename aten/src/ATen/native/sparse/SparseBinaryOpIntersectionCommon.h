@@ -161,11 +161,13 @@ Tensor& _sparse_binary_op_intersection_kernel_impl(
     };
     auto strides = contiguous_strides(broadcasted_sparse_dim_shape);
     auto strides_len = static_cast<int64_t>(strides.size());
-    auto hash_coeffs_cpu = at::from_blob(
-        reinterpret_cast<void*>(strides.data()),
+    auto hash_coeffs_cpu = at::empty(
         {strides_len},
-        probably_coalesced._indices().options().device(kCPU).dtype(kLong))
-      .to(kHash);
+        probably_coalesced._indices().options().device(kCPU).dtype(kHash));
+    // Copy with a potential casting. Is there a nicer way?
+    for (const auto i : c10::irange(strides_len)) {
+      hash_coeffs_cpu[i] = strides[i];
+    }
     return hash_coeffs_cpu.to(probably_coalesced.device());
   }();
 
