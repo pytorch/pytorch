@@ -15,15 +15,20 @@ New operators:
     SequenceMap
 """
 
+import functools
 from typing import Sequence
 
 from torch import _C
 from torch.onnx import symbolic_helper
+from torch.onnx._internal import registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
+
+@_onnx_symbolic("aten::layer_norm")
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
 def layer_norm(
     g,

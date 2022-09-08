@@ -30,10 +30,14 @@ Updated operators:
     Scan
 """
 
+import functools
 import warnings
 
 import torch
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import registration
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
 
 block_listed_operators = [
     "nonzero",
@@ -49,14 +53,14 @@ block_listed_operators = [
     "index_fill",
     "index_copy",
     "repeat_interleave",
-    "isnan",
     "any",
     "all",
 ]
 
 for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
-    vars()[block_listed_op].__module__ = "torch.onnx.symbolic_opset8"
+    _onnx_symbolic(f"aten::{block_listed_op}")(
+        symbolic_helper._block_list_in_opset(block_listed_op)
+    )
 
 
 def _interpolate(name, dim, interpolate_mode):
@@ -86,14 +90,27 @@ def _interpolate(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-upsample_nearest1d = _interpolate("upsample_nearest1d", 3, "nearest")
-upsample_nearest2d = _interpolate("upsample_nearest2d", 4, "nearest")
-upsample_nearest3d = _interpolate("upsample_nearest3d", 5, "nearest")
-upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
-upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
-upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
+upsample_nearest1d = _onnx_symbolic("aten::upsample_nearest1d")(
+    _interpolate("upsample_nearest1d", 3, "nearest")
+)
+upsample_nearest2d = _onnx_symbolic("aten::upsample_nearest2d")(
+    _interpolate("upsample_nearest2d", 4, "nearest")
+)
+upsample_nearest3d = _onnx_symbolic("aten::upsample_nearest3d")(
+    _interpolate("upsample_nearest3d", 5, "nearest")
+)
+upsample_linear1d = _onnx_symbolic("aten::upsample_linear1d")(
+    _interpolate("upsample_linear1d", 3, "linear")
+)
+upsample_bilinear2d = _onnx_symbolic("aten::upsample_bilinear2d")(
+    _interpolate("upsample_bilinear2d", 4, "linear")
+)
+upsample_trilinear3d = _onnx_symbolic("aten::upsample_trilinear3d")(
+    _interpolate("upsample_trilinear3d", 5, "linear")
+)
 
 
+@_onnx_symbolic("aten::__interpolate")
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -119,6 +136,7 @@ def __interpolate(
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
+
 #       is lost after casting.
 def _try_cast_integer_to_float(g, *args):
     floating_scalar_types = ["Half", "Float", "Double"]
@@ -159,15 +177,19 @@ def _comparison_operator(g, input, other, op_name):
 
 
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
+
 #       integer input type not supported in opset8. Cast to float if possible.
+@_onnx_symbolic("aten::gt")
 def gt(g, input, other):
     return _comparison_operator(g, input, other, "Greater")
 
 
+@_onnx_symbolic("aten::lt")
 def lt(g, input, other):
     return _comparison_operator(g, input, other, "Less")
 
 
+@_onnx_symbolic("aten::bmm")
 def bmm(g, self, other):
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other = _try_cast_integer_to_float(g, self, other)
@@ -176,10 +198,12 @@ def bmm(g, self, other):
         return g.op("MatMul", self, other)
 
 
+@_onnx_symbolic("aten::matmul")
 def matmul(g, self, other):
     return bmm(g, self, other)
 
 
+@_onnx_symbolic("aten::prelu")
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
     weight_sizes = symbolic_helper._get_tensor_sizes(weight)
@@ -195,6 +219,7 @@ def prelu(g, self, weight):
         return g.op("PRelu", self, weight)
 
 
+@_onnx_symbolic("aten::mm")
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
@@ -222,6 +247,7 @@ def mm(g, self, other):
     return g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0)
 
 
+@_onnx_symbolic("aten::addmm")
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
 def addmm(g, self, mat1, mat2, beta, alpha):
     if symbolic_helper._try_get_scalar_type(self):
@@ -249,6 +275,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         )
 
 
+@_onnx_symbolic("aten::flatten")
 def flatten(g, input, start_dim, end_dim):
     start_dim_i = symbolic_helper._get_const(start_dim, "i", "start_dim")
     end_dim_i = symbolic_helper._get_const(end_dim, "i", "end_dim")
@@ -277,6 +304,7 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
+@_onnx_symbolic("aten::_constant_fill")
 def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -301,39 +329,46 @@ def _constant_fill(g, sizes, dtype: int, const_value):
         )
 
 
+@_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
+@_onnx_symbolic("aten::empty_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
+@_onnx_symbolic("aten::zeros")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return _constant_fill(g, sizes, dtype, 0)
 
 
+@_onnx_symbolic("aten::zeros_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
 
+@_onnx_symbolic("aten::ones")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
+@_onnx_symbolic("aten::ones_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
 
 
+@_onnx_symbolic("aten::full")
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
@@ -344,6 +379,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return _constant_fill(g, sizes, dtype, const_value)
 
 
+@_onnx_symbolic("aten::full_like")
 @symbolic_helper.parse_args("v", "f", "i", "v", "v", "v", "v")
 def full_like(
     g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None
@@ -352,6 +388,7 @@ def full_like(
     return _constant_fill(g, shape, dtype, fill_value)
 
 
+@_onnx_symbolic("aten::repeat")
 def repeat(g, self, repeats):
     if not symbolic_helper._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
