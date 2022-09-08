@@ -58,17 +58,22 @@ allgather_(
       c10::intrusive_ptr<ProcessGroup::Work>>(output_tensors, work);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
-  return process_group->reduce_scatter(
+  auto work = process_group->reduce_scatter(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::
+      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+          output_tensors, work);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_(
@@ -270,18 +275,20 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
     const ReduceScatterOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::reduce_scatter_", "")
-                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                       .typed<std::tuple<
+                           std::vector<at::Tensor>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
                            const std::vector<at::Tensor>&,
                            const std::vector<std::vector<at::Tensor>>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const c10::intrusive_ptr<::c10d::ReduceOp>&,
                            int64_t)>();
-  return op.call(
+  return std::get<1>(op.call(
       output_tensors,
       input_tensors,
       process_group,
       c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
-      opts.timeout.count());
+      opts.timeout.count()));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce(
