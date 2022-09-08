@@ -1341,9 +1341,9 @@ class TestLinalg(TestCase):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 fn(x, **kwargs, dtype=torch.float)
             # smoke check that profiler returned some events
-            self.assertTrue("aten::linalg_vector_norm" in map(lambda e: e.name, p.events()))
+            self.assertTrue("aten::linalg_vector_norm" in (e.name for e in p.events()))
             # test that there was no explicit copy
-            self.assertFalse("aten::to" in map(lambda e: e.name, p.events()))
+            self.assertFalse("aten::to" in (e.name for e in p.events()))
 
         for f, kwargs, in zip((torch.linalg.vector_norm, torch.norm), ({}, {"p" : 2})):
             profile_and_check(f, x, kwargs)
