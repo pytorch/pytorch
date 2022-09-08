@@ -306,7 +306,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
         def fake_fn(primals, tangents):
-            return fx_g(primals, tangents)
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(fx_g).run(primals, tangents)
 
         # Trace a second time, running functionalization, and THEN running decompositions.
         # functionalization only acts on ATen today, and doesn't currently handle
