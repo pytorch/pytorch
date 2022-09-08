@@ -3,6 +3,7 @@ from typing import Any
 import torch
 from torch.distributed import GradBucket
 
+__all__ = ["noop_hook"]
 
 
 def noop_hook(_: Any, bucket: GradBucket) -> torch.futures.Future[torch.Tensor]:

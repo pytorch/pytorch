@@ -68,6 +68,7 @@ if is_available():
     )
 
     from .rendezvous import (
+        rendezvous,
         _create_store_from_options,
     )
 
