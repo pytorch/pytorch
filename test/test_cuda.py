@@ -22,12 +22,10 @@ import torch.cuda.comm as comm
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1678,24 +1676,6 @@ except RuntimeError as e:
                 x = torch.randn(3, 1, device='cuda')
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
-
-    def test_trilu_indices(self):
-        for test_args in tri_tests_args:
-            _compare_trilu_indices(self, *test_args, device='cuda')
-
-        # test default options
-        x = torch.ones(
-            3, 3, dtype=torch.long, device='cuda', layout=torch.strided)
-        self.assertEqual(
-            x.tril(0).nonzero().transpose(0, 1),
-            torch.tril_indices(3, 3, device='cuda'))
-        self.assertEqual(
-            x.triu(0).nonzero().transpose(0, 1),
-            torch.triu_indices(3, 3, device='cuda'))
-
-    def test_large_trilu_indices(self):
-        for test_args in tri_large_tests_args:
-            _compare_large_trilu_indices(self, *test_args, device='cuda')
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     def test_cuda_kernel_loop_overflow(self):
@@ -3752,7 +3732,8 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), (True, True)],
+    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True),
+                 decorators=[unittest.expectedFailure])],
                  name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
                                                     {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
     def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
