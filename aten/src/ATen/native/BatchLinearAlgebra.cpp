@@ -1495,9 +1495,18 @@ void _linalg_check_errors(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-bool _requires_fw_or_bw_grad(const Tensor& input) {
+// If an input requires fw or bw grad then we need to go down a different
+// (slower) path to ensure that the gradients are computable.
+// That is what `_may_require_fw_or_bw_grad` is helpful for.
+//
+// Why is there a isTensorSubclassLike check here?
+// Without it, this function can lead to composite compliance problems, which
+// may lead to bugs in functorch, where a Tensor Subclass that doesn't
+// require grad may wrap a Tensor subclass that requires grad.
+bool _may_require_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined());
+          || input._fw_grad(/*level */ 0).defined()
+          || isTensorSubclassLike(input));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.inv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2688,9 +2697,8 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view u
 
 
 Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
-  // See [Note: svdvals_compute_uv] for the condition in compute_v
   return std::get<0>(at::_linalg_eigh(A, uplo,
-                     /*comptue_v=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
+                     /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
 Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
@@ -3148,7 +3156,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 Tensor linalg_eigvals(const Tensor& input) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (_requires_fw_or_bw_grad(input)) {
+  if (_may_require_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
 
@@ -3318,12 +3326,8 @@ Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driv
 }
 
 Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
-  // [Note: svdvals_compute_uv]
-  // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
-  //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
-  //     a TensorWrapper requiring fw or bw grad.
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
-                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A),
+                     /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
 }
 

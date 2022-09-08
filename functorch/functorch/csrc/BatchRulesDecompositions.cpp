@@ -140,6 +140,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
   OP_DECOMPOSE(linalg_eigvalsh);
+  OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
   OP_DECOMPOSE(linalg_matmul);
   OP_DECOMPOSE(linalg_matrix_norm);
