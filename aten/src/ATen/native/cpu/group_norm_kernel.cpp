@@ -34,7 +34,7 @@ void GroupNormKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    double eps,
+    T eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -165,7 +165,7 @@ void GroupNormKernelImplChannelsLastInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    double eps,
+    T eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -397,9 +397,11 @@ void GroupNormKernelImpl(
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
         if (mixed_type) {
-          GroupNormKernelImplInternal<BFloat16, float>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplInternal<BFloat16, float>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         } else {
-          GroupNormKernelImplInternal<scalar_t, scalar_t>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         }
       });
       break;
@@ -408,9 +410,11 @@ void GroupNormKernelImpl(
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
         if (mixed_type) {
-          GroupNormKernelImplChannelsLastInternal<BFloat16, float>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplChannelsLastInternal<BFloat16, float>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         } else {
-          GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         }
       });
       break;
