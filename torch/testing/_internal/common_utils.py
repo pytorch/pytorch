@@ -933,13 +933,23 @@ if TEST_WITH_TORCHDYNAMO:
 
 def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if TEST_WITH_TORCHDYNAMO:
-                raise unittest.SkipTest(msg)
-            else:
-                fn(*args, **kwargs)
-        return wrapper
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_TORCHDYNAMO:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if TEST_WITH_TORCHDYNAMO:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+
     return decorator
 
 # Determine whether to enable cuda memory leak check.
@@ -2276,7 +2286,7 @@ class TestCase(expecttest.TestCase):
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
-            x = x.detach().clone()
+            x = x.detach().clone()._coalesced_(False)
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
