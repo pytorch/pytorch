@@ -32,6 +32,15 @@ threshold: 100
 direction: decrease
 timeout: 720
 tests:"""
+S3_BUCKET = "ossci-metrics"
+S3_PREFIX = "torchbench-pr-test"
+
+class S3Client:
+    def __init__(self, bucket):
+        pass
+
+    def upload_file(self, file_path, s3key):
+        assert file_path.is_file(), f"Specified file path {file_path} does not exist or not file."
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
@@ -143,7 +152,8 @@ def process_upload_s3(result_dir):
     result_dir = Path(result_dir)
     assert result_dir.exists(), f"Specified result directory doesn't exist."
     # upload all files to S3 bucket oss-ci-metrics
-    pass
+    files = [x for x in result_dir.iterdir() if x.is_file()]
+    # upload file to S3 bucket
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
