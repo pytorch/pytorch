@@ -1,5 +1,5 @@
 import itertools
-import collections
+import collections.abc
 import contextlib
 import io
 import logging
