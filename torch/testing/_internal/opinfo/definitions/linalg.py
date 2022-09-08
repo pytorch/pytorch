@@ -1265,10 +1265,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
-            # Pre-existing condition; Needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_operator"
-            ),
             # exits early on eager extremal value test
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -1391,12 +1387,6 @@ op_db: List[OpInfo] = [
             skipCPUIfNoLapack,
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_forward_ad"
             ),
         ],
     ),
