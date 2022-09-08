@@ -44,10 +44,10 @@ set_property(TARGET torch::magma
 
 # Check for Magma V2
 include(CheckPrototypeDefinition)
-check_prototype_definition(magma_get_sgeqrf_nb
-  "magma_int_t magma_get_sgeqrf_nb( magma_int_t m);"
+check_prototype_definition(magma_get_zpotrf_nb
+  "magma_int_t magma_get_zpotrf_nb( magma_int_t n );"
   "0"
-  "magma.h"
+  "magma_v2.h;magma_z.h"
   MAGMA_V2)
 if(MAGMA_V2)
   set_property(TARGET torch::magma
