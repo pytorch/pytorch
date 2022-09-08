@@ -5,6 +5,7 @@ import os
 import unittest
 import contextlib
 import math
+import shlex
 import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
@@ -920,7 +921,7 @@ class TestTEFuser(JitTestCase):
                 return ingate * forgetgate * cellgate * outgate
             ''')
             for permutation in permutations(choices, len(choices)):
-                code = template.format(*permutation)
+                code = shlex.quote(template.format(*permutation))
                 scope = {}
                 exec(code, globals(), scope)
                 cu = torch.jit.CompilationUnit(code)
@@ -2614,7 +2615,7 @@ class TestNNCOpInfo(TestNNCOpInfoParent):
 def f({', '.join(param_names)}):
     return op.op({', '.join(fx_args)})"""
             g = {'torch': torch, 'inf' : math.inf, 'op': op}
-            exec(code, g)
+            exec(shlex.quote(code), g)
             f = g['f']
             f.__module__ = 'test'
             out = f(*param_values)
