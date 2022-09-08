@@ -12,18 +12,18 @@ static DispatchKeySet get_all_dynlayer_keyset() {
 
   // "all dispatch keys between DynamicLayer{Front, Back}Mode, inclusive"
   auto result =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, kDynamicLayerFrontModeKey) -
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, kDynamicLayerBackModeKey);
-  result = result | DispatchKeySet({kDynamicLayerFrontModeKey});
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerFrontMode) -
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::FuncTorchDynamicLayerBackMode);
+  result = result | DispatchKeySet({DispatchKey::FuncTorchDynamicLayerFrontMode});
 
   // Hack: don't handle the autocast dispatch keys. Their interaction with functorch
   // is weird.
   result = result - autocast_dispatch_keyset;
 
-  // Hack: don't handle kVmapModeKey. We need a better way of modeling this.
-  // In e.g. grad(vmap(f)), kVmapModeKey makes it so that all random operations,
+  // Hack: don't handle DispatchKey::FuncTorchVmapMode. We need a better way of modeling this.
+  // In e.g. grad(vmap(f)), DispatchKey::FuncTorchVmapMode makes it so that all random operations,
   // even after we are done handling the vmap layer, error out.
-  result = result.remove(kVmapModeKey);
+  result = result.remove(DispatchKey::FuncTorchVmapMode);
 
   return result;
 }
@@ -34,10 +34,10 @@ static DispatchKeySet all_dynlayer_keyset = get_all_dynlayer_keyset();
 
 static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
   if (key == TransformType::Vmap) {
-    // NB: Does not include kVmapModeKey. We may modulate the key when
+    // NB: Does not include DispatchKey::FuncTorchVmapMode. We may modulate the key when
     // constructing the DynamicLayer, but we don't control it when entering/exiting
     // the DynamicLayer.
-    return DispatchKeySet({kBatchedKey});
+    return DispatchKeySet({DispatchKey::FuncTorchBatched});
   } else if (key == TransformType::Grad || key == TransformType::Jvp) {
     return autograd_dispatch_keyset.add(DispatchKey::ADInplaceOrView);
   } else if (key == TransformType::Functionalize) {
@@ -49,7 +49,7 @@ static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
 
 DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key) {
   DispatchKeySet exclude = all_dynlayer_keyset;
-  exclude = exclude.remove(kDynamicLayerBackModeKey);
+  exclude = exclude.remove(DispatchKey::FuncTorchDynamicLayerBackMode);
   exclude = exclude - keysForEnteringDynamicLayer(key);
   return exclude;
 }

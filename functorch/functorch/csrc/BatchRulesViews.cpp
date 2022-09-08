@@ -58,7 +58,7 @@ namespace at { namespace functorch {
 //
 // Now that we have written `sum_batch_rule`, we have to register it inside a
 // TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     VMAP_SUPPORT2(sum, int, sum_batch_rule);
 //     ...
@@ -79,7 +79,7 @@ namespace at { namespace functorch {
 //     return torch.add(self, product, value);
 //   }
 // And register it inside a TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     m.impl("addcmul", addcmul_decomp);
 //     ...
@@ -175,7 +175,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard2(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
     return self.resize_(size, optional_memory_format);
   }
 
@@ -190,7 +190,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
 
   // Resize the wrapped tensor
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   self_value = moveBatchDimToFront(self_value, self_bdim);
   VmapDimVector new_size(size);
   new_size.insert(new_size.begin(), self_value.size(*self_bdim));
@@ -519,7 +519,7 @@ Tensor expand_symint_decomp_hack(const Tensor& self, SymIntArrayRef packed_size,
    return self.expand(size, implicit);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
