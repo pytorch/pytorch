@@ -48,7 +48,7 @@ def aten__is_(g, self, other):
 
 
 @_onnx_symbolic("aten::__isnot_")
-@opset9.wrap_logical_op_with_negation
+@opset9.wrap_logical_op_with_negation  # type: ignore[has-type]
 @_beartype.beartype
 def aten__isnot_(g, self, other):
     return aten__is_(g, self, other)
