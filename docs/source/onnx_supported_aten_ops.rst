@@ -10,8 +10,21 @@ ONNX supported TorchScript operators
 
 This page lists the TorchScript operators that are supported/unsupported by ONNX export.
 
+Supported operators
+-------------------
 
 .. csv-table:: ONNX support for TorchScript operators
-   :file: ../build/onnx/auto_gen_op_support_list.csv
-   :widths: 30, 70
+   :file: ../build/onnx/auto_gen_supported_op_list.csv
+   :widths: 70, 30
+   :header-rows: 1
+
+
+Unsupported operators
+---------------------
+
+Operators that are not yet supported
+
+.. csv-table:: Unsupported operators
+   :file: ../build/onnx/auto_gen_unsupported_op_list.csv
+   :widths: 70, 30
    :header-rows: 1

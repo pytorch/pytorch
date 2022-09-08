@@ -66,13 +66,13 @@ def _symbolic_argument_count(func):
     return params
 
 
-def _all_forward_schemas() -> Dict[str, _TorchSchema]:
+def all_forward_schemas() -> Dict[str, _TorchSchema]:
     """Returns schemas for all TorchScript forward ops."""
     torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
     return {schema.name: schema for schema in torch_schemas if not schema.is_backward()}
 
 
-def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
+def all_symbolics_schemas() -> Dict[str, _TorchSchema]:
     """Returns schemas for all onnx supported ops."""
     symbolics_schemas = {}
 
@@ -96,31 +96,3 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
         symbolics_schemas[name] = symbolics_schema
 
     return symbolics_schemas
-
-
-def onnx_supported_ops():
-    all_schemas = _all_forward_schemas()
-    symbolic_schemas = _all_symbolics_schemas()
-    supported_result = set()
-    not_supported_result = set()
-    for opname in all_schemas:
-        if opname.endswith("_"):
-            opname = opname[:-1]
-        if opname in symbolic_schemas:
-            # Supported op
-            opsets = symbolic_schemas[opname].opsets
-            supported_result.add(
-                (
-                    opname,
-                    f"{opsets[0]}-{opsets[-1]}" if len(opsets) > 1 else f"{opsets[0]}",
-                )
-            )
-        else:
-            # Unsupported op
-            not_supported_result.add(
-                (
-                    opname,
-                    "Not yet supported",
-                )
-            )
-    return sorted(supported_result) + sorted(not_supported_result)
