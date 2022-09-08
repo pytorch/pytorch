@@ -324,6 +324,16 @@ def _apply_params(*args, **kwargs):
     return _apply
 
 
+def _export(name: str):
+    """Exports the function in the current global namespace."""
+
+    def wrapper(func):
+        globals()[name] = func
+        return func
+
+    return wrapper
+
+
 @_beartype.beartype
 def unused(g):
     """Represents "missing" optional inputs."""
@@ -1507,7 +1517,8 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     decorate=[
         _apply_params(
             "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
-        )
+        ),
+        _export("max_pool2d"),
     ],
 )
 @_onnx_symbolic(
@@ -1610,7 +1621,10 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
-    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
+    decorate=[
+        _apply_params("avg_pool2d", torch.nn.modules.utils._pair),
+        _export("avg_pool2d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
@@ -1925,7 +1939,10 @@ def pad(g, input, pad, mode, value):
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[
+        _apply_params("upsample_nearest2d", 4, "nearest"),
+        _export("upsample_nearest2d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
