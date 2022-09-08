@@ -865,8 +865,6 @@ make_fx_failures = {
     # unknown
     xfail('allclose'),
     xfail('equal'),
-    xfail('linalg.eigvals'),
-    xfail('nn.functional.max_pool1d', device_type='cpu'),
     # empty
     skip('new_empty'),
     skip('empty_like'),
@@ -915,6 +913,7 @@ symbolic_tensor_failures = {
     # Needs complex-value support
     xfail('polar'),
     xfail('linalg.eig'),
+    xfail('linalg.eigvals'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -1138,6 +1137,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.linear', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
+    xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
     xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta function/decom...
