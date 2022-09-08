@@ -51,11 +51,14 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
             elif arg.is_symint_or_list:
-                cpp_type = arg.lazy_type.cpp_type()
                 return f"GetSymIntValue({arg.name})"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
-            if arg.is_wrapped_scalar:
+            if arg.is_symint_or_list:
+                # TODO: I don't understand when you should put lazy_ in the name
+                # or not
+                return f"{arg.name} ? c10::make_optional(GetSymIntValue(*{arg.name})) : c10::nullopt"
+            elif arg.is_wrapped_scalar:
                 return f"node_{arg.name}"
             return (
                 f"lazy_{arg.name} ? "
@@ -428,6 +431,7 @@ class GenLazyNativeFuncDefinition:
                         f"{self.backend_namespace}::{self.get_tensor_or_wrap_number}({arg.name}, *common_device);"
                     )
             elif isinstance(arg.lazy_type, OptionalCType):
+                assert arg.lazy_type.elem == BaseCType(getValueT()), arg.lazy_type.elem
                 # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
                 # until we encounter a real world example.
                 lazy_tensor_decls.append(

@@ -117,7 +117,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
-             NvfDataType dtype = NvfDataType::Float) -> nvfuser::Tensor* {
+             NvfDataType dtype = NvfDataType::Float,
+             bool is_cpu = false) -> nvfuser::Tensor* {
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -159,13 +160,15 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {out->index},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
-                dtype));
+                dtype,
+                is_cpu));
 
             return out;
           },
           py::arg("sizes"),
           py::arg("strides"),
           py::arg("dtype") = NvfDataType::Float,
+          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_constant",
@@ -917,6 +920,19 @@ void initNvFuserPythonBindings(PyObject* module) {
 
   NVFUSER_PYTHON_BINDING_CAST_OP("cast", castOp)
 #undef NVFUSER_PYTHON_BINDING_CAST_OP
+
+  nvf_ops.def(
+      "squeeze",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor* arg,
+         std::vector<int64_t>& original_shape,
+         int64_t dim) -> nvfuser::Tensor* {
+        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::SqueezeOpRecord(
+            {arg->index}, {output->index}, original_shape, dim));
+        return output;
+      },
+      py::return_value_policy::reference);
 
   nvf_ops.def(
       "var",
