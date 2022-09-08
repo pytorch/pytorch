@@ -1,3 +1,16 @@
+- name: Core Maintainers
+  patterns:
+  - '*'
+  approved_by:
+  - soumith
+  - gchanan
+  - ezyang
+  - dzhulgakov
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
 - name: ONNX exporter
   patterns:
   - .jenkins/caffe2/*
@@ -323,19 +336,6 @@
   - '*'
   approved_by:
   - pytorch/metamates
-  mandatory_checks_name:
-  - Facebook CLA Check
-  - Lint
-  - pull
-
-- name: Core Maintainers
-  patterns:
-  - '*'
-  approved_by:
-  - soumith
-  - gchanan
-  - ezyang
-  - dzhulgakov
   mandatory_checks_name:
   - Facebook CLA Check
   - Lint

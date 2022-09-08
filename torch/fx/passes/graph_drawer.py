@@ -140,16 +140,12 @@ if HAS_PYDOT:
 
         def _typename(self, target: Any) -> str:
             if isinstance(target, torch.nn.Module):
-                ret = torch.typename(target)
-            elif isinstance(target, str):
-                ret = target
-            else:
-                ret = _get_qualified_name(target)
+                return torch.typename(target)
 
-            # Escape "{" and "}" to prevent dot files like:
-            # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
-            # which triggers `Error: bad label format (...)` from dot
-            return ret.replace("{", r"\{").replace("}", r"\}")
+            if isinstance(target, str):
+                return target
+
+            return _get_qualified_name(target)
 
         def _get_node_label(
             self,

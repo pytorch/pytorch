@@ -1,3 +1,10 @@
+def get_sleef_arch_deps():
+    return [
+        ("x86_64", [
+            "third-party//sleef:sleef",
+        ]),
+    ]
+
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [

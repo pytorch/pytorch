@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 
 #if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
