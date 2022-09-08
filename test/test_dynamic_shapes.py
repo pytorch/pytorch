@@ -10,7 +10,7 @@ import torch
 import operator
 import itertools
 from torch.utils._pytree import tree_map
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
 
 aten = torch.ops.aten
 
@@ -288,6 +288,13 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
+
+    @skipIfNoSympy
+    def test_int_to_float(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        r = sym_float(x.shape[0])
+        self.assertTrue(isinstance(r, torch.SymFloatNode))
 
     @skipIfNoSympy
     def test_aten_ops(self):
