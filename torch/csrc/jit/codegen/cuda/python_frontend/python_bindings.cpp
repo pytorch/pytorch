@@ -117,8 +117,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self,
              std::vector<int64_t> sizes,
              std::vector<int64_t> strides,
-             NvfDataType dtype = NvfDataType::Float,
-             bool is_cpu = false) -> nvfuser::Tensor* {
+             NvfDataType dtype = NvfDataType::Float) -> nvfuser::Tensor* {
             TORCH_CHECK(
                 sizes.size() == strides.size(),
                 "The number of sizes does not match the number of strides.",
@@ -160,15 +159,13 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {out->index},
                 std::move(maybe_symbolic_sizes),
                 std::move(contig_info),
-                dtype,
-                is_cpu));
+                dtype));
 
             return out;
           },
           py::arg("sizes"),
           py::arg("strides"),
           py::arg("dtype") = NvfDataType::Float,
-          py::arg("is_cpu") = false,
           py::return_value_policy::reference)
       .def(
           "define_constant",
