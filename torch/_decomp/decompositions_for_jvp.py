@@ -34,7 +34,6 @@ aten = torch.ops.aten
 # to enable the decomposition.
 
 
-
 def maybe_register_decomposition(op):
     def decorator(f):
         try:
