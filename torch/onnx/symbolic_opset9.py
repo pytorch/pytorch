@@ -29,6 +29,7 @@ from torch.onnx._exporter_states import (
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal.torch_graph import GraphContext
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -6287,7 +6288,7 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+def prim_device(ctx: SymbolicContext, g: GraphContext, *inputs, **kwargs) -> None:
     output_type = ctx.cur_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None

@@ -46,7 +46,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, registration, torch_graph
 
 __all__ = [
     "is_in_onnx_export",
@@ -1663,8 +1663,8 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
 
 
 @_beartype.beartype
-def _add_block(node: _C.Node):
-    return node.addBlock()  # type: ignore[attr-defined]
+def _add_block(node: _C.Node) -> _C.Block:
+    return node.addBlock()
 
 
 @_beartype.beartype
@@ -1673,9 +1673,8 @@ def _add_input_to_block(block: _C.Block):
 
 
 @_beartype.beartype
-def _add_output_to_block(block: _C.Block, value: _C.Value):
-    new_output = block.registerOutput(value)  # type: ignore[attr-defined]
-    return new_output
+def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
+    return block.registerOutput(value)
 
 
 # Note [Export inplace]
@@ -1729,9 +1728,9 @@ def _get_aten_op_overload_name(n: _C.Node) -> str:
 
 @_beartype.beartype
 def _run_symbolic_function(
-    g: _C.Graph,
+    graph: _C.Graph,
     block: _C.Block,
-    n: _C.Node,
+    node: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -1748,7 +1747,7 @@ def _run_symbolic_function(
     opset_version = GLOBALS.export_onnx_opset_version
 
     # See Note [Export inplace]
-    node_kind = n.kind()
+    node_kind = node.kind()
     if node_kind.endswith("_"):
         # Treat relu_ -> relu; add_ -> add etc.
         ns_op_name = node_kind[:-1]
@@ -1756,6 +1755,14 @@ def _run_symbolic_function(
         ns_op_name = node_kind
 
     namespace, op_name = ns_op_name.split("::")
+
+    graph_context = torch_graph.GraphContext(
+        graph=graph,
+        opset=opset_version,
+        onnx_block=block,
+        original_node=node,
+        params_dict=_params_dict,
+    )
 
     try:
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
@@ -1774,32 +1781,39 @@ def _run_symbolic_function(
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
-                attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
+                attrs = {
+                    k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
+                }
                 if _need_symbolic_context(symbolic_fn):
                     # TODO(justinchuby): Refactor how we check for the need of the symbolic context
-                    ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
-                    return symbolic_fn(ctx, g, *inputs, **attrs)
+                    ctx = _exporter_states.SymbolicContext(
+                        _params_dict, env, node, block, opset_version
+                    )
+                    return symbolic_fn(ctx, graph_context, *inputs, **attrs)
                 # PythonOp symbolic need access to the node to resolve the name conflict,
                 # this is inconsistent with regular op symbolic.
                 if op_name == "PythonOp":
-                    inputs = (n, *inputs)
-                return symbolic_fn(g, *inputs, **attrs)
+                    inputs = (node, *inputs)
+                return symbolic_fn(graph_context, *inputs, **attrs)
 
         attrs = {
-            k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
-            for k in n.attributeNames()
+            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
+            for k in node.attributeNames()
         }
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
+            return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
 
         if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
             # Direct ATen export requested
-            outputs = n.outputsSize()
+            outputs = node.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
-            return g.at(  # type: ignore[attr-defined]
-                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+            return graph_context.at(
+                op_name,
+                *inputs,
+                overload_name=_get_aten_op_overload_name(node),
+                **attrs,
             )
 
         if symbolic_function_group is not None:
@@ -1819,11 +1833,14 @@ def _run_symbolic_function(
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
-                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
-                for k in n.attributeNames()
+                k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
+                for k in node.attributeNames()
             }
-            return g.at(  # type: ignore[attr-defined]
-                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+            return graph_context.at(
+                op_name,
+                *inputs,
+                overload_name=_get_aten_op_overload_name(node),
+                **attrs,
             )
         raise
     except TypeError as e:

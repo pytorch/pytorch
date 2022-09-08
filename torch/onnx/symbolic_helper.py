@@ -15,6 +15,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
+from torch.onnx._internal.torch_graph import GraphContext
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 from torch.types import Number
@@ -459,7 +460,7 @@ def _scalar(x: Any) -> Optional[Number]:
 
 
 @_beartype.beartype
-def _if_scalar_type_as(g: _C.Graph, self, tensor):
+def _if_scalar_type_as(g: GraphContext, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
     We only support implicit casting for scalars, so we never
