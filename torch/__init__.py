@@ -895,7 +895,8 @@ from torch._classes import classes
 # decompositions_for_jvp depends on torch.ops
 # Registers decompositions for jvp to the jit registry
 if os.environ.get("PYTORCH_JIT", "1") == "1":
-    from torch._decomp import decompositions_for_jvp as _decompositions_for_jvp
+    from torch._decomp import decompositions_for_jvp
+    del decompositions_for_jvp
 
 # quantization depends on torch.fx
 # Import quantization
