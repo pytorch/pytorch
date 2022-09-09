@@ -517,6 +517,11 @@ def meta_add(self, other, *, alpha=1):
         )
     return self.new_empty(out_shape, dtype=out_dtype)
 
+@register_meta([aten.add_.Tensor], register_dispatcher=False)
+def meta_add_(self, other, *, alpha=1):
+    self = meta_add(self, other, alpha=alpha)
+    return self
+
 @register_meta([aten.mm.default], register_dispatcher=False)
 def meta_mm(a, b):
     check(a.dim() == 2, lambda: "a must be 2D")
