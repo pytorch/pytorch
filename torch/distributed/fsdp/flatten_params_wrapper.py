@@ -77,6 +77,7 @@ class FlattenParamsWrapper(nn.Module):
         _flat_param_handle (FlatParamHandle): A handle for the flattened
             parameter; only present if this wrapper manages parameters.
     """
+
     def __init__(
         self,
         module: nn.Module,
@@ -106,9 +107,10 @@ class FlattenParamsWrapper(nn.Module):
 
     @property
     def handle(self) -> FlatParamHandle:
-        assert hasattr(self, "_flat_param_handle"), \
-            "Accessing the handle of a `FlattenParamsWrapper` that does not " \
+        assert hasattr(self, "_flat_param_handle"), (
+            "Accessing the handle of a `FlattenParamsWrapper` that does not "
             "manage any parameters"
+        )
         return self._flat_param_handle
 
     @property

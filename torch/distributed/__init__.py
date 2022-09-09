@@ -44,6 +44,7 @@ if is_available():
         get_debug_level,
         set_debug_level,
         set_debug_level_from_env,
+        _make_nccl_premul_sum,
     )
 
     if sys.platform != "win32":
@@ -67,6 +68,7 @@ if is_available():
     )
 
     from .rendezvous import (
+        rendezvous,
         _create_store_from_options,
     )
 
