@@ -1257,6 +1257,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
             error_msgs,
         )
 
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
 
 class FixedQParamsObserver(ObserverBase):
     r"""
