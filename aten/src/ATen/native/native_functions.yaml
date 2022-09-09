@@ -1974,6 +1974,8 @@
   autogen: embedding.out
 
 - func: embedding_backward(Tensor grad, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: embedding_backward_symint
 
 - func: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   dispatch:

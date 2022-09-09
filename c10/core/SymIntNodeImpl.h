@@ -66,7 +66,7 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual bool bool_() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual int64_t int_() {
+  virtual int64_t int_(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   }
   virtual std::string str() {
