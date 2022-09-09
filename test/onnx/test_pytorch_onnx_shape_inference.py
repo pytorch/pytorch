@@ -21,7 +21,7 @@ def expect_tensor(scalar_type, shape=None):
 
 class TestONNXShapeInference(common_utils.TestCase):
     def setUp(self):
-        self.opset_version = _constants.onnx_main_opset
+        self.opset_version = _constants.ONNX_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)
         symbolic_helper._set_opset_version(self.opset_version)
 
