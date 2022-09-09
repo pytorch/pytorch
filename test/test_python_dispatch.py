@@ -11,7 +11,7 @@ from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, get_current_dispatch_mode
 
 import logging
 
@@ -1022,51 +1022,6 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with PoliteMode():
                 a.abs()
 
-    def test_make_wrapper_subclass_with_modes(self):
-        class ModeTensor(torch.Tensor):
-            def __new__(cls, elem, mode):
-                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
-                r.elem = elem
-                r.mode = mode
-                return r
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
-                outermost = find_outermost_mode(modes)
-                with outermost.restore():
-                    return func(*args, **kwargs)
-
-        class Mode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                def unwrap(e):
-                    if isinstance(e, ModeTensor):
-                        return e.elem
-                    else:
-                        return e
-
-                def wrap(t):
-                    if isinstance(t, torch.Tensor):
-                        return ModeTensor(t, self)
-                    else:
-                        return t
-
-                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
-
-        x = torch.tensor(4.)
-        with Mode():
-            y = x + x
-            z = y + y
-        self.assertIsInstance(y, ModeTensor)
-        self.assertIsInstance(z, ModeTensor)
-
-        with Mode():
-            with Mode():
-                y = x + x
-                z = y + y
-        self.assertIsInstance(y, ModeTensor)
-        self.assertIsInstance(z, ModeTensor)
-
     def test_error_with_same_mode(self):
         # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
 
@@ -1099,6 +1054,20 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
+
+    def test_get_cur_mode(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                pass
+
+        self.assertEqual(get_current_dispatch_mode(), None)
+
+        with A() as mode1:
+            self.assertEqual(get_current_dispatch_mode(), mode1)
+
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(get_current_dispatch_mode(), mode2)
 
     def test_all_same_mode(self):
         x = LoggingTensorMode()

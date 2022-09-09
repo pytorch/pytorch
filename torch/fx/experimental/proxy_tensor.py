@@ -17,7 +17,7 @@ import inspect
 from dataclasses import dataclass
 import weakref
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, get_cur_mode
+from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, get_current_dispatch_mode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -156,7 +156,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mb_fake_mode = get_cur_mode()
+    mb_fake_mode = get_current_dispatch_mode()
     if isinstance(mb_fake_mode, FakeTensorMode):
         return _pop_mode_temporarily()
     else:

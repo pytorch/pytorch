@@ -112,8 +112,8 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
         return instance
 
 
-def get_cur_mode():
-    return _cur_torch_dispatch_mode[0] if len(_cur_torch_dispatch_mode) > 0 else None
+def get_current_dispatch_mode():
+    return _cur_torch_dispatch_mode[-1] if len(_cur_torch_dispatch_mode) > 0 else None
 
 
 def _push_mode(mode):
