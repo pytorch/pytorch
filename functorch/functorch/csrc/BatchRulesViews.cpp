@@ -103,15 +103,15 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
 std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
-    IntArrayRef sizes) {
+    c10::SymIntArrayRef sizes) {
 
-  VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
+  SymDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
   sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   while (self_.dim() < (int64_t)sizes_with_bdim.size()) {
     self_ = self_.unsqueeze(1);
   }
-  return std::make_tuple(self_.repeat(sizes_with_bdim), 0);
+  return std::make_tuple(self_.repeat_symint(sizes_with_bdim), 0);
 }
 
 
