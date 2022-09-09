@@ -121,6 +121,7 @@ jobs:
         env:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
+          set -x
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           ${CONDA_RUN} .jenkins/pytorch/macos-build.sh
 
