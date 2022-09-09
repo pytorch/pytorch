@@ -186,12 +186,12 @@
 
 - func: _use_cudnn_rnn_flatten_weight() -> bool
 
-- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, SymInt input_size, int mode, SymInt hidden_size, SymInt proj_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
   autogen: _cudnn_rnn_flatten_weight.out
 
-- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, SymInt hidden_size, SymInt proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, SymInt[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   # rnn_tanh may or may not redispatch to _cudnn_rnn based on algorithm and build. Thus it might hit dispatch or kernel device check.
   # Disable dispatch time device check for consistent behavior.
   device_check: NoCheck
@@ -199,7 +199,7 @@
     CUDA: _cudnn_rnn
   autogen: _cudnn_rnn.out
 
-- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, SymInt hidden_size, SymInt proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, SymInt[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   dispatch:
     CUDA: _cudnn_rnn_backward
   autogen: _cudnn_rnn_backward.out
@@ -2077,7 +2077,7 @@
     CompositeExplicitAutogradNonFunctional: new_empty_strided_symint
   autogen: new_empty_strided.out
 
-- func: new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2093,7 +2093,7 @@
     CompositeExplicitAutograd: new_zeros
   autogen: new_zeros.out
 
-- func: new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2850,7 +2850,7 @@
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
-- func: native_layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
@@ -2858,7 +2858,7 @@
     CompositeExplicitAutograd: math_native_layer_norm
   autogen: native_layer_norm.out
 
-- func: native_layer_norm_backward(Tensor grad_out, Tensor input, SymInt[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
@@ -4199,7 +4199,7 @@
 - func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor
   variants: function, method
 
-- func: reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
+- func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -5395,7 +5395,7 @@
   tags: dynamic_output_shape
   autogen: _unique2.out
 
-- func: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
+- func: _unsafe_view(Tensor self, int[] size) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
   autogen: _unsafe_view.out
@@ -10328,7 +10328,7 @@
   structured_delegate: softshrink_backward.grad_input
   python_module: nn
 
-- func: adaptive_avg_pool2d.out(Tensor self, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool2d_out_cpu
@@ -10336,10 +10336,8 @@
     MPS: adaptive_avg_pool2d_out_mps
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out_stub
 
-- func: adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
+- func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeImplicitAutograd: adaptive_avg_pool2d_symint
 
 - func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
@@ -10354,7 +10352,7 @@
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_backward
   autogen: mkldnn_adaptive_avg_pool2d_backward.out
 
-- func: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
+- func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
@@ -11393,13 +11391,13 @@
     CUDA: slow_conv_dilated3d_cuda
   autogen: slow_conv_dilated3d.out
 
-- func: col2im.out(Tensor self, SymInt[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
+- func: col2im.out(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: col2im_out_cpu
     CUDA: col2im_out_cuda
 
-- func: col2im(Tensor self, SymInt[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
     CPU: col2im_cpu
@@ -11433,13 +11431,13 @@
     CPU: im2col_cpu
     CUDA: im2col_cuda
 
-- func: im2col_backward.grad_input(Tensor grad_output, SymInt[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: im2col_backward.grad_input(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: im2col_backward_out_cpu
     CUDA: im2col_backward_out_cuda
 
-- func: im2col_backward(Tensor grad_output, SymInt[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
     CPU: im2col_backward_cpu

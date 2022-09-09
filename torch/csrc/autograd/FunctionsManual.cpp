@@ -4633,7 +4633,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO_t,
     const Tensor& save_mean_t,
     const Tensor& save_invstd_t,
-    c10::SymIntArrayRef normalized_shape,
+    IntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input_t.sizes();
@@ -5977,7 +5977,7 @@ Tensor layer_norm_jvp(
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
-    c10::SymIntArrayRef normalized_shape) {
+    IntArrayRef normalized_shape) {
   auto dims = std::vector<int64_t>{};
   auto view_size = input_t.sizes().vec();
   auto view_size_affine = input_t.sizes().vec();

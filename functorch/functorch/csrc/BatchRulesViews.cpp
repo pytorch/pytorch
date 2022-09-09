@@ -136,22 +136,22 @@ std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
 std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
-    c10::SymIntArrayRef size) {
+    IntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  SymDimVector view_size(size);
+  VmapDimVector view_size(size);
   view_size.insert(view_size.begin(), self_.size(0));
 
   // See if the view is valid. If it's not, then we copy.
   // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
   // anymore.
-  const at::SymDimVector inferred_size = at::infer_size_dv(view_size, self_.sym_numel());
-  const auto stride = at::detail::computeStride(self_.sym_sizes(),
-                                                self_.sym_strides(),
+  const at::DimVector inferred_size = at::infer_size_dv(view_size, self_.numel());
+  const auto stride = at::detail::computeStride(self_.sizes(),
+                                                self_.strides(),
                                                 inferred_size);
   if (!stride.has_value()) {
     self_ = self_.contiguous();
   }
-  return std::make_tuple(at::_unsafe_view_symint(self_, view_size), 0);
+  return std::make_tuple(at::_unsafe_view(self_, view_size), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims) {

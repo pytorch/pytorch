@@ -761,7 +761,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO,
     const Tensor& save_mean,
     const Tensor& save_invstd,
-    c10::SymIntArrayRef normalized_shape,
+    IntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
 std::tuple<Tensor, Tensor> householder_product_backward(
@@ -892,7 +892,7 @@ Tensor layer_norm_jvp(
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
-    c10::SymIntArrayRef normalized_shape);
+    IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,

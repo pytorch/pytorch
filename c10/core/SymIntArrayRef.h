@@ -79,10 +79,6 @@ class SymIntArrayRef final {
   /* implicit */ constexpr SymIntArrayRef(const c10::SymInt (&Arr)[N])
       : wrapped_symint_array_ref(Arr) {}
 
-  /// Construct an ArrayRef from a std::initializer_list.
-  /* implicit */ constexpr SymIntArrayRef(const std::initializer_list<c10::SymInt>& Vec)
-      : wrapped_symint_array_ref(Vec) {}
-
   // Prefer using a more semantic constructor, like
   // fromIntArrayRefKnownNonNegative
   static SymIntArrayRef fromIntArrayRefUnchecked(IntArrayRef array_ref) {
