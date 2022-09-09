@@ -171,20 +171,11 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     # you load consistently use the same libstdc++, or you may have
     # mysterious segfaults.
     #
-    import os as _dl_flags
-    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
-        try:
-            # next try if DLFCN exists
-            import DLFCN as _dl_flags  # type: ignore[import, no-redef]
-        except ImportError:
-            # as a last attempt, use compile-time constants
-            import torch._dl as _dl_flags  # type: ignore[import, no-redef]
     old_flags = sys.getdlopenflags()
-    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
     from torch._C import *  # noqa: F403
     sys.setdlopenflags(old_flags)
     del old_flags
-    del _dl_flags
 
 else:
     # Easy way.  You want this most of the time, because it will prevent
@@ -408,10 +399,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
-        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
-          on a CUDA tensor
-        * :func:`torch.gather` when ``input`` dimension is one and called
-          on a CUDA tensor that requires grad
+        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
@@ -445,10 +434,6 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
-        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
-          and called on a CUDA tensor
-        * :func:`torch.gather` when ``input`` dimension is larger than one
-          and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
@@ -885,10 +870,11 @@ from torch import profiler as profiler
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
 import torch.nn.intrinsic
+from torch import ao as ao
+# nn.quant* depends on ao -- so should be after those.
 import torch.nn.quantizable
 import torch.nn.quantized
-# AO depends on nn, as well as quantized stuff -- so should be after those.
-from torch import ao as ao
+import torch.nn.qat
 
 _C._init_names(list(torch._storage_classes))
 
@@ -969,3 +955,9 @@ if sys.executable != 'torch_deploy':
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
+
+# Enable CUDA Sanitizer
+if 'TORCH_CUDA_SANITIZER' in os.environ:
+    import torch.cuda._sanitizer as csan
+
+    csan.enable_cuda_sanitizer()
