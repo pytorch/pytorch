@@ -287,7 +287,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
+    # xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
     xfail('to_sparse'),
 }
 
@@ -470,6 +470,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
+        skip('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
     }))
@@ -555,6 +556,7 @@ class TestOperators(TestCase):
         # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
         # to have 4 channels, but got 8 channels instead
         xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
+        xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -954,6 +956,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
+        xfail('nn.functional.ctc_loss'),
         xfail('as_strided'),
         xfail('stft'),
         xfail('nn.functional.rrelu'),
@@ -1154,6 +1157,7 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'amax'),  # NYI: forward-AD for scatter_reduce
         xfail('scatter_reduce', 'amin'),  # NYI: forward-AD for scatter_reduce
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         xfail('scatter_reduce', 'sum'),  # NYI: forward-AD for scatter_reduce
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
