@@ -238,6 +238,8 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
         elif first_layer.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -467,6 +469,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
