@@ -1,5 +1,7 @@
-"""Utilities for manipulating the torch.Graph object."""
+"""Utilities for manipulating the torch.Graph object and the torchscript."""
 
+# TODO(justinchuby): Move more of the symbolic helper functions here and expose
+# them to the user.
 
 import dataclasses
 import numbers
@@ -18,8 +20,22 @@ from torch.onnx._internal import _beartype
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
-class GraphProtocol(Protocol):
-    """A class that implements all methods defined in torch.Graph."""
+class GraphLike(Protocol):
+    """Implements all methods defined in torch.Graph, as well as `op()` and `at()`."""
+
+    def op(
+        self,
+        opname: str,
+        *raw_args: Union[torch.Tensor, _C.Value],
+        outputs: int = 1,
+        **kwargs,
+    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+        ...
+
+    def at(
+        self, operator: str, *args, overload_name: str = "", **kwargs
+    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+        ...
 
     def inputs(self) -> List[_C.Value]:
         ...
@@ -80,7 +96,7 @@ class GraphProtocol(Protocol):
 
 
 @dataclasses.dataclass
-class GraphContext(GraphProtocol):
+class GraphContext(GraphLike):
     """Extra context for symbolic functions with all methods from torch.Graph.
 
     Attributes:

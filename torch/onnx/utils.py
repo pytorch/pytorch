@@ -46,7 +46,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration, torch_graph
+from torch.onnx._internal import _beartype, registration, torchscript
 
 __all__ = [
     "is_in_onnx_export",
@@ -1756,7 +1756,7 @@ def _run_symbolic_function(
 
     namespace, op_name = ns_op_name.split("::")
 
-    graph_context = torch_graph.GraphContext(
+    graph_context = torchscript.GraphContext(
         graph=graph,
         opset=opset_version,
         onnx_block=block,

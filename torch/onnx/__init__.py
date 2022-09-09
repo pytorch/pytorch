@@ -30,7 +30,6 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     utils,
 )
 from ._exporter_states import ExportTypes, SymbolicContext
-from ._internal.torch_graph import GraphContext
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
@@ -70,7 +69,6 @@ __all__ = [
     "JitScalarType",
     # Classes
     "SymbolicContext",
-    "GraphContext",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -90,7 +88,6 @@ __all__ = [
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
 SymbolicContext.__module__ = "torch.onnx"
-GraphContext.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
