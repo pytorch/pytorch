@@ -1495,11 +1495,10 @@ class FullyShardedDataParallel(nn.Module):
                 # As a minor optimization, only synchronize the latest event
                 events[-1].synchronize()
         for handle in handles:
-            if handle.needs_pre_unshard():
-                with torch.cuda.stream(self._streams["pre_all_gather"]):
-                    handle.pre_unshard()
-                self._ran_pre_unshard = True
-                self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
+            with torch.cuda.stream(self._streams["pre_all_gather"]):
+                ran_pre_unshard = handle.pre_unshard()
+                if ran_pre_unshard:
+                    self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
             with torch.cuda.stream(self._streams["all_gather"]):
                 handle.unshard()
                 handle.post_unshard()
@@ -1932,11 +1931,10 @@ class FullyShardedDataParallel(nn.Module):
             return
         current_stream = torch.cuda.current_stream()
         self._streams["all_gather"].wait_stream(current_stream)
-        all_fsdp_modules = self.fsdp_modules(self)  # `self` is the root
-        if any(fsdp_module._ran_pre_unshard for fsdp_module in all_fsdp_modules):
-            self._streams["pre_all_gather"].wait_stream(current_stream)
-            for fsdp_module in all_fsdp_modules:
-                fsdp_module._ran_pre_unshard = False
+        # Having the pre-all-gather stream wait for the current stream even if
+        # we do not leverage the pre-all-gather stream is tolerable since this
+        # only runs once per iteration
+        self._streams["pre_all_gather"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
