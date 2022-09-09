@@ -541,7 +541,7 @@ class TORCH_CUDA_CU_API WelfordTriplet {
 
  private:
   //! Holds avg, var and N in this order
-  std::array<Val*, 3> vals_ = {nullptr, nullptr, nullptr};
+  std::array<Val*, 3> vals_ = {{nullptr, nullptr, nullptr}};
 };
 
 //! Welford Scan operation.

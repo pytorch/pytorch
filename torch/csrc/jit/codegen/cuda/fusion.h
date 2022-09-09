@@ -4,7 +4,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_container.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -54,6 +53,7 @@ class WelfordResult;
 
 class SegmentCandidateFinder;
 class SegmentedFusion;
+class KernelArgumentHolder;
 
 //! Fusion Guard is our "context manager". It holds the actrive fusion and
 //! allows it to be accessed anywhere through FusionGuard::getCurFusion()

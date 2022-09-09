@@ -307,6 +307,15 @@ class TORCH_CUDA_CU_API KernelArgumentHolder {
     }
   }
 
+  KernelArgumentHolder& operator=(const KernelArgumentHolder& self) {
+    device_index_ = self.getDeviceIndex();
+    index_mode_ = self.getIndexMode();
+    for (const auto& arg : self.arguments_) {
+      push(arg.get());
+    }
+    return *this;
+  }
+
   // Push a tensor to the arguments
   void push(const at::Tensor& tensor);
 

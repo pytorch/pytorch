@@ -23,6 +23,8 @@
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
+#include <nvfuser_resources/fused_welford_helper.h>
+#include <nvfuser_resources/fused_welford_impl.h>
 #include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
@@ -101,7 +103,9 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
+  ss << nvfuser_resources::fused_welford_helper_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::fused_welford_impl_cu;
   ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
@@ -924,6 +928,7 @@ void initializeCudaContext() {
 namespace {
 
 // Dump PTX or CUBIN to a file
+#if CUDA_VERSION >= 11010
 void dumpCompiledCodeToFile(
     const nvrtcProgram& program,
     int fusion_id,
@@ -946,6 +951,7 @@ void dumpCompiledCodeToFile(
   out.write(code.data(), size);
   out.close();
 }
+#endif
 
 } // namespace
 
@@ -1189,6 +1195,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
   }
 
+#if CUDA_VERSION >= 11010
   if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
     dumpCompiledCodeToFile(program, id, false);
   }
@@ -1199,6 +1206,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
         "CUBIN not available as the kernel was compiled only to PTX");
     dumpCompiledCodeToFile(program, id, true);
   }
+#endif
 
   NvrtcFunction compiled_kernel_;
 
