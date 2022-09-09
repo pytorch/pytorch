@@ -7,6 +7,11 @@
 torch.sparse
 ============
 
+.. warning::
+
+  The PyTorch API of sparse tensors is in beta and may change in the near future.
+  We highly welcome feature requests, bug reports and general suggestions as Github issues.
+
 Why and when to use sparsity
 ++++++++++++++++++++++++++++++++
 
@@ -98,6 +103,18 @@ We are aware that some users want to ignore compressed zero for operations such
 as `cos` and just move on. For this we'd like to kindly point to https://pytorch.org/maskedtensor, which
 is in turn also backed and powered by sparse storage formats and kernels.
 
+Also note that, for now, the user doesn't have a choice of the output layout. For example,
+adding a sparse Tensor to a regular strided Tensor results in a sparse Tensor.
+
+    >>> a + b.to_sparse()
+    tensor([[0., 3.],
+            [3., 0.]])
+
+It is possible, that the resulting Tensor is better represented as a sparse Tensor and more so that it could
+be done efficiently. However, we don't know ahead of time whether the dense Tensor is sufficiently
+sparse. We are working on an API to control the result layout and recognize it is an important
+feature to plan a more optimal path of execution for any given model.
+
 Caveats
 +++++++
 
@@ -109,9 +126,6 @@ Caveats
    structure. Hence, in the following, we use "specified elements" for
    those array elements that are actually stored.
 
-.. warning::
-
-  The PyTorch API of sparse tensors is in beta and may change in the near future.
 
 .. _sparse-coo-docs:
 
