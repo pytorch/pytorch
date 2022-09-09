@@ -165,7 +165,7 @@ Tensor _convolution_decomp(
 //   std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
 //
 //   if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
-//     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+//     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
 //     auto result = cudnn_conv_per_sample_grad_rule(
 //         self_value, self_bdim,
 //         grad_output_value, grad_output_bdim,
@@ -411,7 +411,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::convolution_backward(
         grad_output_, input_, weight_, bias_sizes_opt, stride, padding,
         dilation, transposed, output_padding, groups, output_mask);
@@ -448,7 +448,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   // BNO, BNI, BOI
   // AKA one of the model ensembling case
   if (grad_output_bdim && input_bdim && weight_bdim) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     grad_output = reshape_dim_into(*grad_output_bdim, 1, grad_output);
 
     // BNO, BNI, BOI -> N(BO), N(BI), (BO)I
@@ -471,7 +471,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
 
   Tensor grad_input;
   if (output_mask[0]) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto result = convolution_backward_input_batch_rule(
         grad_output, grad_output_bdim,
         input, input_bdim,
@@ -482,7 +482,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
 
   Tensor grad_weight;
   if (output_mask[1]) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto result = convolution_backward_weight_batch_rule(
         grad_output, grad_output_bdim,
         input, input_bdim,
@@ -504,7 +504,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
 }
 
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(convolution, convolution_batch_rule);
   m.impl("_convolution", _convolution_decomp);
   m.impl("convolution_backward", convolution_backward_plumbing);
