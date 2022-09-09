@@ -1,7 +1,11 @@
 .. currentmodule:: torch.cuda._sanitizer
 
-torch.cuda._sanitizer
+CUDA Stream Sanitizer
 =====================
+
+.. note::
+    This is a prototype feature, which means it is at an early stage
+    for feedback and testing, and its components are subject to change.
 
 Overview
 --------
@@ -24,7 +28,10 @@ Here is an example of a simple synchronization error in PyTorch:
         torch.mul(a, 5, out=a)
 
 The ``a`` tensor is initialized on the default stream and, without any synchronization
-methods, modified on a new stream. When this script is run on the commandline with:
+methods, modified on a new stream. The two kernels will run concurrently on the same tensor,
+which might cause the second kernel to read unitialized data before the first one was able
+to write it, or the first kernel might overwrite part of the result of the second.
+When this script is run on the commandline with:
 ::
 
     TORCH_CUDA_SANITIZER=1 python example_error.py
@@ -39,28 +46,28 @@ the following output is printed by CSAN:
     aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
     writing to argument: self, out, output
     With stack trace:
-        File "pytorch/torch/cuda/_sanitizer.py", line 364, in _handle_kernel_launch
-            stack_trace = traceback.StackSummary.extract(
-        ...
-        File "example_error.py", line 6, in <module>
-            torch.mul(a, 5, out=a)
+      File "example_error.py", line 6, in <module>
+        torch.mul(a, 5, out=a)
+      ...
+      File "pytorch/torch/cuda/_sanitizer.py", line 364, in _handle_kernel_launch
+        stack_trace = traceback.StackSummary.extract(
 
     Previous access by stream 0 during kernel:
     aten::rand(int[] size, *, int? dtype=None, Device? device=None) -> Tensor
     writing to argument: output
     With stack trace:
-        File "pytorch/torch/cuda/_sanitizer.py", line 364, in _handle_kernel_launch
-            stack_trace = traceback.StackSummary.extract(
-        ...
-        File "example_error.py", line 3, in <module>
-            a = torch.rand(10000, device="cuda")
+      File "example_error.py", line 3, in <module>
+        a = torch.rand(10000, device="cuda")
+      ...
+      File "pytorch/torch/cuda/_sanitizer.py", line 364, in _handle_kernel_launch
+        stack_trace = traceback.StackSummary.extract(
 
     Tensor was allocated with stack trace:
-        File "pytorch/torch/cuda/_sanitizer.py", line 420, in _handle_memory_allocation
-            traceback.StackSummary.extract(
-        ...
-        File "example_error.py", line 3, in <module>
-            a = torch.rand(10000, device="cuda")
+      File "example_error.py", line 3, in <module>
+        a = torch.rand(10000, device="cuda")
+      ...
+      File "pytorch/torch/cuda/_sanitizer.py", line 420, in _handle_memory_allocation
+        traceback.StackSummary.extract(
 
 This gives extensive insight into the origin of the error:
 

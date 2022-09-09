@@ -135,8 +135,8 @@ Jiterator (beta)
     jiterator._create_jit_fn
     jiterator._create_multi_output_jit_fn
 
-Sanitizer (prototype)
----------------------
+Stream Sanitizer (prototype)
+----------------------------
 
 CUDA Sanitizer is a prototype tool for detecting synchronization errors between streams in PyTorch.
 See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
