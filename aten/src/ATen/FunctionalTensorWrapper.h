@@ -4,7 +4,8 @@
 #include <ATen/ArrayRef.h>
 #include <ATen/FunctionalStorageImpl.h>
 #include <ATen/core/List.h>
-#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/BoxedKernel.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <c10/core/DispatchKey.h>
@@ -140,7 +141,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
-  c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
 
  private:
@@ -291,8 +291,7 @@ struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
                   .typed<ReturnType(ParameterTypes...)>();
 
     return c10::impl::BoxedKernelWrapper<ReturnType(ParameterTypes...)>::call(
-        c10::KernelFunction::make_boxed_function<functionalize_op_helper>,
-        nullptr,
+        c10::BoxedKernel::makeFromFunction<functionalize_op_helper>(),
         op,
         // BoxedKernelWrapper knows to ignore this keyset argument,
         // because functionalize_op_helper doesn't take in a DispatchKeySet

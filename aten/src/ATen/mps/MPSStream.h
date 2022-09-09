@@ -38,17 +38,18 @@ namespace mps {
 //  MPSStream
 //-----------------------------------------------------------------
 
+enum class SyncType {
+  NONE,               // no commit to command buffer
+  COMMIT,             // commit and flush the command buffer
+  COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
+  COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
+};
+
 class TORCH_API MPSStream
 {
 public:
   enum Unchecked { UNCHECKED };
 
-  enum class SyncType {
-    NONE,               // no commit to command buffer
-    COMMIT,             // commit and flush the command buffer
-    COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
-    COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
-  };
   /// Construct a MPSStream from a Stream.  This construction is checked,
   /// and will raise an error if the Stream is not, in fact, a MPS stream.
   explicit MPSStream(Stream stream);
@@ -57,17 +58,18 @@ public:
   MTLCommandQueue_t commandQueue() const { return _commandQueue; };
   dispatch_queue_t queue() const { return _serialQueue; }
 
-  MTLCommandBuffer_t commandBuffer();
+  MPSCommandBuffer* commandBuffer();
   void commit(bool flush);
   void commitAndWait();
   void commitAndContinue();
-  void synchronize();
+  void synchronize(SyncType syncType);
+  void fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
   void copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
             size_t length, size_t srcOffset, size_t dstOffset, SyncType syncType = SyncType::NONE);
   void copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
                      size_t length, size_t srcOffset, size_t dstOffset, bool non_blocking);
   void flush();
-  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results);
+  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const { return _stream.device_index(); }

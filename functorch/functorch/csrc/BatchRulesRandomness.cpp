@@ -8,12 +8,18 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
+// This file contains batching rules for random operations. These are different
+// from our regular batching rules: regular batching rules get registered to the
+// FuncTorchBatched key, but batching rules for random operations get
+// registered to FuncTorchVmapMode. This is because we need to interpose on
+// random operations even if they're not on a BatchedTensor.
+
 namespace at {
 namespace functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   VmapDimVector shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
@@ -29,7 +35,7 @@ Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   Tensor self_value;
@@ -54,7 +60,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
 }
 
 Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -104,7 +110,7 @@ Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto const batch_size = maybe_layer->batchSize();
   RandomnessType randomness = maybe_layer->randomness();
@@ -124,7 +130,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
@@ -152,7 +158,7 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
 
 template<typename F, F Func, typename... ExtraArgs>
 Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -178,7 +184,7 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
 }
 
 std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, c10::optional<bool> train) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -208,7 +214,7 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
 }
 
 Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
@@ -220,24 +226,32 @@ Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, 
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, self_bdim.has_value());
 
-  if (randomness == RandomnessType::Different && !self_bdim) {
-    auto shape = self_value.sizes();
-    VmapDimVector shapeVec(1, maybe_layer->batchSize());
-    shapeVec.reserve(shape.size() + 1);
-    shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    self_value = self_value.expand(shapeVec);
+  if (randomness == RandomnessType::Different) {
+    // 1D cases: S -> BS -> multinomial(BS)
+    //           BS -> multinomial(BS)
+    //
+    // 2D cases: MS -> BMS -> (BM)S -> multinomial((BM)S) -> (BM)S -> BMS
+    //           BMS -> (BM)S -> multinomial((BM)S) -> (BM)S -> BMS
+    const auto is_2D_case = rankWithoutBatchDim(self_value, self_bdim) == 2;
+    if (!self_bdim.has_value()) {
+      self_value = ensure_has_bdim(self_value, self_bdim.has_value(), maybe_layer->batchSize());
+    }
+    if (is_2D_case) {
+      self_value = reshape_dim_into(0, 0, self_value);
+    }
+    auto out = multinomial(self_value, num_samples, replacement, generator);
+    if (is_2D_case) {
+      out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
+    }
+    return makeBatched(out, 0, cur_level);;
   }
-  if (self_value.dim() == 3 && (self_bdim || randomness == RandomnessType::Different)) {
-    self_value = reshape_dim_into(1, 0, self_value);
-  }
-  auto out = multinomial(self_value, num_samples, replacement, generator);
-  if (randomness == RandomnessType::Same && !self_bdim) {
-    return out;
-  }
-  if(self_value.dim() == 3 && self_bdim) {
-    out = out.reshape(self.sizes());
-  }
-  return makeBatched(out, 0, cur_level);
+
+  TORCH_INTERNAL_ASSERT(randomness == RandomnessType::Same); // check_randomness eliminates error randomness
+  TORCH_INTERNAL_ASSERT(!self_bdim.has_value()); // check_randomness eliminates same randomness with batched input
+  // Must be same randomness with unbatched input
+  // 1D case: S -> multinomial(S) -> S
+  // 2D case: MS -> multinomial(MS) -> MS
+  return multinomial(self_value, num_samples, replacement, generator);
 }
 
 template <typename A, A a, typename C>
@@ -463,7 +477,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
     decltype(&ATEN_FN2(randint_like, low_dtype)), &ATEN_FN2(randint_like, low_dtype), int64_t, int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);
   m.impl("rand_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(rand_like)), &ATEN_FN(rand_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
   m.impl("randn_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(randn_like)), &ATEN_FN(randn_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
-  
+
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
   #undef RANDOM_INPLACE_BATCH_RULE

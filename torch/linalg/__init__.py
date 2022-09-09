@@ -28,8 +28,7 @@ Computes the cross product of two 3-dimensional vectors.
 
 Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
 of vectors, for which it computes the product along the dimension :attr:`dim`.
-In this case, the output has the same batch dimensions as the inputs broadcast to
-a common shape.
+It broadcasts over the batch dimensions.
 
 Args:
     input (Tensor): the first input tensor.
@@ -39,9 +38,6 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
 
-Raises:
-    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
-                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
 Example:
     >>> a = torch.randn(4, 3)
     >>> a
@@ -1040,7 +1036,7 @@ See also the `full description of these drivers`_
 when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`).
 In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing order,
 :math:`\sigma_i` will be rounded down to zero if :math:`\sigma_i \leq \text{rcond} \cdot \sigma_1`.
-If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`A`.
+If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`A` times `max(m, n)`.
 
 This function returns the solution to the problem and some extra information in a named tuple of
 four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`A`, :attr:`B`

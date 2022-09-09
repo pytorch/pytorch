@@ -78,3 +78,13 @@ def strip_overloads(gm):
         if isinstance(node.target, torch._ops.OpOverload):
             node.target = node.target.overloadpacket
     gm.recompile()
+
+
+def get_placeholders(graph):
+    return list(filter(lambda x: x.op == 'placeholder', graph.nodes))
+
+def get_outputs(graph):
+    for node in graph.nodes:
+        if node.op == 'output':
+            return tree_flatten(node.args[0])[0]
+    raise AssertionError("No output node found")

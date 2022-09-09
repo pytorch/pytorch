@@ -83,7 +83,7 @@ class Adamax(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -215,6 +215,12 @@ def _single_tensor_adamax(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_inf = torch.view_as_real(exp_inf)
+
         # Update biased first moment estimate.
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         # Update the exponentially weighted infinity norm.
@@ -248,6 +254,11 @@ def _multi_tensor_adamax(params: List[Tensor],
 
     if maximize:
         grads = torch._foreach_neg(grads)
+
+    params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
+    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
+    exp_infs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_infs]
 
     # Update steps
     torch._foreach_add_(state_steps, 1)

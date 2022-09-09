@@ -107,6 +107,7 @@ def functional_call(
         Example::
 
             >>> a = {'foo': torch.zeros(())}
+            >>> # xdoctest: +SKIP
             >>> mod = Foo()  # does self.foo = self.foo + 1
             >>> print(mod.foo)  # tensor(0.)
             >>> functional_call(mod, a, torch.ones(()))

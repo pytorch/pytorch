@@ -101,8 +101,8 @@ class TestShardedOptimizer(ShardedTensorTestBase):
                 "rank:3/cuda:3",
             ],
         )
-        local_model = MyShardedModel().cuda(self.rank)
-        sharded_model = MyShardedModel(spec=rowwise_spec).cuda(self.rank)
+        local_model = MyShardedModel().cuda()
+        sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
 
         # copy the parameteres from local model
         sharded_model.sharded_param.local_shards()[0].tensor = \
@@ -161,14 +161,14 @@ class TestShardedOptimizer(ShardedTensorTestBase):
                 "rank:3/cuda:3",
             ],
         )
-        sharded_model = MyShardedModel(spec=rowwise_spec).cuda(self.rank)
+        sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
         sharded_model_params = dict(sharded_model.named_parameters())
         param_keys = list(sharded_model_params.keys())
         self.assertEqual(len(param_keys), 2)
         self.assertTrue("param" in param_keys)
         self.assertTrue("sharded_param" in param_keys)
 
-        sharded_linear = MyShardedLinear(rank=self.rank).cuda(self.rank)
+        sharded_linear = MyShardedLinear(rank=self.rank).cuda()
         sharded_linear.shard_parameter()
         sharded_linear_params = dict(sharded_linear.named_parameters())
         param_keys = list(sharded_linear_params.keys())

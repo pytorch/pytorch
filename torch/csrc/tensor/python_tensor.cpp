@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <structmember.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -446,6 +447,10 @@ void py_set_default_dtype(PyObject* obj) {
 
 c10::DispatchKey get_default_dispatch_key() {
   return backendToDispatchKey(default_backend);
+}
+
+at::Device get_default_device() {
+  return at::Device(c10::backendToDeviceType(default_backend));
 }
 
 ScalarType get_default_scalar_type() {

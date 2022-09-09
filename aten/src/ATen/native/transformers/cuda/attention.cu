@@ -16,7 +16,7 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 namespace at {
 
@@ -345,7 +345,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
       accscalar_t,                                                      \
       assume_aligned>                                                   \
       <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(       \
-          nt_qkv->get_buffer()                                          \
+          nt_qkv_buffer                                          \
               .packed_accessor64<scalar_t, 1, RestrictPtrTraits>(),     \
           qkv_bias.packed_accessor64<scalar_t, 1, RestrictPtrTraits>(), \
           offsets_ptr,                                                  \
@@ -376,6 +376,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
         }
         if (qkv.is_nested()) {
           auto* nt_qkv = get_nested_tensor_impl(qkv);
+          const at::Tensor& nt_qkv_buffer = nt_qkv->get_buffer();
           auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
@@ -387,7 +388,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           const auto input_dim = sizes.sizes()[1];
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_dim == 1);
           if (aligned &&
-              ((reinterpret_cast<intptr_t>(nt_qkv->get_buffer().data_ptr()) %
+              ((reinterpret_cast<intptr_t>(qkv.data_ptr()) %
                 TRANSFORM_BIAS_RESCALE_VEC) == 0)) {
             CALL_ADD_PADDING_KERNEL(true);
           } else {
@@ -405,6 +406,11 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+}
+
+Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){
+  TORCH_CHECK(false, "This operator should be overridden in python before use");
+  return at::Tensor();
 }
 } // namespace native
 } // namespace at

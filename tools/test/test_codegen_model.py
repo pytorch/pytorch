@@ -2,14 +2,21 @@
 
 import textwrap
 import unittest
+from typing import cast
 
 import expecttest
+
 import torchgen.dest as dest
 import torchgen.gen as gen
 import yaml
 from torchgen.gen import LineLoader, parse_native_yaml_struct
-
-from torchgen.model import DispatchKey, NativeFunctionsGroup
+from torchgen.model import (
+    Annotation,
+    CustomClassType,
+    DispatchKey,
+    NativeFunctionsGroup,
+    Type,
+)
 
 
 class TestCodegenModel(expecttest.TestCase):
@@ -140,6 +147,59 @@ ScalarOnly and Generic must have same ufunc name""",
             """\
 cannot use CUDAFunctorOnSelf on non-binary function""",
         )
+
+    def test_parse_custom_class_type(self) -> None:
+        custom_class_name = "namespace_foo.class_bar"
+        custom_class_name_with_prefix = f"__torch__.torch.classes.{custom_class_name}"
+        custom_class_type = cast(
+            CustomClassType, Type.parse(custom_class_name_with_prefix)
+        )
+        self.assertTrue(isinstance(custom_class_type, CustomClassType))
+        self.assertEqual(custom_class_name, custom_class_type.class_name)
+        self.assertEqual(custom_class_name_with_prefix, str(custom_class_type))
+
+
+class TestAnnotation(expecttest.TestCase):
+    def test_single_alias_no_write(self) -> None:
+        a = Annotation.parse("a")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertFalse(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple())
+
+    def test_single_alias_is_write(self) -> None:
+        a = Annotation.parse("a!")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple())
+
+    def test_single_alias_is_write_to_wildcard(self) -> None:
+        a = Annotation.parse("a! -> *")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, tuple("*"))
+
+    def test_alias_set(self) -> None:
+        a = Annotation.parse("a|b")
+        self.assertEqual(a.alias_set, ("a", "b"))
+
+    def test_alias_set_is_write_raises_exception(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError, r"alias set larger than 1 is not mutable"
+        ):
+            Annotation.parse("a|b!")
+
+    def test_single_alias_is_write_to_alias_set(self) -> None:
+        a = Annotation.parse("a! -> a|b")
+        self.assertEqual(a.alias_set, tuple("a"))
+        self.assertTrue(a.is_write)
+        self.assertEqual(a.alias_set_after, ("a", "b"))
+
+    def test_before_and_after_alias_set_larger_than_1_raises_exception(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"before alias set and after alias set cannot be larger than 1 at the same time",
+        ):
+            Annotation.parse("a|b -> c|d")
 
 
 if __name__ == "__main__":

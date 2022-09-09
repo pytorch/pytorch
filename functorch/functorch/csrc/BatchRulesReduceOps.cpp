@@ -20,10 +20,6 @@ Tensor sum_decomp(
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
-Tensor sum_symint_decomp(const Tensor& input_t, c10::SymIntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::sum(input_t, c10::asIntArrayRefSlow(dim), keepdim, opt_dtype);
-}
-
 Tensor mean_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
@@ -74,14 +70,14 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
   if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }
@@ -372,7 +368,7 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(searchsorted, Tensor, searchsorted_batch_rule);
   REDUCTION_BOXED(_fft_r2c);
   REDUCTION_BOXED(_fft_c2r);
@@ -426,7 +422,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(_log_softmax);
   REDUCTION_BOXED_ARGS(rot90, 2);
   VMAP_SUPPORT(aminmax, aminmax_batching_rule);
-  m.impl("sum.SymInt", sum_symint_decomp);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
 }

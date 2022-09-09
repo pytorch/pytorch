@@ -202,16 +202,21 @@ class TORCH_API CppFunction final {
 
   CppFunction& operator=(CppFunction&&) = default;
 
+  /// \private
+  /// Creates a function from a type-erased boxed kernel.
+  static CppFunction makeFromBoxedKernel(c10::BoxedKernel kernel) {
+    return CppFunction(
+        c10::KernelFunction::makeFromBoxedKernel(std::move(kernel)),
+        /* cpp_signature */ c10::nullopt, // not known for boxed functions
+        /* schema */ nullptr);
+  }
+
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
   /// but are implemented more efficiently than a hand written
   /// function done in the same way.
   static CppFunction makeFallthrough() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFallthrough(),
-        /* cpp_signature */ c10::nullopt, // not known for fallthroughs
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(c10::BoxedKernel::makeFallthrough());
   }
 
   /// \private
@@ -219,10 +224,7 @@ class TORCH_API CppFunction final {
   /// Creates a function that raises an error saying that named tensors
   /// are not supported when called.
   static CppFunction makeNamedNotSupported() {
-    return CppFunction(
-        c10::KernelFunction::makeNamedNotSupported(),
-        /* cpp_signature */ c10::nullopt, // not known for fallthroughs
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(c10::BoxedKernel::makeNamedNotSupported());
   }
 
   /// Create a function from a boxed kernel function with signature
@@ -231,25 +233,19 @@ class TORCH_API CppFunction final {
   /// in the native C++ calling convention.  Boxed functions are
   /// typically only used to register backend fallbacks via
   /// torch::Library::fallback().
-  template <c10::KernelFunction::BoxedKernelFunction* func>
+  template <c10::BoxedKernel::BoxedKernelFunction* func>
   static CppFunction makeFromBoxedFunction() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunction<func>(),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunction<func>());
   }
 
   // Variant that takes in a boxed kernel function with a plumbed
   // DispatchKeySet. See Note [Plumbing Keys Through The Dispatcher] for
   // details.
-  template <c10::KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
+  template <c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys* func>
   static CppFunction makeFromBoxedFunction() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunction<func>(),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunction<func>());
   }
 
   /// Create a function from a boxed kernel functor which defines
@@ -263,10 +259,8 @@ class TORCH_API CppFunction final {
   template <class KernelFunctor>
   static CppFunction makeFromBoxedFunctor(
       std::unique_ptr<KernelFunctor> kernelFunctor) {
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunctor(std::move(kernelFunctor)));
   }
 
   /// Create a function from an unboxed kernel function.

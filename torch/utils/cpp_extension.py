@@ -51,17 +51,23 @@ MINIMUM_MSVC_VERSION = (19, 0, 24215)
 CUDA_GCC_VERSIONS = {
     '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.2': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.3': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.4': ((6, 0, 0), (11, 5, 0)),
+    '11.5': ((6, 0, 0), (11, 5, 0)),
+    '11.6': ((6, 0, 0), (11, 5, 0)),
+    '11.7': ((6, 0, 0), (11, 5, 0)),
 }
 
 CUDA_CLANG_VERSIONS = {
     '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (10, 0, 0)),
-    '11.2': ((6, 0, 0), (10, 0, 0)),
-    '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.1': ((6, 0, 0), (9, 0, 0)),
+    '11.2': ((6, 0, 0), (9, 0, 0)),
+    '11.3': ((6, 0, 0), (11, 0, 0)),
+    '11.4': ((6, 0, 0), (11, 0, 0)),
+    '11.5': ((6, 0, 0), (12, 0, 0)),
+    '11.6': ((6, 0, 0), (12, 0, 0)),
+    '11.7': ((6, 0, 0), (13, 0, 0)),
 }
 
 
@@ -104,7 +110,8 @@ def _find_cuda_home() -> Optional[str]:
             if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
-        print(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
+        print(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'",
+              file=sys.stderr)
     return cuda_home
 
 def _find_rocm_home() -> Optional[str]:
@@ -127,7 +134,8 @@ def _find_rocm_home() -> Optional[str]:
             if not os.path.exists(rocm_home):
                 rocm_home = None
     if rocm_home and torch.version.hip is None:
-        print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
+        print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'",
+              file=sys.stderr)
     return rocm_home
 
 
@@ -385,6 +393,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
         min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds that 11.4.1
+        if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
+            max_compiler_version = (10, 0, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
         max_compiler_version_str = '.'.join(map(str, max_compiler_version))
 
@@ -894,19 +905,20 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
-                name='extension',
-                ext_modules=[
-                    CppExtension(
-                        name='extension',
-                        sources=['extension.cpp'],
-                        extra_compile_args=['-g']),
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='extension',
+        ...     ext_modules=[
+        ...         CppExtension(
+        ...             name='extension',
+        ...             sources=['extension.cpp'],
+        ...             extra_compile_args=['-g']),
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -940,20 +952,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
-                name='cuda_extension',
-                ext_modules=[
-                    CUDAExtension(
-                            name='cuda_extension',
-                            sources=['extension.cpp', 'extension_kernel.cu'],
-                            extra_compile_args={'cxx': ['-g'],
-                                                'nvcc': ['-O2']})
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='cuda_extension',
+        ...     ext_modules=[
+        ...         CUDAExtension(
+        ...                 name='cuda_extension',
+        ...                 sources=['extension.cpp', 'extension_kernel.cu'],
+        ...                 extra_compile_args={'cxx': ['-g'],
+        ...                                     'nvcc': ['-O2']})
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
 
     Compute capabilities:
 
@@ -987,10 +1000,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
+        >>> # xdoctest: +SKIP
         >>> #include <ATen/ATen.h>
         >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
+        >>> # xdoctest: +SKIP
         >>> #include <torch/extension.h>
         >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
@@ -1015,13 +1030,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> CUDAExtension(
-                    name='cuda_extension',
-                    sources=['extension.cpp', 'extension_kernel.cu'],
-                    dlink=True,
-                    dlink_libraries=["dlink_lib"],
-                    extra_compile_args={'cxx': ['-g'],
-                                        'nvcc': ['-O2', '-rdc=true']})
+        ...        name='cuda_extension',
+        ...        sources=['extension.cpp', 'extension_kernel.cu'],
+        ...        dlink=True,
+        ...        dlink_libraries=["dlink_lib"],
+        ...        extra_compile_args={'cxx': ['-g'],
+        ...                            'nvcc': ['-O2', '-rdc=true']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1153,7 +1169,7 @@ def library_paths(cuda: bool = False) -> List[str]:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif cuda:
         if IS_WINDOWS:
-            lib_dir = 'lib/x64'
+            lib_dir = os.path.join('lib', 'x64')
         else:
             lib_dir = 'lib64'
             if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -1253,12 +1269,13 @@ def load(name,
             added to the PATH environment variable as a side effect.)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load
         >>> module = load(
-                name='extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_cflags=['-O2'],
-                verbose=True)
+        ...     name='extension',
+        ...     sources=['extension.cpp', 'extension_kernel.cu'],
+        ...     extra_cflags=['-O2'],
+        ...     verbose=True)
     '''
     return _jit_compile(
         name,
@@ -1344,14 +1361,14 @@ def load_inline(name,
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
-        >>> source = \'\'\'
+        >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
           return x.sin() + y.sin();
         }
-        \'\'\'
+        """
         >>> module = load_inline(name='inline_extension',
-                                 cpp_sources=[source],
-                                 functions=['sin_add'])
+        ...                      cpp_sources=[source],
+        ...                      functions=['sin_add'])
 
     .. note::
         By default, the Ninja backend uses #CPUS + 2 workers to build the
@@ -1455,7 +1472,8 @@ def _jit_compile(name,
     if version > 0:
         if version != old_version and verbose:
             print(f'The input conditions for extension module {name} have changed. ' +
-                  f'Bumping to version {version} and re-building as {name}_v{version}...')
+                  f'Bumping to version {version} and re-building as {name}_v{version}...',
+                  file=sys.stderr)
         name = f'{name}_v{version}'
 
     if version != old_version:
@@ -1500,10 +1518,11 @@ def _jit_compile(name,
             baton.wait()
     elif verbose:
         print('No modifications detected for re-loaded extension '
-              f'module {name}, skipping build step...')
+              f'module {name}, skipping build step...',
+              file=sys.stderr)
 
     if verbose:
-        print(f'Loading extension module {name}...')
+        print(f'Loading extension module {name}...', file=sys.stderr)
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -1532,7 +1551,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
     _write_ninja_file(
         path=build_file_path,
         cflags=cflags,
@@ -1546,7 +1565,7 @@ def _write_ninja_file_and_compile_objects(
         library_target=None,
         with_cuda=with_cuda)
     if verbose:
-        print('Compiling objects...')
+        print('Compiling objects...', file=sys.stderr)
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1581,7 +1600,7 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
     # NOTE: Emitting a new ninja build file does not cause re-compilation if
     # the sources did not change, so it's ok to re-emit (and it's fast).
     _write_ninja_file_to_build_library(
@@ -1596,7 +1615,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        print(f'Building extension module {name}...')
+        print(f'Building extension module {name}...', file=sys.stderr)
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1675,12 +1694,12 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
     if with_cuda:
         if verbose:
-            print('Detected CUDA files, patching ldflags')
+            print('Detected CUDA files, patching ldflags', file=sys.stderr)
         if IS_WINDOWS:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib/x64")}')
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
+                extra_ldflags.append(os.path.join(CUDNN_HOME, "lib", "x64"))
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')
@@ -1812,12 +1831,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        print(f'Using {root_extensions_directory} as PyTorch extensions root...')
+        print(f'Using {root_extensions_directory} as PyTorch extensions root...', file=sys.stderr)
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating extension directory {build_directory}...')
+            print(f'Creating extension directory {build_directory}...', file=sys.stderr)
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -1828,11 +1847,13 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
+            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...',
+                  file=sys.stderr)
         return int(max_jobs)
     if verbose:
         print('Allowing ninja to set a default number of workers... '
-              '(overridable by setting the environment variable MAX_JOBS=N)')
+              '(overridable by setting the environment variable MAX_JOBS=N)',
+              file=sys.stderr)
     return None
 
 
