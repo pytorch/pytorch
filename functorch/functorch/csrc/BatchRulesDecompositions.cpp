@@ -140,12 +140,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
   OP_DECOMPOSE(linalg_eigvalsh);
+  OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
   OP_DECOMPOSE(linalg_matmul);
   OP_DECOMPOSE(linalg_matrix_norm);
   OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
   OP_DECOMPOSE(linalg_multi_dot);
   OP_DECOMPOSE(linalg_norm);
+  OP_DECOMPOSE2(linalg_norm, ord_str);
   OP_DECOMPOSE(linalg_solve);
   OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
@@ -249,6 +251,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
+  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(pad);
