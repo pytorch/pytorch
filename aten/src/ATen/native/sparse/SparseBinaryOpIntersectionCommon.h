@@ -216,9 +216,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   auto sdim = static_cast<uint32_t>(sparse_dim);
 
   // Apply the hash function to probably_coalesced.indices
-  const auto probably_coalesced_indices_hash
-    // Windows does not seem to like these nested captures without explicit names.
-    = [&probably_coalesced, &hash_coeffs, &probably_coalesced_nnz_arange, sdim, kHash]() -> Tensor {
+  const auto probably_coalesced_indices_hash = [&]() -> Tensor {
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
     auto indices_dim_stride = indices.stride(0);
