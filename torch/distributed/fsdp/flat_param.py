@@ -94,8 +94,8 @@ class HandleShardingStrategy(Enum):
 class HandleTrainingState(Enum):
     IDLE = auto()
     FORWARD = auto()
-    PRE_BACKWARD = auto()
-    POST_BACKWARD = auto()
+    BACKWARD_PRE = auto()
+    BACKWARD_POST = auto()
     SUMMON_FULL_PARAMS = auto()
 
 
@@ -815,8 +815,8 @@ class FlatParamHandle:
         """
         p_assert(
             self._training_state
-            in (HandleTrainingState.PRE_BACKWARD, HandleTrainingState.IDLE),
-            "Expects to be in `PRE_BACKWARD` or `IDLE` (if prefetching)",
+            in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.IDLE),
+            "Expects to be in `BACKWARD_PRE` or `IDLE` (if prefetching)",
         )
         flat_param = self.flat_param
         if flat_param.grad is not None and (
