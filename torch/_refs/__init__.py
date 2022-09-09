@@ -2561,12 +2561,7 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
 
 @register_decomposition(torch.ops.aten.repeat)
 def repeat(a: Tensor, *repeat_shape) -> Tensor:
-    # NOTE: cannot use utils.extract_shape_from_varargs here
-    # because that also validates the shape, but the shape
-    # given to repeat may be "invalid"
-    if len(repeat_shape) == 1 and isinstance(repeat_shape[0], Sequence):
-        repeat_shape = tuple(repeat_shape[0])
-
+    repeat_shape = utils.extract_shape_from_varargs(shape, validate=False)
     utils.check(
         len(repeat_shape) >= len(a.shape),
         lambda: "repeat: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
