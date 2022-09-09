@@ -40,6 +40,12 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Clones the method by the name of orig_method_name into new_method_name method
+TORCH_API void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name);
+
 // Check if a value in the graph is a Scalar value
 TORCH_API bool isScalar(Value* v);
 

@@ -12,14 +12,19 @@
 namespace at {
 namespace functorch {
 
+// This file contains code for the vmap fallback (also known as the
+// BatchedTensor fallback or the Batched fallback). This code runs
+// when an operation doesn't have a batching rule implemented.
+
 // If an operator doesn't have a batching rule implemented then we fallback
-// to this implementation. The fallback only works on out-of-place operators
-// that return only tensors with new memory. (e.g., no in-place operators, no
-// view operations).
+// to this implementation. The fallback doesn't work on out= variants or
+// view operations; that is, it works for out-of-place operations and
+// in-place non-view operations.
 //
-// The fallback effectively takes all of the BatchedTensors in `stack`, slices
-// them, and runs `op` on all of the corresponding slices to produce slices
-// of the outputs. The output slices then get `torch.stack`ed to create the
+// For out-of-place operations, the fallback effectively takes all of the
+// BatchedTensors in `stack`, slices them, and runs `op` on all of the
+// corresponding slices to produce slices of the outputs. The output slices
+// then get `torch.stack`ed to create the
 // final returns.
 //
 // The performance of the fallback is not very good because it introduces an
@@ -27,9 +32,13 @@ namespace functorch {
 // write batching rules for operators whenever possible.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
+// The vmap fallback emits a warning by default, but it may be disabled if
+// the user finds it to be too annoying.
 bool isVmapFallbackWarningEnabled();
 void setVmapFallbackWarningEnabled(bool enabled);
 
+// Used for testing. The vmap fallback is enabled by default. When it is disabled,
+// it raises an error.
 bool isVmapFallbackEnabled();
 void setVmapFallbackEnabled(bool enabled);
 
@@ -43,8 +52,8 @@ template <typename A, typename B, typename C> std::tuple<A, B, C> vector_to_resu
   return std::make_tuple(buffer[0].to<A>(), buffer[1].to<B>(), buffer[2].to<B>());
 }
 
-// This is a way to call the slow fallback from inside some plumbing
-// TODO: Probably better way to metaprogram this
+// slow_fallback is a way to call the vmap fallback inside some boxed kernel.
+// There is probably some better way to metaprogram this.
 template <typename Ret>
 Ret slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue> args) {
   std::vector<IValue> stack(args.begin(), args.end());

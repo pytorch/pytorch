@@ -9,7 +9,6 @@ import contextlib
 import copy
 import inspect
 import io
-import itertools
 import os
 import re
 import textwrap
@@ -551,6 +550,9 @@ def _optimize_graph(
     input_names=None,
     module=None,
 ):
+    if params_dict is None:
+        params_dict = {}
+
     # Inline everything
     _C._jit_pass_inline(graph)
 
@@ -850,9 +852,18 @@ def _trace_and_get_graph_from_model(model, args):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
+    # Disable Autocast cache because it replaces kernel's weight and bias
+    # to be replaced by (undesired) constants
+    # TODO: https://github.com/pytorch/pytorch/issues/84092
+    prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
+    # When weights are not reused, there is no perf impact
+    # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
+    torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model, args, strict=False, _force_outplace=False, _return_inputs_states=True
     )
+    torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
+
     warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != torch.jit._unique_state_dict(model).keys():
@@ -1106,7 +1117,7 @@ def _model_to_graph(
         else:
             output_wrapped = torch_out  # type: ignore[assignment]
 
-        output_tensors, out_desc = _C._jit_flatten(tuple(output_wrapped))
+        output_tensors, out_desc = torch.jit._flatten(tuple(output_wrapped))
         # assign_output_shape pass is not compatible with quantized outputs.
         # Quantized outputs are flattened to 3 values in ONNX, while packed as
         # single value in PyTorch.
@@ -1127,7 +1138,8 @@ def _model_to_graph(
 
     if (
         do_constant_folding
-        and GLOBALS.export_onnx_opset_version in _constants.onnx_constant_folding_opsets
+        and GLOBALS.export_onnx_opset_version
+        >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
@@ -1192,7 +1204,7 @@ def export_to_pretty_string(
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     if opset_version is None:
-        opset_version = _constants.onnx_default_opset
+        opset_version = _constants.ONNX_DEFAULT_OPSET
     if custom_opsets is None:
         custom_opsets = {}
     symbolic_helper._set_opset_version(opset_version)
@@ -1253,7 +1265,7 @@ def unconvertible_ops(
         of the unconvertible ops.
     """
 
-    opset_version = opset_version or _constants.onnx_default_opset
+    opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
     symbolic_helper._set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
@@ -1406,7 +1418,7 @@ def _export(
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
 
         if opset_version is None:
-            opset_version = _constants.onnx_default_opset
+            opset_version = _constants.ONNX_DEFAULT_OPSET
 
         if export_modules_as_functions and opset_version < 15:
             raise ValueError(
@@ -1744,7 +1756,7 @@ def _get_aten_op_overload_name(n: _C.Node) -> str:
     return _C.parse_schema(schema).overload_name
 
 
-# @_beartype.beartype
+@_beartype.beartype
 def _run_symbolic_function(
     g: _C.Graph,
     block: _C.Block,
@@ -1752,7 +1764,7 @@ def _run_symbolic_function(
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-) -> Optional[Union[_C.Value, Sequence[_C.Value]]]:
+) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
     """Runs a symbolic function.
 
     The function is used in C++ to export the node to ONNX.
@@ -1901,9 +1913,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
 
@@ -1921,9 +1931,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.unregister_op(op_name, ns, version)
 
