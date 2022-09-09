@@ -57,6 +57,8 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "clamp_max",
+    "clamp_min",
     "conj_physical",
     "cos",
     "cosh",
@@ -73,6 +75,8 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "isneginf",
+    "isposinf",
     "i0",
     "lgamma",
     "log",
@@ -83,7 +87,6 @@ __all__ = [
     "logsumexp",
     "nan_to_num",
     "neg",
-    "norm",
     "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -181,6 +184,7 @@ __all__ = [
     "amin",
     "any",
     "mean",
+    "std",
     "std_mean",
     "var_mean",
     "sum",
@@ -190,6 +194,7 @@ __all__ = [
     # Linear algebra ops
     #
     "addr",
+    "norm",
     #
     # View & Shape Ops
     #
