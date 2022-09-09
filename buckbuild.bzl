@@ -807,6 +807,7 @@ def define_buck_targets(
             ("aten/src", "ATen/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
+            ("aten/src", "ATen/functorch/**/*.h"),
             ("aten/src", "ATen/quantized/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
@@ -869,6 +870,7 @@ def define_buck_targets(
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.
                 ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ],
             exclude = [

@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 #include <functorch/csrc/TensorWrapper.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>

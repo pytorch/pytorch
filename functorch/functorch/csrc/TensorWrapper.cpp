@@ -6,7 +6,7 @@
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>

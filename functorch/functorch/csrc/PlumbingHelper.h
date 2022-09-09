@@ -5,7 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 #pragma once
 #include <ATen/Tensor.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <functorch/csrc/DynamicLayer.h>
 
 // NOTE: [vmap plumbing]

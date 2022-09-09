@@ -996,6 +996,7 @@ def main():
         'include/ATen/cuda/detail/*.cuh',
         'include/ATen/cuda/detail/*.h',
         'include/ATen/cudnn/*.h',
+        'include/ATen/functorch/*.h',
         'include/ATen/ops/*.h',
         'include/ATen/hip/*.cuh',
         'include/ATen/hip/*.h',
