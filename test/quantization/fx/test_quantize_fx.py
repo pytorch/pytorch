@@ -6246,7 +6246,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         m = M().eval()
-        with self.assertRaisesRegex(ValueError, "get_default_qconfig_mapping\(\"fbgemm\"\)"):
+        with self.assertRaisesRegex(ValueError, """get_default_qconfig_mapping("fbgemm")"""):
             m = prepare_fx(m, qconfig_mapping, data)
 
     @skipIfNoFBGEMM
