@@ -526,7 +526,6 @@ class TestOperators(TestCase):
         xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("cumprod"),  # calls item
         xfail("double"),  # rank 4 tensor for channels_last
-        xfail("eig"),  # calls item
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
         # It looks like you're either (1) calling .item() on a Tensor or
