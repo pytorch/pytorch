@@ -7,11 +7,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-<<<<<<< HEAD
 from typing import Any, Dict, Optional, Tuple, Union
-=======
-from typing import Any, Callable, Dict, Optional, Tuple, Union
->>>>>>> 5a5f1cd9da5f9d92d432a6f378dec663266aabeb
 
 import torch
 from torch._C._distributed_c10d import (
