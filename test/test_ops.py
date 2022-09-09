@@ -1631,6 +1631,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.reshape_as',
         '_refs.softmax',
         '_refs.square',
+        '_refs.std',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
