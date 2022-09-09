@@ -617,7 +617,8 @@ struct vector_args {
             }
             *format_it++ = '\0';
             _PyArg_Parser* _parser = new _PyArg_Parser{format_str, &names_buf[0], fname_cstr, 0};
-            _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser);
+            PyObject *dummy = NULL;
+            _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
 #else
             _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
