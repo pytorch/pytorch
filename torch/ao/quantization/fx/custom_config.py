@@ -325,11 +325,10 @@ class ConvertCustomConfig:
             "observed_to_quantized_custom_module_class": a nested dictionary mapping from quantization
             mode to an inner mapping from observed module classes to quantized module classes, e.g.::
             {
-                "static": {FloatCustomModule: ObservedCustomModule},
-                "dynamic": {FloatCustomModule: ObservedCustomModule},
-                "weight_only": {FloatCustomModule: ObservedCustomModule}
+            "static": {FloatCustomModule: ObservedCustomModule},
+            "dynamic": {FloatCustomModule: ObservedCustomModule},
+            "weight_only": {FloatCustomModule: ObservedCustomModule}
             }
-
             "preserved_attributes": a list of attributes that persist even if they are not used in ``forward``
 
         This function is primarily for backward compatibility and may be removed in the future.
