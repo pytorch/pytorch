@@ -26,6 +26,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
+DEFAULT_STREAM_ID = 0
+
 TK = TypeVar("TK")
 TVa = TypeVar("TVa")
 TVb = TypeVar("TVb")
@@ -220,7 +222,7 @@ class StreamSynchronizations:
         self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
         self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
         self.host_sync_state: Dict[StreamId, SeqNum] = {}
-        self.create_stream(torch.cuda.default_stream().cuda_stream)
+        self.create_stream(DEFAULT_STREAM_ID)
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
         if stream not in self.current_sync_states:
