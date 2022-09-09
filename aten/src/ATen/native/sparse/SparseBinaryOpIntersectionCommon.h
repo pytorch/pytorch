@@ -71,6 +71,7 @@ struct KernelLauncher {
 template <
   template <typename func_t> class kernel_t,
   typename binary_op_t,
+  typename index_t = int64_t,
   typename hash_t = int64_t,
   typename offset_t = int64_t>
 void _sparse_binary_op_intersection_kernel_impl(
@@ -233,27 +234,25 @@ void _sparse_binary_op_intersection_kernel_impl(
       .add_input(probably_coalesced_nnz_arange)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME,
-        // Windows does not seem to like these nested captures without explicit names.
-        [&iter, &indices, &hash_coeffs, indices_dim_stride, indices_nnz_stride, sdim]() {
-        const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
-        const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
+    {
+      const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
+      const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
 
-        KernelLauncher::launch(iter,
-            // Windows does not seem to like these nested captures without explicit names.
-            [ptr_indices, indices_dim_stride, indices_nnz_stride, sdim, ptr_hash_coeffs]
-            FUNCAPI (index_t nnz_idx) -> hash_t {
-            const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-            auto hash = hash_t {0};
-            for (uint32_t dim = 0; dim < sdim; ++dim) {
-              // use only int32_t operations when hash_t == int32_t
-              const auto dim_hash_coeff = ptr_hash_coeffs[dim];
-              const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
-              hash += dim_index * dim_hash_coeff;
-            }
-            return hash;
-        });
-    });
+      KernelLauncher::launch(iter,
+          // Windows does not seem to like these nested captures without explicit names.
+          [ptr_indices, indices_dim_stride, indices_nnz_stride, sdim, ptr_hash_coeffs]
+          FUNCAPI (index_t nnz_idx) -> hash_t {
+          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
+          auto hash = hash_t {0};
+          for (uint32_t dim = 0; dim < sdim; ++dim) {
+            // use only int32_t operations when hash_t == int32_t
+            const auto dim_hash_coeff = ptr_hash_coeffs[dim];
+            const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
+            hash += dim_index * dim_hash_coeff;
+          }
+          return hash;
+      });
+    }
 
     return hash;
   }();
@@ -312,53 +311,50 @@ void _sparse_binary_op_intersection_kernel_impl(
       .add_input(source_arange)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(source_arange.scalar_type(), NAME,
-        // Windows does not seem to like these nested captures without explicit names.
-        [&iter, &source_indices, &sorted_hash, &hash_coeffs, &intersection_count, &intersection_first_idx,
-          indices_dim_stride, indices_nnz_stride, sdim]() {
-        const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
-        const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
-        const auto sorted_hash_len = sorted_hash.numel();
-        const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
-        auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
-        auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
+    {
+      const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
+      const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<hash_t>();
+      const auto sorted_hash_len = sorted_hash.numel();
+      const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
+      auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<hash_t>();
+      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<hash_t>();
 
-        // Fusing hash computation with hash intersection.
-        KernelLauncher::launch(iter,
-            // Windows does not seem to like these nested captures without explicit names.
-            [ptr_indices, ptr_sorted_hash, sorted_hash_len, ptr_hash_coeffs,
-              ptr_intersection_count, ptr_intersection_first_idx, sdim,
-              indices_dim_stride, indices_nnz_stride]
-            FUNCAPI (index_t nnz_idx) -> index_t {
-            // Compute hash value
-            const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-            auto hash = hash_t {0};
-            for (uint32_t dim = 0; dim < sdim; ++dim) {
-              // Use only int32_t operations when hash_t == int32_t.
-              const auto dim_hash_coeff = ptr_hash_coeffs[dim];
-              const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
-              hash += dim_index * dim_hash_coeff;
-            }
+      // Fusing hash computation with hash intersection.
+      KernelLauncher::launch(iter,
+          // Windows does not seem to like these nested captures without explicit names.
+          [ptr_indices, ptr_sorted_hash, sorted_hash_len, ptr_hash_coeffs,
+            ptr_intersection_count, ptr_intersection_first_idx, sdim,
+            indices_dim_stride, indices_nnz_stride]
+          FUNCAPI (index_t nnz_idx) -> index_t {
+          // Compute hash value
+          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
+          auto hash = hash_t {0};
+          for (uint32_t dim = 0; dim < sdim; ++dim) {
+            // Use only int32_t operations when hash_t == int32_t.
+            const auto dim_hash_coeff = ptr_hash_coeffs[dim];
+            const auto dim_index = static_cast<hash_t>(ptr_indices_dim[dim * indices_dim_stride]);
+            hash += dim_index * dim_hash_coeff;
+          }
 
-            // Perform hash values intersection
-            const auto* RESTRICT lb = find_bound<const hash_t*, hash_t, /*is_lower=*/true>(
-                ptr_sorted_hash,
-                ptr_sorted_hash + sorted_hash_len,
-                hash
-            );
+          // Perform hash values intersection
+          const auto* RESTRICT lb = find_bound<const hash_t*, hash_t, /*is_lower=*/true>(
+              ptr_sorted_hash,
+              ptr_sorted_hash + sorted_hash_len,
+              hash
+          );
 
-            const auto* RESTRICT ub = find_bound<const hash_t*, hash_t, /*is_lower=*/false>(
-                ptr_sorted_hash,
-                ptr_sorted_hash + sorted_hash_len,
-                hash
-            );
+          const auto* RESTRICT ub = find_bound<const hash_t*, hash_t, /*is_lower=*/false>(
+              ptr_sorted_hash,
+              ptr_sorted_hash + sorted_hash_len,
+              hash
+          );
 
-            ptr_intersection_count[nnz_idx] = ub - lb;
-            ptr_intersection_first_idx[nnz_idx] = lb - ptr_sorted_hash;
+          ptr_intersection_count[nnz_idx] = ub - lb;
+          ptr_intersection_first_idx[nnz_idx] = lb - ptr_sorted_hash;
 
-            return 0;
-        });
-    });
+          return 0;
+      });
+    }
 
     return std::make_tuple(intersection_count, intersection_first_idx);
   }();
@@ -409,74 +405,69 @@ void _sparse_binary_op_intersection_kernel_impl(
       .add_input(shifted_offset) // offset_t
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(source_idx.scalar_type(), NAME,
-        // Windows does not seem to like these nested captures without explicit names.
-        [&iter, &selected_source,
-          &selected_probably_coalesced, &argsort_hash,
-          &source_sparse_indices, &selected_source_sparse_indices,
-          sdim]() {
-        auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
-        auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
-        const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
+    {
+      auto* RESTRICT ptr_selected_source = selected_source.data_ptr<hash_t>();
+      auto* RESTRICT ptr_selected_probably_coalesced = selected_probably_coalesced.data_ptr<hash_t>();
+      const auto* RESTRICT ptr_argsort = argsort_hash.data_ptr<index_t>();
 
-        auto* RESTRICT ptr_selected_source_sparse_indices = selected_source_sparse_indices.data_ptr<index_t>();
-        // Non-const because of Gcc5/Clang5 issues
-        auto selected_source_sparse_indices_nnz_stride = static_cast<offset_t>(
-            selected_source_sparse_indices.stride(1));
-        auto selected_source_sparse_indices_dim_stride = static_cast<offset_t>(
-            selected_source_sparse_indices.stride(0));
+      auto* RESTRICT ptr_selected_source_sparse_indices = selected_source_sparse_indices.data_ptr<index_t>();
+      // Non-const because of Gcc5/Clang5 issues
+      auto selected_source_sparse_indices_nnz_stride = static_cast<offset_t>(
+          selected_source_sparse_indices.stride(1));
+      auto selected_source_sparse_indices_dim_stride = static_cast<offset_t>(
+          selected_source_sparse_indices.stride(0));
 
-        const auto* RESTRICT ptr_source_sparse_indices = source_sparse_indices.data_ptr<index_t>();
-        // Non-const because of Gcc5/Clang5 issues
-        auto source_sparse_indices_nnz_stride = static_cast<offset_t>(
-            source_sparse_indices.stride(1));
-        auto source_sparse_indices_dim_stride = static_cast<offset_t>(
-            source_sparse_indices.stride(0));
+      const auto* RESTRICT ptr_source_sparse_indices = source_sparse_indices.data_ptr<index_t>();
+      // Non-const because of Gcc5/Clang5 issues
+      auto source_sparse_indices_nnz_stride = static_cast<offset_t>(
+          source_sparse_indices.stride(1));
+      auto source_sparse_indices_dim_stride = static_cast<offset_t>(
+          source_sparse_indices.stride(0));
 
-        KernelLauncher::launch(iter,
-            // Windows does not seem to like these nested captures without explicit names.
-            [ptr_selected_source,
-              ptr_selected_probably_coalesced,
-              ptr_argsort,
-              ptr_selected_source_sparse_indices,
-              selected_source_sparse_indices_nnz_stride,
-              selected_source_sparse_indices_dim_stride,
-              ptr_source_sparse_indices,
-              source_sparse_indices_nnz_stride,
-              source_sparse_indices_dim_stride,
-              sdim]
-            FUNCAPI (
-              index_t idx,
-              hash_t count,
-              hash_t first_match_idx,
-              offset_t shifted_offset) -> index_t {
-            const auto offset = shifted_offset - static_cast<offset_t>(count);
-            auto* RESTRICT ptr_selected_source_idx_out = ptr_selected_source + offset;
-            auto* RESTRICT ptr_selected_probably_coalesced_idx_out = ptr_selected_probably_coalesced + offset;
-            const auto* RESTRICT ptr_argsort_idx = ptr_argsort + first_match_idx;
+      KernelLauncher::launch(iter,
+          // Windows does not seem to like these nested captures without explicit names.
+          [ptr_selected_source,
+            ptr_selected_probably_coalesced,
+            ptr_argsort,
+            ptr_selected_source_sparse_indices,
+            selected_source_sparse_indices_nnz_stride,
+            selected_source_sparse_indices_dim_stride,
+            ptr_source_sparse_indices,
+            source_sparse_indices_nnz_stride,
+            source_sparse_indices_dim_stride,
+            sdim]
+          FUNCAPI (
+            index_t idx,
+            hash_t count,
+            hash_t first_match_idx,
+            offset_t shifted_offset) -> index_t {
+          const auto offset = shifted_offset - static_cast<offset_t>(count);
+          auto* RESTRICT ptr_selected_source_idx_out = ptr_selected_source + offset;
+          auto* RESTRICT ptr_selected_probably_coalesced_idx_out = ptr_selected_probably_coalesced + offset;
+          const auto* RESTRICT ptr_argsort_idx = ptr_argsort + first_match_idx;
 
-            auto* RESTRICT ptr_selected_source_sparse_indices_out =
-              ptr_selected_source_sparse_indices + offset * selected_source_sparse_indices_nnz_stride;
-            const auto* RESTRICT ptr_source_sparse_indices_in =
-              ptr_source_sparse_indices + idx * source_sparse_indices_nnz_stride;
+          auto* RESTRICT ptr_selected_source_sparse_indices_out =
+            ptr_selected_source_sparse_indices + offset * selected_source_sparse_indices_nnz_stride;
+          const auto* RESTRICT ptr_source_sparse_indices_in =
+            ptr_source_sparse_indices + idx * source_sparse_indices_nnz_stride;
 
-            for (hash_t i = 0; i < count; ++i) {
-              *ptr_selected_source_idx_out++ = idx;
-              *ptr_selected_probably_coalesced_idx_out++ = *ptr_argsort_idx++;
+          for (hash_t i = 0; i < count; ++i) {
+            *ptr_selected_source_idx_out++ = idx;
+            *ptr_selected_probably_coalesced_idx_out++ = *ptr_argsort_idx++;
 
-              // res_indices = source._indices().index_select(1, selected_source)
-              // The code below fuses this computation with forming
-              // selected_source and selected_probably_coalesced.
-              for (uint32_t d = 0; d < sdim; ++d) {
-                ptr_selected_source_sparse_indices_out[d * selected_source_sparse_indices_dim_stride]
-                  = ptr_source_sparse_indices_in[d * source_sparse_indices_dim_stride];
-              }
-              ptr_selected_source_sparse_indices_out += selected_source_sparse_indices_nnz_stride;
+            // res_indices = source._indices().index_select(1, selected_source)
+            // The code below fuses this computation with forming
+            // selected_source and selected_probably_coalesced.
+            for (uint32_t d = 0; d < sdim; ++d) {
+              ptr_selected_source_sparse_indices_out[d * selected_source_sparse_indices_dim_stride]
+                = ptr_source_sparse_indices_in[d * source_sparse_indices_dim_stride];
             }
+            ptr_selected_source_sparse_indices_out += selected_source_sparse_indices_nnz_stride;
+          }
 
-            return 0;
-        });
-    });
+          return 0;
+      });
+    }
 
     return std::make_tuple(selected_source, selected_source_sparse_indices, selected_probably_coalesced);
   }();
@@ -528,6 +519,9 @@ void _sparse_binary_op_intersection_kernel_out(
       && (x.sizes().slice(0, x.sparse_dim()) == y.sizes().slice(0, y.sparse_dim())),
       NAME, "(): expects sparse inputs with equal dimensionality, ",
       "number of sparse dimensions, and shape of sparse dimensions");
+  TORCH_CHECK(
+      x._indices().scalar_type() == y._indices().scalar_type(),
+      NAME, "(): expects inputs' indices to be of the same dtype (i.e. long or int)");
 
   const auto broadcasted_shape = infer_size(x.sizes(), y.sizes());
 
@@ -544,29 +538,30 @@ void _sparse_binary_op_intersection_kernel_out(
   // This nnz defines offsets per thread which are computed using cumsum on values
   // of hash dtype. This becomes a problem when hash_t=int32_t and res_nnz > max(int32_t).
   const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
+  const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
-  if (is_max_hash_32bits && is_max_offset_32bits) {
+  if (is_max_hash_32bits && is_32bit_indexing) {
+    using index_t = int32_t;
     using hash_t = int32_t;
-    using offset_t = int32_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
-  else if (is_max_hash_32bits && !is_max_offset_32bits) {
+  else if (is_max_hash_32bits && !is_32bit_indexing) {
+    using index_t = int64_t;
     using hash_t = int32_t;
-    using offset_t = int64_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
-  else if (!is_max_hash_32bits && is_max_offset_32bits) {
+  else if (!is_max_hash_32bits && is_32bit_indexing) {
+    using index_t = int32_t;
     using hash_t = int64_t;
-    using offset_t = int32_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
   else {
+    using index_t = int64_t;
     using hash_t = int64_t;
-    using offset_t = int64_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, hash_t, offset_t>(
+    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
         res, x, y, broadcasted_shape, is_commutative);
   }
 }
