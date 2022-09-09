@@ -1492,12 +1492,15 @@ class FullyShardedDataParallel(nn.Module):
             if events:
                 # As a minor optimization, only synchronize the latest event
                 events[-1].synchronize()
-        for handle in handles:
-            with torch.cuda.stream(self._streams["pre_all_gather"]):
+        any_ran_pre_unshard = False
+        with torch.cuda.stream(self._streams["pre_all_gather"]):
+            for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
-                if ran_pre_unshard:
-                    self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-            with torch.cuda.stream(self._streams["all_gather"]):
+                any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
+        if any_ran_pre_unshard:
+            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
+        with torch.cuda.stream(self._streams["all_gather"]):
+            for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
 
