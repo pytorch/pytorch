@@ -25,7 +25,7 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }
