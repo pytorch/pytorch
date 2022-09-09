@@ -67,8 +67,14 @@ def _torch_reduce_all(fn):
 
         else:
             result_data = masked_fn(self, mask=mask)
+        
+        output_mask = torch.any(mask)
+        if result_data.layout == torch.sparse_coo:
+            output_mask = output_mask.to_sparse()
+        elif result_data.layout == torch.sparse_csr:
+            output_mask = output_mask.to_sparse_csr()
 
-        return MaskedTensor.from_values(result_data, torch.any(mask))
+        return MaskedTensor.from_values(result_data, output_mask)
 
     return reduce_all
 
