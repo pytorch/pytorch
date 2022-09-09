@@ -237,7 +237,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
 
       KernelLauncher::launch(iter,
-          // NOTE: capture by value required for CUDA
+          // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> hash_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = hash_t {0};
@@ -316,11 +316,8 @@ void _sparse_binary_op_intersection_kernel_impl(
 
       // Fusing hash computation with hash intersection.
       KernelLauncher::launch(iter,
-          // Windows does not seem to like these nested captures without explicit names.
-          [ptr_indices, ptr_sorted_hash, sorted_hash_len, ptr_hash_coeffs,
-            ptr_intersection_count, ptr_intersection_first_idx, sdim,
-            indices_dim_stride, indices_nnz_stride]
-          FUNCAPI (index_t nnz_idx) -> index_t {
+          // NOTE: capture by value required by CUDA
+          [=] FUNCAPI (index_t nnz_idx) -> index_t {
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = hash_t {0};
@@ -418,18 +415,8 @@ void _sparse_binary_op_intersection_kernel_impl(
           source_sparse_indices.stride(0));
 
       KernelLauncher::launch(iter,
-          // Windows does not seem to like these nested captures without explicit names.
-          [ptr_selected_source,
-            ptr_selected_probably_coalesced,
-            ptr_argsort,
-            ptr_selected_source_sparse_indices,
-            selected_source_sparse_indices_nnz_stride,
-            selected_source_sparse_indices_dim_stride,
-            ptr_source_sparse_indices,
-            source_sparse_indices_nnz_stride,
-            source_sparse_indices_dim_stride,
-            sdim]
-          FUNCAPI (
+          // NOTE: capture by value required by CUDA
+          [=] FUNCAPI (
             index_t idx,
             hash_t count,
             hash_t first_match_idx,
