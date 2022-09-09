@@ -1529,12 +1529,6 @@ class DeviceCachingAllocator {
         EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        const c10::impl::PyInterpreter* interp =
-            c10::impl::GPUTrace::get_trace();
-        if (C10_UNLIKELY(interp)) {
-          (*interp)->trace_gpu_event_synchronization(
-              reinterpret_cast<uintptr_t>(*event));
-        }
         C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
         block->event_count--;
