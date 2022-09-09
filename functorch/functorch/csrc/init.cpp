@@ -10,15 +10,14 @@
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
-#include <ATen/functorch/BatchedTensorImpl.h>
+#include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/CompileCache.h>
+#include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
-
-// This file contains functorch's Python bindings.
 
 namespace at {
 namespace functorch {
@@ -335,11 +334,11 @@ static std::tuple<Tensor, int64_t> unwrapTensorAtCurrentLevel(const Tensor& tens
 }
 
 static void tls_set_vmap_excluded(bool excluded) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::FuncTorchBatched, excluded);
+  c10::impl::tls_set_dispatch_key_excluded(kBatchedKey, excluded);
 }
 
 static bool tls_set_is_included() {
-  return c10::impl::tls_is_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode);
+  return c10::impl::tls_is_dispatch_key_included(kDynamicLayerFrontModeKey);
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
@@ -415,6 +414,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     throw py::error_already_set();
   }
   py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
+
+  // Windows doesn't like this
+#ifndef _WIN32
+  initDispatchBindings(m.ptr());
+#endif
 }
 
 }}

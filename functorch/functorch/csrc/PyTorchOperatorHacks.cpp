@@ -1,9 +1,10 @@
 #include <functorch/csrc/DynamicLayer.h>
+#include <functorch/csrc/Constants.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 #include <functorch/csrc/TensorWrapper.h>
-#include <ATen/functorch/BatchedTensorImpl.h>
+#include <functorch/csrc/BatchedTensorImpl.h>
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
@@ -12,16 +13,14 @@
 
 namespace at { namespace functorch {
 
-// NOTE: [functorch's PyTorch Operator Hacks]
+// TODO: all of these should be fixed in a more blessed way. In particular,
+// it is bad if any of these go out-of-sync with the implementations in
+// pytorch/pytorch.
 //
 // This file contains hacks for composite PyTorch operators that are problematic.
 // For example, the composite op might have in-place operations,
 // or call data_ptr. We have some idea of how to fix these things in the long term
-// e.g., upstream the changes to PyTorch.
-//
-// TODO: all of these should be fixed in a more blessed way. In particular,
-// it is bad if any of these go out-of-sync with the implementations in
-// pytorch/pytorch.
+// (e.g. functionalization for the in-place operations).
 
 // TODO: upstream into core
 Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
@@ -289,7 +288,7 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
 
 } // dropout_hack
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
+TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("index_select_backward", index_select_backward_hack);
   m.impl("linear", linear_hack);
   m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);
