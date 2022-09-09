@@ -125,7 +125,7 @@ def _parameterized_class_attrs_and_values(
     attrs = ("opset_version", "is_script", "keep_initializers_as_inputs")
     input_values = []
     input_values.extend(itertools.product((7, 8), (True, False), (True,)))
-    # Valid opset versions are defined in torch/onnx/_constants.py.
+    # Valid opset versions are defined in torch/onnx/_internal/constants.py.
     # Versions are intentionally set statically, to not be affected by changes elsewhere.
     if min_opset_version < 9:
         raise ValueError("min_opset_version must be >= 9")

@@ -22,7 +22,7 @@ def expect_tensor(scalar_type, shape=None):
 
 class TestONNXShapeInference(common_utils.TestCase):
     def setUp(self):
-        self.opset_version = _constants.ONNX_MAX_OPSET
+        self.opset_version = constants.ONNX_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)
         symbolic_helper._set_opset_version(self.opset_version)
 
@@ -64,10 +64,10 @@ class TestONNXShapeInference(common_utils.TestCase):
         # Test ConstantOfShape with input of prim::ListConstruct of static tensor
         rank = 4
         g = self.create_empty_graph()
-        constants = [
+        _constants = [
             self.insert_tensor_constant(g, torch.tensor(i + 1)) for i in range(rank)
         ]
-        shape = g.op("prim::ListConstruct", *constants)
+        shape = g.op("prim::ListConstruct", *_constants)
         shape.setType(torch._C.ListType.ofInts())
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
         self.run_test(
