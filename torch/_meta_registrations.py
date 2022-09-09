@@ -814,6 +814,11 @@ def meta_empty_like(self, **kwargs):
     return aten.empty.memory_format(self.size(), **kwargs)
 
 
+@register_meta(aten.zero_.default, register_dispatcher=False)
+def meta_zero_(self):
+    return self
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
