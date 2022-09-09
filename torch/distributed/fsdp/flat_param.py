@@ -588,18 +588,26 @@ class FlatParamHandle:
     ###################
     # UNSHARD/RESHARD #
     ###################
-    def pre_unshard(self):
+    def pre_unshard(self) -> bool:
         """
+        Returns: ``False`` if this is a no-op and ``True`` otherwise.
+
         Postcondition: ``self.flat_param`` 's data is on the device for
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
-        if self._uses_param_mixed_precision and not self._force_full_precision:
+        ret = False
+        if not self.needs_unshard():
+            pass  # no need to prepare for an all-gather
+        elif self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
+            ret = True
         elif self._config.offload_params and self.flat_param.device != self.device:
             # NOTE: This creates a new tensor distinct from any attributes.
             self._flat_param_to(self.device, non_blocking=True)
+            ret = True
         self._check_on_compute_device(self.flat_param)
+        return ret
 
     def _use_low_precision_shard(self):
         """
