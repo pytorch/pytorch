@@ -886,12 +886,12 @@ class TestTensorExprFuser(BaseTestClass):
             test_sigmoid,
         }
         fn_dev_dtype = itertools.product(gpu_only_fns.union(fns), self.devices, self.dtypes)
+
+        torch.manual_seed(0)
         for torch_fn, dev, data_type in fn_dev_dtype:
             if torch_fn == test_lgamma and dev == "cuda":
                 # lgamma_cuda does not support BF16
                 continue
-            torch.manual_seed(0)
-            torch.set_printoptions(10)
             rand_a = torch.rand(1024, dtype=data_type, device=dev)
             rand_b = torch.rand(1024, dtype=data_type, device=dev)
 
