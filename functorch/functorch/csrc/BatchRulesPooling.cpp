@@ -35,7 +35,7 @@ max_pool2d_with_indices_batch_rule(
       reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(_adaptive_avg_pool2d);
   EXISTING_BDIM_ALL_BOXED(_adaptive_avg_pool2d_backward);
   EXISTING_BDIM(_adaptive_avg_pool3d);
