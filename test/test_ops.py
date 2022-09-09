@@ -1686,6 +1686,24 @@ class TestRefsOpsInfo(TestCase):
             return
         self.assertIn(op, self.ref_ops_names_set)
 
+    # For references that are already defined, check that there's *at least one*
+    # reference for every alias of the op.
+    # Note:
+    # - multiple refs *can* map to the same op.  Example: '_refs.var_mean' and
+    #   'ops.nvprims.var_mean' map to 'var_mean'
+    # - refs sharing the same name *could be* defined for different variants, we
+    #   *do not* consider variants when performing this check because it's not
+    #   clear whether we want to enforce this.  Example: 'meshgrid'.
+    @ops(python_ref_db, dtypes=OpDTypes.none)
+    def test_python_refs_define_aliases(self, op):
+        # Note: this uses 'op.torch_opinfo' ('OpInfo' aliases) because aliases
+        # are not populated for refs.
+        for alias in op.torch_opinfo.aliases:
+            # TODO: we only check the '_refs' namespace, this skips nvfuser refs
+            # which are under 'ops.nvprims'.  This *assumes* that for each
+            # nvfuser ref there's already a ref in the '_refs' namespace.
+            self.assertIn("_refs." + alias.name, self.ref_db_names_set)
+
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
         path = op.split('.')

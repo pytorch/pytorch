@@ -15926,6 +15926,7 @@ python_ref_db = [
         "_refs.abs",
         torch_opinfo_name="abs",
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -15939,20 +15940,32 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
         torch_opinfo_name="acos",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acosh",
         torch_opinfo_name="acosh",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asin",
         torch_opinfo_name="asin",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asinh",
         torch_opinfo_name="asinh",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     PythonRefInfo(
         "_refs.arange",
@@ -16084,17 +16097,25 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.movedim",
-        aliases=('moveaxis',),
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -16121,19 +16142,31 @@ python_ref_db = [
         "_refs.digamma",
         torch_opinfo_name="digamma",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erf",
         torch_opinfo_name="erf",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfinv",
         torch_opinfo_name="erfinv",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfc",
         torch_opinfo_name="erfc",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
@@ -16142,11 +16175,17 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
         torch_opinfo_name="expm1",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp2",
         torch_opinfo_name="exp2",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.fill",
@@ -16201,10 +16240,16 @@ python_ref_db = [
         "_refs.i0",
         torch_opinfo_name="i0",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
@@ -16213,6 +16258,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log10",
@@ -16228,10 +16276,16 @@ python_ref_db = [
         # When keepdim=False logsumexp function uses squeeze operation
         # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
@@ -16241,6 +16295,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -16259,6 +16316,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.round",
         torch_opinfo_name="round",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rsqrt",
@@ -16270,6 +16330,9 @@ python_ref_db = [
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
@@ -16291,6 +16354,9 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.softmax",
         torch_opinfo_name="softmax",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
@@ -16311,10 +16377,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",
         torch_opinfo_name="tanh",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.trunc",
         torch_opinfo_name="trunc",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     #
     # Elementwise Unary Special OpInfos
@@ -16382,6 +16454,7 @@ python_ref_db = [
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # Reference result was farther (3.5762786809723224e-07) from the precise computation
             # than the torch result was (2.5068410824946596e-07)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
@@ -16490,6 +16563,9 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
         torch_opinfo_name="atan2",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_and",
@@ -16526,6 +16602,7 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
@@ -16553,6 +16630,9 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.div",
@@ -16562,6 +16642,9 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
@@ -16624,10 +16707,16 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.heaviside",
@@ -16645,11 +16734,17 @@ python_ref_db = [
         "_refs.igamma",
         torch_opinfo_name="igamma",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igammac",
         torch_opinfo_name="igammac",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.isclose",
@@ -16668,6 +16763,9 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_and",
@@ -16688,6 +16786,9 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
         torch_opinfo_name="lt",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
@@ -16712,6 +16813,7 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
@@ -16736,6 +16838,9 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
         torch_opinfo_name="ne",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -16799,6 +16904,7 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # Reference result was farther (nan) from the precise computation than
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -16865,6 +16971,9 @@ python_ref_db = [
         "_refs.clamp",
         torch_opinfo_name="clamp",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     #
     # Data Conversion & Data Movement Opinfos
@@ -16930,6 +17039,9 @@ python_ref_db = [
         "_refs.cat",
         torch_opinfo_name="cat",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     PythonRefInfo(
         "_refs.chunk",
@@ -16965,6 +17077,9 @@ python_ref_db = [
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     PythonRefInfo(
         "_refs.diag_embed",
@@ -17087,6 +17202,9 @@ python_ref_db = [
         "_refs.transpose",
         torch_opinfo_name="transpose",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
+        )
     ),
     PythonRefInfo(
         "_refs.t",
@@ -17113,6 +17231,7 @@ python_ref_db = [
         torch_opinfo_name="vstack",
         supports_nvfuser=False,
         skips=(
+            DecorateInfo(unittest.expectedFailure, "TestRefsOpsInfo", "test_python_refs_define_aliases"),
             # https://github.com/pytorch/pytorch/issues/78613
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
