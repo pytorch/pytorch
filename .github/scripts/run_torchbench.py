@@ -51,7 +51,7 @@ class S3Client:
         print(f"Uploading file {file_name} to S3 with key: {s3_key}")
         self.s3.upload_file(str(file_path), self.bucket, s3_key)
         # output the result URL
-        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}/{s3_key}")
+        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}{s3_key}")
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
