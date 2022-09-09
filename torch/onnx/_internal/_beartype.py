@@ -8,8 +8,9 @@ import typing
 import warnings
 from types import ModuleType
 
-from torch.onnx import _exporter_states, errors
-from torch.onnx._globals import GLOBALS
+from torch.onnx import errors
+from torch.onnx._internal import exporter_states
+from torch.onnx._internal.globals import GLOBALS
 
 try:
     import beartype as _beartype_lib  # type: ignore[import]
@@ -36,16 +37,16 @@ def _no_op_decorator(func):
 
 
 def _create_beartype_decorator(
-    runtime_check_state: _exporter_states.RuntimeTypeCheckState,
+    runtime_check_state: exporter_states.RuntimeTypeCheckState,
 ):
     # beartype needs to be imported outside of the function and aliased because
     # this module overwrites the name "beartype".
 
-    if runtime_check_state == _exporter_states.RuntimeTypeCheckState.DISABLED:
+    if runtime_check_state == exporter_states.RuntimeTypeCheckState.DISABLED:
         return _no_op_decorator
     if _beartype_lib is None:
         # If the beartype library is not installed, return a no-op decorator
-        if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
+        if runtime_check_state == exporter_states.RuntimeTypeCheckState.ERRORS:
             warnings.warn(
                 "TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK is set to 'ERRORS', "
                 "but the beartype library is not installed. "
@@ -55,7 +56,7 @@ def _create_beartype_decorator(
 
     assert isinstance(_beartype_lib, ModuleType)
 
-    if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
+    if runtime_check_state == exporter_states.RuntimeTypeCheckState.ERRORS:
         # Enable runtime type checking which errors on any type hint violation.
         return _beartype_lib.beartype
 

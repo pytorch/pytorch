@@ -4,8 +4,7 @@
 import unittest
 
 import torch
-from torch.onnx import _exporter_states
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter_states
 from torch.testing._internal import common_utils
 
 

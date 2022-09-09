@@ -20,9 +20,9 @@ import numpy as np
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, utils
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx import _experimental, utils
+from torch.onnx._internal import _beartype, constants
+from torch.onnx._internal.globals import GLOBALS
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
@@ -519,7 +519,7 @@ def _onnx_graph_from_model(
     output_names = export_options.output_names
 
     if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
+        opset_version = constants.ONNX_DEFAULT_OPSET
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 

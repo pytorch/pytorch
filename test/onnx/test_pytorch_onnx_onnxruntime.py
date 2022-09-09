@@ -37,14 +37,15 @@ from pytorch_test_common import (
 )
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, verification
+from torch.onnx import verification
+from torch.onnx._internal import constants
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = constants.ONNX_MAX_OPSET
 
 
 def _init_test_generalized_rcnn_transform():

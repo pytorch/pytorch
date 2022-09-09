@@ -5,7 +5,7 @@ import textwrap
 from typing import Optional
 
 from torch import _C
-from torch.onnx import _constants
+from torch.onnx._internal import constants
 
 __all__ = [
     "OnnxExporterError",
@@ -56,7 +56,7 @@ class UnsupportedOperatorError(OnnxExporterError):
                 )
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
-                msg += _constants.PYTORCH_GITHUB_ISSUES_URL
+                msg += constants.PYTORCH_GITHUB_ISSUES_URL
         else:
             msg = (
                 f"ONNX export failed on an operator with unrecognized namespace '{domain}::{op_name}'. "

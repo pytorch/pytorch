@@ -8,9 +8,9 @@ from torch import _C
 from torch._C import _onnx as _C_onnx
 
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
-from torch.onnx import _deprecation, utils
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx import utils
+from torch.onnx._internal import _beartype, deprecation
+from torch.onnx._internal.globals import GLOBALS
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
@@ -197,7 +197,7 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 
 
 # TODO(#76254): Remove the deprecated function.
-@_deprecation.deprecated(
+@deprecation.deprecated(
     "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
 )
 @_beartype.beartype
@@ -255,7 +255,7 @@ def _graph_constant(
 
 
 # TODO(#76254): Remove the deprecated function.
-@_deprecation.deprecated(
+@deprecation.deprecated(
     "1.13",
     "1.14",
     "Internally use '_node_get' in symbolic_helper instead.",

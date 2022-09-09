@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.onnx import symbolic_helper, symbolic_registry, utils
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.globals import GLOBALS
 from torch.testing._internal import common_utils
 
 

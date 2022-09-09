@@ -33,7 +33,8 @@ Updated operators:
 import warnings
 
 import torch
-from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import errors, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import type_utils
 
 block_listed_operators = [
     "nonzero",
@@ -206,7 +207,7 @@ def mm(g, self, other):
     zero_constant = g.op(
         "Constant",
         value_t=torch.tensor(
-            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
+            [0], dtype=type_utils.JitScalarType.from_name(scalar_type).dtype()
         ),
     )
 
@@ -279,14 +280,14 @@ def flatten(g, input, start_dim, end_dim):
 
 def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = type_utils.JitScalarType.FLOAT
     else:
-        scalar_type = _type_utils.JitScalarType(dtype)
+        scalar_type = type_utils.JitScalarType(dtype)
     if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",
             sizes,
-            dtype_i=_type_utils.JitScalarType.FLOAT.onnx_type(),
+            dtype_i=type_utils.JitScalarType.FLOAT.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )

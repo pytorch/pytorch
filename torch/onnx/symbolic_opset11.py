@@ -8,15 +8,14 @@ import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch.onnx import (
-    _type_utils,
     errors,
     symbolic_helper,
     symbolic_opset10 as opset10,
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, type_utils
+from torch.onnx._internal.globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -99,9 +98,9 @@ __all__ = [
 def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     dtype = self.type().scalarType()
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = type_utils.JitScalarType.FLOAT
     else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
+        scalar_type = type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
@@ -125,7 +124,7 @@ def clamp(g, self, min, max):
             return g.op(
                 "Cast",
                 tensor,
-                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+                to_i=type_utils.JitScalarType.from_name(dtype).onnx_type(),
             )
         else:
             return tensor
@@ -154,7 +153,7 @@ def clamp(g, self, min, max):
 @_beartype.beartype
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
+    min = g.op("Cast", min, to_i=type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -168,7 +167,7 @@ def clamp_min(g, self, min):
 @_beartype.beartype
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
+    max = g.op("Cast", max, to_i=type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -183,9 +182,9 @@ def relu6(g, input):
     relu_ = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = type_utils.JitScalarType.FLOAT
     else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
+        scalar_type = type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(0, dtype=scalar_type.dtype()),
@@ -297,9 +296,9 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
         values = g.op(
-            "Cast", values, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+            "Cast", values, to_i=type_utils.JitScalarType.from_name(dtype).onnx_type()
         )
-    scalar_type = _type_utils.JitScalarType.from_name(dtype)
+    scalar_type = type_utils.JitScalarType.from_name(dtype)
 
     if accumulate:
         zeros = g.op(
@@ -382,7 +381,7 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.JitScalarType.from_name(
+                to_i=type_utils.JitScalarType.from_name(
                     self.type().scalarType()
                 ).onnx_type(),
             )
@@ -398,7 +397,7 @@ def cumsum(g, self, dim, dtype=None):
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         cast = g.op(
-            "Cast", self, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
+            "Cast", self, to_i=type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     else:
         cast = self
@@ -984,7 +983,7 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
+            to_i=type_utils.JitScalarType.from_name(
                 self.type().scalarType()
             ).onnx_type(),
         )
@@ -1000,7 +999,7 @@ def __rshift_(g, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -1014,7 +1013,7 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
+            to_i=type_utils.JitScalarType.from_name(
                 self.type().scalarType()
             ).onnx_type(),
         )
@@ -1030,7 +1029,7 @@ def __lshift_(g, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1212,7 +1211,7 @@ def linalg_vector_norm(
         cond_op = g.op(
             "Cast",
             cond_op,
-            to_i=_type_utils.JitScalarType.from_name(
+            to_i=type_utils.JitScalarType.from_name(
                 self.type().scalarType()
             ).onnx_type(),
         )

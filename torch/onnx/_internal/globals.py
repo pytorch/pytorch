@@ -10,9 +10,9 @@ from typing import Optional
 
 import torch._C._onnx as _C_onnx
 
-# This module should only depend on _constants and nothing else in torch.onnx to keep
+# This module should only depend on constants and nothing else in torch.onnx to keep
 # dependency direction clean.
-from torch.onnx import _constants, _exporter_states
+from torch.onnx._internal import constants, exporter_states
 
 
 class _InternalGlobals:
@@ -23,7 +23,7 @@ class _InternalGlobals:
     """
 
     def __init__(self):
-        self._export_onnx_opset_version = _constants.ONNX_DEFAULT_OPSET
+        self._export_onnx_opset_version = constants.ONNX_DEFAULT_OPSET
         self._training_mode: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL
         self._in_onnx_export: bool = False
         # Whether the user's model is training during export
@@ -33,16 +33,14 @@ class _InternalGlobals:
 
         # Internal feature flags
         if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "ERRORS":
-            self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.ERRORS
-            )
+            self.runtime_type_check_state = exporter_states.RuntimeTypeCheckState.ERRORS
         elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "DISABLED":
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.DISABLED
+                exporter_states.RuntimeTypeCheckState.DISABLED
             )
         else:
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.WARNINGS
+                exporter_states.RuntimeTypeCheckState.WARNINGS
             )
 
     @property
@@ -67,7 +65,7 @@ class _InternalGlobals:
     @export_onnx_opset_version.setter
     def export_onnx_opset_version(self, value: int):
         supported_versions = range(
-            _constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1
+            constants.ONNX_MIN_OPSET, constants.ONNX_MAX_OPSET + 1
         )
         if value not in supported_versions:
             raise ValueError(f"Unsupported ONNX opset version: {value}")

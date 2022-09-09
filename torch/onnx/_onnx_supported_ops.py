@@ -2,9 +2,10 @@ import inspect
 from typing import Dict, List, Union
 
 from torch import _C
-from torch.onnx import _constants, symbolic_registry
+from torch.onnx import symbolic_registry
+from torch.onnx._internal import constants
 
-for v in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
+for v in range(constants.ONNX_MIN_OPSET, constants.ONNX_MAX_OPSET + 1):
     symbolic_registry.register_version("", v)
 
 

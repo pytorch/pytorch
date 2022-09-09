@@ -11,7 +11,6 @@ from torch._C._onnx import (
 )
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
-    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -28,8 +27,9 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_registry,
     utils,
 )
-from ._exporter_states import ExportTypes, SymbolicContext
-from ._type_utils import JitScalarType
+from torch.onnx._internal.exporter_states import ExportTypes, SymbolicContext
+from torch.onnx._internal.type_utils import JitScalarType
+from ._internal import deprecation
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
     _optimize_graph,
@@ -94,7 +94,7 @@ producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
 
-@_deprecation.deprecated(
+@deprecation.deprecated(
     since="1.12.0", removed_in="TBD", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):

@@ -9,7 +9,7 @@ import torch
 import torch.onnx
 from torch.nn import Module
 from torch.onnx import producer_name, producer_version
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.globals import GLOBALS
 from torch.testing._internal import common_utils
 
 

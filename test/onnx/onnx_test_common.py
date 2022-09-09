@@ -10,7 +10,8 @@ import numpy as np
 import onnxruntime
 
 import torch
-from torch.onnx import _constants, verification
+from torch.onnx import verification
+from torch.onnx._internal import constants
 from torch.testing._internal import common_utils
 
 onnx_model_dir = os.path.join(
@@ -61,7 +62,7 @@ def set_rng_seed(seed):
 
 
 class _TestONNXRuntime(common_utils.TestCase):
-    opset_version = _constants.ONNX_DEFAULT_OPSET
+    opset_version = constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
     check_shape = True

@@ -4,7 +4,8 @@ import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
 from torch import _C
-from torch.onnx import _constants, errors
+from torch.onnx import errors
+from torch.onnx._internal import constants
 
 __all__ = [
     "get_op_supported_version",
@@ -38,9 +39,7 @@ _symbolic_versions: Dict[Union[int, str], Any] = {}
 
 
 def _import_symbolic_opsets():
-    for opset_version in range(
-        _constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1
-    ):
+    for opset_version in range(constants.ONNX_MIN_OPSET, constants.ONNX_MAX_OPSET + 1):
         module = importlib.import_module(f"torch.onnx.symbolic_opset{opset_version}")
         global _symbolic_versions
         _symbolic_versions[opset_version] = module
@@ -148,7 +147,7 @@ def unregister_op(opname: str, domain: str, version: int):
 
 def get_op_supported_version(opname: str, domain: str, version: int):
     iter_version = version
-    while iter_version <= _constants.ONNX_MAX_OPSET:
+    while iter_version <= constants.ONNX_MAX_OPSET:
         ops = [(op[0], op[1]) for op in get_ops_in_version(iter_version)]
         if (domain, opname) in ops:
             return iter_version

@@ -37,16 +37,14 @@ import torch.jit._trace
 import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
-    _constants,
-    _exporter_states,
     _patch_torch,
     errors,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,
 )
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, constants, exporter_states
+from torch.onnx._internal.globals import GLOBALS
 
 __all__ = [
     "is_in_onnx_export",
@@ -517,10 +515,10 @@ def _is_constant_tensor_list(node):
 
 
 @_beartype.beartype
-def _split_tensor_list_constants(g, block):
+def _split_tensor_listconstants(g, block):
     for node in block.nodes():
         for subblock in node.blocks():
-            _split_tensor_list_constants(g, subblock)
+            _split_tensor_listconstants(g, subblock)
         if _is_constant_tensor_list(node):
             inputs = []
             for val in node.output().toIValue():
@@ -569,7 +567,7 @@ def _optimize_graph(
     if _disable_torch_constant_prop is False:
         _C._jit_pass_constant_propagation(graph)
 
-    _split_tensor_list_constants(graph, graph)
+    _split_tensor_listconstants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
     _C._jit_pass_dce(graph)
@@ -1139,7 +1137,7 @@ def _model_to_graph(
     if (
         do_constant_folding
         and GLOBALS.export_onnx_opset_version
-        >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
+        >= constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
@@ -1204,7 +1202,7 @@ def export_to_pretty_string(
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
+        opset_version = constants.ONNX_DEFAULT_OPSET
     if custom_opsets is None:
         custom_opsets = {}
     symbolic_helper._set_opset_version(opset_version)
@@ -1265,7 +1263,7 @@ def unconvertible_ops(
         of the unconvertible ops.
     """
 
-    opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
+    opset_version = opset_version or constants.ONNX_DEFAULT_OPSET
     symbolic_helper._set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
@@ -1402,7 +1400,7 @@ def _export(
     export_modules_as_functions=False,
 ):
     if export_type is None:
-        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
+        export_type = exporter_states.ExportTypes.PROTOBUF_FILE
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1418,7 +1416,7 @@ def _export(
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
 
         if opset_version is None:
-            opset_version = _constants.ONNX_DEFAULT_OPSET
+            opset_version = constants.ONNX_DEFAULT_OPSET
 
         if export_modules_as_functions and opset_version < 15:
             raise ValueError(
@@ -1483,7 +1481,7 @@ def _export(
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = (
-                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
+                export_type is not exporter_states.ExportTypes.PROTOBUF_FILE
             )
             if custom_opsets is None:
                 custom_opsets = {}
@@ -1541,32 +1539,31 @@ def _export(
                 )
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
-            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
+            if export_type == exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
                     opened_file.write(proto)
             elif export_type in [
-                _exporter_states.ExportTypes.ZIP_ARCHIVE,
-                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+                exporter_states.ExportTypes.ZIP_ARCHIVE,
+                exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
             ]:
                 compression = (
                     zipfile.ZIP_DEFLATED
-                    if export_type
-                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
+                    if export_type == exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
                     else zipfile.ZIP_STORED
                 )
                 with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+                    z.writestr(constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
-            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
+            elif export_type == exporter_states.ExportTypes.DIRECTORY:
                 if os.path.exists(f):
                     assert os.path.isdir(f)
                 else:
                     os.makedirs(f)
 
                 model_proto_file = os.path.join(
-                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
+                    f, constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
                 )
                 with torch.serialization._open_file_like(
                     model_proto_file, "wb"
@@ -1743,7 +1740,7 @@ def _need_symbolic_context(symbolic_fn) -> bool:
     if first_param_name not in type_hints:
         return False
     param_type = type_hints[first_param_name]
-    return issubclass(param_type, _exporter_states.SymbolicContext)
+    return issubclass(param_type, exporter_states.SymbolicContext)
 
 
 @_beartype.beartype
@@ -1808,7 +1805,7 @@ def _run_symbolic_function(
 
             attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
-                ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
+                ctx = exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
             # PythonOp symbolic need access to the node to resolve the name conflict,
             # this is inconsistent with regular op symbolic.
@@ -1913,7 +1910,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
+    for version in range(constants.ONNX_MIN_OPSET, constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
 
@@ -1931,7 +1928,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
+    for version in range(constants.ONNX_MIN_OPSET, constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.unregister_op(op_name, ns, version)
 

@@ -17,8 +17,8 @@ Updated operators:
 
 import torch
 from torch.onnx import symbolic_helper
-from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.globals import GLOBALS
 
 
 @symbolic_helper.parse_args("v")

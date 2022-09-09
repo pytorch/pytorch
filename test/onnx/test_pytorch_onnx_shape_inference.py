@@ -4,7 +4,8 @@ import numpy as np
 
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
-from torch.onnx import _constants, symbolic_helper
+from torch.onnx import symbolic_helper
+from torch.onnx._internal import constants
 from torch.testing._internal import common_utils
 
 

@@ -6,7 +6,7 @@ import torch
 
 from onnx_test_common import run_model_test
 from torch.onnx import OperatorExportTypes
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.globals import GLOBALS
 from torch.onnx.utils import _model_to_graph
 
 

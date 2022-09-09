@@ -3,15 +3,8 @@ from typing import Optional, Tuple
 
 import torch
 from torch._C import _onnx as _C_onnx
-from torch.onnx import (
-    _type_utils,
-    errors,
-    symbolic_helper,
-    symbolic_opset9 as opset9,
-    utils,
-)
-from torch.onnx._internal import _beartype
-
+from torch.onnx import errors, symbolic_helper, symbolic_opset9 as opset9, utils
+from torch.onnx._internal import _beartype, type_utils
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -73,7 +66,7 @@ def outer(g, input, other):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
+            to_i=type_utils.JitScalarType.from_name(
                 input.type().scalarType()
             ).onnx_type(),
         )
