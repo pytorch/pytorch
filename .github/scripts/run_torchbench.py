@@ -49,7 +49,7 @@ class S3Client:
         file_name = file_path.name
         s3_key = f"{self.prefix}/{filekey_prefix}/{file_name}"
         print(f"Uploading file {file_name} to S3 with key: {s3_key}")
-        self.s3.upload_file(str(file_path), self.bucket, s3_key, ExtraArgs={'ACL':'public-read'})
+        self.s3.upload_file(str(file_path), self.bucket, s3_key, ExtraArgs={'ACL': 'public-read'})
         # output the result URL
         print(f"Uploaded the result file {file_name} to {S3_URL_BASE}/{self.bucket}/{s3_key}")
 
