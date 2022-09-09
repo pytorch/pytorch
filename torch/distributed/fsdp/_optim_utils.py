@@ -27,6 +27,12 @@ from torch.distributed.fsdp._shard_utils import (
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 
+def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
+    keys = sorted(dictionary.keys())
+    for k in keys:
+        yield k, dictionary[k]
+
+
 class _ConsolidatedOptimState:
     """
     This holds the consolidated optimizer state on the target rank. Positive-
@@ -164,7 +170,7 @@ def _communicate_optim_state(
     group = fsdp_module.process_group
 
     tensor_buffer = None  # initialize lazily in case it is not needed
-    for state_name, value in flat_param_state.items():
+    for state_name, value in sorted_items(flat_param_state):
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
             # If the parameter is not sharded, then neither is the
@@ -176,6 +182,8 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value.cpu()
                 continue
+            if not value.is_cuda:
+                value = value.to(fsdp_module.compute_device)
             if tensor_buffer is None:
                 # Assume that positive-dimension tensor optimizer state
                 # has the same shape as the sharded flattened parameter
@@ -230,7 +238,7 @@ def _unflatten_communicated_optim_state(
     for _ in range(num_unflat_params):
         unflat_state_param = {}
         # Add positive-dimension tensor state: unflatten with views
-        for state_name, flat_tensor in tensor_state.items():
+        for state_name, flat_tensor in sorted_items(tensor_state):
             views_generated = state_name in flat_param_views
             if not views_generated:
                 views = FlatParamHandle._get_unflat_views(flat_param, flat_tensor)
@@ -249,10 +257,10 @@ def _unflatten_communicated_optim_state(
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
-        for state_name, zero_dim_tensor in zero_dim_tensor_state.items():
+        for state_name, zero_dim_tensor in sorted_items(zero_dim_tensor_state):
             unflat_state_param[state_name] = zero_dim_tensor
         # Add non-tensor state: take the target rank's value
-        for state_name, non_tensor in non_tensor_state.items():
+        for state_name, non_tensor in sorted_items(non_tensor_state):
             unflat_state_param[state_name] = non_tensor
         unflat_param_state.append(unflat_state_param)
     return unflat_param_state
@@ -647,7 +655,7 @@ def _process_pos_dim_tensor_state(
     no_tensor_osd: Dict[str, Any] = {"state": {}}
     for key, param_state in flat_osd["state"].items():
         no_tensor_osd["state"][key] = {}
-        for state_name, value in param_state.items():
+        for state_name, value in sorted_items(param_state):
             is_pos_dim_tensor_state = torch.is_tensor(value) and value.dim() > 0
             if not is_pos_dim_tensor_state:
                 no_tensor_osd["state"][key][state_name] = value
@@ -725,7 +733,7 @@ def _broadcast_pos_dim_tensor_states(
     no_tensor_osd = processed_optim_state_dict  # alias
     flat_osd = flat_optim_state_dict  # alias
     for key, param_state in no_tensor_osd["state"].items():
-        for state_name, value in param_state.items():
+        for state_name, value in sorted_items(param_state):
             is_pos_dim_tensor_state = isinstance(value, _PosDimTensorInfo)
             if not is_pos_dim_tensor_state:
                 continue
@@ -1208,7 +1216,7 @@ def _optim_state_dict(
             assert len(r0_optim_state_key.unflat_param_names) == 1
             unflat_param_name = r0_optim_state_key.unflat_param_names[0]
             fsdp_osd_state[unflat_param_name] = copy.copy(osd_state[flat_param_id])
-            for state_name, value in fsdp_osd_state[unflat_param_name].items():
+            for state_name, value in sorted_items(fsdp_osd_state[unflat_param_name]):
                 if torch.is_tensor(value):
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
