@@ -18,12 +18,28 @@
 #include <functorch/csrc/ADInterpreters.h>
 #include <functorch/csrc/FunctionalizeInterpreter.h>
 
-// Forward declared bc I am lazy
+// Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
 namespace at {
 namespace functorch {
 
+// This file contains the implementation of functorch's interpreter stack.
+// See NOTE: [functorch interpreter stack] first before reading on.
+//
+// NB: the functorch interpreter stack is also referred to as:
+// - the "dynamic layer stack" -- an older name for "interpreter" was
+//   "dynamic layer".
+// - the "functorch mode stack". You can think of each functorch transform as a
+//   "mode" (in the same sense as torch_dispatch mode or torch_function mode),
+//   and functorch being an implementation of a "mode stack" where the modes
+//   may be arbitrary composed.
+
+// DynamicLayer is basically the same thing as an Interpreter.
+// It represents a functorch transform and it holds an Interpreter,
+// which contains metadata related to the transform and instructions on
+// how to perform the transform.
+//
 // TODO: we can excise DynamicLayer in favor of Interpreter,
 // But I am going to leave it for now as a compatiblity shim to avoid
 // needing to refactor a lot of callsites...
@@ -85,6 +101,8 @@ Tensor unwrapIfDead(const Tensor& tensor);
 std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
 
+// While a functorch grad transform is active, Tensor.requires_grad_() gets
+// disabled. These two functions are the mechanism to controlling that.
 void setInplaceRequiresGradAllowed(bool allowed);
 bool getInplaceRequiresGradAllowed();
 
