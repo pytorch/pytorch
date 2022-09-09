@@ -502,8 +502,8 @@ function(torch_compile_options libname)
     # Unfortunately, hidden visibility messes up some ubsan warnings because
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
+    #target_compile_options(${libname} PRIVATE
+    #    $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
