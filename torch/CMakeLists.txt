@@ -286,7 +286,6 @@ if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   if(NOT MSVC)
     target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
-    target_compile_options(torch_python_obj PRIVATE -Wno-unused-local-typedefs)
   endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
@@ -401,7 +400,6 @@ endif()
 
 if(NOT MSVC)
   target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-  target_compile_options(torch_python PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 # Required workaround for generated sources
