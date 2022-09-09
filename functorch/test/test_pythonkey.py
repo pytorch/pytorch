@@ -590,9 +590,6 @@ class TestPartitioning(AOTTestCase):
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
