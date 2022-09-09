@@ -18,6 +18,7 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
@@ -33,6 +34,9 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
 from functorch.experimental import functionalize
+
+if not IS_WINDOWS:
+    from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -2167,6 +2171,41 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], yt.movedim(2, 0))
 
 
+class TestCustomFunction(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")
+    @onlyCPU
+    def test_basic(self, device):
+        called_impl = False
+        called_vjp = False
+
+        def my_sin_impl(args):
+            x, = args
+            nonlocal called_impl
+            called_impl = True
+            return x.sin(), x
+
+        def my_sin_vjp(args):
+            grad_y, result, x = args
+            nonlocal called_vjp
+            called_vjp = True
+            return (grad_y * 3 * x.cos(),)
+
+        def filter_fn(args):
+            return args[0]
+
+        my_sin = custom_vjp('my_sin', filter_fn, my_sin_impl, my_sin_vjp)
+
+        x = torch.tensor([1., 2.], requires_grad=True, device=device)
+
+        y = my_sin(x)
+        self.assertTrue(called_impl)
+
+        y.sum().backward()
+        self.assertTrue(called_vjp)
+
+        assert torch.allclose(x.grad, 3 * x.cos())
+
+
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
@@ -3138,8 +3177,8 @@ class TestFunctionalize(TestCase):
 
 
 def forward(self, x_1, indices_1) -> torch.Tensor:
-    index = torch.ops.aten.index.Tensor(x_1, [indices_1]);  x_1 = indices_1 = None
-    return index
+    index_tensor = torch.ops.aten.index.Tensor(x_1, [indices_1]);  x_1 = indices_1 = None
+    return index_tensor
     """)
 
     # Ensure grad(functionalize(f)) works
@@ -3208,11 +3247,11 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
 
 def forward(self, x_1) -> torch.Tensor:
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
-    add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
-    view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
-    return view_copy_1
+    view_copy_default = torch.ops.aten.view_copy.default(x_1, [4, 2])
+    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, ones);  view_copy_default = ones = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(x_1, view_copy_default_1);  x_1 = None
+    return view_copy_default_1
     """)
 
     def test_functionalize_fx_transpose_simple(self, device):
@@ -3227,8 +3266,8 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
-    transpose_copy = torch.ops.aten.transpose_copy.int(x_1, 1, 0);  x_1 = None
-    return transpose_copy
+    transpose_copy_int = torch.ops.aten.transpose_copy.int(x_1, 1, 0);  x_1 = None
+    return transpose_copy_int
     """)
 
     def test_functionalize_fx_out_op(self, device):
@@ -3249,12 +3288,12 @@ def forward(self, x_1) -> torch.Tensor:
 
 def forward(self, inpt_1) -> torch.Tensor:
     empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
-    add = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
-    view_copy = torch.ops.aten.view_copy.default(add, [4])
-    view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
-    add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
-    view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
-    return view_copy_2
+    add_tensor = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4])
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4]);  add_tensor = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
+    view_copy_default_2 = torch.ops.aten.view_copy.default(add_tensor_1, [4]);  add_tensor_1 = None
+    return view_copy_default_2
     """)
 
     def test_functionalize_fx_multi_out_op(self, device):
@@ -3277,13 +3316,13 @@ def forward(self, inpt_1) -> torch.Tensor:
 def forward(self, inpt_1) -> torch.Tensor:
     empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
-    view_copy_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
-    aminmax = torch.ops.aten.aminmax.default(view_copy_1, dim = 0);  view_copy_1 = None
-    getitem = aminmax[0]
-    getitem_1 = aminmax[1];  aminmax = None
-    view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
-    return (view_copy_2, getitem)
+    view_copy_default = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
+    aminmax_default = torch.ops.aten.aminmax.default(view_copy_default_1, dim = 0);  view_copy_default_1 = None
+    getitem = aminmax_default[0]
+    getitem_1 = aminmax_default[1];  aminmax_default = None
+    view_copy_default_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    return (view_copy_default_2, getitem)
     """)
 
     def test_functionalize_fx_reapply_views_simple(self, device):
@@ -3302,11 +3341,11 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 def forward(self, x_1) -> torch.Tensor:
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
-    view = torch.ops.aten.view.default(x_1, [4, 2])
-    add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
-    view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
-    return view_1
+    view_default = torch.ops.aten.view.default(x_1, [4, 2])
+    add_tensor = torch.ops.aten.add.Tensor(view_default, ones);  view_default = ones = None
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(x_1, view_default_1);  x_1 = None
+    return view_default_1
     """)
 
     def test_functionalize_nonfunctional_output(self, device):
@@ -3343,8 +3382,8 @@ def forward(self) -> torch.Tensor:
 
 
 def forward(self, a_1, b_1) -> torch.Tensor:
-    index = torch.ops.aten.index.Tensor(a_1, [b_1]);  a_1 = b_1 = None
-    return index
+    index_tensor = torch.ops.aten.index.Tensor(a_1, [b_1]);  a_1 = b_1 = None
+    return index_tensor
     """)
 
     def test_functionalize_optional_tensorlist2(self, device):
@@ -3361,11 +3400,11 @@ def forward(self, a_1, b_1) -> torch.Tensor:
 
 
 def forward(self, a_1, b_1) -> torch.Tensor:
-    unbind = torch.ops.aten.unbind.int(b_1);  b_1 = None
-    getitem = unbind[0]
-    getitem_1 = unbind[1];  unbind = None
-    index = torch.ops.aten.index.Tensor(a_1, [getitem, getitem_1]);  a_1 = getitem = getitem_1 = None
-    return index
+    unbind_int = torch.ops.aten.unbind.int(b_1);  b_1 = None
+    getitem = unbind_int[0]
+    getitem_1 = unbind_int[1];  unbind_int = None
+    index_tensor = torch.ops.aten.index.Tensor(a_1, [getitem, getitem_1]);  a_1 = getitem = getitem_1 = None
+    return index_tensor
     """)
 
     def test_resize_program_inputs(self, device):
@@ -3381,10 +3420,10 @@ def forward(self, a_1, b_1) -> torch.Tensor:
 
 
 def forward(self, x_1):
-    resize = torch.ops.aten.resize.default(x_1, [10])
-    fill = torch.ops.aten.fill.Scalar(resize, 2);  resize = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None
-    copy_ = torch.ops.aten.copy_.default(resize_, fill);  resize_ = fill = None
+    resize_default = torch.ops.aten.resize.default(x_1, [10])
+    fill_scalar = torch.ops.aten.fill.Scalar(resize_default, 2);  resize_default = None
+    resize__default = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None
+    copy__default = torch.ops.aten.copy_.default(resize__default, fill_scalar);  resize__default = fill_scalar = None
     return None
     """)
 
@@ -3428,6 +3467,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestCustomFunction,
     globals(),
     only_for=only_for,
 )

@@ -7,7 +7,6 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
-from torch.masked import is_masked_tensor, MaskedTensor
 from . import _docs
 
 if TYPE_CHECKING:
@@ -857,7 +856,7 @@ def _where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
         )
 
 
-def _input_mask(input: Union[Tensor, MaskedTensor], *args, **kwargs) -> Tensor:
+def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     """Return canonical input mask.
 
     A canonical input mask is defined as a boolean mask tensor that
@@ -988,51 +987,23 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
         )
 
 
-def _combine_input_and_mask(
-    op, input: Union[MaskedTensor, Tensor], mask, *args
-) -> Tensor:
-    def helper(input, mask):
-        if mask is None:
-            return input
-        canonical_mask = _input_mask(input, mask=mask)
-        if callable(op):
-            fill_value = _reduction_identity(op.__name__, input, *args)
-            return _where(canonical_mask, input, fill_value)
-        else:
-            raise ValueError(
-                f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
-            )
-
-    class Combine(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, input, mask):
-            """Return input with masked-out elements eliminated for the given operations."""
-            ctx.save_for_backward(mask)
-
-            if mask is not None:
-                ctx.mark_non_differentiable(mask)
-
-            return helper(input, mask)
-
-        @staticmethod
-        def backward(ctx, grad_output):
-            (mask,) = ctx.saved_tensors
-            grad_data = (
-                grad_output.get_data() if is_masked_tensor(grad_output) else grad_output
-            )
-            result = MaskedTensor.from_values(grad_data, mask)
-            return result, None
-
-    return (
-        Combine.apply(input.get_data(), input.get_mask())  # type: ignore[union-attr]
-        if is_masked_tensor(input)
-        else helper(input, mask)
-    )
+def _combine_input_and_mask(op, input: Tensor, mask, *args) -> Tensor:
+    """Return input with masked-out elements eliminated for the given operations."""
+    if mask is None:
+        return input
+    canonical_mask = _input_mask(input, mask=mask)
+    if callable(op):
+        fill_value = _reduction_identity(op.__name__, input, *args)
+        return _where(canonical_mask, input, fill_value)
+    else:
+        raise ValueError(
+            f"_combine_input_and_mask expected masked operation (got {type(op).__name__} object)"
+        )
 
 
 @_apply_docstring_templates
 def sum(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1085,7 +1056,7 @@ def sum(
 
 @_apply_docstring_templates
 def prod(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1202,7 +1173,7 @@ def cumprod(
 
 @_apply_docstring_templates
 def amax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1252,7 +1223,7 @@ def amax(
 
 @_apply_docstring_templates
 def amin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1274,9 +1245,9 @@ def amin(
 
     mask_input = _combine_input_and_mask(amin, input, mask)
     dim_ = _canonical_dim(dim, mask_input.ndim)
-    if mask_input.layout == torch.strided:
+    if input.layout == torch.strided:
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
-    elif mask_input.layout == torch.sparse_coo:
+    elif input.layout == torch.sparse_coo:
         if mask is None:
             # See comment in the sparse_csr branch of prod, a similar issue arises here
             # where unspecified elements along a dimension may need to be reduced with the result
@@ -1286,7 +1257,7 @@ def amin(
         return _sparse_coo_scatter_reduction_helper(
             torch.amin, mask_input, dim_, bool(keepdim), dtype
         )
-    elif mask_input.layout == torch.sparse_csr:
+    elif input.layout == torch.sparse_csr:
         if mask is None:
             raise ValueError(
                 "masked amin expects explicit mask for sparse_csr tensor input"
@@ -1296,13 +1267,13 @@ def amin(
         )
     else:
         raise ValueError(
-            f"masked amin expects strided, sparse_coo or sparse_csr tensor (got {mask_input.layout} tensor)"
+            f"masked amin expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)"
         )
 
 
 @_apply_docstring_templates
 def argmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1328,7 +1299,7 @@ def argmax(
 
 @_apply_docstring_templates
 def argmin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1354,7 +1325,7 @@ def argmin(
 
 @_apply_docstring_templates
 def mean(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1415,7 +1386,7 @@ elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def median(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int = -1,
     *,
     keepdim: bool = False,
@@ -1481,8 +1452,8 @@ def logsumexp(
 # TODO: Add docstring; currently they're only set up for reductions and normalizations
 # @_apply_docstring_templates
 def logaddexp(
-    input: Union[Tensor, MaskedTensor],
-    other: Union[Tensor, MaskedTensor],
+    input: Tensor,
+    other: Tensor,
     *,
     dtype: Optional[DType] = None,
     input_mask: Optional[Tensor] = None,
@@ -1502,7 +1473,7 @@ def logaddexp(
 
 @_apply_docstring_templates
 def norm(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     ord: Optional[float] = 2.0,
     dim: DimOrDims = None,
     *,
@@ -1537,7 +1508,7 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
 
 
 def std_var(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     unbiased: Optional[bool] = False,
     *,
@@ -1599,7 +1570,7 @@ def std_var(
 
 @_apply_docstring_templates
 def var(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     unbiased: Optional[bool] = False,
     *,
@@ -1628,7 +1599,7 @@ fully masked-out elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def std(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: DimOrDims = None,
     unbiased: Optional[bool] = False,
     *,
@@ -1657,7 +1628,7 @@ fully masked-out elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def softmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1677,7 +1648,7 @@ def softmax(
 
 @_apply_docstring_templates
 def log_softmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1697,7 +1668,7 @@ def log_softmax(
 
 @_apply_docstring_templates
 def softmin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1717,7 +1688,7 @@ def softmin(
 
 @_apply_docstring_templates
 def normalize(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor,
     ord: float,
     dim: int,
     *,

@@ -763,16 +763,16 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.split, (self,), self, split_size, dim=dim
             )
-        if isinstance(split_size, Tensor):
+        if isinstance(split_size, int):
+            return super(Tensor, self).split(split_size, dim)
+        elif isinstance(split_size, Tensor):
             try:
                 split_size = int(split_size)
+                return super(Tensor, self).split(split_size, dim)
             except ValueError:
-                pass
-
-        if isinstance(split_size, int):
-            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
+                return super(Tensor, self).split_with_sizes(split_size, dim)
         else:
-            return torch._VF.split_with_sizes(self, split_size, dim)
+            return super(Tensor, self).split_with_sizes(split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.

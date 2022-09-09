@@ -32,8 +32,6 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(c10::string_view name);
 
-  bool has_argument(c10::string_view name);
-
   bool is_nondeterministic() const;
 
   // Returns whether lhs and rhs may alias directly.

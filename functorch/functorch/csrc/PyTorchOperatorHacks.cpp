@@ -13,16 +13,14 @@
 
 namespace at { namespace functorch {
 
-// NOTE: [functorch's PyTorch Operator Hacks]
+// TODO: all of these should be fixed in a more blessed way. In particular,
+// it is bad if any of these go out-of-sync with the implementations in
+// pytorch/pytorch.
 //
 // This file contains hacks for composite PyTorch operators that are problematic.
 // For example, the composite op might have in-place operations,
 // or call data_ptr. We have some idea of how to fix these things in the long term
-// e.g., upstream the changes to PyTorch.
-//
-// TODO: all of these should be fixed in a more blessed way. In particular,
-// it is bad if any of these go out-of-sync with the implementations in
-// pytorch/pytorch.
+// (e.g. functionalization for the in-place operations).
 
 // TODO: upstream into core
 Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {

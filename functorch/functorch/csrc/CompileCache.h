@@ -10,8 +10,6 @@
 namespace at {
 namespace functorch {
 
-// CompileCache is the compilation cache used for AOTAutograd.
-
 /// Initialize python bindings for kernel compilation cache.
 void initCompileCacheBindings(PyObject *module);
 
