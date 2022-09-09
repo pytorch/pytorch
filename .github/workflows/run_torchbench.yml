@@ -10,6 +10,8 @@ env:
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
 jobs:
   run-torchbench:
@@ -39,7 +41,7 @@ jobs:
           # pin cmake version to 3.22 since 3.23 breaks pytorch build
           # see details at: https://github.com/pytorch/pytorch/issues/74985
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
-                           setuptools cmake=3.22 cffi typing_extensions \
+                           setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
       - name: Setup TorchBench branch
         run: |
@@ -78,6 +80,13 @@ jobs:
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_MERGE_BASE" \
                   --pr-head-sha "$PR_HEAD_SHA"
+      - name: Upload result to S3
+        run: |
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          python3 pytorch/.github/scripts/run_torchbench.py \
+                  upload-s3 \
+                  --result-dir "${HOME}/.torchbench/bisection/pr${{ github.event.number }}"
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci
