@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
-from torch.masked import is_masked_tensor, MaskedTensor
+from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
 from . import _docs
 
 if TYPE_CHECKING:
@@ -1020,7 +1020,7 @@ def _combine_input_and_mask(
             grad_data = (
                 grad_output.get_data() if is_masked_tensor(grad_output) else grad_output
             )
-            result = MaskedTensor.from_values(grad_data, mask)
+            result = as_masked_tensor(grad_data, mask)
             return result, None
 
     return (

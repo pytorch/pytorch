@@ -342,7 +342,7 @@ class MaskedTensor(torch.Tensor):
         class Constructor(torch.autograd.Function):
             @staticmethod
             def forward(ctx, data, mask):
-                return MaskedTensor(data.clone(), mask.clone())
+                return MaskedTensor(data, mask)
 
             @staticmethod
             def backward(ctx, grad_output):
