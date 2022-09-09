@@ -205,9 +205,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       const auto* RESTRICT ptr_hash_coeffs = hash_coeffs.template data_ptr<hash_t>();
 
       KernelLauncher::launch(iter,
-          // Windows does not seem to like these nested captures without explicit names.
-          [ptr_indices, indices_dim_stride, indices_nnz_stride, sdim, ptr_hash_coeffs]
-          FUNCAPI (index_t nnz_idx) -> hash_t {
+          // NOTE: capture by value required for CUDA
+          [=] FUNCAPI (index_t nnz_idx) -> hash_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           auto hash = hash_t {0};
           for (uint32_t dim = 0; dim < sdim; ++dim) {
