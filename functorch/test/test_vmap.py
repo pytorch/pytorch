@@ -3197,6 +3197,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('allclose'),  # returns a boolean
+        xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
         xfail('randint_like'),  # randomness is tested separately
         xfail('randn_like'),  # randomness is tested separately
