@@ -13,7 +13,7 @@ torch.sparse
   We highly welcome feature requests, bug reports and general suggestions as Github issues.
 
 Why and when to use sparsity
-++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++
 
 :class:`torch.Tensor` by default stores memory contiguously in memory
 leading to efficient implementations of various array processing
@@ -41,8 +41,8 @@ easy to try these different compression techniques, but we do not
 provide a means of determining the best one for your particular
 application.
 
-How to use this documentation
-+++++++++++++++++++++++++++++
+Overview
+++++++++
 
 It is straightforward to construct a sparse Tensor from a given dense Tensor by using
 the conversion routines.
@@ -70,6 +70,12 @@ GPUs require batching for optimal performance and thus we support batch dimensio
 Some data such as Graph embeddings might be better viewed as sparse collections of vectors
 instead of scalars and thus we provide dense dimensions. Please see the documentation
 for each storage format for details.
+
+Further, when talking about storing only non-zero elements of a sparse
+array, the usage of adjective "non-zero" is not strict: one is
+allowed to store also zeros in the sparse array data
+structure. Hence, in the following, we use "specified elements" for
+those array elements that are actually stored.
 
 Fundamentally, operations on Tensor with sparse storage formats behave the same as
 operations on Tensor with strided (or other) storage formats. The particularities of
@@ -114,17 +120,6 @@ It is possible, that the resulting Tensor is better represented as a sparse Tens
 be done efficiently. However, we don't know ahead of time whether the dense Tensor is sufficiently
 sparse. We are working on an API to control the result layout and recognize it is an important
 feature to plan a more optimal path of execution for any given model.
-
-Caveats
-+++++++
-
-.. note::
-
-   When talking about storing only non-zero elements of a sparse
-   array, the usage of adjective "non-zero" is not strict: one is
-   allowed to store also zeros in the sparse array data
-   structure. Hence, in the following, we use "specified elements" for
-   those array elements that are actually stored.
 
 
 .. _sparse-coo-docs:
