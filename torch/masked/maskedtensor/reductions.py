@@ -52,8 +52,8 @@ def _torch_reduce_all(fn):
         if fn == "all":
             result_data = masked_fn(self.get_data(), mask=mask)
 
-        elif fn in {"argmin", "argmax"} and self.is_sparse():
-            sparse_idx = masked_fn(self, mask=mask).to(dtype=torch.int)
+        elif fn in {"argmin", "argmax"} and self.is_sparse_coo():
+            sparse_idx = masked_fn(self.get_data().values(), mask=mask).to(dtype=torch.int)
             indices = (
                 self.get_data().to_sparse_coo().indices()
                 if not self.is_sparse_coo()
@@ -65,16 +65,14 @@ def _torch_reduce_all(fn):
             ).cumprod(0)
             result_data = torch.sum(idx * stride)
 
+        # we simply pass in the values for sparse COO/CSR tensors
+        elif self.is_sparse():
+            result_data = masked_fn(MaskedTensor(self.get_data().values(), mask))
+
         else:
             result_data = masked_fn(self, mask=mask)
-        
-        output_mask = torch.any(mask)
-        if result_data.layout == torch.sparse_coo:
-            output_mask = output_mask.to_sparse()
-        elif result_data.layout == torch.sparse_csr:
-            output_mask = output_mask.to_sparse_csr()
 
-        return MaskedTensor.from_values(result_data, output_mask)
+        return MaskedTensor.from_values(result_data, torch.any(mask))
 
     return reduce_all
 

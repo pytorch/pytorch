@@ -668,9 +668,9 @@ class TestMatMul(TestCase):
         )
         x_mt = MaskedTensor(x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1)))
         x = x.masked_fill(~x_mt.get_mask(), 0)
-        attn_2 = torch.bmm(x, x.transpose(-2, -1))
-        attn_3 = torch.bmm(x_mt, x_mt.transpose(-2, -1))
-        self.assertEqual(attn_3.get_data().masked_fill(~attn_3.get_mask(), 0), attn_2)  # type: ignore[attr-defined]
+        attn = torch.bmm(x, x.transpose(-2, -1))
+        attn_mt = torch.bmm(x_mt, x_mt.transpose(-2, -1))
+        _compare_mt_t(attn_mt, attn)
 
     def test_masked_bmm(self):
         key_padding_mask = torch.tensor(
@@ -681,11 +681,9 @@ class TestMatMul(TestCase):
             ]
         )
         x = torch.arange(4 * 3 * 2).reshape(4, 3, 2).float()
-        x_mt = MaskedTensor(
-            x,
-            ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x)),
-            requires_grad=True,
-        )
+        key_padding_mask = ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x))
+        x_mt = MaskedTensor(x, key_padding_mask, requires_grad=True)
+
         attn_mask_bool = torch.tensor(
             [
                 [False, True, True],
@@ -694,23 +692,14 @@ class TestMatMul(TestCase):
             ]
         )
         attn_mask = attn_mask_bool.float().masked_fill_(attn_mask_bool, float("-inf"))
-        v = masked_bmm(x, x_mt.transpose(1, 2), attn_mask)
-        v.sum().backward()
 
-    def test_linear(self):
-        x = torch.arange(4 * 3 * 2).reshape(4, 3, 2)
-        w_x = torch.arange(10).reshape(5, 2) + x.amax()
-        linear = torch.nn.functional.linear
-        key_padding_mask = torch.tensor(
-            [
-                [False, False, False, True],
-                [False, True, True, True],
-                [False, True, False, True],
-            ]
-        )
-        x_mt = MaskedTensor(
-            x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x))
-        )
+        mt_res = masked_bmm(x, x_mt.transpose(1, 2), attn_mask)
+        mt_res.sum().backward()  # make sure this runs
+
+        x_masked = x.masked_fill(~x_mt.get_mask(), 0)
+        t_res = torch.bmm(x, x_masked.transpose(1, 2))
+
+        _compare_mt_t(mt_res, t_res)
 
 
 def is_unary(op):
@@ -733,6 +722,16 @@ MASKEDTENSOR_FLOAT_TYPES = {
 }
 
 class TestOperators(TestCase):
+    def _convert_mt_args(self, args, mask, layout):
+        return [
+            MaskedTensor(
+                arg.sparse_mask(mask) if layout != torch.strided else arg, mask
+            )
+            if torch.is_tensor(arg)
+            else arg
+            for arg in args
+        ]
+
     def _test_unary_binary_equality(self, device, dtype, op, layout=torch.strided):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
@@ -763,14 +762,7 @@ class TestOperators(TestCase):
                     sample_kwargs = {}
 
             mt = MaskedTensor(input, mask)
-            mt_args = [
-                MaskedTensor(
-                    arg.sparse_mask(mask) if layout != torch.strided else arg, mask
-                )
-                if torch.is_tensor(arg)
-                else arg
-                for arg in sample_args
-            ]
+            mt_args = self._convert_mt_args(sample_args, mask, layout)
 
             mt_result = op(mt, *mt_args, **sample_kwargs)
             t_result = op(sample.input, *sample_args, **sample_kwargs)
@@ -793,11 +785,7 @@ class TestOperators(TestCase):
             if input.dim() == 0 or input.numel() == 0:
                 continue
 
-            mask = (
-                _create_random_mask(input.shape, device)
-                if "mask" not in sample_kwargs
-                else sample_kwargs.pop("mask")
-            )
+            mask = _create_random_mask(input.shape, device)
 
             if torch.count_nonzero(mask) == 0:
                 continue
@@ -813,14 +801,7 @@ class TestOperators(TestCase):
                 input = input.sparse_mask(mask)
 
             mt = MaskedTensor(input, mask)
-            mt_args = [
-                MaskedTensor(
-                    arg.sparse_mask(mask) if layout != torch.strided else arg, mask
-                )
-                if torch.is_tensor(arg)
-                else arg
-                for arg in sample_args
-            ]
+            mt_args = self._convert_mt_args(sample_args, mask, layout)
 
             mt_result = op(mt, *mt_args, **sample_kwargs)
             t_result = op(tensor_input, *sample_args, **sample_kwargs)
