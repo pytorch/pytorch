@@ -26,6 +26,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
+DEFAULT_STREAM_ID = 0
+
 TK = TypeVar("TK")
 TVa = TypeVar("TVa")
 TVb = TypeVar("TVb")
@@ -220,6 +222,7 @@ class StreamSynchronizations:
         self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
         self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
         self.host_sync_state: Dict[StreamId, SeqNum] = {}
+        self.create_stream(DEFAULT_STREAM_ID)
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
         if stream not in self.current_sync_states:
@@ -273,6 +276,7 @@ class StreamSynchronizations:
                 )
             )
         else:
+            self.host_sync_state[stream] = 0
             self.current_sync_states[stream] = self.host_sync_state.copy()
 
     def create_event(self, event: EventId) -> None:
@@ -323,9 +327,9 @@ class StreamSynchronizations:
             self.host_sync_state, self.current_sync_states[stream]
         )
 
-    def all_streams_sync_to_seq_num(self, seq_num: SeqNum) -> None:
-        for stream in self.current_sync_states.keys():
-            self.host_sync_state[stream] = seq_num
+    def sync_all_streams(self) -> None:
+        for stream, state in self.current_sync_states.items():
+            self.host_sync_state[stream] = state[stream]
 
         for state in self.current_sync_states.values():
             self._state_wait_for_other(state, self.host_sync_state)
@@ -448,7 +452,7 @@ class EventHandler:
         self.syncs.create_stream(stream)
 
     def _handle_device_synchronization(self) -> None:
-        self.syncs.all_streams_sync_to_seq_num(self.seq_num)
+        self.syncs.sync_all_streams()
 
     def _handle_stream_synchronization(self, stream: StreamId) -> None:
         self.syncs.all_streams_wait_for_stream(stream)
