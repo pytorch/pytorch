@@ -1065,8 +1065,6 @@ class FullyShardedDataParallel(nn.Module):
 
         # Used to prevent running the pre-backward hook multiple times
         self._ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
-        # Used to know whether to sync the pre-all-gather stream
-        self._ran_pre_unshard: bool = False
         self._is_root: Optional[bool] = None  # `None` indicates not yet set
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
