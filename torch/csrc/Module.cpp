@@ -38,8 +38,10 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
@@ -688,6 +690,37 @@ PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  bool isTHPFunction = THPFunction_Check(arg);
+  bool isTHPCppFunction = torch::autograd::THPCppFunction_Check(arg);
+  THPUtils_assert(
+      isTHPFunction || isTHPCppFunction,
+      "_will_engine_execute_node expects an grad_fn, "
+      "but got %s",
+      THPUtils_typename(arg));
+  const auto exec_info = torch::autograd::get_current_graph_task_exec_info();
+  THPUtils_assert(
+      exec_info,
+      "_get_should_execute_nodes should only be called during the backward pass");
+  if (!exec_info->empty()) {
+    torch::autograd::Node* node;
+    if (isTHPFunction) {
+      node = ((THPFunction*)arg)->cdata.lock().get();
+    } else {
+      node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
+    }
+    auto it = exec_info->find(node);
+    if (it == exec_info->end() || !it->second.should_execute()) {
+      Py_RETURN_FALSE;
+    }
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_TRUE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -867,6 +900,10 @@ static PyMethodDef TorchMethods[] = {
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
     {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+    {"_will_engine_execute_node",
+     THPModule_willEngineExecuteNode,
+     METH_O,
+     nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
