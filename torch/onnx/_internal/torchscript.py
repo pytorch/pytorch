@@ -112,6 +112,7 @@ class GraphContext(GraphLike):
     original_node: _C.Node
     onnx_block: _C.Block
     params_dict: Dict[str, "_C.IValue"]
+    env: Dict[_C.Value, _C.Value]
     # TODO(justinchuby): What should we call env?
 
     def op(

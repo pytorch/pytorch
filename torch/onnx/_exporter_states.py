@@ -31,7 +31,6 @@ class SymbolicContext:
         env: dict,
         cur_node: _C.Node,
         onnx_block: _C.Block,
-        opset: int,
     ):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
@@ -39,8 +38,6 @@ class SymbolicContext:
         self.cur_node: _C.Node = cur_node
         # Current onnx block that converted nodes are being appended to.
         self.onnx_block: _C.Block = onnx_block
-        # Current opset version.
-        self.opset: int = opset
 
 
 @enum.unique
