@@ -434,9 +434,19 @@ class TestAutograd(TestCase):
         c.register_hook(fn)
 
         out = c.sum()
-        torch.autograd.grad(out, (a,))
-
+        torch.autograd.grad(out, (a,), retain_graph=True)
         self.assertEqual(counter[0], 2)
+
+        should_execute = list(map(get_grad_fn, (a, a2, b, c)))
+        should_not_execute = []
+        # This might be counterintuitive but if input is not specified,
+        # _will_engine_execute_node will return yes unconditionally
+        # even if the node is not part of the graph.
+        # The only way to figure out whether a node is part of the graph
+        # might be to actually traverse the graph
+        torch.autograd.backward(out)
+        self.assertEqual(counter[0], 4)
+
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
