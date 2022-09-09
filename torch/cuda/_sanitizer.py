@@ -5,8 +5,8 @@ to determine if they are synchronized or not. When enabled in a python program a
 possible data race is detected, a detailed warning will be printed and the program
 will exit.
 
-It can be enabled either by importing this module and using
-:func:`enable_cuda_sanitizer()` or by exporting ``TORCH_CUDA_SANITIZER``
+It can be enabled either by importing this module and calling
+:func:`enable_cuda_sanitizer()` or by exporting the ``TORCH_CUDA_SANITIZER``
 environment variable.
 """
 
@@ -386,6 +386,9 @@ class EventHandler:
         stack_trace = traceback.StackSummary.extract(
             traceback.walk_stack(None), lookup_lines=False
         )
+        # The stack trace generated in this way is in the inverse order, so it must be
+        # reversed.
+        stack_trace.reverse()
 
         for data_ptr in read_only:
             self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -437,11 +440,15 @@ class EventHandler:
 
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
+        stack_trace = traceback.StackSummary.extract(
+            traceback.walk_stack(None), lookup_lines=False
+        )
+        # The stack trace generated in this way is in the inverse order, so it must be
+        # reversed.
+        stack_trace.reverse()
         self.tensors_accessed.create_tensor(
             data_ptr,
-            traceback.StackSummary.extract(
-                traceback.walk_stack(None), lookup_lines=False
-            ),
+            stack_trace,
         )
 
     def _handle_memory_deallocation(self, data_ptr: DataPtr) -> None:
