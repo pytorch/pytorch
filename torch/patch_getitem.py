@@ -331,8 +331,7 @@ def infer_size_dv(shape, numel):
 
     newsize = 1
     infer_dim = None
-    ndim = len(shape)
-    for dim in range(ndim):
+    for dim in range(len(shape)):
         if shape[dim] == -1:
             if infer_dim is not None:
                 raise RuntimeError("only one dimension can be inferred")
@@ -342,15 +341,13 @@ def infer_size_dv(shape, numel):
         else:
             raise RuntimeError(f"invalid shape dimension {shape[dim]}")
 
-    print(f"numel = {numel} nsz = {newsize} infer_dim = {infer_dim}")
     if numel == newsize or ((infer_dim is not None) and newsize > 0 and numel % newsize == 0):
         if infer_dim is not None:
             if newsize == 0:
                 raise RuntimeError(f"cannot reshape tensor of 0 elements into shape {shape}" +
                                    "because the unspecified dimension size -1 can be any" +
                                    "value and is ambiguous")
-            
-            print ("in infer_dim!!!")
+
             res[infer_dim] = numel // newsize
 
         return res
@@ -387,33 +384,33 @@ def computeStride(oldshape, oldstride, newshape):
 
         if (tensor_d == 0) or (oldshape[tensor_d - 1] != 1 and
             oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride):
-            while view_d >= 0 and (view_numel < tensor_numel or newshape[view_d] == 1): 
+            while view_d >= 0 and (view_numel < tensor_numel or newshape[view_d] == 1):
                     newstride[view_d] = view_numel * chunk_base_stride
                     view_numel *= newshape[view_d]
                     view_d -= 1
-            
+
             if view_numel != tensor_numel:
                 return None
-            
+
             if tensor_d > 0:
                 chunk_base_stride = oldstride[tensor_d - 1]
                 tensor_numel = 1
                 view_numel = 1
-    
-  
+
+
     if view_d != -1:
         return None
-  
+
     return newstride
 
 
-def reshape(self, proposed_shape: List[int]):
-  print (f"In reshape {type(self)}")
+def reshape(self, *proposed_shape):
+  proposed_shape = proposed_shape[0] if isinstance(proposed_shape[0], Iterable) else proposed_shape
   if self.is_sparse:
     # TODO: not sure what else to do here?
     raise RuntimeError("reshape is not implemented for sparse tensors")
 
-  proposed_shape = proposed_shape if isinstance(proposed_shape, Iterable) else [proposed_shape]
+
   shape = infer_size_dv(proposed_shape, self.numel())
 
   if self.device.type == 'mkldnn':
@@ -421,10 +418,10 @@ def reshape(self, proposed_shape: List[int]):
     raise RuntimeError("reshape is not implemented for sparse tensors")
 
 
-  stride: Optional[List[int]] = computeStride(self.size(), self.stride(), shape)
+  stride = computeStride(self.size(), self.stride(), shape)
 
-  if stride:
-    # TODO: we should probably keep these device checks? 
+  if stride is not None:
+    # TODO: we should probably keep these device checks?
     if (not self.device.type == 'xla' and  not self.device.type == 'lazy' and  not self.device.type == 'ipu'):
       # this already has a decomp
       return torch.ops.aten._reshape_alias(self, shape, stride)
@@ -432,7 +429,7 @@ def reshape(self, proposed_shape: List[int]):
       return self.view(shape)
 
   # TODO: replacing _unsafe_view with view
-  return self.view(self.clone(torch.contiguous_format), shape)
+  return self.view(self.clone(memory_format=torch.contiguous_format), shape)
 
 torch.reshape = reshape
 torch.Tensor.reshape = reshape
