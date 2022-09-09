@@ -31,6 +31,10 @@ if(BUILD_FUNCTORCH)
 
   set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
         ${CMAKE_BINARY_DIR}/functorch)
+  set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" DEBUG_POSTFIX "")
+  if(WIN32)
+    set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".pyd")
+  endif()
   install(TARGETS ${PROJECT_NAME} DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}")
 else()
   target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIBRARIES} ${TORCH_PYTHON_LIBRARY})

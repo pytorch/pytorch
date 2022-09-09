@@ -165,7 +165,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t {cur_level_var} = maybe_layer->layerId();
@@ -187,7 +187,7 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t {cur_level_var} = maybe_layer->layerId();
@@ -230,7 +230,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t {cur_level_var} = maybe_layer->layerId();
@@ -256,7 +256,6 @@ def gen_all_vmap_plumbing(native_functions: Sequence[NativeFunction]) -> str:
 #pragma once
 #include <ATen/Operators.h>
 #include <functorch/csrc/PlumbingHelper.h>
-#include <functorch/csrc/Constants.h>
 
 namespace at {{ namespace functorch {{
 
