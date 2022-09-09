@@ -94,18 +94,23 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto act_scale = input.q_scale();
   auto weight_scale = maybe_padded_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  c10::optional<float> bias_multiplier;
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, kSpatialDim + 2);
+
+  c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
     // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
     // becomes quantized_output.dim() - 2 + 1. nothing needs to be done for the leading dimensions
-    std::vector<int64_t> new_size(quantized_output.dim(), 1);
-    new_size[1] = bias_.value().size(0);
+    std::vector<int64_t> new_size(quantized_output.dim() - 1, 1);
+    new_size[0] = bias_.value().size(0);
     broadcasted_bias = bias_.value().reshape(new_size);
+    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
     broadcasted_bias.value() = broadcasted_bias.value().to(c10::MemoryFormat::ChannelsLast);
-    bias_multiplier = 1.0 / (act_scale * weight_scale);
+    bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+    auto bias_multiplier = 1.0 / (act_scale * weight_scale);
+    bias_multiplier_tensor.value().fill_(bias_multiplier);
   }
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
@@ -140,10 +145,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
     at::SmallVector<void *, 7> data_ptrs;
     at::SmallVector<int64_t, 7> uids;
-    data_ptrs = {input.data_ptr<int8_t>(), maybe_padded_weight_.data_ptr<int8_t>(), &requantize_multiplier, quantized_output.data_ptr<int8_t>()};
+    data_ptrs = {input.data_ptr<int8_t>(), maybe_padded_weight_.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
-      data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), &bias_multiplier.value(),
+      data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
                                          broadcasted_bias.value().data_ptr()});
       uids.insert(uids.end(), {'b', 'c', 'd'});
     }
@@ -176,8 +182,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   c10::optional<cudnn_frontend::Operation> bias_mult_op;
   c10::optional<cudnn_frontend::Operation> sum_conv_bias_op;
-  c10::SmallVector<int64_t, 4> scalar_tensor_size{1, 1, 1, 1};
-  c10::SmallVector<int64_t, 4> scalar_tensor_stride{1, 1, 1, 1};
   if (bias_.has_value()) {
     // we can't directly assign bias_mult_op becauase operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
@@ -189,9 +193,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // we use inplace operation here where the output is assigned to the input
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'b', cudnn_utils::getAlignment(broadcasted_bias.value())))
-      .setbDesc(cudnn_utils::getTensorDescriptorScalar(scalar_tensor_size, scalar_tensor_stride, CUDNN_DATA_FLOAT, 'c', 16))
+      .setbDesc(cudnn_utils::getTensorDescriptor(bias_multiplier_tensor.value(), 'c', cudnn_utils::getAlignment(bias_multiplier_tensor.value())))
       .setyDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
-      .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
+      .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
 
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
@@ -227,9 +231,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // output is a fp32 tensor
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : tensor2requant_ptr)
-    .setbDesc(cudnn_utils::getTensorDescriptorScalar(scalar_tensor_size, scalar_tensor_stride, CUDNN_DATA_FLOAT, 's', 16))
+    .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
     .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', key.output_alignment))
-    .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(CUDNN_DATA_FLOAT))
+    .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 

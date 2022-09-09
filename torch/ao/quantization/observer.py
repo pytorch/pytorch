@@ -12,8 +12,8 @@ from typing import Any, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
-from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
-
+from torch.ao.quantization.utils import (
+    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel)
 
 __all__ = [
     "default_affine_fixed_qparams_observer",
@@ -83,6 +83,7 @@ def _with_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
         >>> foo_instance1 = foo_builder()
@@ -103,11 +104,12 @@ def _with_callable_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_callable_args = classmethod(_with_callable_args)
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
         >>> foo_instance1 = foo_builder()
-        >>> wait 50
+        >>> # wait 50
         >>> foo_instance2 = foo_builder()
         >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
         False
@@ -446,7 +448,11 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -559,6 +565,11 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "MovingAverageMinMaxObserver's qscheme only support \
+                    torch.per_tensor_symmetric and torch.per_tensor_affine."
+            )
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -628,6 +639,11 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
+        if not is_per_channel(qscheme):
+            raise NotImplementedError(
+                "PerChannelMinMaxObserver's qscheme only support \
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
             qscheme=qscheme,
@@ -768,8 +784,11 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        # This used to be torch.ones but that does not work because
+        # JIT compiler can optimize it via common subexpression elimination
+        # in which case both min_val and max_val point to the same tensor.
+        self.min_val = torch.rand(0, )
+        self.max_val = torch.rand(0, )
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -812,6 +831,11 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
+        if not is_per_channel(qscheme):
+            raise NotImplementedError(
+                "MovingAveragePerChannelMinMaxObserver's qscheme only support \
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis,
             dtype=dtype,
@@ -892,6 +916,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(
             dtype=dtype,

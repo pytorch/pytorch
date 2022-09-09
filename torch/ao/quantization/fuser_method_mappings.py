@@ -21,6 +21,7 @@ def fuse_conv_bn(is_qat, conv, bn):
 
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn(m1, b1)
     """
     assert(conv.training == bn.training),\
@@ -58,6 +59,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
         >>> r1 = nn.ReLU(inplace=False)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
     assert(conv.training == bn.training == relu.training),\
@@ -103,6 +105,7 @@ def fuse_linear_bn(is_qat, linear, bn):
 
         >>> m1 = nn.Linear(20, 10)
         >>> b1 = nn.BatchNorm1d(10)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_linear_bn(m1, b1)
     """
     assert(linear.training == bn.training),\
@@ -130,6 +133,7 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
 
         >>> m1 = nn.ConvTranspose2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_convtranspose_bn(m1, b1)
     """
     assert(convt.training == bn.training),\
@@ -173,7 +177,7 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     return None if fuser method does not exist
     '''
     if additional_fuser_method_mapping is None:
-        additional_fuser_method_mapping = dict()
+        additional_fuser_method_mapping = {}
     all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD,
                                      additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)

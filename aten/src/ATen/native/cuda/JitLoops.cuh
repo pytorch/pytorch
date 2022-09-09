@@ -12,11 +12,7 @@
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
-#if !AT_ROCM_ENABLED()
 #include <ATen/native/cuda/CUDAJitLoops.cuh>
-#else
-#error Jiterator not supported on ROCm
-#endif
 
 namespace at {
 namespace native {

@@ -14,6 +14,8 @@
 #else
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/lift.h>
+#include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
@@ -174,23 +176,23 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
 
 at::Tensor lift_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
-  return at::functionalization::impl::to_functional_tensor(self);
-}
-
-at::Tensor lift_functionalize_copy(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
-  return at::functionalization::impl::to_functional_tensor(self.clone());
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::lift(self);
+  return at::functionalization::impl::to_functional_tensor(out);
 }
 
 at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
-  return at::functionalization::impl::to_functional_tensor(self);
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::lift_fresh(self);
+  return at::functionalization::impl::to_functional_tensor(out);
 }
 
 at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
-  return at::functionalization::impl::to_functional_tensor(at::lift_fresh_copy(self));
+  auto out = at::lift_fresh_copy(self);
+  return at::functionalization::impl::to_functional_tensor(out);
 }
 
 bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {

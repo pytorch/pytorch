@@ -157,10 +157,15 @@ at::Tensor sum_backward(
     at::IntArrayRef sizes,
     at::OptionalIntArrayRef opt_dims,
     bool keepdim);
+at::Tensor sum_backward(
+    const at::Tensor& grad,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef dims,
+    bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
@@ -302,6 +307,7 @@ at::Tensor evenly_distribute_backward(
     const at::Tensor& input,
     const at::Tensor& value);
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
@@ -325,7 +331,7 @@ at::Tensor std_backward(
 Tensor mean_backward(
     const Tensor& grad,
     IntArrayRef shape,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     int64_t numel,
     bool keepdim);
 Tensor var_mean_backward(
@@ -829,6 +835,12 @@ Tensor linalg_det_backward(
     const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots);
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
