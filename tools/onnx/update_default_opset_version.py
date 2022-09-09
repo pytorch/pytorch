@@ -83,7 +83,7 @@ def main(args: Any) -> None:
     os.chdir(pytorch_dir)
 
     read_sub_write(
-        os.path.join("torch", "onnx", "_constants.py"),
+        os.path.join("torch", "onnx", "_internal", "constants.py"),
         r"(ONNX_DEFAULT_OPSET = )\d+",
         new_default,
     )
