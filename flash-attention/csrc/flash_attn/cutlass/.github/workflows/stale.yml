@@ -1,0 +1,57 @@
+name: Mark inactive issues and pull requests
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+
+jobs:
+  mark-inactive-30d:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark 30 day inactive issues and pull requests
+        uses: actions/stale@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: >
+            This issue has been labeled `inactive-30d` due to no recent activity in the past 30 days.
+            Please close this issue if no further response or action is needed.
+            Otherwise, please respond with a comment indicating any updates or changes to the original issue and/or confirm this issue still needs to be addressed.
+            This issue will be labeled `inactive-90d` if there is no activity in the next 60 days.
+          stale-issue-label: "inactive-30d"
+          exempt-issue-labels: "0 - Blocked,0 - Backlog,good first issue"
+          days-before-issue-stale: 30
+          days-before-issue-close: -1
+          stale-pr-message: >
+            This PR has been labeled `inactive-30d` due to no recent activity in the past 30 days.
+            Please close this PR if it is no longer required.
+            Otherwise, please respond with a comment indicating any updates.
+            This PR will be labeled `inactive-90d` if there is no activity in the next 60 days.
+          stale-pr-label: "inactive-30d"
+          exempt-pr-labels: "0 - Blocked,0 - Backlog,good first issue"
+          days-before-pr-stale: 30
+          days-before-pr-close: -1
+          operations-per-run: 50
+  mark-inactive-90d:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark 90 day inactive issues and pull requests
+        uses: actions/stale@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: >
+            This issue has been labeled `inactive-90d` due to no recent activity in the past 90 days.
+            Please close this issue if no further response or action is needed.
+            Otherwise, please respond with a comment indicating any updates or changes to the original issue and/or confirm this issue still needs to be addressed.
+          stale-issue-label: "inactive-90d"
+          exempt-issue-labels: "0 - Blocked,0 - Backlog,good first issue"
+          days-before-issue-stale: 90
+          days-before-issue-close: -1
+          stale-pr-message: >
+            This PR has been labeled `inactive-90d` due to no recent activity in the past 90 days.
+            Please close this PR if it is no longer required.
+            Otherwise, please respond with a comment indicating any updates.
+          stale-pr-label: "inactive-90d"
+          exempt-pr-labels: "0 - Blocked,0 - Backlog,good first issue"
+          days-before-pr-stale: 90
+          days-before-pr-close: -1
+          operations-per-run: 50
