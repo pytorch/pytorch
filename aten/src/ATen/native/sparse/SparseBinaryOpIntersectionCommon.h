@@ -288,9 +288,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   // intersection_count and intersection_first_idx are used to form indices at which
   // intersection values are selected.
   Tensor intersection_count, intersection_first_idx;
-  std::tie(intersection_count, intersection_first_idx)
-    // Windows does not seem to like these nested captures without explicit names.
-    = [&source, &nnz_arange, &hash_coeffs, &sorted_hash, sdim]() -> std::tuple<Tensor, Tensor> {
+  std::tie(intersection_count, intersection_first_idx) = [&]() -> std::tuple<Tensor, Tensor> {
     const auto source_nnz = source._nnz();
     auto intersection_buffer = at::empty({2, source_nnz}, sorted_hash.options());
     auto intersection_count = intersection_buffer.select(0, 0);
@@ -366,9 +364,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   // res.indices = source.indices.index_select(1, selected_source).
   Tensor selected_source, selected_source_sparse_indices, selected_probably_coalesced;
   std::tie(selected_source, selected_source_sparse_indices, selected_probably_coalesced)
-    // Windows does not seem to like these nested captures without explicit names.
-    = [&intersection_count, &intersection_first_idx, &source,
-        &nnz_arange, &argsort_hash, sdim]() -> std::tuple<Tensor, Tensor, Tensor> {
+    = [&]() -> std::tuple<Tensor, Tensor, Tensor> {
     // Thread offset = shifted_offset - shift.
     // This computation is fused in kernels below.
 
