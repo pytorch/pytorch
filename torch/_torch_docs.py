@@ -8106,7 +8106,7 @@ Same as :meth:`Tensor.narrow` except returning a copy rather
 than shared storage.  This is primarily for sparse tensors, which
 do not have a shared-storage narrow method.  Calling ``narrow_copy``
 with ``dimemsion > self.sparse_dim()`` will return a copy with the
-relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
+relevant sparse or dense dimension narrowed, and ``self.shape`` updated accordingly.
 
 Args:
     input (Tensor): the tensor to narrow
@@ -8120,17 +8120,17 @@ Keyword args:
 Example::
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> torch.narrow_copy(x, 0, 0, 2)
+    >>> s = x.to_sparse(2)
+    >>> torch.narrow_copy(s, 0, 0, 2)
     tensor([[ 1,  2,  3],
             [ 4,  5,  6]])
-    >>> torch.narrow_copy(x, 1, 1, 2)
+    >>> torch.narrow_copy(s, 1, 1, 2)
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
 
 .. seealso::
 
-        :func:`torch.Tensor.narrow_copy` for the method variant
         :func:`torch.narrow` for a non copy variant
 
 """,
