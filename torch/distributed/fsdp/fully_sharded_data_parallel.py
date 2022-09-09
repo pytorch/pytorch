@@ -1439,12 +1439,15 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
         """
-        for handle in handles:
-            with torch.cuda.stream(self._streams["pre_all_gather"]):
+        any_ran_pre_unshard = False
+        with torch.cuda.stream(self._streams["pre_all_gather"]):
+            for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
-                if ran_pre_unshard:
-                    self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-            with torch.cuda.stream(self._streams["all_gather"]):
+                any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
+        if any_ran_pre_unshard:
+            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
+        with torch.cuda.stream(self._streams["all_gather"]):
+            for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
 
