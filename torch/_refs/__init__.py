@@ -2540,7 +2540,7 @@ def native_layer_norm(
     if input.device.type == "cpu":
         mean = prims.convert_element_type(mean, input.dtype)
         rstd = prims.convert_element_type(rstd, input.dtype)
-    return (out, mean, rstd)
+    return (out.contiguous(), mean, rstd)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
