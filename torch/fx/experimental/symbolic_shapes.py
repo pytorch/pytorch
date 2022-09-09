@@ -224,7 +224,7 @@ for method, _func in magic_methods.items():
             if isinstance(other, PySymInt):
                 other = other.expr
             # TODO: consider constant prop here
-            return PySymInt(sympy.expand(func(self.expr, other)), self.shape_env)
+            return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymIntNode
@@ -297,9 +297,10 @@ class ShapeEnv(object):
         Tries to evaluate expr without introducing guards
         """
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
+        symbols = list(expr.free_symbols)
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
-            for idx, k in enumerate(self.var_to_val.keys())
+            for idx, k in enumerate(symbols)
         }
         new_expr = expr.xreplace(new_shape_env)
         new_expr = sympy.expand(new_expr)
