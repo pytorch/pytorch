@@ -378,6 +378,9 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
 
+        # Dictionary to store metadata
+        self.meta : Dict[str, Any] = {}
+
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
@@ -728,7 +731,8 @@ class {module_name}(torch.nn.Module):
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
+        return '\n'.join([orig_str, self._code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()

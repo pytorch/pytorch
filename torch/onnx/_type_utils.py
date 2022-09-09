@@ -8,6 +8,7 @@ from typing_extensions import Literal
 
 import torch
 from torch._C import _onnx as _C_onnx
+from torch.onnx._internal import _beartype
 
 ScalarName = Literal[
     "Byte",
@@ -80,6 +81,7 @@ class JitScalarType(enum.IntEnum):
     UNDEFINED = enum.auto()  # 16
 
     @classmethod
+    @_beartype.beartype
     def from_name(
         cls, name: Union[ScalarName, TorchName, Optional[str]]
     ) -> JitScalarType:
@@ -104,30 +106,36 @@ class JitScalarType(enum.IntEnum):
         raise ValueError(f"Unknown torch or scalar type: '{name}'")
 
     @classmethod
+    @_beartype.beartype
     def from_dtype(cls, dtype: torch.dtype) -> JitScalarType:
         """Convert a torch dtype to ScalarType."""
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise ValueError(f"Unknown dtype: {dtype}")
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
+    @_beartype.beartype
     def scalar_name(self) -> ScalarName:
         """Convert a ScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
 
+    @_beartype.beartype
     def torch_name(self) -> TorchName:
         """Convert a ScalarType to a torch type name."""
         return _SCALAR_TYPE_TO_TORCH_NAME[self]
 
+    @_beartype.beartype
     def dtype(self) -> torch.dtype:
         """Convert a ScalarType to a torch dtype."""
         return _SCALAR_TYPE_TO_DTYPE[self]
 
+    @_beartype.beartype
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a ScalarType to an ONNX data type."""
         if self not in _SCALAR_TYPE_TO_ONNX:
             raise ValueError(f"Scalar type {self} cannot be converted to ONNX")
         return _SCALAR_TYPE_TO_ONNX[self]
 
+    @_beartype.beartype
     def onnx_compatible(self) -> bool:
         """Return whether this ScalarType is compatible with ONNX."""
         return (
@@ -137,11 +145,13 @@ class JitScalarType(enum.IntEnum):
         )
 
 
+@_beartype.beartype
 def valid_scalar_name(scalar_name: Union[ScalarName, str]) -> bool:
     """Return whether the given scalar name is a valid JIT scalar type name."""
     return scalar_name in _SCALAR_NAME_TO_TYPE
 
 
+@_beartype.beartype
 def valid_torch_name(torch_name: Union[TorchName, str]) -> bool:
     """Return whether the given torch name is a valid torch type name."""
     return torch_name in _TORCH_NAME_TO_SCALAR_TYPE
