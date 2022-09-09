@@ -57,6 +57,8 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "clamp_max",
+    "clamp_min",
     "conj_physical",
     "cos",
     "cosh",
@@ -73,12 +75,16 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "isneginf",
+    "isposinf",
     "i0",
     "lgamma",
     "log",
     "log1p",
     "log2",
     "log10",
+    "log_softmax",
+    "logsumexp",
     "nan_to_num",
     "neg",
     "positive",
@@ -89,6 +95,7 @@ __all__ = [
     "signbit",
     "sin",
     "sinh",
+    "softmax",
     "sqrt",
     "square",
     "tan",
@@ -177,6 +184,7 @@ __all__ = [
     "amin",
     "any",
     "mean",
+    "std",
     "std_mean",
     "var_mean",
     "sum",
@@ -186,6 +194,7 @@ __all__ = [
     # Linear algebra ops
     #
     "addr",
+    "norm",
     #
     # View & Shape Ops
     #
@@ -220,6 +229,7 @@ __all__ = [
     "permute",
     "ravel",
     "reshape",
+    "reshape_as",
     "roll",
     "rot90",
     "rsqrt",
@@ -231,6 +241,7 @@ __all__ = [
     "transpose",
     "unsqueeze",
     "view",
+    "view_as",
     "vsplit",
     "vstack",
     "unflatten",
@@ -248,6 +259,11 @@ __all__ = [
     "eye",
     "full",
     "full_like",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_ones",
+    "new_zeros",
     "ones",
     "ones_like",
     "scalar_tensor",
@@ -629,6 +645,7 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
+@register_decomposition(torch.ops.aten.logsumexp)
 @out_wrapper()
 def logsumexp(
     a: TensorLikeType,
@@ -3922,6 +3939,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@register_decomposition(torch.ops.aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

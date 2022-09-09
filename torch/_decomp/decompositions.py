@@ -1557,20 +1557,6 @@ def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     return self
 
 
-@register_decomposition(aten.logsumexp.default)
-@pw_cast_for_int_to_real
-def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
-
-
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
 @out_wrapper("output", "buffer")
@@ -1583,21 +1569,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
-
-
-@register_decomposition(aten.norm)
-@out_wrapper()
-@reduction_complex_to_real
-def norm(
-    self: Tensor,
-    p: Optional[float] = None,
-    dim: List[int] = None,
-    keepdim: bool = False,
-    dtype: Optional[torch.dtype] = None,
-):
-    if p is None:
-        p = 2.0
-    return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
 
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)

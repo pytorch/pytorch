@@ -1557,11 +1557,16 @@ class TestTags(TestCase):
 @skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs.linalg"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    ref_ops_names_set = set(ref_ops_names)
+    # some refs have variants (e.g., meshgrid), we need to filter those out
+    # or we'll create tests with the same names, which is not allowed
+    ref_db_names_set = set(ref_op.name for ref_op in python_ref_db)
+    # sort to always return these in the same order
+    ref_db_names = sorted(ref_db_names_set)
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1623,21 +1628,27 @@ class TestRefsOpsInfo(TestCase):
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.layer_norm',
         '_refs.nn.functional.poisson_nll_loss',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.reshape_as',
+        '_refs.softmax',
         '_refs.square',
+        '_refs.std',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
         '_refs.trunc_divide',
+        '_refs.view_as',
         '_refs.vsplit',
         '_refs.vstack',
         '_refs.linalg.matrix_norm',
         '_refs.linalg.norm',
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
+        '_refs.log_softmax',
         '_refs.unflatten',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
@@ -1664,7 +1675,16 @@ class TestRefsOpsInfo(TestCase):
     def test_refs_are_in_python_ref_db(self, op):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
-        self.assertIn(op, self.ref_db_names)
+        self.assertIn(op, self.ref_db_names_set)
+
+    # like 'test_refs_are_in_python_ref_db' but check in the other direction
+    @parametrize("op", ref_db_names)
+    def test_python_refs_are_in_ops_names(self, op):
+        # TODO: skip nvfuser refs since those don't have __all__ and it's not
+        # clear at the moment what would be the best way to check those
+        if op.startswith("ops.nvprims"):
+            return
+        self.assertIn(op, self.ref_ops_names_set)
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):

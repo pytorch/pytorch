@@ -22,6 +22,7 @@ from torch._prims_common.wrappers import out_wrapper
 
 __all__ = [
     "svd",
+    "svdvals",
     "vector_norm",
     "matrix_norm",
     "norm",
