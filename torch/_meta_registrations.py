@@ -803,6 +803,17 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
+@register_meta(aten.rand_like.default)
+def meta_rand_like(self, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
+
+
+@register_meta(aten.empty_like.default)
+def meta_empty_like(self, **kwargs):
+    # TODO: stride semantics?
+    return aten.empty.memory_format(self.size(), **kwargs)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
