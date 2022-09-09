@@ -865,7 +865,11 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap), r)
 
     def may_turn_const(self, t):
-        return t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse
+        return (
+            t.numel() <= CONSTANT_NUMEL_LIMIT
+            and not t.is_sparse
+            and not isinstance(t, FakeTensor)
+        )
 
     def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
         any_constant = any(e.constant is not None for e in flat_arg_tensors)
