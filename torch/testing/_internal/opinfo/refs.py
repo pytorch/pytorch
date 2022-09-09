@@ -114,7 +114,13 @@ class PythonRefInfo(OpInfo):
         assert isinstance(self.torch_opinfo, OpInfo)
 
         def test_ref_export(name):
-            # make sure name is exported via __all__
+            """
+            Make sure 'name' is exported via '__all__'.
+            """
+            # Note: we need to import this because 'torch.ops' modules are not
+            # initialized until 'torch._prims' is imported.  We also cannot use
+            # '__import__' or 'importlib.import_module' and need to walk the
+            # module hierarchy manually.
             import torch
 
             lst = name.split(".")
@@ -125,6 +131,7 @@ class PythonRefInfo(OpInfo):
             for i in range(len(mod_name)):
                 mod = getattr(mod, mod_name[i])
 
+            # ops.nvprims doesn't have __all__
             if hasattr(mod, "__all__"):
                 assert func_name in mod.__all__, f"missing ref export: {name}"
 
