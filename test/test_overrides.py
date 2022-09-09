@@ -1252,7 +1252,6 @@ class TestTorchFunctionMode(TestCase):
         with x:
             pass
 
-
     def test_get_cur_mode(self):
         class A(TorchFunctionMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
