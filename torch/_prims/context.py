@@ -69,8 +69,9 @@ def torch_to_refs_map():
 nvfuser_decompositions: Sequence[
     Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
 ] = {  # type: ignore[assignment]
-    # nll_loss_forward decomposition gives data-dependent control flow during tracing
-    torch.ops.aten.nll_loss_forward,
+    # see issue: github.com/pytorch/pytorch/issues/84734
+    torch.ops.aten.nll_loss_forward.default,
+    torch.ops.aten.nll_loss_forward.output,
 }
 
 
@@ -112,7 +113,6 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
             if namespace == "prims":
                 nvfunc = getattr(torch.ops.nvprims, name, None)
                 if nvfunc is not None:
-                    print("running nvprim: ", name)
                     return nvfunc(*args, **kwargs)
         return orig_func(*args, **kwargs)
 
