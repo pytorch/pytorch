@@ -24,12 +24,9 @@ from torch.onnx import (  # noqa: F401
     errors,
     symbolic_helper,
 )
-from torch.onnx._exporter_states import (
-    SymbolicContext,  # Special case class import for readability
-)
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
-from torch.onnx._internal.torchscript import GraphLike
+from torch.onnx._internal.torchscript import GraphContext
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -6286,33 +6283,33 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(ctx: SymbolicContext, g: GraphLike, *inputs, **kwargs) -> None:
-    output_type = ctx.cur_node.output().type()
+def prim_device(g: GraphContext, *inputs, **kwargs) -> None:
+    output_type = g.original_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
 
     return symbolic_helper._unimplemented(
         "prim::device",
         f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
-        ctx.cur_node.output(),
+        g.original_node.output(),
     )
 
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
-    env = ctx.env
-    params_dict = ctx.params_dict
+def prim_loop(g: GraphContext, *inputs, **attrs):
+    node = g.original_node
+    env = g.env
+    params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
-    new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
+    new_op_outputs = g.op("Loop", *inputs, outputs=node.outputsSize())
     new_node = (
-        new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
+        new_op_outputs[0].node() if node.outputsSize() > 1 else new_op_outputs.node()
     )
-    for b in n.blocks():
+    for block in node.blocks():
         new_block = new_node.addBlock()
         # Copy input metadata to subblock
         #
@@ -6320,7 +6317,7 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
         #     block0(iter, input_1, ..., input_n)
         #
         # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-        for i, b_in in enumerate(b.inputs()):
+        for i, b_in in enumerate(block.inputs()):
             if i == 0 and i < len(inputs):
                 b_in.setType(inputs[i].type())
             # For optional block inputs, they may switch between None not-None inside
@@ -6333,7 +6330,7 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
             ):
                 b_in.setType(inputs[i + 1].type())
         torch._C._jit_pass_onnx_block(
-            b, new_block, operator_export_type, env, False  # type:ignore[arg-type]
+            block, new_block, operator_export_type, env, False  # type:ignore[arg-type]
         )
     new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
@@ -6348,11 +6345,11 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
-    block = ctx.onnx_block
-    env = ctx.env
-    params_dict = ctx.params_dict
+def prim_if(g: GraphContext, *inputs, **attrs):
+    n = g.original_node
+    block = g.onnx_block
+    env = g.env
+    params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
@@ -6437,39 +6434,39 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
 
 @_onnx_symbolic("prim::Constant")
 @_beartype.beartype
-def prim_constant(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
+def prim_constant(g: GraphContext, *inputs, **attrs):
+    node = g.original_node
 
-    if n.mustBeNone():
+    if node.mustBeNone():
         return None
     # This must go before checking for string values, because some device constants
     # have string values, but we want to keep them as unconverted Device types so
     # that eq() can work on them.
-    if isinstance(n.output().type(), _C.DeviceObjType):
+    if isinstance(node.output().type(), _C.DeviceObjType):
         return None
-    if n.kindOf("value") == "t":
-        return g.op("Constant", value_t=symbolic_helper._node_get(n, "value"))
-    if n.kindOf("value") == "s":
-        return g.op("Constant", value_s=symbolic_helper._node_get(n, "value"))
-    if n.output().type().isSubtypeOf(
+    if node.kindOf("value") == "t":
+        return g.op("Constant", value_t=symbolic_helper._node_get(node, "value"))
+    if node.kindOf("value") == "s":
+        return g.op("Constant", value_s=symbolic_helper._node_get(node, "value"))
+    if node.output().type().isSubtypeOf(
         _C.ListType.ofInts()
-    ) or n.output().type().isSubtypeOf(_C.ListType.ofFloats()):
+    ) or node.output().type().isSubtypeOf(_C.ListType.ofFloats()):
         return g.op(
-            "Constant", value_t=torch.tensor(symbolic_helper._node_get(n, "value"))
+            "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
         )
 
     raise errors.SymbolicValueError(
-        f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. "
+        f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "
         f"Please send a bug report at {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
-        n.output(),
+        node.output(),
     )
 
 
 @_onnx_symbolic("onnx::Placeholder")
 @_beartype.beartype
-def onnx_placeholder(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
-    block = ctx.onnx_block
-    env = ctx.env
+def onnx_placeholder(g: GraphContext, *inputs, **attrs):
+    node = g.original_node
+    block = g.onnx_block
+    env = g.env
 
-    return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)
+    return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
