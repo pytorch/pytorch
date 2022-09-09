@@ -22,6 +22,7 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_mobile_tracer_sources",
 )
 load(
     ":pt_ops.bzl",
@@ -506,6 +507,16 @@ def copy_template_registration_files(name, apple_sdks = None):
         default_outs = ["."],
         apple_sdks = apple_sdks,
     )
+
+def get_feature_tracer_source_list():
+    """
+    Return just the Feature specific handlers used in the model tracer.
+    """
+    sources = []
+    for s in torch_mobile_tracer_sources:
+        if s.endswith("Tracer.cpp"):
+            sources.append(s)
+    return sources
 
 def pt_operator_query_codegen(
         name,
@@ -1254,12 +1265,8 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_model_tracer",
         srcs = [
-            "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
             "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
-        ],
+        ] + get_feature_tracer_source_list(),
         header_namespace = "",
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
