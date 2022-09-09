@@ -54,6 +54,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override {
     PANIC(sym_strides);
   }
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override {
+    PANIC(sym_storage_offset);
+  }
 
   // Just swallow the event, don't do anything
   void trace_gpu_event_creation(uintptr_t event) const override {}
@@ -64,11 +67,15 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
   void trace_gpu_stream_creation(uintptr_t stream) const override {}
+  void trace_gpu_device_synchronization() const override {}
+  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(uintptr_t event) const override {}
 };
 
 void PyInterpreter::disarm() noexcept {
-  static NoopPyInterpreterVTable noop_vtable;
-  vtable_ = &noop_vtable;
+  // Intentionally leaked
+  static PyInterpreterVTable* noop_vtable = new NoopPyInterpreterVTable();
+  vtable_ = noop_vtable;
 }
 
 } // namespace impl

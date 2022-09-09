@@ -751,6 +751,27 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
 
 
+def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), -100, 100),
+        ((S, S), 0, 1),
+        ((S, S, S), 1, 2),
+    )
+    for shape, hi, lo in samples:
+        yield SampleInput(make_arg(shape), args=(hi, lo))
+
+
+def error_inputs_uniform(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    yield ErrorInput(
+        SampleInput(t, args=(3, -1)),
+        error_type=RuntimeError,
+        error_regex=r"uniform_ expects to return a \[from, to\) range, but found from=3 > to=-1",
+    )
+
+
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
     yield ErrorInput(SampleInput(0, args=(3, 1.)), error_type=TypeError, error_regex='must be int, not float')
@@ -4900,22 +4921,15 @@ def error_inputs_flipud(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
                      error_regex="Input must be >= 1-d.")
 
-# TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
-    x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    lb = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    ub = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    shape = (S, M, S)
 
-    def detach(tensor):
-        return tensor.clone().detach_().requires_grad_(requires_grad)
-
-    return [
-        SampleInput(detach(x), args=(lb, ub)),
-        SampleInput(detach(x), args=(detach(lb[0]), detach(ub[0]))),
-        SampleInput(detach(x), args=(detach(lb[:, :1]),)),
-        SampleInput(detach(x), args=(None, ub)),
-        SampleInput(detach(x), args=(lb, None)),
-    ]
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape[1:]), make_arg(shape[1:])))
+    yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
+    yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -8028,6 +8042,31 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('uniform',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
+           method_variant=None,
+           inplace_variant=torch.Tensor.uniform_,
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_autograd=False,
+           is_factory_function=False,
+           sample_inputs_func=sample_inputs_uniform,
+           error_inputs_func=error_inputs_uniform,
+           skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Tests that assume input tensor has a meningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # aten.uniform_.default - couldn't find symbolic meta function/decomposition
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               # aten.uniform was not decomposed
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
