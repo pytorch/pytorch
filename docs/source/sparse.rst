@@ -7,10 +7,40 @@
 torch.sparse
 ============
 
+Why and when to use sparsity
+++++++++++++++++++++++++++++++++
+
+:class:`torch.Tensor` by default stores memory contiguously in memory
+leading to efficient implementations of various array processing
+algorithms that rely on the fast access to elements. However, some
+users might decide to represent data such as graph adjacency matrices,
+pruned weights or points clouds by Tensors whose elements are compromised
+primarily of zeros. We can provide performance optimizations for these
+use cases by providing sparse storage formats.
+
+Various sparse storage formats (`such as COO, CSR/CSC, LIL, etc.`__)
+have been developed over the years. They all have in common that they
+track the positions of non-zero valued elements and maybe some, but most
+importantly not all, zero valued elements.
+
+By compressing repeat zeros sparse storage formats aim to save memory and
+computational resources on various CPUs and GPUs. Especially for high
+degrees of sparsity this can have significant performance implications.
+
+The exact details or a given sparse storage format can matter a lot
+depending on the device and array processing algorithm in question.
+Therefore it is important to note that using a sparse storage format
+is not always advantageous. Details such as the distribution of zero
+valued elements and the level of sparsity matter. We aim to make it
+easy to try these different compression techniques, but we do not
+provide a means of determining the best one for your particular
+application.
+
 How to use this documentation
 +++++++++++++++++++++++++++++
 
-It is straightforward to construct a sparse Tensor from a given dense Tensor.
+It is straightforward to construct a sparse Tensor from a given dense Tensor by using
+the conversion routines.
 
     >>> a = torch.tensor([[0, 1.], [0, 0]])
     >>> b = torch.tensor([[0, 2.], [3, 0]])
@@ -26,14 +56,20 @@ It is straightforward to construct a sparse Tensor from a given dense Tensor.
            values=tensor([2., 3.]),
            size=(2, 2), nnz=2, layout=torch.sparse_coo)
 
+PyTorch currently supports the sparse storage formats: :ref:`COO<sparse-coo-docs>`,
+:ref:`CSR<sparse-csr-docs>`, :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`,
+and :ref:`BSC<sparse-bsc-docs>`.
 
-Operations on Tensor with sparse storage formats behave the same as operations on Tensor with
-dense storage formats. The main goal of storage formats is to compress repeat zeros and provide
-access to kernels that take advantage of that. Since changing the storage format changes the
-underlying kernel this may result in slight numerical differences.
+Note that we provide slight generalizations of these formats with support. Devices such as
+GPUs require batching for optimal performance and thus we support batch dimensions.
+Some data such as Graph embeddings might be better viewed as sparse collections of vectors
+instead of scalars and thus we provide dense dimensions. Please see the documentation
+for each storage format for details.
 
-Another difference is operator coverage. Not as many operations support sparse Tensors as support
-dense Tensors.
+Fundamentally, operations on Tensor with sparse storage formats behave the same as
+operations on Tensor with strided (or other) storage formats. The particularities of
+storage, that is the physical layout of the data, does and should not influence the semantics.
+However, not as many operations support sparse Tensors as support dense Tensors.
 
     >>> b_s = b.to_sparse_csr()
     >>> b_s.cos()
@@ -64,26 +100,6 @@ is in turn also backed and powered by sparse storage formats and kernels.
 Caveats
 +++++++
 
-PyTorch provides :class:`torch.Tensor` to represent a
-multi-dimensional array containing elements of a single data type. By
-default, array elements are stored contiguously in memory leading to
-efficient implementations of various array processing algorithms that
-relay on the fast access to array elements.  However, there exists an
-important class of multi-dimensional arrays, so-called sparse arrays,
-where the contiguous memory storage of array elements turns out to be
-suboptimal. Sparse arrays have a property of having a vast portion of
-elements being equal to zero which means that a lot of memory as well
-as processor resources can be spared if only the non-zero elements are
-stored or/and processed. Various sparse storage formats (`such as COO,
-CSR/CSC, LIL, etc.`__) have been developed that are optimized for a
-particular structure of non-zero elements in sparse arrays as well as
-for specific operations on the arrays. PyTorch supports the following
-sparse storage formats: :ref:`COO<sparse-coo-docs>`,
-:ref:`CSR<sparse-csr-docs>`, :ref:`CSC<sparse-csc-docs>`,
-:ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
-
-__ https://en.wikipedia.org/wiki/Sparse_matrix
-
 .. note::
 
    When talking about storing only non-zero elements of a sparse
@@ -92,20 +108,11 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
    structure. Hence, in the following, we use "specified elements" for
    those array elements that are actually stored.
 
-.. note::
-
-   Using a sparse storage format for storing sparse arrays is not
-   always advantageous. Details such as the distribution of zero
-   valued elements and the level of sparsity matter. We provide
-   access to different compression techniques, but not a means of
-   determining the best one for your particular application.
-
 .. warning::
 
   The PyTorch API of sparse tensors is in beta and may change in the near future.
 
 .. _sparse-coo-docs:
-
 
 Sparse COO tensors
 ++++++++++++++++++
@@ -319,7 +326,6 @@ sparse tensor with the following properties:
   On the other hand, the lexicographical ordering of indices can be
   advantageous for implementing algorithms that involve many element
   selection operations, such as slicing or matrix products.
-
 
 Working with sparse COO tensors
 -------------------------------
