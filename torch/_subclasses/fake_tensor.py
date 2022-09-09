@@ -15,7 +15,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -555,7 +555,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with enable_torch_dispatch_mode(fake_mode):
+        with contextlib.nullcontext() if not fake_mode else fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
     @staticmethod
@@ -735,7 +735,7 @@ class FakeTensorMode(TorchDispatchMode):
                         "It's likely that this is from calling tensor.shape in C++"
                     )
 
-            with self.restore():
+            with self:
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
@@ -757,7 +757,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
-            with self.restore():
+            with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
