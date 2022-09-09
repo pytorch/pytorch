@@ -10,10 +10,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/Metaprogramming.h>
 
-// This file contains batching rules for operations that return Tensors of
-// dynamic shape. We generally don't support those with vmap so we raise
-// errors for them.
-
 
 namespace at { namespace functorch {
 
@@ -61,7 +57,7 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
         "support over at github.com/pytorch/functorch/issues/275");
 }
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
     UNSUPPORTED_DYNAMIC(where);
     UNSUPPORTED_DYNAMIC(unique);

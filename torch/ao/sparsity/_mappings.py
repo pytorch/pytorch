@@ -1,8 +1,3 @@
-__all__ = [
-    "get_static_sparse_quantized_mapping",
-    "get_dynamic_sparse_quantized_mapping",
-]
-
 def get_static_sparse_quantized_mapping():
     import torch.ao.nn.sparse
     _static_sparse_quantized_mapping = dict({

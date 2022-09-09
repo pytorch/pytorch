@@ -6,7 +6,7 @@
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
-#include <ATen/functorch/BatchedTensorImpl.h>
+#include <functorch/csrc/BatchedTensorImpl.h>
 
 namespace at { namespace functorch {
 

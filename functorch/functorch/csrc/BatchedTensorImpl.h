@@ -12,6 +12,9 @@
 #include <ATen/SmallVector.h>
 #include <ATen/Tensor.h>
 
+#include <functorch/csrc/Macros.h>
+#include <functorch/csrc/Constants.h>
+
 namespace at {
 namespace functorch {
 
@@ -40,7 +43,8 @@ constexpr int64_t kBatchDimsStackSize = 5;
 //
 // bt.sizes() returns (5, 7); bt.sum(0) performs a reduction over the (public)
 // dim 0, which is equivalent to dim 3 in the underlying ones(2, 3, 5, 7) tensor.
-struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
+struct BatchedTensorImpl : public c10::TensorImpl {
+  explicit BatchedTensorImpl(Tensor value, int64_t dim, int64_t level);
   explicit BatchedTensorImpl(at::DispatchKeySet key_set, Tensor value, int64_t dim, int64_t level);
 
   // Returns batch dimension of this tensor
@@ -75,16 +79,9 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 #endif
 
   void refreshTensorMetadata();
-
-  // Used in torchdim. torchdim uses non-lexical BatchedTensor; the way it
-  // accomplishes this is a hack where it is able to modify the levels of
-  // BatchedTensor to match the level of the current vmap transform.
   void _unsafe_set_level(int64_t level) {
     level_ = level;
   }
-
-  // Used in batching rule for in-place view operations that can change
-  // the index of the bdim (think squeeze_, unsqueeze_)
   void unsafe_set_bdim(int64_t bdim) {
     // NB: you MUST call refreshTensorMetadata after doing this.
     bdim_ = bdim;
@@ -103,7 +100,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 inline bool isBatchedTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::FuncTorchBatched);
+  return tensor.unsafeGetTensorImpl()->key_set().has(kBatchedKey);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a
@@ -134,15 +131,11 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
+FUNCTORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
+FUNCTORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
 
-// Certain dispatch keys must be propagated to the BatchedTensor (or, in general,
-// any wrapper Tensor subclasses). This is because there are methods on Tensor
-// that skip dispatch and check for the presence of a dispatch key (e.g. is_cpu()).
-// TODO: should probably contain more (or all?) backend keys
 constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::Negative,
   DispatchKey::Conjugate,
