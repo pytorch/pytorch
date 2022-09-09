@@ -15,10 +15,9 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/CompileCache.h>
+#include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
-
-// This file contains functorch's Python bindings.
 
 namespace at {
 namespace functorch {
@@ -415,6 +414,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     throw py::error_already_set();
   }
   py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
+
+  // Windows doesn't like this
+#ifndef _WIN32
+  initDispatchBindings(m.ptr());
+#endif
 }
 
 }}

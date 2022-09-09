@@ -209,16 +209,20 @@ void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
   bool reset_tensor = false;
+
+  TORCH_CHECK(!numel_.is_symbolic(), "CAFFE2 doesn't support SymInts");
+  int concrete_numel = numel_.as_int_unchecked();
   if (reserved_) {
     // If tensor is reserved then don't claim its memeory unless nbytes()
     // is smaller than new size
-    reset_tensor =
-        storage_.nbytes() < (storage_offset_ + numel_) * data_type_.itemsize();
+    reset_tensor = storage_.nbytes() <
+        (storage_offset_ + concrete_numel) * data_type_.itemsize();
   } else {
     reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize() ||
+            (storage_offset_ + concrete_numel) * data_type_.itemsize() ||
         !FLAGS_caffe2_keep_on_shrink ||
-        storage_.nbytes() - (storage_offset_ + numel_) * data_type_.itemsize() >
+        storage_.nbytes() -
+                (storage_offset_ + concrete_numel) * data_type_.itemsize() >
             static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
   }
 
@@ -233,9 +237,10 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d =
+        sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
     if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+      if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() == z) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -253,9 +258,11 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -279,9 +286,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -328,7 +337,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.stride_at_unchecked(a) <
         sizes_and_strides_.stride_at_unchecked(b);
   });
-  int64_t require_stride = 1;
+  SymInt require_stride = 1;
   for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
@@ -354,7 +363,7 @@ void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    (*pyobj_interpreter_.load(std::memory_order_acquire))
+    pyobj_interpreter_.load(std::memory_order_acquire)
         ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
@@ -377,15 +386,15 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-impl::PyInterpreter& TensorImpl::load_pyobj_interpreter() const {
+impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
   auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
   if (interpreter) {
-    return *interpreter;
+    return interpreter;
   }
   TORCH_CHECK(
       false,
       "cannot access PyObject for Tensor on interpreter ",
-      (*pyobj_interpreter_.load())->name());
+      pyobj_interpreter_.load()->name());
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
@@ -545,7 +554,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+    r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
   }
   if (r) {
     r->set_version_counter(std::forward<VariableVersion>(version_counter));
@@ -620,8 +629,8 @@ void TensorImpl::copy_generic_tensor_metadata(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
-  if (src_impl->extra_meta_ != nullptr) {
-    dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
+  if (src_impl->named_tensor_meta_ != nullptr) {
+    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
   dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
 }
@@ -686,7 +695,8 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       "Extend() called on tensor with symbolic shape")
 
   using SizesVector = SmallVector<int64_t, 5>;
-  IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
   SizesVector newDims(sizes_and_strides.begin(), sizes_and_strides.end());
   newDims[0] += num;
   if (!storage_.data()) {
@@ -695,7 +705,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   }
   const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
   if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
-    sizes_and_strides_.set_sizes(newDims);
+    sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
     numel_ = newNumel;
     return;
   }
@@ -703,9 +713,10 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   newCapacity[0] = std::max(
       newDims[0],
       static_cast<int64_t>(std::ceil(
-          sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+          sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
+          (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
-  auto oldSize = numel_;
+  auto oldSize = numel_.as_int_unchecked();
   Resize(newCapacity);
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
@@ -731,7 +742,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
         true); // non-blocking
   }
   reserved_ = true;
-  sizes_and_strides_.set_sizes(newDims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
   numel_ = newNumel;
 }
 
@@ -741,11 +752,12 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
       "Right now ReserveSpace is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "ReserveSpace() called on tensor with symbolic shape")
+      "ReserveSpace() called on tensor with symbolic shape");
 
   TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
   // TODO: eliminate newCapacity.
-  IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
   SmallVector<int64_t, 5> newCapacity(
       sizes_and_strides.begin(), sizes_and_strides.end());
   newCapacity[0] = outer_dim;
@@ -761,7 +773,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   Resize(newCapacity);
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
-  sizes_and_strides_.set_sizes(oldDims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(oldDims));
   numel_ = oldSize;
   reserved_ = true;
 }
@@ -772,7 +784,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
       "Right now Reshape is only supported for contiguous Tensor.");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "Reshape() called on tensor with symbolic shape")
+      "Reshape() called on tensor with symbolic shape");
 
   int64_t new_size = 1;
   for (auto d : dims) {
@@ -780,7 +792,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
     new_size *= d;
   }
   TORCH_CHECK(
-      new_size == numel_,
+      new_size == numel_.as_int_unchecked(),
       "New size and old size are not equal. You cannot use Reshape, "
       "but should use Resize."
       // TODO(jiayq): remove the following warning after pending diffs
@@ -788,7 +800,7 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
       " The old caffe2 mixes Reshape and Resize but this behavior has "
       "been changed. If you find this error, most likely you will need "
       "to change corresponding code from Reshape to Resize.");
-  sizes_and_strides_.set_sizes(dims);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(dims));
   empty_tensor_restride(MemoryFormat::Contiguous);
 }
 
@@ -844,9 +856,9 @@ void TensorImpl::ShareExternalPointer(
       "initialized data_type(TypeMeta).");
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "ShareExternalPointer() called on tensor with symbolic shape");
+      "ReserveSpace() called on tensor with symbolic shape");
   if (!size_bytes) {
-    size_bytes = numel_ * data_type.itemsize();
+    size_bytes = numel_.as_int_unchecked() * data_type.itemsize();
   }
   if (storage_.unique()) {
     storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
@@ -872,17 +884,8 @@ void TensorImpl::set_sym_sizes_and_strides(
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;
   sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-  }
-  extra_meta_->sizes_ = sizes;
-  extra_meta_->strides_ = strides;
-  SymInt numel = 1;
-  for (const auto& s : sizes) {
-    numel *= s;
-  }
-  extra_meta_->numel_ = numel;
-  // TODO: refresh the other entries
+  sizes_and_strides_.set_sizes(sizes);
+  sizes_and_strides_.set_strides(strides);
 }
 
 namespace impl {

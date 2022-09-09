@@ -13,6 +13,9 @@ import torch
 from torch.distributed.algorithms.join import Joinable, JoinHook
 from torch.optim import Optimizer
 
+
+def _get_global_rank(group: Any, rank: int) -> int: ...
+
 class _ZeROJoinHook(JoinHook):
     zero: Any = ...
     def __init__(self, zero: Any) -> None: ...

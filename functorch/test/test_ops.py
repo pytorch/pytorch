@@ -513,111 +513,17 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
-    @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
-        skip("atleast_1d"),  # Takes too long
-        skip("atleast_2d"),  # Takes too long
-        skip("atleast_3d"),  # Takes too long
-        xfail("_masked.prod"),  # calls item
-        xfail("_masked.cumprod"),  # calls item
-        xfail("as_strided"),  # incorrect output
-        xfail("as_strided_scatter"),  # incorrect output
-        skip("bernoulli"),  # calls random op
-        xfail("bfloat16"),  # rank 4 tensor for channels_last
-        xfail("chalf"),  # rank 4 tensor for channels_last
-        xfail("cumprod"),  # calls item
-        xfail("double"),  # rank 4 tensor for channels_last
-        xfail("eig"),  # calls item
-        xfail("float"),  # rank 4 tensor for channels_last
-        xfail("half"),  # rank 4 tensor for channels_last
-        # It looks like you're either (1) calling .item() on a Tensor or
-        # (2) attempting to use a Tensor in some data-dependent control flow or
-        # (3) encountering this error in PyTorch internals.
-        xfail("index_reduce"),
-        xfail("linalg.eig"),  # vmap over torch.allclose
-        xfail("linalg.eigvals"),  # vmap over torch.allclose
-        xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
-        # It looks like you're either (1) calling .item() on a Tensor or
-        # (2) attempting to use a Tensor in some data-dependent control flow or
-        # (3) encountering this error in PyTorch internals.
-        xfail("linalg.vander"),
-        xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
-        xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
-        # got a batched tensor as input while the running_mean or running_var,
-        # which will be updated in place, were not batched.
-        xfail("nn.functional.batch_norm"),
-        xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d"),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
-        skip("nn.functional.dropout"),  # calls random op
-        skip("nn.functional.dropout2d"),  # calls random op
-        skip("nn.functional.dropout3d"),  # calls random op
-        skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
-        skip("nn.functional.fractional_max_pool2d"),  # calls random op
-        skip("nn.functional.fractional_max_pool3d"),  # calls random op
-        # It looks like you're either (1) calling .item() on a Tensor or
-        # (2) attempting to use a Tensor in some data-dependent control flow or
-        # (3) encountering this error in PyTorch internals.
-        xfail("nn.functional.gaussian_nll_loss"),
-        # got a batched tensor as input while the running_mean or running_var,
-        # which will be updated in place, were not batched.
-        xfail("nn.functional.instance_norm"),
-        xfail("nn.functional.layer_norm"),  # vmap: inplace into a regular tensor
-        # RuntimeError: NYI: querying is_contiguous inside of vmap
-        # for memory_format other than torch.contiguous_formats
-        xfail("nn.functional.max_pool2d"),
-        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-        # supported with memory_format torch.preserve_format or
-        # torch.contiguous_format (got ChannelsLast)
-        xfail("nn.functional.max_unpool2d"),
-        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-        # supported with memory_format torch.preserve_format
-        # or torch.contiguous_format (got ChannelsLast)s
-        xfail("nn.functional.max_unpool2d", "grad"),
-        xfail("nn.functional.prelu"),  # Mismatch!
-        xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
-        xfail("normal"),  # calls random op
-        xfail("normal", "number_mean"),  # calls random op
-        xfail("pca_lowrank"),  # calls random op
-        # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
-        xfail("prod"),
-        xfail("put"),  # vmap: inplace into a regular tensor
-        xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
-        xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
-        xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
-        xfail("svd_lowrank"),  # calls random op
-        xfail("take"),  # vmap: inplace into a regular tensor
-        xfail("to"),  # rank 4 tensor for channels_last
-        xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
-        # locally fails with `bias tensor has to be contiguous`
-        # but passes on CI, hence the skip.
-        skip("nn.functional.conv_transpose3d", device_type='cuda'),
-        # got a batched tensor as input while the running_mean or running_var,
-        # which will be updated in place, were not batched.
-        xfail("nn.functional.batch_norm", 'without_cudnn'),
-    }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
-        tol1('linalg.svd',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-        tol1('linalg.lu_factor',
-             {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
-        tol1('svd',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-    ))
     def test_vmapvjpvjp(self, device, dtype, op):
-        # Since, we test `vjpvjp` independently,
-        # for this test, we just verify that vmap
-        # of `vjpvjp` is correct.
+        self.skipTest("Skipped; these tests take too long")
+        op_skip = set({
+        })
+        op_skip = op_skip.union(vjp_fail)
+        if op.name in op_skip:
+            self.skipTest("Skipped; Expected failures")
+            return
+
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -677,7 +583,6 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
-        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -759,7 +664,6 @@ class TestOperators(TestCase):
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
-        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -769,6 +673,7 @@ class TestOperators(TestCase):
         xfail('_masked.prod'),  # .item or data-dependent control flow
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
+        xfail('linalg.householder_product'),  # output with shape [5, 5] doesn't match the broadcast shape [2, 5, 5]
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
@@ -798,10 +703,6 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -833,17 +734,20 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
-        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
         xfail('cumprod'),
         xfail('lu_solve'),
         xfail('linalg.det'),
+        xfail('linalg.lstsq', 'grad_oriented'),
+        xfail('linalg.pinv'),
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
         xfail('complex'),
+        xfail('linalg.pinv', 'hermitian'),
+        xfail('pinverse'),
         skip('_masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
@@ -913,7 +817,6 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
-        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
         xfail('complex'),
         xfail('copysign'),
@@ -929,6 +832,10 @@ class TestOperators(TestCase):
         xfail('linalg.det'),
         xfail('linalg.eig'),
         xfail('linalg.householder_product'),
+        xfail('linalg.lstsq', ''),
+        xfail('linalg.lstsq', 'grad_oriented'),
+        xfail('linalg.pinv'),
+        xfail('linalg.pinv', 'hermitian'),
         xfail('lu'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
@@ -936,6 +843,7 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('pinverse'),
         xfail('prod'),
         xfail('put'),
         skip('linalg.det'),  # https://github.com/pytorch/functorch/issues/961
@@ -1034,7 +942,6 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
-        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1411,6 +1318,9 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
+        # call inplace functions
+        xfail('linalg.householder_product'),  # inplace
+
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
         xfail('masked_select'),
@@ -1434,12 +1344,6 @@ class TestOperators(TestCase):
         skip('native_layer_norm', '', device_type='cpu'),
         xfail('as_strided_scatter', ''),
     })
-    @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
-    ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)

@@ -93,7 +93,7 @@ def mock_revert(repo: GitRepo, pr: GitHubPR, *,
 
 def mock_merge(pr_num: int, repo: GitRepo,
                dry_run: bool = False,
-               skip_mandatory_checks: bool = False,
+               force: bool = False,
                comment_id: Optional[int] = None,
                mandatory_only: bool = False,
                on_green: bool = False,
@@ -130,11 +130,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                   ),
     ]
 
-
-def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
-    raise RuntimeError("testing")
-
-
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -158,14 +153,6 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = DummyGitRepo()
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_raise)
-    def test_read_merge_rules_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
-        "Tests that PR fails to read the merge rules"
-        pr = GitHubPR("pytorch", "pytorch", 77700)
-        repo = DummyGitRepo()
-        self.assertRaisesRegex(RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
@@ -326,7 +313,7 @@ class TestGitHubPR(TestCase):
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
-                                           skip_mandatory_checks=True,
+                                           force=True,
                                            comment_id=mock.ANY,
                                            on_green=False,
                                            land_checks=False,
@@ -340,7 +327,7 @@ class TestGitHubPR(TestCase):
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
-                                           skip_mandatory_checks=False,
+                                           force=False,
                                            comment_id=mock.ANY,
                                            on_green=False,
                                            land_checks=False,

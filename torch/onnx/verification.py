@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -22,15 +22,10 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
-from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
-_NumericType = Union[Number, torch.Tensor, np.ndarray]
 
-
-@_beartype.beartype
 def _flatten_tuples(elem):
     flattened = []
     for t in elem:
@@ -41,8 +36,7 @@ def _flatten_tuples(elem):
     return flattened
 
 
-# TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> Union[list, np.ndarray]:
+def _to_numpy(elem):
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -55,13 +49,12 @@ def _to_numpy(elem) -> Union[list, np.ndarray]:
     elif isinstance(elem, dict):
         flattened = []
         for k in elem:
-            flattened.extend([_to_numpy(k), _to_numpy(elem[k])])
+            flattened += [_to_numpy(k)] + [_to_numpy(elem[k])]
         return flattened
     return elem
 
 
-@_beartype.beartype
-def _inline_flatten_list(inputs, res_list) -> list:
+def _inline_flatten_list(inputs, res_list):
     for i in inputs:
         res_list.append(i) if not isinstance(
             i, (list, tuple)
@@ -69,8 +62,7 @@ def _inline_flatten_list(inputs, res_list) -> list:
     return res_list
 
 
-@_beartype.beartype
-def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
+def _unpack_to_numpy(values, cast_onnx_accepted=True):
     value_unpacked = []
     for value in values:
         value_unpacked.extend(
@@ -79,7 +71,6 @@ def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     return [_to_numpy(v) for v in value_unpacked]
 
 
-@_beartype.beartype
 def _run_ort(ort_session, inputs):
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
@@ -98,10 +89,9 @@ def _run_ort(ort_session, inputs):
             )
         ort_inputs[ort_session_inputs[i].name] = input
     ort_outs = ort_session.run(None, ort_inputs)
-    return ort_outs
+    return _inline_flatten_list(ort_outs, [])
 
 
-@_beartype.beartype
 def _ort_session(
     model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
@@ -125,15 +115,13 @@ def _ort_session(
     return ort_session
 
 
-@_beartype.beartype
 def _compare_ort_pytorch_outputs(
-    ort_outs: Union[Sequence[_NumericType], Sequence],
-    pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
+    ort_outs: Sequence[np.ndarray],
+    pt_outs: Sequence[torch.Tensor],
     rtol: float,
     atol: float,
     check_shape: bool,
     check_dtype: bool,
-    ignore_none: bool,
     acceptable_error_percentage: Optional[float],
 ):
     """
@@ -142,13 +130,9 @@ def _compare_ort_pytorch_outputs(
     Args:
         ort_outs: outputs from ONNX Runtime.
         pt_outs: outputs from PyTorch.
-        rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
-        ignore_none: Whether to ignore None type in
-            torch output, which is usually the case with tracing. Set this to False, if
-            torch output should keep None type, which is usually the case with exporting
-            ScriptModules.
-        acceptable_error_percentage: acceptable percentage of element mismatches in comparison.
+        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
+        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
             It should be a float of value between 0.0 and 1.0.
 
     Raises:
@@ -156,16 +140,12 @@ def _compare_ort_pytorch_outputs(
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
-    if ignore_none:
-        # torch.jit._flatten filters None type
-        pt_outs, _ = torch.jit._flatten(pt_outs)
-    else:
-        pt_outs = _inline_flatten_list([pt_outs], [])
-    pt_outs_np = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
-    ort_outs = _inline_flatten_list(ort_outs, [])
+    pt_outs, _ = torch.jit._flatten(pt_outs)
+    pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
+
     assert len(ort_outs) == len(
-        pt_outs_np
-    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs_np)})"
+        pt_outs
+    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
     ):
@@ -173,7 +153,7 @@ def _compare_ort_pytorch_outputs(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
         )
 
-    for ort_out, pt_out in zip(ort_outs, pt_outs_np):
+    for ort_out, pt_out in zip(ort_outs, pt_outs):
         try:
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not check_shape:
@@ -202,7 +182,6 @@ def _compare_ort_pytorch_outputs(
             raise
 
 
-@_beartype.beartype
 def _prepare_input_for_pytorch(args, kwargs):
     """Prepare input for PyTorch model execution.
 
@@ -229,7 +208,6 @@ def _prepare_input_for_pytorch(args, kwargs):
     return args, kwargs
 
 
-@_beartype.beartype
 def _prepare_input_for_export(args, kwargs):
     """Prepare input for ONNX model export.
 
@@ -254,7 +232,6 @@ def _prepare_input_for_export(args, kwargs):
     return onnx_inputs
 
 
-@_beartype.beartype
 def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
     """Prepare input for ONNX model execution in ONNX Runtime.
 
@@ -280,7 +257,6 @@ def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
         return onnx_inputs
 
 
-@_beartype.beartype
 def _try_clone_model(model):
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -292,7 +268,6 @@ def _try_clone_model(model):
         return model
 
 
-@_beartype.beartype
 def _compare_ort_pytorch_model(
     model,
     ort_session,
@@ -301,12 +276,11 @@ def _compare_ort_pytorch_model(
     additional_test_inputs,
     remained_onnx_input_idx,
     flatten,
-    ignore_none,
     rtol,
     atol,
     check_shape,
     check_dtype,
-    acceptable_error_percentage: Optional[float],
+    accetable_error_persentage: Optional[float],
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -317,7 +291,6 @@ def _compare_ort_pytorch_model(
             equal up to specified precision.
     """
 
-    @_beartype.beartype
     def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
@@ -330,14 +303,13 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs=ort_outs,
-            pt_outs=pt_outs,
-            rtol=rtol,
-            atol=atol,
-            check_shape=check_shape,
-            check_dtype=check_dtype,
-            ignore_none=ignore_none,
-            acceptable_error_percentage=acceptable_error_percentage,
+            ort_outs,
+            pt_outs,
+            rtol,
+            atol,
+            check_shape,
+            check_dtype,
+            accetable_error_persentage,
         )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
@@ -350,7 +322,6 @@ def _compare_ort_pytorch_model(
 class _GraphDiff:
     """A class to represent the difference between two graphs."""
 
-    @_beartype.beartype
     def __init__(self, graph_a: _C.Graph, graph_b: _C.Graph):
         """Construct a _GraphDiff object.
 
@@ -361,16 +332,13 @@ class _GraphDiff:
         self.graph_a = graph_a
         self.graph_b = graph_b
 
-    @_beartype.beartype
     def __str__(self):
         """See function :func:`diff_report`."""
         return self.diff_report()
 
-    @_beartype.beartype
     def _indent(self, lines: str) -> str:
         return "\n".join(["\t" + line for line in lines.splitlines()])
 
-    @_beartype.beartype
     def diff_report(self) -> str:
         """Return a string representation of the graph difference.
 
@@ -420,7 +388,6 @@ class _GraphDiff:
         return "\n".join(graph_diff_report)
 
 
-@_beartype.beartype
 def _check_graph_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -462,7 +429,6 @@ def _check_graph_diff(
     return ""
 
 
-@_beartype.beartype
 def _traced_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -490,7 +456,6 @@ def _traced_graph_from_model(
         return jit_graph
 
 
-@_beartype.beartype
 def _onnx_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -519,7 +484,7 @@ def _onnx_graph_from_model(
     output_names = export_options.output_names
 
     if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
+        opset_version = _constants.onnx_default_opset
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
@@ -558,7 +523,6 @@ def _onnx_graph_from_model(
         return onnx_graph
 
 
-@_beartype.beartype
 def check_export_model_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -602,10 +566,9 @@ def check_export_model_diff(
     )
 
 
-@_beartype.beartype
 def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args: Union[torch.Tensor, Tuple[Any, ...]],
+    input_args: Tuple[Any, ...],
     input_kwargs: Optional[Mapping[str, Any]] = None,
     do_constant_folding: bool = True,
     dynamic_axes: Optional[
@@ -619,12 +582,9 @@ def verify(
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[
-        Sequence[Union[torch.Tensor, Tuple[Any, ...]]]
-    ] = None,
+    additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
-    ignore_none: bool = True,
     check_shape: bool = True,
     check_dtype: bool = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
@@ -661,15 +621,11 @@ def verify(
             inputs into a flattened list of Tensors for ONNX. Set this to False if nested
             structures are to be preserved for ONNX, which is usually the case with
             exporting ScriptModules.
-        ignore_none (bool, optional): Whether to ignore None type in
-            torch output, which is usually the case with tracing. Set this to False, if
-            torch output should keep None type, which is usually the case with exporting
-            ScriptModules. Default to True.
-        check_shape (bool, optional): Whether to check the shapes between
+        check_shape (bool, optional): Default True. If True, check the shapes between
             PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
-            output shape broadcasting. Default to True.
-        check_dtype (bool, optional): Whether to check the dtypes between
-            PyTorch and ONNX Runtime outputs are consistent. Default to True.
+            output shape broadcasting.
+        check_dtype (bool, optional): Default True. If True, check the dtypes between
+            PyTorch and ONNX Runtime outputs are consistent.
         ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
@@ -713,17 +669,16 @@ def verify(
         ort_session = _ort_session(model_f, ort_providers)
 
         _compare_ort_pytorch_model(
-            model=model_copy,
-            ort_session=ort_session,
-            input_args=input_args,
-            input_kwargs=input_kwargs,
-            additional_test_inputs=additional_test_inputs,
-            remained_onnx_input_idx=remained_onnx_input_idx,
-            flatten=flatten,
-            ignore_none=ignore_none,
-            rtol=rtol,
-            atol=atol,
-            check_shape=check_shape,
-            check_dtype=check_dtype,
-            acceptable_error_percentage=acceptable_error_percentage,
+            model_copy,
+            ort_session,
+            input_args,
+            input_kwargs,
+            additional_test_inputs,
+            remained_onnx_input_idx,
+            flatten,
+            rtol,
+            atol,
+            check_shape,
+            check_dtype,
+            acceptable_error_percentage,
         )

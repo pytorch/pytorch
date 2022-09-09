@@ -307,9 +307,6 @@ TAGS
 # bazel symlinks
 bazel-*
 
-# xla repo
-xla/
-
 # direnv, posh-direnv
 .envrc
 .psenvrc

@@ -39,9 +39,6 @@ class TORCH_API RRefContext {
 
   static void handleException(const JitFuture& jitFuture);
 
-  // handle exception without throw ::c10::Error again
-  static void handleExceptionSilent(const JitFuture& jitFuture);
-
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
   void operator=(const RRefContext&) = delete;

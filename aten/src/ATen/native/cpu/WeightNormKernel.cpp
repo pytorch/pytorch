@@ -1,8 +1,6 @@
-#define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/core/TensorBase.h>
+#include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 #include <ATen/cpu/vec/functional.h>
@@ -15,10 +13,10 @@ namespace {
 
 template <typename scalar_t, typename accscalar_t>
 void weight_norm_first_dim_kernel(
-    TensorBase& w,
-    TensorBase& norm,
-    const TensorBase& v,
-    const TensorBase& g,
+    Tensor& w,
+    Tensor& norm,
+    const Tensor& v,
+    const Tensor& g,
     int64_t M, int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
@@ -123,10 +121,10 @@ inline void apply_norm_per_row(
 
 template <typename scalar_t, typename accscalar_t>
 void weight_norm_last_dim_kernel(
-    TensorBase& w,
-    TensorBase& norm,
-    const TensorBase& v,
-    const TensorBase& g,
+    Tensor& w,
+    Tensor& norm,
+    const Tensor& v,
+    const Tensor& g,
     int64_t M, int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
@@ -134,7 +132,7 @@ void weight_norm_last_dim_kernel(
   auto norm_data = norm.data_ptr<accscalar_t>();
 
   int num_threads = at::get_num_threads();
-  TensorBase buffer = at::detail::empty_cpu({num_threads, N}, norm.options()).zero_();
+  Tensor buffer = at::empty({num_threads, N}, norm.options()).zero_();
   auto buffer_data = buffer.data_ptr<accscalar_t>();
 
   // vertical parallel reduction
@@ -175,12 +173,12 @@ void weight_norm_last_dim_kernel(
 
 template <typename scalar_t, typename accscalar_t>
 void weight_norm_backward_first_dim_kernel(
-    TensorBase& grad_v,
-    TensorBase& grad_g,
-    const TensorBase& grad_w,
-    const TensorBase& saved_v,
-    const TensorBase& saved_g,
-    const TensorBase& saved_norm,
+    Tensor& grad_v,
+    Tensor& grad_g,
+    const Tensor& grad_w,
+    const Tensor& saved_v,
+    const Tensor& saved_g,
+    const Tensor& saved_norm,
     int64_t M, int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
@@ -316,12 +314,12 @@ inline void apply_per_row_backward(
 
 template <typename scalar_t, typename accscalar_t>
 void weight_norm_backward_last_dim_kernel(
-    TensorBase& grad_v,
-    TensorBase& grad_g,
-    const TensorBase& grad_w,
-    const TensorBase& saved_v,
-    const TensorBase& saved_g,
-    const TensorBase& saved_norm,
+    Tensor& grad_v,
+    Tensor& grad_g,
+    const Tensor& grad_w,
+    const Tensor& saved_v,
+    const Tensor& saved_g,
+    const Tensor& saved_norm,
     int64_t M, int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
@@ -337,7 +335,7 @@ void weight_norm_backward_last_dim_kernel(
   //
   int num_threads = at::get_num_threads();
   int K = std::max(3, num_threads);
-  TensorBase buffer = at::detail::empty_cpu({K, N}, saved_norm.options()).zero_();
+  Tensor buffer = at::empty({K, N}, saved_norm.options()).zero_();
   auto buffer_data = buffer.data_ptr<accscalar_t>();
 
   // vertical parallel reduction
@@ -393,10 +391,10 @@ void weight_norm_backward_last_dim_kernel(
 }
 
 void weight_norm_kernel(
-    TensorBase& w,
-    TensorBase& norm,
-    const TensorBase& v,
-    const TensorBase& g,
+    Tensor& w,
+    Tensor& norm,
+    const Tensor& v,
+    const Tensor& g,
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
@@ -416,12 +414,12 @@ void weight_norm_kernel(
 }
 
 void weight_norm_backward_kernel(
-    TensorBase& grad_v,
-    TensorBase& grad_g,
-    const TensorBase& grad_w,
-    const TensorBase& saved_v,
-    const TensorBase& saved_g,
-    const TensorBase& saved_norm,
+    Tensor& grad_v,
+    Tensor& grad_g,
+    const Tensor& grad_w,
+    const Tensor& saved_v,
+    const Tensor& saved_g,
+    const Tensor& saved_norm,
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == saved_v.dim() - 1,
       "fused kernels can only be applied for first or last dim");

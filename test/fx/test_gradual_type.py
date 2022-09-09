@@ -44,16 +44,13 @@ class AnnotationsTest(TestCase):
         where n is the corresoinding node in the resulting graph.
         """
         class M(torch.nn.Module):
-            def forward(self,
-                        x: TensorType((1, 2, 3, Dyn)),
-                        y: Dyn,
-                        z: TensorType[Dyn, 3, Dyn]):
-                return torch.add(x, y) + z
+            def forward(self, x: TensorType((1, 2, 3, Dyn)), y: Dyn):
+                return torch.add(x, y)
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
 
-        expected_ph_types = [TensorType((1, 2, 3, Dyn)), Dyn, TensorType((Dyn, 3, Dyn))]
+        expected_ph_types = [TensorType((1, 2, 3, Dyn)), Dyn]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
