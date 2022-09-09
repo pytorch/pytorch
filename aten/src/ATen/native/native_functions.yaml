@@ -377,6 +377,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sgn_out
+    MPS: sgn_out_mps
     SparseCPU, SparseCUDA: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA: sgn_sparse_csr_out
 
