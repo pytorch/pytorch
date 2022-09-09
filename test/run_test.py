@@ -659,7 +659,6 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    #
     enabled = {
         # TODO: expose these options to the user
         # Temporary disable all feature-conditional tests
@@ -730,13 +729,14 @@ def run_doctests(test_module, test_directory, options):
     # pkgpath = os.path.join(pkgpath, 'utils')
     # pkgpath = os.path.join(pkgpath, 'nn')
     # pkgpath = os.path.join(pkgpath, 'ao')
-    pkgpath = os.path.join(pkgpath, 'autograd')
+    # pkgpath = os.path.join(pkgpath, 'autograd')
     # pkgpath = os.path.join(pkgpath, 'jit')
     # pkgpath = os.path.join(pkgpath, 'distributions')
-    # pkgpath = os.path.join(pkgpath, 'masked')
+    # pkgpath = os.path.join(pkgpath, 'masked')  # might have issues, unclear
+
     # pkgpath = os.path.join(pkgpath, 'optim')
     # pkgpath = os.path.join(pkgpath, 'cuda')
-    # pkgpath = os.path.join(pkgpath, 'distributed')
+    pkgpath = os.path.join(pkgpath, 'distributed')
     # pkgpath = os.path.join(pkgpath, 'rx')
     # pkgpath = os.path.join(pkgpath, 'monitor')
     # pkgpath = os.path.join(pkgpath, 'futures')
