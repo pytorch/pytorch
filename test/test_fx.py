@@ -120,6 +120,16 @@ wrap('wrapped_with_submodule')
 def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
     return batchnorm1d(x)
 
+def my_decorator(f):
+    @functools.wraps(f)
+    def wrapper_inside_decorator(*args, **kwargs):
+        return f(*args, **kwargs)
+    return wrapper_inside_decorator
+
+@wrap
+@my_decorator
+def wrapped_decorated_fn(x):
+    return x
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -447,6 +457,14 @@ class TestFX(JitTestCase):
         retraced = symbolic_trace(m)
         self.assertIn('wrapped_via_decorator', retraced.code)
         self.assertEqual(retraced(0), 1)
+
+    def test_wrap_decorated_function(self):
+        def to_trace(y):
+            return wrapped_decorated_fn(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_decorated_fn', m.code)
+        self.assertEqual(m(1), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
