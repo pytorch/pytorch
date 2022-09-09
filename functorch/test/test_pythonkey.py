@@ -24,10 +24,10 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions,
+    nop, num_of_recompilations, default_partition, default_decompositions,
     memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
+from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
 from functorch_additional_op_db import additional_op_db
@@ -412,7 +412,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
-        xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('trapezoid'),
         xfail('trapz'),
@@ -701,6 +700,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
         res = aot_mod(*inputs)
+        res[0].sum().backward()
 
 
 only_for = ("cpu")
