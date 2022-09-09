@@ -1700,7 +1700,8 @@ def _should_aten_fallback(
     )
 
 
-def _need_symbolic_context(symbolic_fn) -> bool:
+@_beartype.beartype
+def _need_symbolic_context(symbolic_fn: Callable) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
     params = tuple(inspect.signature(symbolic_fn).parameters.values())
     # When the annotation is postpone-evaluated, the annotation is a string
@@ -1715,6 +1716,7 @@ def _need_symbolic_context(symbolic_fn) -> bool:
     return issubclass(param_type, _exporter_states.SymbolicContext)
 
 
+@_beartype.beartype
 def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
     """Decorator that provides the symbolic context to the symbolic function if needed."""
     if _need_symbolic_context(symbolic_fn):
