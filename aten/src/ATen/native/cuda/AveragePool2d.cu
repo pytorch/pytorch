@@ -32,8 +32,8 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
-    const scalar_t* const bottom_data, const uint64_t channels,
-    const uint64_t height, const uint64_t width, const int pooled_height,
+    const scalar_t* const bottom_data, const int channels,
+    const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const top_data, const int divisor_override,
@@ -59,7 +59,7 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
     }
 
     accscalar_t aveval = accscalar_t(0);
-    const scalar_t* const bottom_slice = bottom_data + (n * channels + c) * height * width;
+    const scalar_t* const bottom_slice = bottom_data + ((uint64_t) n * channels + c) * ((uint64_t) height * width);
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
         aveval += bottom_slice[h * width + w];
@@ -81,8 +81,8 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
-    const scalar_t* const bottom_data, const uint64_t channels,
-    const uint64_t height, const uint64_t width, const int pooled_height,
+    const scalar_t* const bottom_data, const int channels,
+    const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const top_data, const int divisor_override,
@@ -108,7 +108,7 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     }
 
     accscalar_t aveval = accscalar_t(0);
-    const scalar_t* const bottom_slice = bottom_data + n * channels * height * width + c;
+    const scalar_t* const bottom_slice = bottom_data + ((uint64_t) n * channels) * ((uint64_t) height * width) + c;
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
         aveval += bottom_slice[(h * width + w) * channels];
@@ -130,8 +130,8 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
-    const uint64_t channels, const uint64_t height,
-    const uint64_t width, const int pooled_height, const int pooled_width,
+    const int channels, const int height,
+    const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
@@ -149,7 +149,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
     const int pwend = min(w / stride_w + 1, pooled_width);
     accscalar_t gradient = accscalar_t(0);
     const scalar_t* const top_diff_slice =
-        top_diff + (n * channels + c) * pooled_height * pooled_width;
+        top_diff + ((uint64_t) n * channels + c) * ((uint64_t) pooled_height * pooled_width);
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
@@ -187,8 +187,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const top_diff,
-    const uint64_t channels, const uint64_t height,
-    const uint64_t width, const int pooled_height, const int pooled_width,
+    const int channels, const int height,
+    const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
@@ -204,7 +204,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
     const int pwstart = (w < kernel_w) ? 0 : (w - kernel_w) / stride_w + 1;
     const int pwend = min(w / stride_w + 1, pooled_width);
     accscalar_t gradient = accscalar_t(0);
-    const scalar_t* const top_diff_slice = top_diff + n * channels * pooled_height * pooled_width + c;
+    const scalar_t* const top_diff_slice = top_diff + ((uint64_t) n * channels ) * ((uint64_t) pooled_height * pooled_width) + c;
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
