@@ -13,7 +13,6 @@
 #include <ATen/Tensor.h>
 
 #include <functorch/csrc/Macros.h>
-#include <functorch/csrc/Constants.h>
 
 namespace at {
 namespace functorch {
@@ -107,7 +106,7 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 inline bool isBatchedTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(kBatchedKey);
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::FuncTorchBatched);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a

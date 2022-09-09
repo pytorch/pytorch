@@ -8,7 +8,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 
-#include <functorch/csrc/Constants.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -16,7 +15,7 @@ namespace functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      c10::DispatchKeySet(kBatchedKey),
+      c10::DispatchKeySet(DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )
@@ -47,7 +46,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      key_set.add(kBatchedKey),
+      key_set.add(DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )

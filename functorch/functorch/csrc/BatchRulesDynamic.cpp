@@ -61,7 +61,7 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
         "support over at github.com/pytorch/functorch/issues/275");
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
     UNSUPPORTED_DYNAMIC(where);
     UNSUPPORTED_DYNAMIC(unique);

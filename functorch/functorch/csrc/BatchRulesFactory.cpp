@@ -107,7 +107,7 @@ bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
   return true;
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("_has_same_storage_numel", _has_same_storage_numel_batch_rule);
   VMAP_SUPPORT(ones_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(ones_like)));
   VMAP_SUPPORT(zeros_like, BASIC_UNARY_BATCH_RULE(ATEN_FN(zeros_like)));

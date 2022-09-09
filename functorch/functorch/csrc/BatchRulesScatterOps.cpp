@@ -317,7 +317,7 @@ std::tuple<Tensor,optional<int64_t>> index_batch_rule(
 // plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indices
 ) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -504,7 +504,7 @@ void index_put__batch_rule(
 // plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indices
 , const Tensor & values, bool accumulate) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -543,7 +543,7 @@ void _index_put_impl__batch_rule(
 // plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &indices,
                                   const Tensor &values, bool accumulate, bool unsafe) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -664,7 +664,7 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
 // plumbing done since we don't support List<optional<Tensor>> in codegen
 Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & indices,
                           const Tensor & values, bool accumulate) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -1050,7 +1050,7 @@ std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
   m.impl("index_put", index_put_plumbing);

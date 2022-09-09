@@ -216,7 +216,7 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> prelu_backward_bat
   return std::make_tuple(std::get<0>(grads), 0, std::get<1>(grads), (weight_grad_is_batched ? optional<int64_t>(0) : nullopt));
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(glu_backward, glu_backward_batch_rule);
   VMAP_SUPPORT(glu, glu_batch_rule);
   VMAP_SUPPORT(prelu, prelu_batch_rule)

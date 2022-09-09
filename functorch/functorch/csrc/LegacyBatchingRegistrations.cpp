@@ -14,7 +14,6 @@
 #include <functorch/csrc/BatchingMetaprogramming.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
-#include <functorch/csrc/Constants.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
 namespace at {
@@ -106,7 +105,7 @@ bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
 
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.chunk(chunks, dim);
   }
 
@@ -119,7 +118,7 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
 
 std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::tensor_split(self, sections, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -131,7 +130,7 @@ std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int6
 
 std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntArrayRef indices, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::tensor_split(self, indices, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -143,7 +142,7 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
 
 Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.squeeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
@@ -177,7 +176,7 @@ Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
 
 Tensor& squeeze__batching_rule(Tensor& self) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.squeeze_();
   }
   auto* batched = maybeGetBatchedImpl(self);
@@ -214,7 +213,7 @@ Tensor& squeeze__batching_rule(Tensor& self) {
 
 Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.unsqueeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
@@ -234,7 +233,7 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
 
 Tensor& transpose__batching_rule(Tensor& self, int64_t dim0, int64_t dim1) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.transpose_(dim0, dim1);
   }
   auto* batched = maybeGetBatchedImpl(self);
@@ -266,7 +265,7 @@ Tensor& transpose__batching_rule(Tensor& self, int64_t dim0, int64_t dim1) {
 
 Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.fill_(value);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -296,7 +295,7 @@ Tensor& zero_inplace_batching_rule(Tensor &self) {
 
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::transpose(self, dim0, dim1);
   }
   // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
@@ -321,7 +320,7 @@ static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int
 
 Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
   if (!participatesInCurrentLevel(grad)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::select_backward(grad, input_sizes, dim, index);
   }
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
@@ -333,7 +332,7 @@ Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes
 
 Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
   if (!participatesInCurrentLevel(grad)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::slice_backward(grad, input_sizes, dim, start, end, step);
   }
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
@@ -345,7 +344,7 @@ Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes,
 
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::split(self, split_size, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -357,7 +356,7 @@ std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, 
 
 std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return split_with_sizes(self, split_sizes, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -369,7 +368,7 @@ std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayR
 
 std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::unbind(self, dim);
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -484,7 +483,7 @@ Tensor as_strided_batching_rule(
     IntArrayRef strides,
     optional<int64_t> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::as_strided(tensor, sizes, strides, storage_offset);
   }
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(tensor);
@@ -612,7 +611,7 @@ Tensor as_strided_batching_rule(
 template <typename F, F Func, typename... ExtraArgs>
 Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   if (!participatesInCurrentLevel(input)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return Func(input, args...);
   }
   // guard against the user passing in a batch of scalar tensors with batch
@@ -624,7 +623,7 @@ Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
 template <typename F, F Func, typename... ExtraArgs>
 Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   if (!participatesInCurrentLevel(input)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return (input.*Func)(extra_args...);
   }
   auto* input_batched = unsafeGetBatchedImpl(input);
@@ -634,7 +633,7 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
 
 Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
   if (!participatesInCurrentLevel(tensors)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::cat(tensors, dim);
   }
   auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
@@ -648,7 +647,7 @@ Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
 
 Tensor block_diag_batching_rule(TensorList tensors) {
   if (!participatesInCurrentLevel(tensors)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::block_diag(tensors);
   }
   auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
@@ -676,7 +675,7 @@ Tensor block_diag_batching_rule(TensorList tensors) {
 
 Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   if (!participatesInCurrentLevel(tensors)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::stack(tensors, dim);
   }
   auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
@@ -701,7 +700,7 @@ Tensor new_empty_strided_batching_rule(
     optional<Device> device,
     optional<bool> pin_memory) {
   if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.new_empty_strided(
         size, stride, dtype, layout, device, pin_memory);
   }
@@ -771,11 +770,11 @@ Tensor& BatchedTensor_requires_grad_(Tensor& self, bool requires_grad) {
 }
 
 
-TORCH_LIBRARY_IMPL(_, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);

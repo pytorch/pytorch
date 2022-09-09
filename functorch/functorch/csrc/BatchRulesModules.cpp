@@ -386,7 +386,7 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
   EXISTING_BDIM(op);
 
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(im2col);
   EXISTING_BDIM(im2col_backward);
 

@@ -9,7 +9,6 @@
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/PlumbingHelper.h>
-#include <functorch/csrc/Constants.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 

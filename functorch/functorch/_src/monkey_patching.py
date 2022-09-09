@@ -30,12 +30,14 @@ def _functorch_str(tensor, *, tensor_contents=None):
     value = _C.get_unwrapped(tensor)
     dl_enabled = _C.tls_set_is_included()
     try:
-        # Disable temporarily kDynamicLayerFrontModeKey/kDynamicLayerBackModeKey as included dispatch keys
+        # Disable temporarily FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
         if (dl_enabled):
             _C._set_dynamic_layer_keys_included(False)
         value_repr = repr(value)
     finally:
-        # Reenable kDynamicLayerFrontModeKey/kDynamicLayerBackModeKey as included dispatch keys
+        # Reenable FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
         if (dl_enabled):
             _C._set_dynamic_layer_keys_included(True)
 

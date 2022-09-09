@@ -279,7 +279,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
     std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto results = batch_norm_backward_no_weight_bias_batch_rule<F, Func>(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
@@ -308,7 +308,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({input, weight_opt, bias_opt}, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::native_group_norm(input, weight_opt, bias_opt, N, C, HxW, group, eps);
   }
 
@@ -323,13 +323,13 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     const auto input_ = reshape_dim_into(*input_bdim, 0, input_value);
     const auto bdim_size = input_value.size(*input_bdim);
 
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto result = at::native_group_norm(input_, nullopt, nullopt, N * bdim_size, C, HxW, group, eps);
     result0 = makeBatched(reshape_dim_outof(0, bdim_size, std::get<0>(result)), 0, cur_level);
     mean = makeBatched(reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0, cur_level);
     rstd = makeBatched(reshape_dim_outof(0, bdim_size, std::get<2>(result)), 0, cur_level);
   } else {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto result = at::native_group_norm(input_value, nullopt, nullopt, N, C, HxW, group, eps);
     result0 = std::get<0>(result);
     mean = std::get<1>(result);
@@ -397,7 +397,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt}, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::native_group_norm_backward(grad_out, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask);
   }
 
@@ -441,7 +441,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto res = group_norm_backward_no_weight_bias_batch_rule(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
@@ -607,7 +607,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt, bias_opt}, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::native_layer_norm_backward(grad_out, input, normalized_shape, mean, rstd,
         weight_opt, bias_opt, output_mask);
   }
@@ -667,7 +667,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing
     std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto results = native_layer_norm_backward_no_weight_bias_batch_rule(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
@@ -761,7 +761,7 @@ struct NativeBatchNormBackwardBatchRuleHelper {
 
     if (!areAnyBatchedAtLevel({grad_out, input, weight_opt, running_mean_opt,
           running_var_opt, save_mean_opt, save_rstd_opt}, cur_level)) {
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       return at::native_batch_norm_backward(grad_out, input, weight_opt,
           running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt,
           training, eps, output_mask);
@@ -791,7 +791,7 @@ struct CudnnBatchNormBackwardBatchRuleHelper {
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
           running_var_opt, save_mean_opt, save_rstd_opt, reserve}, cur_level)) {
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       return at::cudnn_batch_norm_backward(input, grad_out, weight,
           running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps, reserve);
     }
@@ -819,7 +819,7 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
           running_var_opt, save_mean_opt, save_rstd_opt}, cur_level)) {
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       return at::miopen_batch_norm_backward(input, grad_out, weight,
           running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
     }
@@ -875,7 +875,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     return at::miopen_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
   }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));

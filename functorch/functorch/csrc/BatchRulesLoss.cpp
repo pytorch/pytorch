@@ -64,7 +64,7 @@ Tensor binary_cross_entropy_plumbing(
 
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(target, cur_level)
       && !isBatchedAtLevel(weight, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::binary_cross_entropy(self, target, weight, reduction);
   }
 
@@ -77,7 +77,7 @@ Tensor binary_cross_entropy_plumbing(
 
   Tensor result;
   if (self_bdim || target_bdim) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto bdim_size = get_bdim_size2(self_value, self_bdim, target_value, target_bdim);
     auto self_ = moveBatchDimToFront(self_value, self_bdim);
     auto target_ = moveBatchDimToFront(target_value, target_bdim);
@@ -86,7 +86,7 @@ Tensor binary_cross_entropy_plumbing(
     result = at::binary_cross_entropy(self_, target_, nullopt, Reduction::None);
     result = makeBatched(result, 0, cur_level);
   } else {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     result = at::binary_cross_entropy(self_value, target_value, nullopt, Reduction::None);
   }
   if (weight.has_value() && weight->defined()) {
@@ -103,7 +103,7 @@ Tensor binary_cross_entropy_backward_plumbing(
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad, input, target, weight_opt}, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::binary_cross_entropy_backward(grad, input, target, weight_opt, reduction);
   }
 
@@ -120,7 +120,7 @@ Tensor binary_cross_entropy_backward_plumbing(
 
   Tensor grad_input;
   if (grad_bdim || input_bdim || target_bdim) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     const auto bdim_size = get_bdim_size3(
         grad_value, grad_bdim, input_value, input_bdim, target_value, target_bdim);
 
@@ -136,7 +136,7 @@ Tensor binary_cross_entropy_backward_plumbing(
         grad_, input_, target_, nullopt, Reduction::None);
     grad_input = makeBatched(grad_input, 0, cur_level);
   } else {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     grad_input = at::binary_cross_entropy_backward(
         grad_value, input_value, target_value, nullopt, Reduction::None);
   }
@@ -276,7 +276,7 @@ at::Tensor nll_loss_backward_decomposition(
   return grad_input * grad_output_;
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nll_loss_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss2d_forward", nll_loss_forward_decomposition);
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
