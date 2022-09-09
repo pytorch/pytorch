@@ -783,7 +783,7 @@ def _prepare_onnx_paddings(g, input, pad):
 def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = symbolic_helper._maybe_get_scalar(value)
-    value = symbolic_helper._if_scalar_type_as(g, value, input)
+    value = symbolic_helper._if_scalar_type_as(value, input)
     pad = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
 
@@ -1019,7 +1019,7 @@ def index_fill(g, self, dim, index, value):
         g, self, dim, index
     )
     value = symbolic_helper._maybe_get_scalar(value)
-    value = symbolic_helper._if_scalar_type_as(g, value, self)
+    value = symbolic_helper._if_scalar_type_as(value, self)
     expanded_value = opset9.expand(g, value, expanded_index_shape, None)
     return scatter(g, self, dim, expanded_index, expanded_value)
 

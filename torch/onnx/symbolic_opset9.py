@@ -673,7 +673,7 @@ def sqrt(g, self):
 @_beartype.beartype
 def rsqrt(g, self):
     return g.op(
-        "Div", symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self)
+        "Div", symbolic_helper._if_scalar_type_as(torch.ones(1), self), sqrt(g, self)
     )
 
 
@@ -2884,7 +2884,7 @@ def index_fill(g, self, dim, index, value):
         g, self, dim, index
     )
     value = symbolic_helper._maybe_get_scalar(value)
-    value = symbolic_helper._if_scalar_type_as(g, value, self)
+    value = symbolic_helper._if_scalar_type_as(value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
 
     return scatter(g, self, dim, expanded_index, expanded_value)
@@ -3026,9 +3026,7 @@ def log(g, self):
 @_onnx_symbolic("aten::log1p")
 @_beartype.beartype
 def log1p(g, self):
-    return log(
-        g, add(g, symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), self)
-    )
+    return log(g, add(g, symbolic_helper._if_scalar_type_as(torch.ones(1), self), self))
 
 
 @_onnx_symbolic("aten::log10")
@@ -5171,7 +5169,7 @@ def lift(g, self):
 def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = symbolic_helper._maybe_get_scalar(value)
-    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(g, value, self), self)
+    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
 
 
 @_onnx_symbolic("aten::index")

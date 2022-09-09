@@ -6,10 +6,11 @@ import numbers
 import re
 from typing import Any, Dict, Iterable, Iterator, List, Tuple, Union
 
+from typing_extensions import Protocol
+
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-
 from torch.onnx import _deprecation
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
@@ -17,8 +18,69 @@ from torch.onnx._internal import _beartype
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
+class GraphProtocol(Protocol):
+    """A class that implements all methods defined in torch.Graph."""
+
+    def inputs(self) -> List[_C.Value]:
+        ...
+
+    def outputs(self) -> List[_C.Value]:
+        ...
+
+    def nodes(self) -> Iterator[_C.Node]:
+        ...
+
+    def param_node(self) -> _C.Node:
+        ...
+
+    def return_node(self) -> _C.Node:
+        ...
+
+    def addInput(self, name: str) -> _C.Value:
+        ...
+
+    def eraseInput(self, i: int) -> None:
+        ...
+
+    def registerOutput(self, n: _C.Value) -> int:
+        ...
+
+    def eraseOutput(self, i: int) -> None:
+        ...
+
+    def create(self, name: str, args, num_outputs: int) -> _C.Node:
+        ...
+
+    def appendNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def prependNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def insertNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def block(self) -> _C.Block:
+        ...
+
+    def setInsertPoint(self, n: Union[_C.Block, _C.Node]) -> None:
+        ...
+
+    def insert_point_guard(self, n: Union[_C.Block, _C.Node]):
+        ...
+
+    def insertPoint(self) -> _C.Node:
+        ...
+
+    def insertGraph(self, callee: _C.Graph, inputs: List[_C.Value]) -> List[_C.Value]:
+        ...
+
+    def makeMultiOutputIntoTuple(self) -> None:
+        ...
+
+
 @dataclasses.dataclass
-class GraphContext:
+class GraphContext(GraphProtocol):
     """Extra context for symbolic functions with all methods from torch.Graph.
 
     Attributes:
@@ -78,73 +140,14 @@ class GraphContext:
     def at(
         self, operator: str, *args, overload_name: str = "", **kwargs
     ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
-        from torch.onnx._internal import torch_graph
-
         return aten_op(
             self.graph, operator, *args, overload_name=overload_name, **kwargs
         )
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
-    def inputs(self) -> List[_C.Value]:
-        return self.graph.inputs()
-
-    def outputs(self) -> List[_C.Value]:
-        return self.graph.outputs()
-
-    def nodes(self) -> Iterator[_C.Node]:
-        return self.graph.nodes()
-
-    def param_node(self) -> _C.Node:
-        return self.graph.param_node()
-
-    def return_node(self) -> _C.Node:
-        return self.graph.return_node()
-
-    def addInput(self, name: str) -> _C.Value:
-        return self.graph.addInput(name)
-
-    def eraseInput(self, i: int) -> None:
-        return self.graph.eraseInput(i)
-
-    def registerOutput(self, n: _C.Value) -> int:
-        return self.graph.registerOutput(n)
-
-    def eraseOutput(self, i: int) -> None:
-        return self.graph.eraseOutput(i)
-
-    def create(self, name: str, args, num_outputs: int) -> _C.Node:
-        return self.graph.create(name, args, num_outputs)
-
-    def appendNode(self, n: _C.Node) -> _C.Node:
-        return self.graph.appendNode(n)
-
-    def prependNode(self, n: _C.Node) -> _C.Node:
-        return self.graph.prependNode(n)
-
-    def insertNode(self, n: _C.Node) -> _C.Node:
-        return self.graph.insertNode(n)
-
-    def block(self) -> _C.Block:
-        return self.graph.block()
-
-    def lint(self) -> None:
-        return self.graph.lint()
-
-    def setInsertPoint(self, n: Union[_C.Block, _C.Node]) -> None:
-        return self.graph.setInsertPoint(n)
-
-    def insert_point_guard(self, n: Union[_C.Block, _C.Node]):
-        return self.graph.insert_point_guard(n)
-
-    def insertPoint(self) -> _C.Node:
-        return self.graph.insertPoint()
-
-    def insertGraph(self, callee: _C.Graph, inputs: List[_C.Value]) -> List[_C.Value]:
-        return self.graph.insertGraph(callee, inputs)
-
-    def makeMultiOutputIntoTuple(self) -> None:
-        return self.graph.makeMultiOutputIntoTuple()
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.graph, name)
 
 
 @_beartype.beartype
