@@ -83,5 +83,19 @@ void add_padding_kernelLauncher(
     const std::vector<int64_t>& output_sizes,
     const int batch_size,
     const int output_batch_size);
+
+Tensor flash_attention_helper_dense(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool causal);
+
+Tensor flash_attention_helper(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool causal);
 } // namespace native
 } // namespace at
