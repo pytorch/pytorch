@@ -275,7 +275,19 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="symbolic")(*flat_args)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
-    print(fw_module.code)
+    fw_module.print_readable()
+    shape_env = fw_module.shape_env
+    guards = [shape_env.simplify(guard) for guard, _ in fw_module.shape_env.guards]
+    print("Guards: ", set(guards))
+    shape_env.update_divisible()
+    print("Divisibility: ", shape_env.divisible)
+    shape_groups = collections.defaultdict(list)
+    for k, v in shape_env.replacements.items():
+        shape_groups[v].append(k)
+    print("Shape Groups: ")
+    for k, v in shape_groups.items():
+        print(k, shape_env.size_hint(k),  v)
+    print()
     with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
