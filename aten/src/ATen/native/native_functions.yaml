@@ -2085,7 +2085,7 @@
     CompositeExplicitAutograd: new_full
   autogen: new_full.out
 
-- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
