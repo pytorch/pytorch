@@ -1031,7 +1031,13 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   bool cast_from_fp32_to_bf16 = is_from_float && is_to_bf16;
   bool non_bf16_cast = (!is_to_bf16) && (!is_from_bf16);
   bool valid_bf16_cast = cast_from_bf16_to_fp32 || cast_from_fp32_to_bf16;
-  TORCH_CHECK(valid_bf16_cast || non_bf16_cast);
+  TORCH_CHECK(
+      valid_bf16_cast || non_bf16_cast,
+      "Cast is not implemented for the conversion between ",
+      src_type,
+      " and ",
+      dst_type,
+      ".");
 
   llvm::Type* dstType =
       llvmTypeToVec(dtypeToLLVM(v->dtype()), v->dtype().lanes());
@@ -1052,6 +1058,9 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
 
   // Scalar casts
   if (is_from_bf16) {
+    // Shift the BF16 value left by 16bits and then bit cast the shifted value
+    // to FP32.
+    //   FP32_VAL = BF16_VAL << 16
     auto lans = v->dtype().lanes();
     value_ = irb_.CreateZExt(value_, llvmTypeToVec(IntTy_, lans));
     auto vec_shl_val = toVec(llvm::ConstantInt::get(IntTy_, 16), lans);
@@ -1061,6 +1070,14 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
   }
 
   if (is_to_bf16) {
+    // Convert the FP32 value by RNE(Rounding to Nearest Even). Algorithm is as
+    // follows:
+    //   STEP1: U32_VAL = BITCAST(F32_VAL)
+    //   STEP2: U32_VAL_TMP = U32_VAL >> 16
+    //   STEP3: U32_VAL_TMP = U32_VAL_TMP & 1
+    //   STEP4: ROUNDING_BIAS = U32_VAL_TMP + UINT32(0x7FFF)
+    //   STEP5: U32_VAL_TMP = U32_VAL + ROUNDING_BIAS
+    //   STEP6: BF16_VAL = static_cast<UINT16>(U32_VAL_TMP >> 16)
     auto lans = v->src_value()->dtype().lanes();
     auto shift_len = llvm::ConstantInt::get(IntTy_, 16);
     auto one = llvm::ConstantInt::get(ShortTy_, 1);
@@ -1068,17 +1085,24 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     auto bf16_nan = llvm::ConstantInt::get(ShortTy_, 0xFFFF);
 
     auto mask = irb_.CreateFCmpOEQ(value_, value_);
+    // STEP1: U32_VAL = BITCAST(F32_VAL)
     auto fp32_i32_value =
         irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(IntTy_, lans));
+    // STEP2: U32_VAL_TMP = (U32_VAL >> 16)
     value_ = irb_.CreateLShr(fp32_i32_value, toVec(shift_len, lans));
     value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
+    // STEP3: U32_VAL_TMP = U32_VAL_TMP & 1
     value_ = irb_.CreateAnd(value_, toVec(one, lans));
+    // STEP4: ROUNDING_BIAS = U32_VAL_TMP + UINT32(0x7FFF)
     value_ = irb_.CreateAdd(value_, toVec(rounding_bias, lans));
     value_ = irb_.CreateZExt(value_, llvmTypeToVec(IntTy_, lans));
+    // STEP5: U32_VAL_TMP = U32_VAL + ROUNDING_BIAS
     value_ = irb_.CreateAdd(value_, fp32_i32_value);
+    // STEP6: BF16_VAL = static_cast<UINT16>(U32_VAL_TMP >> 16)
     value_ = irb_.CreateLShr(value_, toVec(shift_len, lans));
     value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
     value_ = irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(ShortTy_, lans));
+    // If the the value is NaN, return BF16 NaN.
     value_ = irb_.CreateSelect(mask, value_, toVec(bf16_nan, lans));
     return;
   }

@@ -519,7 +519,7 @@ def _onnx_graph_from_model(
     output_names = export_options.output_names
 
     if opset_version is None:
-        opset_version = _constants.onnx_default_opset
+        opset_version = _constants.ONNX_DEFAULT_OPSET
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
