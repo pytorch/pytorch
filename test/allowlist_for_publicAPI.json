@@ -91,15 +91,6 @@
     "Union",
     "get_combined_dict"
   ],
-  "torch.ao.quantization.backend_config.utils": [
-    "Any",
-    "Dict",
-    "Callable",
-    "List",
-    "Union",
-    "Tuple",
-    "Pattern"
-  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",

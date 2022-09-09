@@ -7,7 +7,11 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
+<<<<<<< HEAD
 from typing import Any, Dict, Optional, Tuple, Union
+=======
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+>>>>>>> 5a5f1cd9da5f9d92d432a6f378dec663266aabeb
 
 import torch
 from torch._C._distributed_c10d import (
@@ -916,7 +920,7 @@ def _new_process_group_helper(
 
             backend_plugin = Backend._plugins[backend.upper()]
             creator_fn = backend_plugin.creator_fn
-            extended_api = Backend._plugins[backend.upper()].extended_api
+            extended_api = backend_plugin.extended_api
 
             if not extended_api:
                 pg = creator_fn(prefix_store, group_rank, group_size, timeout)
