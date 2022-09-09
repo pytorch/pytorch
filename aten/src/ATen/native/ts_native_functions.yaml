@@ -212,6 +212,7 @@ symint:
   - slice_scatter
   - empty_strided
   - new_empty_strided
+  - embedding_dense_backward
 autograd:
   - max_pool3d
   - native_group_norm

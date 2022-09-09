@@ -24,12 +24,26 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = indices.sizes().vec();
-  for (auto d : weight.sizes().slice(1)) {
+  auto size = indices.sym_sizes().vec();
+  for (auto d : weight.sym_sizes().slice(1)) {
     size.push_back(d);
   }
 
-  return weight.index_select(0, indices.reshape(-1)).view(size);
+  // note: it is not clear why the above code uses a loop and a slice(1),
+  // since the iteration domain is gauranteed to be 1 due to asserting 2-D weight
+  // but this should be safe
+  auto emb_dim = weight.sym_sizes()[1];
+
+  // if index's strides were
+  // [Sn, ..., S1, 1], we should expect index_select to return strides like
+  // [d*Sn, ..., d*S1, d, 1] because we added one new dim size d as most contiguous
+  auto new_strides = indices.sym_strides().vec();
+  for (auto& s : new_strides) {
+    s *= emb_dim;
+  }
+  new_strides.push_back(1);
+
+  return weight.index_select(0, indices.contiguous().view(-1)).as_strided_symint(size, new_strides);
 }
 
 Tensor embedding_backward(
@@ -40,6 +54,19 @@ Tensor embedding_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   } else {
     return at::embedding_dense_backward(
+        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+  }
+}
+
+Tensor embedding_backward_symint(
+    const Tensor & grad, const Tensor & indices, SymInt num_weights,
+    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  if (sparse) {
+    // TODO symintify
+    return at::embedding_sparse_backward(
+    grad, indices, num_weights.expect_int(), padding_idx, scale_grad_by_freq);
+  } else {
+    return at::embedding_dense_backward_symint(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   }
 }

@@ -391,7 +391,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(im2col_backward);
 
   VMAP_SUPPORT(embedding, embedding_batch_rule);
-  VMAP_SUPPORT(embedding_dense_backward, embedding_dense_backward_batch_rule);
+  // TODO symintify
+  // VMAP_SUPPORT(embedding_dense_backward, embedding_dense_backward_batch_rule);
 
   VMAP_SUPPORT(grid_sampler_2d, GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT(grid_sampler_2d_backward, GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_2d_backward));
