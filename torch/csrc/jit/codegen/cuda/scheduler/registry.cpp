@@ -358,6 +358,45 @@ class SchedulerTopologyChecker {
 
     return true;
   }
+
+  /* Returns if any non-trivial views are not before the reference. For example:
+   *     t0
+   *    /  \
+   *  view ref
+   *   |
+   *   t1
+   * This could be important as transform propagation from a reference backwards
+   * through a view should always work, but transform propagation form a
+   * reference forward through a view could interfere with the view transforms.
+   */
+  static bool hasViewNotBeforeRef(
+      Fusion* fusion,
+      std::vector<TensorView*> reference_tvs) {
+    std::vector<TensorView*> view_tvs;
+    auto view_ops = ir_utils::getViewOps(fusion);
+    for (auto view_op : view_ops) {
+      auto tv_outs = ir_utils::filterByType<TensorView>(view_op->outputs());
+      for (auto entry : tv_outs) {
+        view_tvs.push_back(entry);
+      }
+    }
+
+    if (view_tvs.empty()) {
+      return false;
+    }
+
+    // Terrible complexity, may be worth improving, but is a compile time
+    // check.
+    for (auto ref_tv : reference_tvs) {
+      for (auto view_tv : view_tvs) {
+        if (!DependencyCheck::isDependencyOf(view_tv, ref_tv)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
 };
 
 bool isConnectedFusionGraph(Fusion* fusion) {
@@ -838,6 +877,16 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
+    // Persistent scheduler simply uses reduction_tvs[0] as the reference, if
+    // that changes, this needs to be changed. Second check here may be overly
+    // conservative.
+    if (SchedulerTopologyChecker::hasViewNotBeforeRef(
+            fusion, {reduction_tvs[0]}) ||
+        !scheduler_utils::allMatchingViews(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction, "Unsupported view fusion.");
+    }
+
     // Make sure reduction axes are consistent through the fusion
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
@@ -957,6 +1006,14 @@ class PointWiseScheduler : public SchedulerEntry {
       return false;
     }
 
+    if (!scheduler_utils::allMatchingViews(fusion) &&
+        SchedulerTopologyChecker::hasViewNotBeforeRef(
+            fusion, {getReferenceTensorView(fusion)})) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::PointWise, "Unsupported view fusion.");
+      return false;
+    }
+
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
 
@@ -1045,6 +1102,16 @@ class PersistentKernelScheduler : public SchedulerEntry {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Persistent, "no reduction tv");
       return false;
+    }
+
+    // Persistent scheduler simply uses reduction_tvs[0] as the reference, if
+    // that changes, this needs to be changed. Second check here may be overly
+    // conservative.
+    if (SchedulerTopologyChecker::hasViewNotBeforeRef(
+            fusion, {reduction_tvs[0]}) ||
+        !scheduler_utils::allMatchingViews(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "Unsupported view fusion.");
     }
 
     if (findTransposeOps(fusion).size() > 0) {

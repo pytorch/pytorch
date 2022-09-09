@@ -13768,8 +13768,8 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime1 = executor_cache.getMostRecentKernelRuntime();
-  auto log1 = std::dynamic_pointer_cast<PointwiseParams>(
-      executor_cache.getMostRecentExecutorInfo().params);
+  auto log1 =
+      executor_cache.getMostRecentExecutorInfo().params->as<PointwiseParams>();
   TORCH_CHECK(log1 != nullptr);
   TORCH_CHECK(log1->vectorize);
 
@@ -13782,8 +13782,8 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime2 = executor_cache.getMostRecentKernelRuntime();
-  auto log2 = std::dynamic_pointer_cast<PointwiseParams>(
-      executor_cache.getMostRecentExecutorInfo().params);
+  auto log2 =
+      executor_cache.getMostRecentExecutorInfo().params->as<PointwiseParams>();
   TORCH_CHECK(log2 != nullptr);
   TORCH_CHECK(log2->vectorize);
 
@@ -13796,8 +13796,8 @@ TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
 
   outputs = executor_cache.runFusionWithInputs({t0, t1});
   auto runtime3 = executor_cache.getMostRecentKernelRuntime();
-  auto log3 = std::dynamic_pointer_cast<PointwiseParams>(
-      executor_cache.getMostRecentExecutorInfo().params);
+  auto log3 =
+      executor_cache.getMostRecentExecutorInfo().params->as<PointwiseParams>();
   TORCH_CHECK(log3 != nullptr);
   TORCH_CHECK(log3->vectorize);
 
@@ -25509,6 +25509,49 @@ TEST_F(NVFuserTest, FusionSizeDependentData_CUDA) {
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {a}, {a + 123}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionDependencyCheck_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(1);
+  TensorView* tv1 = makeSymbolicTensor(1);
+  TensorView* tv2 = makeSymbolicTensor(1);
+  TensorView* tv3 = makeSymbolicTensor(1);
+
+  auto tv4 = add(tv0, tv1);
+  auto tv5 = add(tv0, tv2);
+  auto tv6 = add(tv0, tv3);
+
+  auto tv7 = add(tv1, tv2);
+  auto tv8 = add(tv1, tv3);
+
+  auto tv9 = add(tv2, tv3);
+
+  {
+    auto all_vals = DependencyCheck::getAllValsBetween(
+        {tv0, tv1}, {tv4, tv5, tv6, tv7, tv8, tv9});
+    std::unordered_set<Val*> all_vals_set(all_vals.begin(), all_vals.end());
+    std::vector<Val*> results({tv0, tv1, tv4, tv5, tv6, tv7, tv8});
+    for (auto result : results) {
+      TORCH_CHECK(all_vals_set.count(result) > 0);
+      all_vals_set.erase(result);
+    }
+    TORCH_CHECK(all_vals_set.empty());
+  }
+
+  auto tv10 = add(tv6, tv7);
+  {
+    auto all_vals = DependencyCheck::getAllValsBetween({tv0, tv1}, {tv10});
+    std::unordered_set<Val*> all_vals_set(all_vals.begin(), all_vals.end());
+    std::vector<Val*> results({tv0, tv1, tv6, tv7, tv10});
+    for (auto result : results) {
+      TORCH_CHECK(all_vals_set.count(result) > 0);
+      all_vals_set.erase(result);
+    }
+    TORCH_CHECK(all_vals_set.empty());
+  }
 }
 
 // Repro for issue #1925

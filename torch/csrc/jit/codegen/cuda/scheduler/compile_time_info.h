@@ -121,7 +121,7 @@ class ScopePersistentFactorInfo {
 //!  information.
 class BroadcastMultiples {
  public:
-  using DataType = std::vector<scheduler_utils::BroadcastMultiple>;
+  using DataType = scheduler_utils::BroadcastMultipleInformation;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::BROADCAST_BYTE_MULTIPLES;
 };

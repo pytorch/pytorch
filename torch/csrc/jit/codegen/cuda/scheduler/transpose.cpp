@@ -612,17 +612,19 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
   auto grouped_inputs_outputs = domain_map.groupInputsOutputsByInnerDim();
   TORCH_INTERNAL_ASSERT(grouped_inputs_outputs.size() >= 2);
 
-  // We need something similar to `cacheFork` for input tensors in group 2. We
-  // need this because we will want to propagate to the entire DAG except group
-  // 2 and its cached inputs, so we need to make sure the DAG is still connected
-  // if we remove group and its cached inputs. For example
-  //    t0
-  //    |
-  //   cache
-  //   |  |
-  //  t1  t2
-  // if groups = {{t1, t2}, {t0}}, then removing {t0, cache} from the DAG will
-  // make it disconnected.
+  /*
+   * We need something similar to `cacheFork` for input tensors in group 2. We
+   * need this because we will want to propagate to the entire DAG except group
+   * 2 and its cached inputs, so we need to make sure the DAG is still connected
+   * if we remove group and its cached inputs. For example
+   *    t0
+   *    |
+   *   cache
+   *   /  \
+   *  t1  t2
+   * if groups = {{t1, t2}, {t0}}, then removing {t0, cache} from the DAG will
+   * make it disconnected.
+   */
   std::unordered_set<TensorView*> group2_and_cached_inputs(
       grouped_inputs_outputs[1].begin(), grouped_inputs_outputs[1].end());
   for (auto tv : grouped_inputs_outputs[1]) {

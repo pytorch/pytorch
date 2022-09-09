@@ -261,9 +261,11 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSinTransposeCos_CUDA) {
   testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
 }
 
-// t0->transpose--.
-//                 |
-// t1->transpose---add-->sin->t5
+/*
+ * t0->transpose--.
+ *                 \
+ * t1->transpose---add-->sin->t5
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -325,10 +327,12 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleOutput_CUDA) {
       &fusion, outputs, {input}, {tv_ref1, tv_ref2}, __LINE__, __FILE__);
 }
 
-// t0->transpose->sin->t3
-//   \_.-->cos->t5
-//   /
-// t1
+/*
+ * t0->transpose->sin->t3
+ *   \_.-->cos->t5
+ *   /
+ * t1
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -366,9 +370,11 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
       __FILE__);
 }
 
-//             .------>sin------>z
-// x->transpose->transpose->add->y
-//  \_______________________/
+/*
+ *             .------>sin------>z
+ * x->transpose->transpose->add->y
+ *  \_______________________/
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMatchingSkipConnection_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -43,10 +43,6 @@ TensorView* applyViewTransforms(
   TORCH_INTERNAL_ASSERT(
       post_reduce_tv->nDims() > 0, "Tried to view a 0-dim TensorView");
 
-  TORCH_CHECK(
-      !post_reduce_tv->domain()->hasRFactor(),
-      "Cannot call view on the same TensorView twice.");
-
   TORCH_INTERNAL_ASSERT(!view_analysis.transforms.empty());
 
   TensorView* consumer = IrBuilder::create<TensorView>(
