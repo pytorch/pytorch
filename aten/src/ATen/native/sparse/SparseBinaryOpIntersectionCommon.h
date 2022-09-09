@@ -537,7 +537,7 @@ void _sparse_binary_op_intersection_kernel_out(
   // then the size of intersection is exactly the product of their nnzs.
   // This nnz defines offsets per thread which are computed using cumsum on values
   // of hash dtype. This becomes a problem when hash_t=int32_t and res_nnz > max(int32_t).
-  const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
+  // const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
   if (is_max_hash_32bits && is_32bit_indexing) {
