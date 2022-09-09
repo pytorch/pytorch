@@ -2144,10 +2144,7 @@ def matmul(tensor1, tensor2):
         # we track m1 vs m2 separately even though they must match for nicer error messages
         n = tensor1.size(-2) if dim_tensor1 > 1 else 1
         m1 = tensor1.size(-1)
-        batch_tensor1: List[int] = []
-        # TODO: handling of slice
-        for i in range(dim_tensor1 - 2):
-            batch_tensor1.append(tensor1.size(i))
+        batch_tensor1 = tensor1.shape[:-2]
         m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
         p = tensor2.size(-1) if dim_tensor2 > 1 else 1
         batch_tensor2: List[int] = []
