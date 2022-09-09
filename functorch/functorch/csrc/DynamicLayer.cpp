@@ -22,8 +22,8 @@ namespace at {
 namespace functorch {
 
 void setDynamicLayerFrontBackKeysIncluded(bool included) {
-  c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, included);
-  c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, included);
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode, included);
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerBackMode, included);
 }
 
 DynamicLayer::DynamicLayer(
@@ -427,11 +427,11 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   layer.interpreter().sendToNextInterpreter(op, stack);
 }
 
-TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerFrontMode, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallback>());
 }
 
-TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
+TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerBackMode, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
 

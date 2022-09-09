@@ -8,7 +8,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 
-#include <functorch/csrc/Constants.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -16,7 +15,7 @@ namespace functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      c10::DispatchKeySet(kBatchedKey),
+      c10::DispatchKeySet(DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )
@@ -28,7 +27,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
   TORCH_INTERNAL_ASSERT(false);
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
 
   const auto public_dims = value_.dim() - 1;
@@ -47,7 +46,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
-      key_set.add(kBatchedKey),
+      key_set.add(DispatchKey::FuncTorchBatched),
       value.dtype(),
       value.device()
     )
@@ -57,7 +56,7 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
   refreshTensorMetadata();
 }

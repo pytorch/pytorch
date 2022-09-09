@@ -134,12 +134,12 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
     if (!batched || (batched->level() != cur_level)) {
       // Unsqueeze dim 0, expand it to the correct shape
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       auto value = moveDimToFrontAndExpand(logical_tensor, {}, bdim_size);
       result.emplace_back(std::move(value), levels);
       continue;
     }
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     auto physical = batched->value();
     auto value = moveDimToFrontAndExpand(physical, batched->bdim(), bdim_size);
     result.emplace_back(std::move(value), levels);
@@ -189,12 +189,12 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
     auto* batched = maybeGetBatchedImpl(logical_tensor);
     if (!batched || (batched->level() != cur_level)) {
       // Unsqueeze dim 0, expand it to the correct shape
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       auto value = moveDimToFrontAndUnsqueeze(logical_tensor, {}, max_example_dim);
       result.emplace_back(std::move(value), levels);
       continue;
     }
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     auto physical = batched->value();
     auto value = moveDimToFrontAndUnsqueeze(physical, batched->bdim(), max_example_dim);
     result.emplace_back(std::move(value), levels);
