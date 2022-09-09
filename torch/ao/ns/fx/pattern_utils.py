@@ -69,6 +69,11 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     all_quant_patterns = get_native_quant_patterns()
 
     default_base_op_idx = 0
+
+    # Reference patterns for int8 always start with a dequantize, so the
+    # base op has index 1.
+    ref_model_base_op_idx = 1
+
     for quant_pattern, _quant_handler in all_quant_patterns.items():
         # TODO: this is a temporary hack to flatten the patterns from quantization so
         # that it works with the ns matcher function, maybe we should use `is_match`
@@ -94,6 +99,15 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
             else:
                 new_pattern = (cls, quant_pattern)
             results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
+
+        # For each fp32, pattern, add additional patterns for reference model
+        # emulation to int8.
+        # TODO(future PR): extend to fp16 if needed.
+        if isinstance(quant_pattern, tuple):
+            new_pattern = (torch.quantize_per_tensor, *quant_pattern, "dequantize")
+        else:
+            new_pattern = (torch.quantize_per_tensor, quant_pattern, "dequantize")
+        results.append((new_pattern, ref_model_base_op_idx))  # type: ignore[arg-type]
 
 
     # After this point, results countains values such as

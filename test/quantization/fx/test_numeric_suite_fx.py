@@ -339,6 +339,49 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @skipIfNoFBGEMM
+    def test_simple_mod_reference(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        mp = prepare_fx(
+            m, {'': torch.ao.quantization.default_qconfig},
+            example_inputs=(torch.randn(1, 1, 1, 1),))
+        mq = convert_fx(copy.deepcopy(mp))
+        mq_ref = convert_to_reference_fx(mp)
+        results = get_matching_subgraph_pairs(mq, mq_ref)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        conv_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, nn.Conv2d) + '_0'
+
+        expected_types = {
+            conv_name_0: (
+                (nnq.Conv2d, nnq.Conv2d),
+                ("dequantize", torch.quantize_per_tensor),
+            ),
+        }
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mq, mq_ref)
+
+    @skipIfNoFBGEMM
+    def test_simple_fun_reference(self):
+        m = LinearFunctional().eval()
+        mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(1, 1, 1, 1),))
+        mq = convert_fx(copy.deepcopy(mp))
+        mq_ref = convert_to_reference_fx(mp)
+        results = get_matching_subgraph_pairs(mq, mq_ref)
+
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        linear_name_0 = 'base_op_' + get_base_name_for_op(
+            base_name_to_sets_of_related_ops, F.linear) + '_0'
+
+        expected_types = {
+            linear_name_0:
+                (
+                    (toq.linear, toq.linear),
+                    ("dequantize", torch.quantize_per_tensor),
+                ),
+        }
+        self.assert_types_for_matched_subgraph_pairs(results, expected_types, mq, mq_ref)
+
+    @skipIfNoFBGEMM
     def test_simple_fusion(self):
         m = LinearReluFunctional().eval()
         mp = prepare_fx(m, {'': torch.ao.quantization.default_qconfig}, example_inputs=(torch.randn(4, 4),))

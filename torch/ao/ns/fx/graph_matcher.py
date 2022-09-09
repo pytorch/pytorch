@@ -216,9 +216,7 @@ def _get_subgraph_relationship_type(
         else:
             return SubgraphTypeRelationship.NOT_RELATED
     elif node_a.op == 'call_module':
-        assert (subgraph_a.base_op_node == subgraph_a.start_node and
-                subgraph_b.base_op_node == subgraph_b.start_node), \
-            "Matching call_module patterns where base_op_node != start_node is not supported yet"
+
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
         mod_a = getattr_from_fqn(gm_a, node_a.target)
