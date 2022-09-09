@@ -1863,9 +1863,11 @@ class FullyShardedDataParallel(nn.Module):
             return
         current_stream = torch.cuda.current_stream()
         self._streams["all_gather"].wait_stream(current_stream)
-        if self._ran_pre_unshard:
+        all_fsdp_modules = self.fsdp_modules(self)  # `self` is the root
+        if any(fsdp_module._ran_pre_unshard for fsdp_module in all_fsdp_modules):
             self._streams["pre_all_gather"].wait_stream(current_stream)
-            self._ran_pre_unshard = False
+            for fsdp_module in all_fsdp_modules:
+                fsdp_module._ran_pre_unshard = False
 
     def _prefetch_handles(
         self,
