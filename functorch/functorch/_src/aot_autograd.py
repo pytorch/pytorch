@@ -30,6 +30,14 @@ except ImportError:
         return x
 
 
+try:
+    from torchdynamo.utils import dynamo_timed
+except ImportError:
+
+    def dynamo_timed(x):
+        return x
+
+
 pytree._register_pytree_node(
     immutable_collections.immutable_list,
     lambda x: (list(x), None),
@@ -298,7 +306,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
         def fake_fn(primals, tangents):
-            return fx_g(primals, tangents)
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(fx_g).run(primals, tangents)
 
         # Trace a second time, running functionalization, and THEN running decompositions.
         # functionalization only acts on ATen today, and doesn't currently handle
@@ -369,6 +378,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     return CompiledFunction.apply
 
 
+@dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
 ):
@@ -391,9 +401,9 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-    fake_mode = FakeTensorMode.push() if config.use_fake_tensor else nullcontext()
+    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
 
-    with preserve_rng_state(), fake_mode as mode:
+    with preserve_rng_state(), fake_mode() as mode:
 
         def process_inputs(flat_args):
             if mode:

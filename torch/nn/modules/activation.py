@@ -1094,6 +1094,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
         elif self.num_heads % 2 == 1:
             why_not_fast_path = "num_heads is odd"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
             tensor_args = (
