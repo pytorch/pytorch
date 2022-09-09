@@ -1,4 +1,3 @@
-import traceback
 import torch
 import torch.utils._pytree as pytree
 from typing import Dict, Any, List, Type
@@ -133,8 +132,6 @@ class PySymInt(object):
         self.expr = expr
         self.shape_env = shape_env
         self.constant = constant
-        # TODO: optimize this
-        self.stack_trace = traceback.format_stack()
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)

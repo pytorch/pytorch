@@ -63,20 +63,15 @@ def has_proxy_slot(obj, tracer):
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
-    def maybe_extra():
-        if hasattr(obj, "stack_trace"):
-            return f"\n\nAllocated at:\n{''.join(obj.stack_trace)}"
-        return ""
-
     d = obj.__dict__.get(proxy_slot)
     if not d:
         if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}{maybe_extra()}")
+            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
         return default
     assert isinstance(d, weakref.WeakKeyDictionary)
     if tracer not in d:
         if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}{maybe_extra()}")
+            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
         else:
             return default
     return transform(d[tracer])
