@@ -86,6 +86,29 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     return kwargs
 
 
+def _test_ref_export(name):
+    """
+    Make sure 'name' is exported via '__all__'.
+    """
+    # Note: we need to import this because 'torch.ops' modules are not
+    # initialized until 'torch._prims' is imported.  We also cannot use
+    # '__import__' or 'importlib.import_module' and need to walk the
+    # module hierarchy manually.
+    import torch
+
+    lst = name.split(".")
+    mod_name = lst[:-1]
+    func_name = lst[-1]
+
+    mod = torch
+    for i in range(len(mod_name)):
+        mod = getattr(mod, mod_name[i])
+
+    # ops.nvprims doesn't have __all__
+    if hasattr(mod, "__all__"):
+        assert func_name in mod.__all__, f"missing ref export: {name}"
+
+
 class PythonRefInfo(OpInfo):
     """
     An OpInfo for a Python reference of an OpInfo base class operation.
@@ -113,29 +136,7 @@ class PythonRefInfo(OpInfo):
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
 
-        def test_ref_export(name):
-            """
-            Make sure 'name' is exported via '__all__'.
-            """
-            # Note: we need to import this because 'torch.ops' modules are not
-            # initialized until 'torch._prims' is imported.  We also cannot use
-            # '__import__' or 'importlib.import_module' and need to walk the
-            # module hierarchy manually.
-            import torch
-
-            lst = name.split(".")
-            mod_name = lst[:-1]
-            func_name = lst[-1]
-
-            mod = torch
-            for i in range(len(mod_name)):
-                mod = getattr(mod, mod_name[i])
-
-            # ops.nvprims doesn't have __all__
-            if hasattr(mod, "__all__"):
-                assert func_name in mod.__all__, f"missing ref export: {name}"
-
-        test_ref_export(name)
+        _test_ref_export(name)
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -166,6 +167,8 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         )
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
+
+        _test_ref_export(name)
 
         inherited = self.torch_opinfo._original_reduction_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -201,6 +204,8 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
+        _test_ref_export(name)
+
         inherited = self.torch_opinfo._original_unary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
@@ -231,6 +236,8 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         )
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
+
+        _test_ref_export(name)
 
         inherited = self.torch_opinfo._original_binary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
