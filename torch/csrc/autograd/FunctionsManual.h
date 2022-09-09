@@ -154,13 +154,13 @@ at::Tensor unsqueeze_multiple(
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
-    at::IntArrayRef sizes,
+    at::SymIntArrayRef sizes,
     at::OptionalIntArrayRef opt_dims,
     bool keepdim);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
+    c10::IntArrayRef dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
@@ -324,9 +324,9 @@ at::Tensor std_backward(
     bool keepdim);
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     at::OptionalIntArrayRef opt_dim,
-    int64_t numel,
+    c10::SymInt numel,
     bool keepdim);
 Tensor var_mean_backward(
     const Tensor& gvar,

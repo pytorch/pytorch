@@ -142,6 +142,18 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
+  c10::SymInt size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
+}
+
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
@@ -592,21 +604,21 @@ Tensor unsqueeze_multiple(
 
 Tensor sum_backward(
     const Tensor& grad,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (opt_dims.has_value() && opt_dims.value().size() > 0) {
-      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
+      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand_symint(sizes);
     }
   }
-  return grad.expand(sizes);
+  return grad.expand_symint(sizes);
 }
 
 Tensor sum_backward(
     const Tensor& grad,
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
+    c10::IntArrayRef dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
     // we are only using `keepdim=true` path for SymInts for now
@@ -623,19 +635,20 @@ Tensor nansum_backward(
     const Tensor& self,
     at::OptionalIntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self.sizes(), dims, keepdim) *
+  return sum_backward(grad, self.sym_sizes(), dims, keepdim) *
       self.isnan().logical_not();
 }
 
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     OptionalIntArrayRef opt_dim,
-    int64_t numel,
+    c10::SymInt numel,
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  return sum_backward(grad, shape, opt_dim, keepdim) / n;
+  // TODO: don't guard
+  return sum_backward(grad, shape, opt_dim, keepdim) / n.guard_int(__FILE__, __LINE__);
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -1479,9 +1492,9 @@ Tensor var_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
@@ -1504,9 +1517,9 @@ Tensor std_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }

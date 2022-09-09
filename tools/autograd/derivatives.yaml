@@ -1058,7 +1058,7 @@
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
+  self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1548,7 +1548,7 @@
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: sum_backward(grad, self.sizes(), dim, keepdim)
+      self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this function once semantics for nested tensor expand have been settled on
