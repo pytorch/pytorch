@@ -79,7 +79,7 @@ def gen_unwraps(
 
 
 def gen_case_where_all_bdims_are_none(
-    schema: FunctionSchema, cur_level_var: str
+    outer_sig: DispatcherSignature, schema: FunctionSchema, cur_level_var: str
 ) -> str:
     conditions = []
     flat_args = schema.arguments.flat_all
@@ -90,7 +90,7 @@ def gen_case_where_all_bdims_are_none(
 
     sig = DispatcherSignature.from_schema(schema)
     translated_args = ", ".join(
-        e.expr for e in translate(sig.arguments(), sig.arguments())
+        e.expr for e in translate(outer_sig.arguments(), sig.arguments())
     )
     return f"""\
 if ({' && '.join(conditions)}) {{
@@ -160,7 +160,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -182,7 +182,7 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -224,7 +224,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     cur_level_var = "cur_level"
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     wrapped_returns = gen_returns(returns, cur_level_var, results_var)
     return f"""\

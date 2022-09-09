@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import distutils.command.clean
+import sys
 import shutil
 import glob
 import os
@@ -129,21 +130,25 @@ class BuildExtension_(BuildExtension):
 if __name__ == '__main__':
     print("Building wheel {}-{}".format(package_name, version))
     write_version_file()
-    setup(
-        # Metadata
-        name=package_name,
-        version=version,
-        author='PyTorch Core Team',
-        url="https://github.com/pytorch/functorch",
-        description='JAX-like composable function transforms for PyTorch',
-        license='BSD',
+    try:
+        setup(
+            # Metadata
+            name=package_name,
+            version=version,
+            author='PyTorch Core Team',
+            url="https://github.com/pytorch/functorch",
+            description='JAX-like composable function transforms for PyTorch',
+            license='BSD',
 
-        # Package info
-        packages=find_packages(),
-        install_requires=requirements,
-        extras_require=extras,
-        ext_modules=get_extensions(),
-        cmdclass={
-            "build_ext": BuildExtension_.with_options(no_python_abi_suffix=True),
-            'clean': clean,
-        })
+            # Package info
+            packages=find_packages(),
+            install_requires=requirements,
+            extras_require=extras,
+            ext_modules=get_extensions(),
+            cmdclass={
+                "build_ext": BuildExtension_.with_options(no_python_abi_suffix=True),
+                'clean': clean,
+            })
+    except Exception as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)

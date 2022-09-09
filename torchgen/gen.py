@@ -20,6 +20,7 @@ from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,
+    CppSignature,
     CppSignatureGroup,
     DispatcherSignature,
     NamedCType,
@@ -161,7 +162,6 @@ def parse_native_yaml_struct(
             device_guard=False,
             # I'm actually not sure about this; undefined could be hit on
             # empty TensorList, hypothetically that could have sizes in it
-            symint=False,
             index={},
         )
     )
@@ -176,16 +176,6 @@ def parse_native_yaml_struct(
             # Only cuda-like devices in tree require device guards
             device_guard=is_cuda_dispatch_key(k),
             index=v,
-            # Which dispatch keys natively support symint
-            # Note: DispatchKey.CompositeExplicitAutograd has to match out
-            # composites; I think there's some factoring problem here
-            symint=k
-            in [
-                DispatchKey.Meta,
-                DispatchKey.CompositeImplicitAutograd,
-                DispatchKey.CompositeExplicitAutograd,
-                DispatchKey.CompositeExplicitAutogradNonFunctional,
-            ],
         )
     return ParsedYaml(rs, indices)
 
@@ -363,6 +353,8 @@ def static_dispatch_extra_headers(backends: List[BackendIndex]) -> List[str]:
 # supporting usecases even when there is a memory_format argument along with tensor_option arguments.
 # This usecase is not covered by tools.codegen.api.translate() yet as its application is limited to static dispatch
 def translate_args_dispatcher_to_cpp(
+    sig: DispatcherSignature,
+    cpp_sig: CppSignature,
     f: NativeFunction,
 ) -> str:
 
@@ -385,10 +377,7 @@ def translate_args_dispatcher_to_cpp(
                 output_bindings.append(binding)
         return output_bindings
 
-    disp_sig = DispatcherSignature.from_schema(f.func)
-    cpp_sig = CppSignatureGroup.from_native_function(
-        f, method=False, fallback_binding=False
-    ).signature
+    disp_sig = sig
     disp_bindings = disp_sig.arguments()
     # When last argument of CPP signature has SpecialArgName.possibly_redundant_memory_format NCType,
     # get memory_format bindings of dispatcher signature to have the same NCType as well
@@ -401,11 +390,20 @@ def translate_args_dispatcher_to_cpp(
 
 
 def generate_static_dispatch_backend_call(
+    sig: DispatcherSignature,
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    name = DispatcherSignature.from_schema(f.func).name()
-    exprs = translate_args_dispatcher_to_cpp(f)
+    cpp_sigs = CppSignatureGroup.from_native_function(
+        f, method=False, fallback_binding=False
+    )
+    if sig.symint and f.func.has_symint():
+        cpp_sig = cpp_sigs.symint_signature
+    else:
+        cpp_sig = cpp_sigs.signature
+    assert cpp_sig is not None
+    name = cpp_sig.name()
+    exprs = translate_args_dispatcher_to_cpp(sig, cpp_sig, f)
     backend_metadata = backend_index.get_kernel(f)
     kernel_ns = (
         backend_metadata.cpp_namespace
@@ -417,11 +415,20 @@ def generate_static_dispatch_backend_call(
 
 
 def generate_static_dispatch_fallback_call(
+    sig: DispatcherSignature,
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
-    name = DispatcherSignature.from_schema(f.func).name()
-    exprs = translate_args_dispatcher_to_cpp(f)
+    cpp_sigs = CppSignatureGroup.from_native_function(
+        f, method=False, fallback_binding=False
+    )
+    if sig.symint and f.func.has_symint():
+        cpp_sig = cpp_sigs.symint_signature
+    else:
+        cpp_sig = cpp_sigs.signature
+    assert cpp_sig is not None
+    name = cpp_sig.name()
+    exprs = translate_args_dispatcher_to_cpp(sig, cpp_sig, f)
     ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
@@ -437,6 +444,7 @@ def generate_static_dispatch_fallback_call(
 
 
 def static_dispatch(
+    sig: DispatcherSignature,
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
@@ -453,11 +461,10 @@ def static_dispatch(
         )
     ]
     if len(keys) == 1:
-        return generate_static_dispatch_backend_call(f, keys[0])
+        return generate_static_dispatch_backend_call(sig, f, keys[0])
     elif len(keys) == 0:
-        return generate_static_dispatch_fallback_call(f, backend_indices)
+        return generate_static_dispatch_fallback_call(sig, f, backend_indices)
 
-    sig = DispatcherSignature.from_schema(f.func)
     native_tensor_args = [
         a.name
         for a in sig.arguments()
@@ -483,10 +490,10 @@ def static_dispatch(
     for index in keys:
         dispatch_code.append(f"""case DispatchKey::{index.dispatch_key}:""")
         dispatch_code.append(
-            f"""\t{generate_static_dispatch_backend_call(f, index)};"""
+            f"""\t{generate_static_dispatch_backend_call(sig, f, index)};"""
         )
 
-    fallback = generate_static_dispatch_fallback_call(f, backend_indices)
+    fallback = generate_static_dispatch_fallback_call(sig, f, backend_indices)
     connector = "\n\t\t"
 
     return f"""
@@ -528,8 +535,6 @@ class ComputeOperators:
     def __call__(self, f: NativeFunction) -> str:
         sig = DispatcherSignature.from_schema(f.func)
         name = f.func.name.unambiguous_name()
-        call_method_name = "call"
-        redispatch_method_name = "redispatch"
 
         if self.target is Target.DECLARATION:
             # Note [The ATen Operators API]
@@ -563,8 +568,8 @@ struct TORCH_API {name} {{
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
   STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
-  static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
-  static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
+  static {sig.defn(name="call", is_redispatching_fn=False)};
+  static {sig.defn(name="redispatch", is_redispatching_fn=True)};
 }};"""
 
         elif self.target is Target.DEFINITION:
@@ -585,12 +590,13 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
                     dispatcher_exprs_str = ", ".join(
                         ["dispatchKeySet"] + [a.name for a in sig.arguments()]
                     )
-                    dispatcher_call = "redispatch"
-                    method_name = f"{name}::{redispatch_method_name}"
+                    method_base = "redispatch"
                 else:
-                    method_name = f"{name}::{call_method_name}"
                     dispatcher_exprs_str = ", ".join([a.name for a in sig.arguments()])
-                    dispatcher_call = "call"
+                    method_base = "call"
+
+                dispatcher_call = method_base
+                method_name = f"{name}::{method_base}"
 
                 fn_body = f"""
     static auto op = create_{name}_typed_handle();
@@ -602,7 +608,7 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
                 ):
                     # call() should go through static dispatch
                     fn_body = static_dispatch(
-                        f, backend_indices=self.static_dispatch_backend_indices
+                        sig, f, backend_indices=self.static_dispatch_backend_indices
                     )
                 defns += f"""
 // aten::{f.func}

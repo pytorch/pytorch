@@ -269,7 +269,7 @@ at::Tensor LazyNativeFunctions::_to_copy(
   }
 };
 
-at::Tensor LazyNativeFunctions::empty(
+at::Tensor LazyNativeFunctions::empty_symint(
     at::SymIntArrayRef sym_size,
     c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout,
@@ -307,7 +307,7 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  at::Tensor t = empty(
+  at::Tensor t = empty_symint(
       c10::SymIntArrayRef::fromIntArrayRef(size),
       dtype,
       layout,
@@ -409,7 +409,7 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  return LazyNativeFunctions::view_copy(
+  return LazyNativeFunctions::view_copy_symint(
       self, c10::SymIntArrayRef::fromIntArrayRef(size));
 }
 
@@ -449,7 +449,7 @@ at::Tensor LazyNativeFunctions::new_empty_strided(
           self, size, stride, dtype, layout, device, pin_memory);
 }
 
-at::Tensor LazyNativeFunctions::narrow_copy(
+at::Tensor LazyNativeFunctions::narrow_copy_symint(
     const at::Tensor& self,
     int64_t dim,
     c10::SymInt start,
