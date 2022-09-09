@@ -85,7 +85,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
-  OP_DECOMPOSE(embedding_backward);
+  // TODO symintify
+  // OP_DECOMPOSE(embedding_backward);
   OP_DECOMPOSE(expand_as);
   OP_DECOMPOSE(fft_fft);
   OP_DECOMPOSE(fft_fftshift);
