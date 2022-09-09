@@ -12,8 +12,6 @@
 #include <ATen/SmallVector.h>
 #include <ATen/Tensor.h>
 
-#include <functorch/csrc/Macros.h>
-
 namespace at {
 namespace functorch {
 
@@ -42,7 +40,7 @@ constexpr int64_t kBatchDimsStackSize = 5;
 //
 // bt.sizes() returns (5, 7); bt.sum(0) performs a reduction over the (public)
 // dim 0, which is equivalent to dim 3 in the underlying ones(2, 3, 5, 7) tensor.
-struct BatchedTensorImpl : public c10::TensorImpl {
+struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   explicit BatchedTensorImpl(at::DispatchKeySet key_set, Tensor value, int64_t dim, int64_t level);
 
   // Returns batch dimension of this tensor
@@ -136,10 +134,10 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-FUNCTORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-FUNCTORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
 
 // Certain dispatch keys must be propagated to the BatchedTensor (or, in general,
 // any wrapper Tensor subclasses). This is because there are methods on Tensor

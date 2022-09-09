@@ -7,7 +7,7 @@
 #include <torch/library.h>
 #include <ATen/ATen.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
