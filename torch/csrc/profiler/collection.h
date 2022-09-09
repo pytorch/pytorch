@@ -163,6 +163,8 @@ using strong_t = strong::
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
 using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
+using PyOptSelf = strong_t<PyObject*, struct PyOptSelf_>;
+using PyOptimizer = strong_t<PyObject*, struct PyOptimizer_>;
 
 struct NNModuleInfo {
   PyModuleSelf self_;
@@ -172,6 +174,15 @@ struct NNModuleInfo {
   std::vector<std::pair<std::string, void*>> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
+};
+
+struct OptInfo {
+  PyOptSelf self_;
+  PyOptimizer opt_;
+  at::StringView opt_name_;
+
+  std::vector<void*> params_addr_;
+  std::vector<std::pair<std::string, void*>> opt_state_;
 };
 
 struct PyExtraFieldsBase {
@@ -188,7 +199,8 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = std::pair<PyFrameState, c10::optional<NNModuleInfo>>;
+  using args_t = std::
+      tuple<PyFrameState, c10::optional<NNModuleInfo>, c10::optional<OptInfo>>;
 
   ExtraFields(
       time_t end_time_ns,
@@ -196,11 +208,13 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        callsite_{args.first},
-        module_{args.second} {}
+        callsite_{std::get<PyFrameState>(args)},
+        module_{std::get<c10::optional<NNModuleInfo>>(args)},
+        opt_{std::get<c10::optional<OptInfo>>(args)} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
+  c10::optional<OptInfo> opt_;
 };
 
 template <>

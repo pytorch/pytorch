@@ -1457,6 +1457,76 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
 
+    def test_opt_params(self):
+
+        def check_results(opt, opts):
+            self.assertEqual(len(opt.param_groups), len(opts))
+            for group, opt_ in zip(opt.param_groups, opts):
+                self.assertEqual(
+                    [(v.storage().data_ptr()) for v in group.get("params", [])],
+                    opt_.param_addrs
+                )
+
+            for opt_ in opts:
+                self.assertEqual(
+                    [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
+                    opt_.opt_state
+                )
+
+        def flat_out_extrafields(nodes, out=None):
+            if out is None:
+                out = []
+            for node in nodes:
+                if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.opt:
+                    if node.extra_fields.opt.param_addrs:
+                        # avoiding duplicates from extrafields
+                        addr = node.extra_fields.opt.param_addrs[0]
+                        found = False
+                        for o in out:
+                            if addr in o.param_addrs:
+                                found = True
+                                break
+
+                        if not found:
+                            out.append(node.extra_fields.opt)
+                flat_out_extrafields(node.children, out)
+            return out
+
+        class simpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 5)
+                self.fc2 = nn.Linear(5, 2)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = simpleNet()
+            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+            for _ in range(2):
+                opt.zero_grad()
+                out = net(inputs)
+                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+                loss.backward()
+                opt.step()
+
+        check_results(opt, flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()))
+
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p_adam:
+            net = simpleNet()
+            opt = torch.optim.Adam(net.parameters(), foreach=True)
+            for _ in range(2):
+                opt.zero_grad()
+                out = net(inputs)
+                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+                loss.backward()
+                opt.step()
+
+        check_results(opt, flat_out_extrafields(p_adam.profiler.kineto_results.experimental_event_tree()))
+
+
 @dataclass(frozen=True)
 class MockKinetoEvent():
     _name: str

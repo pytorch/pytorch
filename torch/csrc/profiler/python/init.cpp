@@ -157,6 +157,25 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
       .def_readonly("total_reserved", &allocation_t::total_reserved_);
 
+  py::class_<OptInfo>(m, "_OptInfo")
+      .def_property_readonly(
+          "param_addrs",
+          [](const OptInfo& s) {
+            py::list params_addrs;
+            for (auto& addr : s.params_addr_) {
+              params_addrs.append(reinterpret_cast<intptr_t>(addr));
+            }
+            return params_addrs;
+          })
+      .def_property_readonly("opt_state", [](const OptInfo& s) {
+        py::list states;
+        for (auto& a : s.opt_state_) {
+          states.append(
+              std::make_pair(a.first, reinterpret_cast<intptr_t>(a.second)));
+        }
+        return states;
+      });
+
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
           "params",
@@ -172,6 +191,7 @@ void initPythonBindings(PyObject* module) {
           "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
+      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
       .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)

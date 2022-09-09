@@ -114,6 +114,13 @@ class Optimizer(object):
                       "instance, capturable=True can impair performance, and you should set capturable=False.")
                 self._warned_capturable_if_run_uncaptured = True
 
+    def _hook_code(self):
+        """
+        no-op hook function for memory profiling.
+        This hook is called in profile_hook_step() to track Optimizer's state and param_groups
+        """
+        pass
+
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
@@ -124,7 +131,9 @@ class Optimizer(object):
                 obj, *_ = args
                 profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
-                    return func(*args, **kwargs)
+                    out = func(*args, **kwargs)
+                    obj._hook_code()
+                    return out
             return wrapper
 
         hooked = getattr(self.__class__.step, "hooked", None)
