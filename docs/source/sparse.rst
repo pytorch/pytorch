@@ -70,6 +70,7 @@ Fundamentally, operations on Tensor with sparse storage formats behave the same 
 operations on Tensor with strided (or other) storage formats. The particularities of
 storage, that is the physical layout of the data, does and should not influence the semantics.
 However, not as many operations support sparse Tensors as support dense Tensors.
+See our :ref:`operator<sparse-ops-docs>` documentation for a list.
 
     >>> b_s = b.to_sparse_csr()
     >>> b_s.cos()
@@ -875,9 +876,13 @@ function:
     >>> (csr.transpose(0, 1).to_dense() == csc.to_dense()).all()
     tensor(True)
 
+.. _sparse-ops-docs:
 
-Supported Linear Algebra operations
+Supported operations
 +++++++++++++++++++++++++++++++++++
+
+Linear Algebra operations
+-------------------------
 
 The following table summarizes supported Linear Algebra operations on
 sparse matrices where the operands layouts may vary. Here
@@ -921,7 +926,7 @@ matrix arguments.
    S == (S.t() @ D.t()).t()``.
 
 Tensor methods and sparse
-+++++++++++++++++++++++++
+-------------------------
 
 The following Tensor methods are related to sparse tensors:
 
@@ -1028,7 +1033,8 @@ The following Tensor methods support sparse COO tensors:
 :meth:`~torch.Tensor.zero_`
 
 Torch functions specific to sparse Tensors
-++++++++++++++++++++++++++++++++++++++++++
+------------------------------------------
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -1051,7 +1057,7 @@ Torch functions specific to sparse Tensors
     sparse.spdiags
 
 Other functions
-+++++++++++++++
+---------------
 
 The following :mod:`torch` functions support sparse tensors:
 
@@ -1079,7 +1085,10 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
 
-In addition, all zero-preserving unary functions support sparse
+Unary functions
+---------------
+
+All zero-preserving unary functions support sparse
 COO/CSR/CSC/BSR/CSR tensor inputs:
 
 :func:`~torch.abs`
