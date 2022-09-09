@@ -25,8 +25,18 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   level_ = -1;
   // mirror all of the generic tensor metadata onto the wrapper
   copy_generic_tensor_metadata(value_.getIntrusivePtr().get(), this);
-  refresh_numel();
-  refresh_contiguous();
+  if (!has_symbolic_sizes_strides_) {
+    refresh_numel();
+    refresh_contiguous();
+  } else {
+    // TODO: put this in refresh_numel
+    SymInt numel = 1;
+    for (const auto& s : extra_meta_->sizes_) {
+      numel *= s;
+    }
+    extra_meta_->numel_ = numel;
+    // TODO: contiguity
+  }
   storage_access_should_throw_ = false;
   // In general, the sizes/stride metadata on a tensor can change as it is mutated,
   // and these changes need to be reflected in the metadata of the wrapper.
