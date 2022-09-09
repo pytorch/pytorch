@@ -47,9 +47,15 @@ void initONNXBindings(PyObject* module) {
                  const std::vector<at::Tensor>& tensors,
                  const python::IODescriptor& desc,
                  bool onnx_shape_inference,
-                 bool is_script) {
+                 bool is_script,
+                 int opset_version) {
                 ONNXAssignOutputShape(
-                    graph, tensors, desc, onnx_shape_inference, is_script);
+                    graph,
+                    tensors,
+                    desc,
+                    onnx_shape_inference,
+                    is_script,
+                    opset_version);
               }))
       .def(
           "_jit_pass_onnx_function_substitution",
