@@ -19,7 +19,7 @@ namespace functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   VmapDimVector shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
@@ -35,7 +35,7 @@ Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   Tensor self_value;
@@ -60,7 +60,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
 }
 
 Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -110,7 +110,7 @@ Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto const batch_size = maybe_layer->batchSize();
   RandomnessType randomness = maybe_layer->randomness();
@@ -130,7 +130,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
@@ -158,7 +158,7 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
 
 template<typename F, F Func, typename... ExtraArgs>
 Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -184,7 +184,7 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
 }
 
 std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, c10::optional<bool> train) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
@@ -214,7 +214,7 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
 }
 
 Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
