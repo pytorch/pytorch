@@ -1970,8 +1970,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         training_state = self._get_training_state(current_handles_key)
         valid_training_states = (
-            HandleTrainingState.PRE_BACKWARD,
-            HandleTrainingState.POST_BACKWARD,
+            HandleTrainingState.BACKWARD_PRE,
+            HandleTrainingState.BACKWARD_POST,
         )
         p_assert(
             training_state in valid_training_states,
@@ -1980,26 +1980,26 @@ class FullyShardedDataParallel(nn.Module):
         )
         eod = self._exec_order_data
         if (
-            training_state == HandleTrainingState.PRE_BACKWARD
+            training_state == HandleTrainingState.BACKWARD_PRE
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
                 if (
-                    target_training_state != HandleTrainingState.POST_BACKWARD
+                    target_training_state != HandleTrainingState.BACKWARD_POST
                     and self._needs_pre_backward_unshard.get(target_handles_key, False)
                 ):
                     return target_handles_key
         elif (
-            training_state == HandleTrainingState.POST_BACKWARD
+            training_state == HandleTrainingState.BACKWARD_POST
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
             if target_handles_key is not None:
                 target_training_state = self._get_training_state(target_handles_key)
                 if (
-                    target_training_state != HandleTrainingState.POST_BACKWARD
+                    target_training_state != HandleTrainingState.BACKWARD_POST
                     and self._needs_pre_backward_unshard.get(target_handles_key, False)
                 ):
                     return target_handles_key
@@ -3040,7 +3040,7 @@ class FullyShardedDataParallel(nn.Module):
                 if not _handles_key:
                     return
                 for handle in _handles:
-                    handle._training_state = HandleTrainingState.PRE_BACKWARD
+                    handle._training_state = HandleTrainingState.BACKWARD_POST
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
@@ -3126,7 +3126,7 @@ class FullyShardedDataParallel(nn.Module):
             # then subsequent hook callbacks will see POST state.
             self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
             self.training_state = TrainingState_.BACKWARD_POST
-            handle._training_state = HandleTrainingState.POST_BACKWARD
+            handle._training_state = HandleTrainingState.BACKWARD_POST
 
             if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
                 # In self._fsdp_params_exec_order, the parameters are ordered based on
