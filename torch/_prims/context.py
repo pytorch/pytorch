@@ -66,23 +66,12 @@ def torch_to_refs_map():
     return r
 
 
-@functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
+nvfuser_decompositions: Sequence[
+    Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+] = {  # type: ignore[assignment]
+    # nll_loss_forward decomposition gives data-dependent control flow during tracing
+    torch.ops.aten.nll_loss_forward,
+}
 
 
 @functools.lru_cache(None)
@@ -176,7 +165,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+        if func is None and isinstance(orig_func, torch._ops.OpOverload) and not func in nvfuser_decompositions:
             func = torch._decomp.decomposition_table.get(orig_func, None)
 
         if func is not None:
