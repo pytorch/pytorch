@@ -165,14 +165,14 @@ class PrepareCustomConfig:
         Create a ``PrepareCustomConfig`` from a dictionary with the following items:
 
             "standalone_module_name": a list of (module_name, qconfig_mapping, example_inputs,
-                child_prepare_custom_config, backend_config) tuples
+            child_prepare_custom_config, backend_config) tuples
 
             "standalone_module_class" a list of (module_class, qconfig_mapping, example_inputs,
-                child_prepare_custom_config, backend_config) tuples
+            child_prepare_custom_config, backend_config) tuples
 
             "float_to_observed_custom_module_class": a nested dictionary mapping from quantization
-                mode to an inner mapping from float module classes to observed module classes, e.g.
-                {"static": {FloatCustomModule: ObservedCustomModule}}
+            mode to an inner mapping from float module classes to observed module classes, e.g.
+            {"static": {FloatCustomModule: ObservedCustomModule}}
 
             "non_traceable_module_name": a list of modules names that are not symbolically traceable
             "non_traceable_module_class": a list of module classes that are not symbolically traceable
@@ -323,12 +323,12 @@ class ConvertCustomConfig:
         Create a ``ConvertCustomConfig`` from a dictionary with the following items:
 
             "observed_to_quantized_custom_module_class": a nested dictionary mapping from quantization
-                mode to an inner mapping from observed module classes to quantized module classes, e.g.
-                {
-                    "static": {FloatCustomModule: ObservedCustomModule},
-                    "dynamic": {FloatCustomModule: ObservedCustomModule},
-                    "weight_only": {FloatCustomModule: ObservedCustomModule}
-                }
+             mode to an inner mapping from observed module classes to quantized module classes, e.g.
+             {
+                 "static": {FloatCustomModule: ObservedCustomModule},
+                 "dynamic": {FloatCustomModule: ObservedCustomModule},
+                 "weight_only": {FloatCustomModule: ObservedCustomModule}
+             }
 
             "preserved_attributes": a list of attributes that persist even if they are not used in ``forward``
 
