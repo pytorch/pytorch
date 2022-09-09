@@ -896,6 +896,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       !args.getCacheId().has_value() || outputs.empty(),
       "short cut input cache is not compatible with pre-allocated output");
 
+  size_t num_inputs = args.size();
+
   if (isDebugDumpEnabled(DebugDumpOption::FusionArgs)) {
     std::cout << "Arguments for fusion" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
@@ -1260,7 +1262,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     bytes_processed_ = 0;
     // Figure how many bytes are inputs, outputs, and temporary buffers
-    for (auto i : c10::irange(args.size())) {
+    for (auto i : c10::irange(num_inputs)) {
       if (auto tensor_arg_abstract =
               dynamic_cast<const TensorArgAbstract*>(args[i])) {
         bytes_processed_ += tensor_arg_abstract->numel() *
