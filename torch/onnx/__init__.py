@@ -1,6 +1,4 @@
 """ONNX exporter."""
-import warnings
-
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import (
@@ -27,9 +25,9 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_registry,
     utils,
 )
-from torch.onnx._internal.exporter_states import ExportTypes, SymbolicContext
-from torch.onnx._internal.type_utils import JitScalarType
 from ._internal import deprecation
+from ._internal.exporter_states import ExportTypes, SymbolicContext
+from ._internal.type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
     _optimize_graph,
