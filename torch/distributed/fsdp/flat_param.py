@@ -644,22 +644,30 @@ class FlatParamHandle:
     ###################
     # UNSHARD/RESHARD #
     ###################
-    def pre_unshard(self):
+    def pre_unshard(self) -> bool:
         """
+        Returns: ``False`` if this is a no-op and ``True`` otherwise.
+
         Postcondition: ``self.flat_param`` 's data is on the device for
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
+        ret = False
         if self._registered_orig_params:
             # TODO (awgu): I am not sure if we want to enable this by default
             # for `use_orig_params=True` since there may be some CPU overhead.
-            self._writeback_orig_params()
-        if self._uses_param_mixed_precision and not self._force_full_precision:
+            ret = ret or self._writeback_orig_params()
+        if not self.needs_unshard():
+            pass  # no need to prepare for an all-gather
+        elif self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
+            ret = True
         elif self._config.offload_params and self.flat_param.device != self.device:
             # NOTE: This creates a new tensor distinct from any attributes.
             self._flat_param_to(self.device, non_blocking=True)
+            ret = True
         self._check_on_compute_device(self.flat_param)
+        return ret
 
     def _use_low_precision_shard(self):
         """
@@ -1160,12 +1168,14 @@ class FlatParamHandle:
         Raises:
             RuntimeError: An original parameter changes storages and no longer
             has the expected flattened shape.
+        Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
         self._check_sharded(self.flat_param)
         self._check_registered_orig_params()
         start, end = self.flat_param._shard_indices  # type: ignore[attr-defined]
         offset = 0
         assert self.flat_param._params is not None
+        wroteback = False
         for i, param in enumerate(self.flat_param._params):
             in_sharded_flat_param = i >= start and i <= end
             if in_sharded_flat_param:
@@ -1187,11 +1197,13 @@ class FlatParamHandle:
                             f"Expects {expected_shape} but got {param.shape}"
                         )
                     self.flat_param[offset : offset + numel_in_shard].copy_(param)
+                    wroteback = True
                 # TODO (awgu): writeback gradient
                 # need to handle what if there is no flat param grad but there is param grad
                 # -> allocate memory?
                 # needs_grad_writeback = param.grad is not None and not self._same_storage(param.grad)
                 offset += numel_in_shard
+        return wroteback
 
     def _deregister_orig_params(self):
         for (param_name, module, _) in self.flat_param._param_infos:
