@@ -1618,6 +1618,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.matmul',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
