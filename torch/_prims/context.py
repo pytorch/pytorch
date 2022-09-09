@@ -165,7 +165,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if func is None and isinstance(orig_func, torch._ops.OpOverload) and not func in nvfuser_decompositions:
+        if func is None and isinstance(orig_func, torch._ops.OpOverload) and not orig_func in nvfuser_decompositions:
             func = torch._decomp.decomposition_table.get(orig_func, None)
 
         if func is not None:
