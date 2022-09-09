@@ -4,6 +4,11 @@ import torch
 
 from .core import MaskedTensor, is_masked_tensor
 
+__all__ = [
+    "as_masked_tensor",
+    "masked_tensor",
+]
+
 
 """"
 These two factory functions are intended to mirror
