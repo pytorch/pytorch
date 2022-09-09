@@ -814,9 +814,19 @@ def meta_empty_like(self, **kwargs):
     return aten.empty.memory_format(self.size(), **kwargs)
 
 
+@register_meta(aten.full_like.default)
+def meta_full_like(self, fill_value, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
+
+
 @register_meta(aten.zero_.default, register_dispatcher=False)
 def meta_zero_(self):
     return self
+
+
+@register_meta(aten.index_put.default, register_dispatcher=False)
+def meta_index_put(self, indices, values, accumulate=False):
+    return self.new_empty(self.size())
 
 
 # We must also trigger meta registrations from PrimTorch ref
