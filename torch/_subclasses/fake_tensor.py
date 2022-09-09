@@ -494,6 +494,8 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
+        # TODO: This doesn't work with sparse self
+
         # torch.Tensor.new does not go through the normal dispatcher pattern
         # so in order to use the same pattern as normal invocation of
         # returning meta device within the kernel we need to intercept
@@ -502,7 +504,7 @@ class FakeTensor(torch.Tensor):
         # when attempting to compute an output in meta, so
         # we compute the real tensor then convert to meta
         out_device = self.fake_device
-        with no_dispatch():
+        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
             real_out = super().new(*args, **kwargs)
 
         assert not isinstance(real_out, FakeTensor), real_out
@@ -865,7 +867,11 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap), r)
 
     def may_turn_const(self, t):
-        return t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse
+        return (
+            t.numel() <= CONSTANT_NUMEL_LIMIT
+            and not t.is_sparse
+            and not isinstance(t, FakeTensor)
+        )
 
     def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
         any_constant = any(e.constant is not None for e in flat_arg_tensors)

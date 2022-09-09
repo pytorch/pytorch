@@ -13,7 +13,6 @@
 #include <ATen/Tensor.h>
 
 #include <functorch/csrc/Macros.h>
-#include <functorch/csrc/Constants.h>
 
 namespace at {
 namespace functorch {
@@ -79,9 +78,16 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 #endif
 
   void refreshTensorMetadata();
+
+  // Used in torchdim. torchdim uses non-lexical BatchedTensor; the way it
+  // accomplishes this is a hack where it is able to modify the levels of
+  // BatchedTensor to match the level of the current vmap transform.
   void _unsafe_set_level(int64_t level) {
     level_ = level;
   }
+
+  // Used in batching rule for in-place view operations that can change
+  // the index of the bdim (think squeeze_, unsqueeze_)
   void unsafe_set_bdim(int64_t bdim) {
     // NB: you MUST call refreshTensorMetadata after doing this.
     bdim_ = bdim;
@@ -100,7 +106,7 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 // NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
 // BatchedTensorImpl.
 inline bool isBatchedTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(kBatchedKey);
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::FuncTorchBatched);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a
