@@ -41,7 +41,7 @@ def _flatten_tuples(elem):
     return flattened
 
 
-@_beartype.beartype
+# TODO(justinchuby): Add type checking by narrowing down the return type when input is None
 def _to_numpy(elem) -> Union[list, np.ndarray]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
@@ -98,7 +98,7 @@ def _run_ort(ort_session, inputs):
             )
         ort_inputs[ort_session_inputs[i].name] = input
     ort_outs = ort_session.run(None, ort_inputs)
-    return _inline_flatten_list(ort_outs, [])
+    return ort_outs
 
 
 @_beartype.beartype
@@ -127,12 +127,13 @@ def _ort_session(
 
 @_beartype.beartype
 def _compare_ort_pytorch_outputs(
-    ort_outs: Union[Sequence[_NumericType], Sequence, Dict],
-    pt_outs: Union[_NumericType, Sequence[_NumericType], Sequence, Dict],
+    ort_outs: Union[Sequence[_NumericType], Sequence],
+    pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
     rtol: float,
     atol: float,
     check_shape: bool,
     check_dtype: bool,
+    ignore_none: bool,
     acceptable_error_percentage: Optional[float],
 ):
     """
@@ -141,9 +142,13 @@ def _compare_ort_pytorch_outputs(
     Args:
         ort_outs: outputs from ONNX Runtime.
         pt_outs: outputs from PyTorch.
-        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
+        rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
+        atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
+        ignore_none: Whether to ignore None type in
+            torch output, which is usually the case with tracing. Set this to False, if
+            torch output should keep None type, which is usually the case with exporting
+            ScriptModules.
+        acceptable_error_percentage: acceptable percentage of element mismatches in comparison.
             It should be a float of value between 0.0 and 1.0.
 
     Raises:
@@ -151,16 +156,16 @@ def _compare_ort_pytorch_outputs(
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
-    ort_outs = list(ort_outs)
-    pt_outs, _ = torch.jit._flatten(pt_outs)
-    pt_outs = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
-
-    assert isinstance(ort_outs, list)
-    assert isinstance(pt_outs, list)
-
+    if ignore_none:
+        # torch.jit._flatten filters None type
+        pt_outs, _ = torch.jit._flatten(pt_outs)
+    else:
+        pt_outs = _inline_flatten_list([pt_outs], [])
+    pt_outs_np = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
+    ort_outs = _inline_flatten_list(ort_outs, [])
     assert len(ort_outs) == len(
-        pt_outs
-    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
+        pt_outs_np
+    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs_np)})"
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
     ):
@@ -168,7 +173,7 @@ def _compare_ort_pytorch_outputs(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
         )
 
-    for ort_out, pt_out in zip(ort_outs, pt_outs):
+    for ort_out, pt_out in zip(ort_outs, pt_outs_np):
         try:
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not check_shape:
@@ -184,7 +189,6 @@ def _compare_ort_pytorch_outputs(
             )
         except AssertionError as e:
             if acceptable_error_percentage:
-                assert isinstance(ort_out, np.ndarray)
                 error_percentage = 1 - np.sum(
                     np.isclose(ort_out, pt_out, rtol=rtol, atol=atol)
                 ) / np.prod(ort_out.shape)
@@ -297,11 +301,12 @@ def _compare_ort_pytorch_model(
     additional_test_inputs,
     remained_onnx_input_idx,
     flatten,
+    ignore_none,
     rtol,
     atol,
     check_shape,
     check_dtype,
-    accetable_error_persentage: Optional[float],
+    acceptable_error_percentage: Optional[float],
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -325,13 +330,14 @@ def _compare_ort_pytorch_model(
         ort_outs = _run_ort(ort_session, ort_inputs)
 
         _compare_ort_pytorch_outputs(
-            ort_outs,
-            pt_outs,
-            rtol,
-            atol,
-            check_shape,
-            check_dtype,
-            accetable_error_persentage,
+            ort_outs=ort_outs,
+            pt_outs=pt_outs,
+            rtol=rtol,
+            atol=atol,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            ignore_none=ignore_none,
+            acceptable_error_percentage=acceptable_error_percentage,
         )
 
     compare_ort_pytorch_model_with_input(input_args, input_kwargs)
@@ -513,7 +519,7 @@ def _onnx_graph_from_model(
     output_names = export_options.output_names
 
     if opset_version is None:
-        opset_version = _constants.onnx_default_opset
+        opset_version = _constants.ONNX_DEFAULT_OPSET
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
@@ -618,6 +624,7 @@ def verify(
     ] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
+    ignore_none: bool = True,
     check_shape: bool = True,
     check_dtype: bool = True,
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
@@ -654,11 +661,15 @@ def verify(
             inputs into a flattened list of Tensors for ONNX. Set this to False if nested
             structures are to be preserved for ONNX, which is usually the case with
             exporting ScriptModules.
-        check_shape (bool, optional): Default True. If True, check the shapes between
+        ignore_none (bool, optional): Whether to ignore None type in
+            torch output, which is usually the case with tracing. Set this to False, if
+            torch output should keep None type, which is usually the case with exporting
+            ScriptModules. Default to True.
+        check_shape (bool, optional): Whether to check the shapes between
             PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
-            output shape broadcasting.
-        check_dtype (bool, optional): Default True. If True, check the dtypes between
-            PyTorch and ONNX Runtime outputs are consistent.
+            output shape broadcasting. Default to True.
+        check_dtype (bool, optional): Whether to check the dtypes between
+            PyTorch and ONNX Runtime outputs are consistent. Default to True.
         ort_providers (sequence, optional): ONNX Runtime providers to use.
         rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
         atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
@@ -702,16 +713,17 @@ def verify(
         ort_session = _ort_session(model_f, ort_providers)
 
         _compare_ort_pytorch_model(
-            model_copy,
-            ort_session,
-            input_args,
-            input_kwargs,
-            additional_test_inputs,
-            remained_onnx_input_idx,
-            flatten,
-            rtol,
-            atol,
-            check_shape,
-            check_dtype,
-            acceptable_error_percentage,
+            model=model_copy,
+            ort_session=ort_session,
+            input_args=input_args,
+            input_kwargs=input_kwargs,
+            additional_test_inputs=additional_test_inputs,
+            remained_onnx_input_idx=remained_onnx_input_idx,
+            flatten=flatten,
+            ignore_none=ignore_none,
+            rtol=rtol,
+            atol=atol,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            acceptable_error_percentage=acceptable_error_percentage,
         )

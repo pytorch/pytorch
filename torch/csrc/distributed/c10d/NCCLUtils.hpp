@@ -21,8 +21,11 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
   if (processGroupFailureReason != c10::nullopt) {
     return (*processGroupFailureReason).c_str();
   }
-  std::string interpret = nullptr;
-  std::string err = std::string(ncclGetLastError(NULL));
+  std::string interpret;
+  std::string err;
+#ifdef ENABLE_NCCL_GET_LAST_ERROR
+  err = "\nLast error:\n" + std::string(ncclGetLastError(NULL));
+#endif
   switch (error) {
     case ncclUnhandledCudaError:
       interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
@@ -43,9 +46,18 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
     default:
       interpret = "Unknown NCCL error!";
   }
-  return (interpret + "\nLast error:\n" + err).c_str();
+  return (interpret + err).c_str();
 }
 } // namespace
+
+// GetLastError is enabled only for NCCL versions 2.13+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 13)
+#define ENABLE_NCCL_GET_LAST_ERROR
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_GET_LAST_ERROR
+#endif
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -62,6 +74,12 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
 #define ENABLE_NCCL_P2P_SUPPORT
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
 #define ENABLE_NCCL_P2P_SUPPORT
+#endif
+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 11)
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -223,6 +241,33 @@ class NCCLComm {
   // better error messaging.
   c10::optional<std::string> commFailureReason_;
 };
+
+// Helper that automatically cleans up premul sums.
+struct ncclRedOpRAII {
+  ncclRedOpRAII() {}
+  ncclRedOpRAII(ncclRedOp_t op) : op_(op) {}
+  ncclRedOpRAII(ncclRedOp_t op, ncclComm_t comm) :
+    op_(op), comm_(comm), premul_sum_(true) {}
+  ncclRedOpRAII(const ncclRedOpRAII&) = delete;
+  ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
+  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
+    std::swap(tmp.op_, this->op_);
+    std::swap(tmp.comm_, this->comm_);
+    std::swap(tmp.premul_sum_, this->premul_sum_);
+  }
+#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
+  ~ncclRedOpRAII() {
+    if (premul_sum_) {
+      ncclRedOpDestroy(op_, comm_);
+    }
+  }
+#endif
+  operator ncclRedOp_t() const { return op_; }
+  ncclRedOp_t op_;
+  ncclComm_t comm_;
+  bool premul_sum_ = false;
+};
+
 
 } // namespace c10d
 
