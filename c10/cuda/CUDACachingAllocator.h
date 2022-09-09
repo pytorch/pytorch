@@ -148,11 +148,14 @@ class CachingAllocatorConfig {
     return instance().m_roundup_power2_divisions;
   }
 
+  static void set_allocator_settings(const std::string& env);
+
  private:
   static CachingAllocatorConfig& instance() {
     static CachingAllocatorConfig* s_instance = ([]() {
       auto inst = new CachingAllocatorConfig();
-      inst->parseArgs();
+      const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
+      inst->parseArgs(env);
       return inst;
     })();
     return *s_instance;
@@ -162,11 +165,11 @@ class CachingAllocatorConfig {
       : m_max_split_size(std::numeric_limits<size_t>::max()),
         m_roundup_power2_divisions(0),
         m_garbage_collection_threshold(0) {}
-  size_t m_max_split_size;
-  size_t m_roundup_power2_divisions;
-  double m_garbage_collection_threshold;
+  std::atomic<size_t> m_max_split_size;
+  std::atomic<size_t> m_roundup_power2_divisions;
+  std::atomic<double> m_garbage_collection_threshold;
 
-  void parseArgs();
+  void parseArgs(const char* env);
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);

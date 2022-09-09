@@ -399,66 +399,75 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 } // namespace
 
-void CachingAllocatorConfig::parseArgs() {
-  const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-  if (val != NULL) {
-    const std::string config(val);
+void CachingAllocatorConfig::parseArgs(const char* env) {
+  // If empty, set the default values
+  if (env == NULL) {
+    m_max_split_size = std::numeric_limits<size_t>::max();
+    m_roundup_power2_divisions = 0;
+    m_garbage_collection_threshold = 0;
+    return;
+  }
 
-    std::regex exp("[\\s,]+");
-    std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-    std::sregex_token_iterator end;
-    std::vector<std::string> options(it, end);
+  const std::string config(env);
 
-    for (auto option : options) {
-      std::regex exp2("[:]+");
-      std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-      std::sregex_token_iterator end2;
-      std::vector<std::string> kv(it2, end2);
-      if (kv.size() >= 2) {
-        /* Maximum split size in MB.  Limited to large size blocks */
-        if (kv[0].compare("max_split_size_mb") == 0) {
-          size_t val2 = stoi(kv[1]);
-          TORCH_CHECK(
-              val2 > kLargeBuffer / (1024 * 1024),
-              "CachingAllocator option max_split_size_mb too small, must be > ",
-              kLargeBuffer / (1024 * 1024),
-              "");
-          val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
-          val2 = std::min(
-              val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
-          m_max_split_size = val2 * 1024 * 1024;
-        } else if (kv[0].compare("roundup_power2_divisions") == 0) {
-          size_t val2 = stoi(kv[1]);
-          TORCH_CHECK(
-              llvm::isPowerOf2_64(val2),
-              "For roundups, the divisons has to be power of 2 ",
-              "");
-          m_roundup_power2_divisions = val2;
-        } else if (kv[0].compare("garbage_collection_threshold") == 0) {
-          /*
-           * Perform garbage collection of GPU memory blocks to avoid
-           * triggering expensive sync-and-reclaim-all operation. Upon setting
-           * the threshold (e.g., 0.8), the allocator will start reclaiming
-           * blocks if GPU memory capacity usage exceeds the threshold (i.e.,
-           * 80% of total memory).
-           * Values 0.0 and 1.0 are not allowed as they are less meaningful.
-           */
-          double val2 = stod(kv[1]);
-          TORCH_CHECK(
-              val2 > 0,
-              "garbage_collect_threshold too small, set it 0.0~1.0",
-              "");
-          TORCH_CHECK(
-              val2 < 1.0,
-              "garbage_collect_threshold too big, set it 0.0~1.0",
-              "");
-          m_garbage_collection_threshold = val2;
-        } else {
-          TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
-        }
+  std::regex exp("[\\s,]+");
+  std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+  std::sregex_token_iterator end;
+  std::vector<std::string> options(it, end);
+
+  for (auto option : options) {
+    std::regex exp2("[:]+");
+    std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+    std::sregex_token_iterator end2;
+    std::vector<std::string> kv(it2, end2);
+    if (kv.size() >= 2) {
+      /* Maximum split size in MB.  Limited to large size blocks */
+      if (kv[0].compare("max_split_size_mb") == 0) {
+        size_t val2 = stoi(kv[1]);
+        TORCH_CHECK(
+            val2 > kLargeBuffer / (1024 * 1024),
+            "CachingAllocator option max_split_size_mb too small, must be > ",
+            kLargeBuffer / (1024 * 1024),
+            "");
+        val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
+        val2 = std::min(
+            val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
+        m_max_split_size = val2 * 1024 * 1024;
+      } else if (kv[0].compare("roundup_power2_divisions") == 0) {
+        size_t val2 = stoi(kv[1]);
+        TORCH_CHECK(
+            llvm::isPowerOf2_64(val2),
+            "For roundups, the divisons has to be power of 2 ",
+            "");
+        m_roundup_power2_divisions = val2;
+      } else if (kv[0].compare("garbage_collection_threshold") == 0) {
+        /*
+         * Perform garbage collection of GPU memory blocks to avoid
+         * triggering expensive sync-and-reclaim-all operation. Upon setting
+         * the threshold (e.g., 0.8), the allocator will start reclaiming
+         * blocks if GPU memory capacity usage exceeds the threshold (i.e.,
+         * 80% of total memory).
+         * Values 0.0 and 1.0 are not allowed as they are less meaningful.
+         */
+        double val2 = stod(kv[1]);
+        TORCH_CHECK(
+            val2 > 0,
+            "garbage_collect_threshold too small, set it 0.0~1.0",
+            "");
+        TORCH_CHECK(
+            val2 < 1.0,
+            "garbage_collect_threshold too big, set it 0.0~1.0",
+            "");
+        m_garbage_collection_threshold = val2;
+      } else {
+        TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
       }
     }
   }
+}
+
+void CachingAllocatorConfig::set_allocator_settings(const std::string& env) {
+  instance().parseArgs(env.c_str());
 }
 
 class DeviceCachingAllocator {
