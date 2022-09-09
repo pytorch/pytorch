@@ -35,7 +35,7 @@ timeout: 720
 tests:"""
 S3_BUCKET = "ossci-metrics"
 S3_PREFIX = "torchbench-pr-test"
-S3_URL_BASE = "https://ossci-metrics.s3.amazonaws.com/"
+S3_URL_BASE = f"https://{S3_BUCKET}.s3.amazonaws.com/"
 
 class S3Client:
     def __init__(self, bucket: str = S3_BUCKET, prefix: str = S3_PREFIX):
@@ -51,7 +51,7 @@ class S3Client:
         print(f"Uploading file {file_name} to S3 with key: {s3_key}")
         self.s3.upload_file(str(file_path), self.bucket, s3_key)
         # output the result URL
-        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}/{self.bucket}/{s3_key}")
+        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}/{s3_key}")
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
