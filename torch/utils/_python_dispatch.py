@@ -5,9 +5,8 @@ import warnings
 from torch.utils._mode_utils import _ModeInfo
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
+from typing import List
 
-
-_cur_torch_dispatch_mode = []
 
 @dataclass
 class TorchDispatchModeInfo(_ModeInfo):
@@ -110,6 +109,9 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
         warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
         instance = cls(*args, **kwargs)
         return instance
+
+
+_cur_torch_dispatch_mode: List[TorchDispatchMode] = []
 
 
 def get_current_dispatch_mode():
