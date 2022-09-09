@@ -13,7 +13,7 @@ Testing environment:
 # 1. Does not reuse the build artifact in other CI workflows
 # 2. CI jobs are serialized because there is only one worker
 import os
-import boto3
+import boto3  # type: ignore[import]
 import git  # type: ignore[import]
 import pathlib
 import argparse
@@ -38,13 +38,13 @@ S3_PREFIX = "torchbench-pr-test"
 S3_URL_BASE = "https://ossci-metrics.s3.amazonaws.com/"
 
 class S3Client:
-    def __init__(self, bucket=S3_BUCKET, prefix=S3_PREFIX):
+    def __init__(self, bucket: str=S3_BUCKET, prefix: str=S3_PREFIX):
         self.s3 = boto3.client('s3')
         self.resource = boto3.resource('s3')
         self.bucket = bucket
         self.prefix = prefix
 
-    def upload_file(self, file_path, filekey_prefix):
+    def upload_file(self, file_path: Path, filekey_prefix: str):
         assert file_path.is_file(), f"Specified file path {file_path} does not exist or not file."
         file_name = file_path.name
         s3_key = f"{self.prefix}/{filekey_prefix}/{file_name}"
@@ -161,14 +161,14 @@ def run_userbenchmarks(pytorch_path: str, torchbench_path: str, base_sha: str, h
     print(f"Running torchbench userbenchmark command: {command}")
     subprocess.check_call(command, cwd=torchbench_path, env=env)
 
-def process_upload_s3(result_dir):
+def process_upload_s3(result_dir: str):
     # validate result directory
     result_dir = Path(result_dir)
-    assert result_dir.exists(), f"Specified result directory doesn't exist."
+    assert result_dir.exists(), f"Specified result directory {result_dir} doesn't exist."
     # upload all files to S3 bucket oss-ci-metrics
     files = [x for x in result_dir.iterdir() if x.is_file()]
     # upload file to S3 bucket
-    s3_client = S3Client()
+    s3_client: S3Client = S3Client()
     filekey_prefix = result_dir.name
     for f in files:
         s3_client.upload_file(f, filekey_prefix)
