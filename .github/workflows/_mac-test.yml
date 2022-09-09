@@ -127,6 +127,8 @@ jobs:
       - name: Test
         id: test
         run: |
+          set -x
+
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
           # sanitize the input commit message and PR body here:
