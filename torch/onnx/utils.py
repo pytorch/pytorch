@@ -1700,7 +1700,6 @@ def _should_aten_fallback(
     )
 
 
-@_beartype.beartype
 def _need_symbolic_context(symbolic_fn) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
     params = tuple(inspect.signature(symbolic_fn).parameters.values())
@@ -1714,6 +1713,23 @@ def _need_symbolic_context(symbolic_fn) -> bool:
         return False
     param_type = type_hints[first_param_name]
     return issubclass(param_type, _exporter_states.SymbolicContext)
+
+
+def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
+    """Decorator that provides the symbolic context to the symbolic function if needed."""
+    if _need_symbolic_context(symbolic_fn):
+
+        def wrapper(graph_context: torchscript.GraphContext, *args, **kwargs):
+            symbolic_context = _exporter_states.SymbolicContext(
+                params_dict=graph_context.params_dict,
+                env=graph_context.env,
+                cur_node=graph_context.original_node,
+                onnx_block=graph_context.onnx_block,
+            )
+            return symbolic_fn(symbolic_context, graph_context, *args, **kwargs)
+
+        return wrapper
+    return symbolic_fn
 
 
 @_beartype.beartype
@@ -1784,12 +1800,6 @@ def _run_symbolic_function(
                 attrs = {
                     k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
                 }
-                if _need_symbolic_context(symbolic_fn):
-                    # TODO(justinchuby): Refactor how we check for the need of the symbolic context
-                    ctx = _exporter_states.SymbolicContext(
-                        _params_dict, env, node, block, opset_version
-                    )
-                    return symbolic_fn(ctx, graph_context, *inputs, **attrs)
                 # PythonOp symbolic need access to the node to resolve the name conflict,
                 # this is inconsistent with regular op symbolic.
                 if op_name == "PythonOp":
@@ -1896,7 +1906,13 @@ def register_custom_op_symbolic(
         itertools.chain(_constants.onnx_stable_opsets, [_constants.onnx_main_opset])
     )
 
-    registration.custom_onnx_symbolic(symbolic_name, versions)(symbolic_fn)
+    registration.custom_onnx_symbolic(
+        symbolic_name,
+        versions,
+        decorate=[
+            _symbolic_context_handler,
+        ],
+    )(symbolic_fn)
 
 
 @_beartype.beartype
