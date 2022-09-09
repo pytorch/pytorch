@@ -860,9 +860,9 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.reshape(numel, grad_output.size(-1))
+    grad = grad_output.contiguous().view(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.reshape(numel)
+    indices_rank1 = indices.contiguous().view(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
