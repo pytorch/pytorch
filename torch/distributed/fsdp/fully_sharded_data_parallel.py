@@ -3040,7 +3040,7 @@ class FullyShardedDataParallel(nn.Module):
                 if not _handles_key:
                     return
                 for handle in _handles:
-                    handle._training_state = HandleTrainingState.BACKWARD_POST
+                    handle._training_state = HandleTrainingState.BACKWARD_PRE
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
