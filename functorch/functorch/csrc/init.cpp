@@ -10,14 +10,15 @@
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/CompileCache.h>
-#include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
+#include <functorch/csrc/dim/dim.h>
 
+// This file contains functorch's Python bindings.
 
 namespace at {
 namespace functorch {
@@ -59,11 +60,16 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
   // but we can't do that unless we give BatchedTensorImpl a notion of storage.
   if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
   } else {
-      TORCH_INTERNAL_ASSERT(unwrapped.nbytes() == wrapped_inner.nbytes());
-      TORCH_INTERNAL_ASSERT(unwrapped.sizes() == wrapped_inner.sizes(),
-          "An inplace-mutation op (like transpose_() was called on an input to the functionalization pass."
-          " Propagating those mutations to the input is currently not supported.");
-      unwrapped.copy_(wrapped_inner);
+    if (unwrapped.nbytes() != wrapped_inner.nbytes()) {
+      // Functions might resize zero-sized inputs, which we need to reflect ehre.
+      unwrapped.resize_(wrapped_inner.sizes());
+    }
+    // If the input tensor's metadata was mutated, then use as_strided_()
+    // to propagate the metadata change.
+    if (unwrapped.sizes() != wrapped_inner.sizes()) {
+      unwrapped.as_strided_(wrapped_inner.sizes(), wrapped_inner.strides());
+    }
+    unwrapped.copy_(wrapped_inner);
   }
 }
 
@@ -329,11 +335,11 @@ static std::tuple<Tensor, int64_t> unwrapTensorAtCurrentLevel(const Tensor& tens
 }
 
 static void tls_set_vmap_excluded(bool excluded) {
-  c10::impl::tls_set_dispatch_key_excluded(kBatchedKey, excluded);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::FuncTorchBatched, excluded);
 }
 
 static bool tls_set_is_included() {
-  return c10::impl::tls_is_dispatch_key_included(kDynamicLayerFrontModeKey);
+  return c10::impl::tls_is_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode);
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
@@ -400,12 +406,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
+
   at::functorch::initCompileCacheBindings(m.ptr());
 
-  // Windows doesn't like this
-#ifndef _WIN32
-  initDispatchBindings(m.ptr());
-#endif
+  // initialize first-class dims and install it as a submodule on _C
+  auto dim = Dim_init();
+  if (!dim) {
+    throw py::error_already_set();
+  }
+  py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
 }
 
 }}

@@ -165,7 +165,7 @@ using qnormalize_fn = void (*)(
 
 using qmean_inner_dim_fn = void (*)(
     const Tensor& /* X */,
-    IntArrayRef /* dim */,
+    OptionalIntArrayRef /* opt_dim */,
     bool /* keepdim */,
     c10::optional<ScalarType> /* opt_dtype */,
     Tensor& /* Y */);

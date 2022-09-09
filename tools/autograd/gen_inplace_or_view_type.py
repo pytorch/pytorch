@@ -22,6 +22,7 @@ from torchgen.api.types import (
     longT,
     OptionalCType,
     symIntArrayRefT,
+    SymIntT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -249,6 +250,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         for r in cpp.argument(
             a,
             method=False,
+            symint=True,
             cpp_no_default_args=set(),
             faithful=False,
             has_tensor_options=False,
@@ -321,6 +323,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
+        OptionalCType(BaseCType(SymIntT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
@@ -494,7 +497,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()
         ]
     )
@@ -514,7 +517,7 @@ def inplace_or_view_method_definition(
     ):
         return None
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns).cpp_type(),
+        return_type=cpp.returns_type(f.func.returns, symint=True).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=gen_formals(f),
         type_definition_body=emit_inplace_or_view_body(fn),

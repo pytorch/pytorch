@@ -107,8 +107,6 @@ class TORCH_CUDA_CU_API WelfordResult {
       TensorView* in_avg,
       TensorView* in_var_sum,
       TensorView* in_n);
-
-  WelfordResult rFactor(const std::vector<int>& axes);
 };
 
 //! Welford operator on specified axes. This is currently the only scan op with
@@ -253,6 +251,9 @@ TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
 // isreal
 TORCH_CUDA_CU_API Val* isreal(Val*);
 TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
+// print
+TORCH_CUDA_CU_API Val* print(Val*);
+TORCH_CUDA_CU_API TensorView* print(TensorView*);
 
 // Broadcasts inp based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
@@ -403,12 +404,14 @@ TORCH_CUDA_CU_API TensorView* sum(
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* min(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 // COMPOUND OPERATIONS
 // add_alpha

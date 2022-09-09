@@ -37,6 +37,10 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
+    if hasattr(test_suite, "check_shape"):
+        kwargs["check_shape"] = test_suite.check_shape
+    if hasattr(test_suite, "check_dtype"):
+        kwargs["check_dtype"] = test_suite.check_dtype
     return verification.verify(*args, **kwargs)
 
 
@@ -57,9 +61,11 @@ def set_rng_seed(seed):
 
 
 class _TestONNXRuntime(common_utils.TestCase):
-    opset_version = _constants.onnx_default_opset
+    opset_version = _constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
+    check_shape = True
+    check_dtype = True
 
     def setUp(self):
         set_rng_seed(0)
@@ -90,7 +96,7 @@ class _TestONNXRuntime(common_utils.TestCase):
         remained_onnx_input_idx=None,
         verbose=False,
     ):
-        def _run_test(m, remained_onnx_input_idx, flatten=True):
+        def _run_test(m, remained_onnx_input_idx, flatten=True, ignore_none=True):
             return run_model_test(
                 self,
                 m,
@@ -107,6 +113,7 @@ class _TestONNXRuntime(common_utils.TestCase):
                 training=training,
                 remained_onnx_input_idx=remained_onnx_input_idx,
                 flatten=flatten,
+                ignore_none=ignore_none,
                 verbose=verbose,
             )
 
@@ -123,7 +130,11 @@ class _TestONNXRuntime(common_utils.TestCase):
 
         if self.is_script_test_enabled and self.is_script:
             script_model = model if is_model_script else torch.jit.script(model)
-            _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
-
+            _run_test(
+                script_model,
+                scripting_remained_onnx_input_idx,
+                flatten=False,
+                ignore_none=False,
+            )
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)

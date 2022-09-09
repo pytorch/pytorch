@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <structmember.h>
@@ -107,7 +108,7 @@ PyTypeObject THPStreamType = {
 
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
-  Py_TYPE(&THPStreamType) = &PyType_Type;
+  Py_SET_TYPE(&THPStreamType, &PyType_Type);
   if (PyType_Ready(&THPStreamType) < 0) {
     throw python_error();
   }

@@ -182,11 +182,17 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
-UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
+UnaryOp::UnaryOp(
+    IrBuilderPasskey passkey,
+    UnaryOpType type,
+    Val* out,
+    Val* in,
+    int rng_offset)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
       out_{out},
-      in_{in} {
+      in_{in},
+      rng_offset_(rng_offset) {
   addOutput(out);
   addInput(in);
 }
@@ -195,7 +201,8 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       unary_op_type_(src->unary_op_type_),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      rng_offset_(src->rng_offset_) {}
 
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -460,7 +467,7 @@ bool GroupedReductionOp::sameAs(const Statement* other) const {
     return false;
   }
 
-  for (const auto i : c10::irange(numReductions())) {
+  for (const auto i : c10::irange(numExprs())) {
     if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
       return false;
     }
@@ -630,7 +637,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init,
-    MmaOptions options)
+    OptionsInMma options)
     : MmaOp(passkey, out, in_a, in_b, init) {
   options_ = options;
 }
@@ -1182,6 +1189,25 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
     itype = IterType::Iteration;
   }
 
+  Val* expanded_extent = nullptr;
+  if (outer->hasExpandedExtent() || inner->hasExpandedExtent()) {
+    if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      expanded_extent = mul(outer->expandedExtent(), inner->expandedExtent());
+    } else if (outer->hasExpandedExtent() && !inner->hasExpandedExtent()) {
+      if (inner->isBroadcast()) {
+        expanded_extent = outer->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->expandedExtent(), inner->extent());
+      }
+    } else if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      if (outer->isBroadcast()) {
+        expanded_extent = inner->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->extent(), inner->expandedExtent());
+      }
+    }
+  }
+
   // Merging trivial reduction with iter domain, that's fine, just make it an
   // iter domain.
   if ((outer->isReduction() || inner->isReduction()) &&
@@ -1193,6 +1219,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       IterDomainBuilder(
           outer->container()->zeroVal(), merged_id_size->as<Int>())
           .parallel_type(outer->getParallelType())
+          .expanded_extent(expanded_extent)
           .iter_type(itype)
           .build();
 
@@ -1234,6 +1261,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop size
   Val* remainder =
       ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+  Val* expanded_remainder = nullptr;
+  if (in->hasExpandedExtent()) {
+    expanded_remainder = ceilDiv(
+        Split::extent(in->expandedExtent(), start_offset, stop_offset), factor);
+  }
 
   if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
       (stop_offset != nullptr && !stop_offset->isZeroInt())) {
@@ -1242,20 +1274,28 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Partial split is only allowed with root domains");
   }
   // outer loop IterDomain
-  IterDomain* ido = IterDomainBuilder(
-                        in->container()->zeroVal(),
-                        inner_split ? remainder->as<Int>() : factor)
-                        .parallel_type(in->getParallelType())
-                        .iter_type(in->getIterType())
-                        .build();
+  IterDomain* ido =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? remainder->as<Int>() : factor)
+          .expanded_extent(
+              in->hasExpandedExtent() && inner_split ? expanded_remainder
+                                                     : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   // inner loop IterDomain
-  IterDomain* idi = IterDomainBuilder(
-                        in->container()->zeroVal(),
-                        inner_split ? factor : remainder->as<Int>())
-                        .parallel_type(in->getParallelType())
-                        .iter_type(in->getIterType())
-                        .build();
+  IterDomain* idi =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? factor : remainder->as<Int>())
+          .expanded_extent(
+              in->hasExpandedExtent() && !inner_split ? expanded_remainder
+                                                      : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1290,6 +1330,41 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
   return split_out;
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    SwizzleMode swizzle_mode) {
+  TORCH_CHECK(
+      !in_x->extent()->isZeroInt() && !in_y->extent()->isZeroInt(),
+      "Invalid swizzling of a empty dimension.");
+
+  // TODO: reduction check on swizzle:
+  TORCH_CHECK(
+      !in_x->isReduction() && !in_y->isReduction(),
+      "swizzled reduction not yet supported");
+
+  for (auto input : InputsOf::outputs(in_x->fusion(), {in_x, in_y})) {
+    TORCH_CHECK(
+        !input->as<IterDomain>()->isBroadcast(),
+        "swizzling broadcast axes not yet supported");
+  }
+
+  // TODO: gather and shift check on swizzle
+  TORCH_INTERNAL_ASSERT(
+      !in_x->isGather() && !in_y->isGather(),
+      "Swizzled gather not yet supported");
+
+  IterDomain* out_x = IterDomainBuilder(in_x).build();
+
+  IterDomain* out_y = IterDomainBuilder(in_y).build();
+
+  IrBuilder::create<Swizzle2D>(
+      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type, swizzle_mode);
+
+  return std::make_pair(out_x, out_y);
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
@@ -1300,15 +1375,23 @@ void IterDomain::parallelize(ParallelType t) {
     return;
   }
 
-  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t) ||
+      t == ParallelType::Group) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, unswitching and grouping are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
         extent(),
         " .");
+  }
+
+  if (t == ParallelType::Group) {
+    TORCH_CHECK(
+        getIterType() == IterType::Iteration,
+        "Grouping IterDomain of non Iteration type is not allowed. ",
+        getIterType());
   }
 
   if (isMmaSwizzled()) {
@@ -1748,6 +1831,39 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   return reordered_domain;
 }
 
+void TensorDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    int x,
+    int y,
+    SwizzleMode swizzle_mode) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
+
+  TORCH_CHECK(
+      x >= 0 && (unsigned int)x < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  TORCH_CHECK(
+      y >= 0 && (unsigned int)y < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  IterDomain* axis_x = axis(x);
+  IterDomain* axis_y = axis(y);
+
+  IterDomain* axis_out_x = nullptr;
+  IterDomain* axis_out_y = nullptr;
+
+  std::tie(axis_out_x, axis_out_y) =
+      IterDomain::swizzle(swizzle_type, axis_x, axis_y, swizzle_mode);
+
+  domain_.erase(domain_.begin() + x);
+  domain_.insert(domain_.begin() + x, axis_out_x);
+
+  domain_.erase(domain_.begin() + y);
+  domain_.insert(domain_.begin() + y, axis_out_y);
+
+  resetDomains();
+}
+
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
@@ -1807,10 +1923,9 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
   return false;
 }
 
-TensorDomain* TensorDomain::view(
-    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+TensorDomain* TensorDomain::view(const AnalyzeViewResult& view_analysis) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
-  return transformView(this, transforms);
+  return transformView(this, view_analysis);
 }
 
 TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
@@ -1961,6 +2076,49 @@ bool Merge::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other);
 }
+
+Swizzle2D::Swizzle2D(
+    IrBuilderPasskey passkey,
+    IterDomain* out_x,
+    IterDomain* out_y,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    Swizzle2DType swizzle_type,
+    SwizzleMode swizzle_mode)
+    : Expr(passkey, ExprType::Swizzle2D),
+      out_x_{out_x},
+      out_y_{out_y},
+      in_x_{in_x},
+      in_y_{in_y},
+      swizzle_type_(swizzle_type),
+      swizzle_mode_(swizzle_mode) {
+  addOutput(out_x);
+  addOutput(out_y);
+  addInput(in_x);
+  addInput(in_y);
+}
+
+bool Swizzle2D::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Swizzle2D>()) {
+    return false;
+  }
+  if (!(swizzle_type_ == other->as<Swizzle2D>()->swizzle_type_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+Swizzle2D::Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_x_(ir_cloner->clone(src->out_x_)),
+      out_y_(ir_cloner->clone(src->out_y_)),
+      in_x_(ir_cloner->clone(src->in_x_)),
+      in_y_(ir_cloner->clone(src->in_y_)),
+      swizzle_type_(src->swizzle_type_),
+      swizzle_mode_(src->swizzle_mode_) {}
 
 NamedScalar::NamedScalar(
     IrBuilderPasskey passkey,

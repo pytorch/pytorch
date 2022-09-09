@@ -58,6 +58,11 @@ std::tuple<Tensor,optional<int64_t>> prelu_batch_rule(
   const auto input_ = moveBatchDimToFront(input, input_bdim);
   auto weight_flatten = moveBatchDimToFront(weight, weight_bdim);
 
+  const auto weight_logical_dim = rankWithoutBatchDim(weight, weight_bdim);
+  TORCH_CHECK(weight_logical_dim == 0 || weight_logical_dim == 1,
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ",
+      weight_logical_dim);
+
   if (weight_flatten.dim() > 1) {
     // for an input [N, C, ...]
     // weight can be a non-vector but the total number of elements must be the same as C
@@ -211,7 +216,7 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> prelu_backward_bat
   return std::make_tuple(std::get<0>(grads), 0, std::get<1>(grads), (weight_grad_is_batched ? optional<int64_t>(0) : nullopt));
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(glu_backward, glu_backward_batch_rule);
   VMAP_SUPPORT(glu, glu_batch_rule);
   VMAP_SUPPORT(prelu, prelu_batch_rule)

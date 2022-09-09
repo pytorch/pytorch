@@ -1,28 +1,33 @@
 torch.Storage
 ===================================
 
-A :class:`torch._TypedStorage` is a contiguous, one-dimensional array of
-elements of a particular :class:`torch.dtype`. It can be given any
-:class:`torch.dtype`, and the internal data will be interpretted appropriately.
-
-Every strided :class:`torch.Tensor` contains a :class:`torch._TypedStorage`,
-which stores all of the data that the :class:`torch.Tensor` views.
-
-For backward compatibility, there are also :class:`torch.<type>Storage` classes
-(like :class:`torch.FloatStorage`, :class:`torch.IntStorage`, etc). These
-classes are not actually instantiated, and calling their constructors creates
-a :class:`torch._TypedStorage` with the appropriate :class:`torch.dtype`.
-:class:`torch.<type>Storage` classes have all of the same class methods that
-:class:`torch._TypedStorage` has.
-
-Also for backward compatibility, :class:`torch.Storage` is an alias for the
-storage class that corresponds with the default data type
-(:func:`torch.get_default_dtype()`). For instance, if the default data type is
-:attr:`torch.float`, :class:`torch.Storage` resolves to
+:class:`torch.Storage` is an alias for the storage class that corresponds with
+the default data type (:func:`torch.get_default_dtype()`). For instance, if the
+default data type is :attr:`torch.float`, :class:`torch.Storage` resolves to
 :class:`torch.FloatStorage`.
 
+The :class:`torch.<type>Storage` and :class:`torch.cuda.<type>Storage` classes,
+like :class:`torch.FloatStorage`, :class:`torch.IntStorage`, etc., are not
+actually ever instantiated. Calling their constructors creates
+a :class:`torch.TypedStorage` with the appropriate :class:`torch.dtype` and
+:class:`torch.device`.  :class:`torch.<type>Storage` classes have all of the
+same class methods that :class:`torch.TypedStorage` has.
 
-.. autoclass:: torch._TypedStorage
+A :class:`torch.TypedStorage` is a contiguous, one-dimensional array of
+elements of a particular :class:`torch.dtype`. It can be given any
+:class:`torch.dtype`, and the internal data will be interpreted appropriately.
+:class:`torch.TypedStorage` contains a :class:`torch.UntypedStorage` which
+holds the data as an untyped array of bytes.
+
+Every strided :class:`torch.Tensor` contains a :class:`torch.TypedStorage`,
+which stores all of the data that the :class:`torch.Tensor` views.
+
+.. autoclass:: torch.TypedStorage
+   :members:
+   :undoc-members:
+   :inherited-members:
+
+.. autoclass:: torch.UntypedStorage
    :members:
    :undoc-members:
    :inherited-members:

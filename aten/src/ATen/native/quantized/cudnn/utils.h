@@ -258,17 +258,6 @@ cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const 
     .build();
 }
 
-cudnn_frontend::Tensor getTensorDescriptorScalar(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
-  return cudnn_frontend::TensorBuilder()
-    .setDim(shape.size(), shape.data())
-    .setStrides(strides.size(), strides.data())
-    .setId(id)
-    .setAlignment(alignment)
-    .setDataType(cudnn_dtype)
-    .setByValue(true)
-    .build();
-}
-
 // TODO: there is a table from input dtype to operator dtype, we can derive
 // the operator dtype based on input dtype
 cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {

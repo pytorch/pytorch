@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 import torch
 from collections import defaultdict
 from torch import nn
@@ -30,32 +30,33 @@ class ActivationSparsifier:
             specifies how inputs should be aggregated over time.
             The aggregate_fn should usually take 2 torch tensors and return the aggregated tensor.
             Example
-                >>> def add_agg_fn(tensor1, tensor2):  return tensor1 + tensor2
-        reduce_fn (Optional, Callable):
-            default reduce_fn that is used if not specified while registering the layer.
-            reduce_fn will be called on the aggregated tensor i.e. the tensor obtained after
-            calling agg_fn() on all inputs.
-            Example
-                >>> def mean_reduce_fn(agg_tensor):    return agg_tensor.mean(dim=0)
-        mask_fn (Optional, Callable):
-            default mask_fn that is used to create the sparsification mask using the tensor obtained after
-            calling the reduce_fn(). This is used by default if a custom one is passed in the
-            register_layer().
-            Note that the mask_fn() definition should contain the sparse arguments that is passed in sparse_config
-            arguments.
-        features (Optional, list):
-            default selected features to sparsify.
-            If this is non-empty, then the mask_fn will be applied for each feature of the input.
-            For example,
-                >>> mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
-        feature_dim (Optional, int):
-            default dimension of input features. Again, features along this dim will be chosen
-            for sparsification.
-        sparse_config (Dict):
-            Default configuration for the mask_fn. This config will be passed
-            with the mask_fn()
+                def add_agg_fn(tensor1, tensor2):  return tensor1 + tensor2
+                reduce_fn (Optional, Callable):
+                    default reduce_fn that is used if not specified while registering the layer.
+                    reduce_fn will be called on the aggregated tensor i.e. the tensor obtained after
+                    calling agg_fn() on all inputs.
+                    Example
+                def mean_reduce_fn(agg_tensor):    return agg_tensor.mean(dim=0)
+                mask_fn (Optional, Callable):
+                    default mask_fn that is used to create the sparsification mask using the tensor obtained after
+                    calling the reduce_fn(). This is used by default if a custom one is passed in the
+                    register_layer().
+                    Note that the mask_fn() definition should contain the sparse arguments that is passed in sparse_config
+                    arguments.
+                features (Optional, list):
+                    default selected features to sparsify.
+                    If this is non-empty, then the mask_fn will be applied for each feature of the input.
+                    For example,
+                mask = [mask_fn(reduce_fn(aggregated_fn(input[feature])) for feature in features]
+                feature_dim (Optional, int):
+                    default dimension of input features. Again, features along this dim will be chosen
+                    for sparsification.
+                sparse_config (Dict):
+                    Default configuration for the mask_fn. This config will be passed
+                    with the mask_fn()
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> model = SomeModel()
         >>> act_sparsifier = ActivationSparsifier(...)  # init activation sparsifier
         >>> # Initialize aggregate_fn
@@ -74,6 +75,7 @@ class ActivationSparsifier:
         >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
         >>>
         >>> # start training process
+        >>> for _ in [...]:
         >>>     # epoch starts
         >>>         # model.forward(), compute_loss() and model.backwards()
         >>>     # epoch ends
@@ -324,6 +326,26 @@ class ActivationSparsifier:
             data_groups[name] = new_config
         return data_groups
 
+    def _convert_mask(self, states_dict, sparse_coo=True):
+        r"""Converts the mask to sparse coo or dense depending on the `sparse_coo` argument.
+        If `sparse_coo=True`, then the mask is stored as sparse coo else dense tensor
+        """
+        states = copy.deepcopy(states_dict)
+        for _, state in states.items():
+            if state['mask'] is not None:
+                if isinstance(state['mask'], List):
+                    for idx in range(len(state['mask'])):
+                        if sparse_coo:
+                            state['mask'][idx] = state['mask'][idx].to_sparse_coo()
+                        else:
+                            state['mask'][idx] = state['mask'][idx].to_dense()
+                else:
+                    if sparse_coo:
+                        state['mask'] = state['mask'].to_sparse_coo()
+                    else:
+                        state['mask'] = state['mask'].to_dense()
+        return states
+
     def state_dict(self) -> Dict[str, Any]:
         r"""Returns the state of the sparsifier as a :class:`dict`.
 
@@ -334,9 +356,9 @@ class ActivationSparsifier:
         * defaults - the default config while creating the constructor
         """
         data_groups = self._get_serializable_data_groups()
-
+        state = self._convert_mask(self.state)
         return {
-            'state': self.state,
+            'state': state,
             'data_groups': data_groups,
             'defaults': self.defaults
         }
@@ -355,13 +377,15 @@ class ActivationSparsifier:
     def __get_state__(self) -> Dict[str, Any]:
 
         data_groups = self._get_serializable_data_groups()
+        state = self._convert_mask(self.state)
         return {
             'defaults': self.defaults,
-            'state': self.state,
+            'state': state,
             'data_groups': data_groups,
         }
 
     def __set_state__(self, state: Dict[str, Any]) -> None:
+        state['state'] = self._convert_mask(state['state'], sparse_coo=False)  # convert mask to dense tensor
         self.__dict__.update(state)
 
         # need to attach layer and hook info into the data_groups

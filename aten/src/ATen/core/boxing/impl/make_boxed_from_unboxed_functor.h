@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/boxing/OperatorKernel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
@@ -63,27 +64,6 @@ class OperatorHandle;
  * and are expected to be called by explicitly specifying the template parameters in a way that matches
  * the expected operator signature at each call site.
  */
-
-/**
- * Inherit from OperatorKernel to implement a c10 kernel.
- *
- * Example:
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- *
- * The kernel class is allowed to have members but these are equivalent
- * to global variables. The kernel implementation is responsible for
- * preventing race conditions on them.
- *
- * See below for how to register this kernel with PyTorch.
- */
-struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
-  virtual ~OperatorKernel() = default;
-};
 
 namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
@@ -373,7 +353,14 @@ namespace impl {
   template<bool AllowDeprecatedTypes>
   struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
     static std::vector<c10::SymInt> call(IValue& v) {
-      return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return r;
+      } else {
+        return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      }
     }
   };
   template<class T, bool AllowDeprecatedTypes>

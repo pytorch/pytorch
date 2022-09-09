@@ -67,6 +67,7 @@ def parse_backend_yaml(
         "autograd",
         "full_codegen",
         "non_native",
+        "ir_gen",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -107,6 +108,9 @@ def parse_backend_yaml(
     # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     non_native = yaml_values.pop("non_native", {})
 
+    # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    _ = yaml_values.pop("ir_gen", {})
+
     assert (
         len(yaml_values.keys()) == 0
     ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
@@ -136,6 +140,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             dispatch_key=dispatch_key,
             use_out_as_primary=use_out_as_primary,
             external=True,
+            symint=True,  # TODO: make this configurable
             device_guard=use_device_guard,
             index=metadata,
         )
@@ -418,6 +423,8 @@ def gen_dispatcher_registrations(
             grouped_native_functions,
         )
     )
+    newline = "\n"
+    ns_helper = NamespaceHelper(namespace_str="at")
     deferred_dispatch_registrations = ""
     static_init_dispatch_registrations = ""
     if eager_registration:
@@ -449,8 +456,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
         f"Register{dispatch_key}.cpp",
         "RegisterDispatchKey.cpp",
         lambda: {
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-            "deferred_dispatch_registrations": deferred_dispatch_registrations,
             "extra_cuda_headers": "",
             "external_backend_headers": external_backend_headers_str,
             "ops_headers": "#include <ATen/Functions.h>"
@@ -461,21 +466,31 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
-            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": list(
-                concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_index,
-                        Target.ANONYMOUS_DEFINITION,
-                        selector,
-                        rocm=False,
-                        class_method_name=f"{class_name}",
-                        skip_dispatcher_op_registration=False,
+            "dispatch_definitions": fm.substitute_with_template(
+                "RegisterDispatchDefinitions.ini",
+                lambda: {
+                    "ns_prologue": ns_helper.prologue,
+                    "ns_epilogue": ns_helper.epilogue,
+                    "static_init_dispatch_registrations": static_init_dispatch_registrations,
+                    "deferred_dispatch_registrations": deferred_dispatch_registrations,
+                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
+                    "dispatch_namespace": dispatch_key.lower(),
+                    "dispatch_namespaced_definitions": "",
+                    "dispatch_anonymous_definitions": list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.ANONYMOUS_DEFINITION,
+                                selector,
+                                rocm=False,
+                                class_method_name=f"{class_name}",
+                                skip_dispatcher_op_registration=False,
+                            ),
+                            grouped_native_functions,
+                        )
                     ),
-                    grouped_native_functions,
-                )
-            ),
+                },
+            ).split(newline),
         },
     )
 

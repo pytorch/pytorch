@@ -16,10 +16,12 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <functorch/csrc/Constants.h>
-#include <functorch/csrc/VmapGeneratedPlumbing.h>
+#include <ATen/VmapGeneratedPlumbing.h>
+
+// This file contains helper functions for batching rules.
 
 namespace at { namespace functorch {
+
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
@@ -119,7 +121,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -243,7 +245,7 @@ inline void boxed_existing_bdim_all_batch_rule(
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -299,7 +301,7 @@ inline void boxed_all_tensors_have_optional_bdim(
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -468,5 +470,8 @@ inline VmapDimVector range(int64_t start, int64_t stop) {
   }
   return dims;
 }
+std::tuple<Tensor, Tensor> _binary_pointwise_helper(
+    const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
+    bool do_type_promotion=true);
 
 }}
