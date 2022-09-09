@@ -172,5 +172,8 @@ void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
+bool SparseCsrTensorImpl::is_contiguous_custom(MemoryFormat) const {
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
+}
 
 } // namespace at

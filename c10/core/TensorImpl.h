@@ -602,6 +602,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return sym_sizes_custom();
     }
+    // Sizes guaranteed to be non-negative, so unchecked cast is OK
     return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
         sizes_and_strides_.sizes_arrayref());
   }
