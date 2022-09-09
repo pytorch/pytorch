@@ -582,9 +582,6 @@
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
   mask: 'not_implemented("native_dropout_backward: mask")'
 
-- name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
-
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
   result: self_t.zero_()

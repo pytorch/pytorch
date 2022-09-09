@@ -3294,7 +3294,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
-        xfail('eig'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
