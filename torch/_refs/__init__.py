@@ -168,6 +168,7 @@ __all__ = [
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
     "item",  # TODO: add OpInfo
+    "to",
     #
     # Reduction ops
     #
@@ -1654,6 +1655,53 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
+# TODO: extend to device and layout similar to
+# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
+def _to_will_alias(
+    a: TensorLikeType,
+    dtype: torch.dtype,
+    copy: bool,
+    memory_format: torch.memory_format,
+) -> bool:
+    return (
+        not copy
+        and a.dtype == dtype
+        and (
+            memory_format == torch.preserve_format
+            or a.is_contiguous(memory_format=memory_format)
+        )
+    )
+
+
+# TODO: there are multiple overloads of to, but we only support one here
+# aten/src/ATen/native/native_functions.yaml lists all overloads
+# Missing overloads:
+# to.dtype_layout
+# to.device
+# to.other
+# https://github.com/pytorch/pytorch/issues/84264
+def to(
+    a: TensorLikeType,
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+    if _to_will_alias(a, dtype, copy, memory_format):
+        return a
+    if (
+        (copy is True or dtype != a.dtype)
+        and memory_format == torch.preserve_format
+        and non_blocking is False
+    ):
+        return prims.convert_element_type(a, dtype)
+    result = torch.empty_like(
+        a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
+    )
+    copy_to(result, a)
+    return result
+
+
 #
 # Reduction references
 #
@@ -1876,21 +1924,14 @@ def amax(
     )
 
 
-def _set_correction(
-    unbiased: Optional[bool] = None,
-    correction: Optional[int] = None,
-):
-    if correction is not None and unbiased is not None:
-        raise RuntimeError("cannot specify both correction and unbiased arguments")
-    elif correction is None and unbiased is None:
-        correction = 1
-    elif correction is None and unbiased is not None:
-        correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
-        raise ValueError("correction argument should be integer")
-    if correction < 0:
-        raise ValueError("correction argument should be non-negative")
-    return correction
+def _dim_var_dispatch(dim=None, unbiased=None):
+    # There's the following overload of torch.var:
+    # var(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    # We need to explicitly convert bool dims to unbiased arg
+    if unbiased is None and isinstance(dim, bool):
+        unbiased = dim
+        dim = None
+    return dim, unbiased
 
 
 @out_wrapper()
@@ -1902,7 +1943,8 @@ def var(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
-    correction = _set_correction(unbiased, correction)
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
+    correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -1929,7 +1971,8 @@ def std(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
-    correction = _set_correction(unbiased, correction)
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
+    correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2003,6 +2046,7 @@ def std_mean(
     keepdim: bool = False,
     correction: Optional[int] = None,
 ):
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     s = std(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return s, m
@@ -2017,6 +2061,7 @@ def var_mean(
     *,
     correction: Optional[int] = None,
 ):
+    dim, unbiased = _dim_var_dispatch(dim, unbiased)
     v = var(a, dim, unbiased, keepdim, correction=correction)
     m = mean(a, dim, keepdim)
     return v, m
@@ -2430,7 +2475,9 @@ def _normalize(
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
-    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    biased_var, mean = torch.var_mean(
+        a_acc, dim=norm_dims, unbiased=False, keepdim=True
+    )
     rstd = torch.rsqrt(biased_var + eps)
     out = (a - mean) * rstd
     return out, mean, rstd
@@ -2612,13 +2659,17 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     return a_
 
 
-# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 # CompositeImplicitAutograd - don't register decomp
 # NOTE: shape is a vararg because Tensor.reshape can be called with as
 # Tensor.reshape(a, b, c) or Tensor.reshape((a, b, c)) Function call
 # torch.reshape doesn't support unpacked shapes
 def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=True)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.reshape(other.size())
 
 
 @register_decomposition(torch.ops.aten.roll)
@@ -2767,6 +2818,7 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     return a.view(tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :]))
 
 
+@register_decomposition(torch.ops.aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
@@ -3088,6 +3140,7 @@ def t(a: TensorLikeType):
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
+@register_decomposition(torch.ops.aten.transpose, disable_meta=True)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
@@ -3097,7 +3150,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _permutation = list(range(0, a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
-    return prims.transpose(a, _permutation)
+    return torch.permute(a, _permutation)
 
 
 # Aliases for transpose
@@ -3120,6 +3173,11 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.view(other.size())
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3959,9 +4017,9 @@ def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
 
     # Number of elements in top trapezoid
     trapezoid_size = (m_first_row + m_last_row) * n_row_trapezoid // 2
-    # Number of elemetns in bottom rectangle
+    # Number of elements in bottom rectangle
     diff_row = n_row_all - n_row_trapezoid
-    rectangle_size = max(0, (n_row_all - n_row_trapezoid) * col)
+    rectangle_size = max(0, diff_row * col)
 
     return trapezoid_size, rectangle_size, m_first_row
 
