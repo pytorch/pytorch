@@ -1454,16 +1454,17 @@ Tensor var_backward(
     if (n == correction) {
       return INFINITY * grad;
     } else {
+      // TODO: sym_numel
       return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const int64_t dof = _safe_size(self.sizes(), dim) - correction;
+  const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
+  return (2.0 / dof.guard_int(__FILE__, __LINE__)) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
 Tensor std_backward(
