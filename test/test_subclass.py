@@ -8,7 +8,7 @@ from torch import nn
 from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
+    TestCase, run_tests, parametrize, skipIfTorchDynamo, subtest, instantiate_parametrized_tests)
 from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
@@ -76,6 +76,7 @@ class TestSubclass(TestCase):
                 # Serialization should preserve both custom type and "parameter-ness".
                 self.assertIsInstance(x_loaded, nn.Parameter)
 
+    @skipIfTorchDynamo("Visible only with functorch as functorch monkeypatches tensor str")
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_repr(self, tensor_cls, as_param):
