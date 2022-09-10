@@ -354,9 +354,11 @@ void initDispatchBindings(PyObject* module) {
     return at::isTensorSubclassLike(tensor);
   });
 
-  m.def("_dispatch_key_name", [](uint64_t dispatch_key) {
-    auto dt = (c10::DispatchKey)dispatch_key;
-    return c10::toString(dt);
+  m.def("_dispatch_key_name", [](c10::DispatchKey k) {
+    return c10::toString(k);
+  });
+  m.def("_dispatch_key_parse", [](c10::DispatchKey k) {
+    return k;
   });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
