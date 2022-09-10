@@ -1,6 +1,7 @@
 #include "caffe2/operators/rnn/recurrent_network_op.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
+#include <c10/util/irange.h>
 
 #ifndef CAFFE2_RNN_NO_TEXT_FORMAT
 #endif
@@ -79,16 +80,17 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
     auto outputs_with_grads =
         argsHelper.GetRepeatedArgument<int32_t>("outputs_with_grads");
     CAFFE_ENFORCE(outputs_with_grads.size() > 0);
+    gradientInputs.reserve(outputs_with_grads.size());
     for (auto id : outputs_with_grads) {
       // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       gradientInputs.push_back(GO(id));
     }
 
     // All inputs and outputs are passed back
-    for (int i = 0; i < def_.input_size(); ++i) {
+    for (const auto i : c10::irange(def_.input_size())) {
       gradientInputs.push_back(I(i));
     }
-    for (int i = 0; i < def_.output_size(); ++i) {
+    for (const auto i : c10::irange(def_.output_size())) {
       gradientInputs.push_back(O(i));
     }
 
@@ -228,8 +230,7 @@ void extractLinks(
       externalArg,
       " ",
       windowArg);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < internal.size(); ++i) {
+  for (const auto i : c10::irange(internal.size())) {
     detail::Link l;
     l.internal = internal[i];
     l.external = external[i];
