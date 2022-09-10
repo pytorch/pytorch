@@ -1677,6 +1677,7 @@ def _to_will_alias(
 
 def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_format=None, layout=None, pin_memory=None):
     if isinstance(device, TensorLike):
+        print("overload to 'to.other'")
         # overload to `to.other`
         memory_format = copy
         copy = non_blocking
@@ -1688,6 +1689,7 @@ def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_f
         layout = other.layout
         pin_memory = other.pin_memory
     elif isinstance(device, torch.dtype):
+        print("overload to 'to.dtype'")
         # overload to `to.dtype`
         memory_format = copy
         copy = non_blocking
@@ -1696,6 +1698,10 @@ def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_f
         layout = None
         pin_memory = None
         device = None
+    elif isinstance(device, torch.device):
+        print("overload to 'to.device'")
+    else:
+        print("overload to 'to.dtype_layout'")
     # overload to `to.device`
     # do nothing because signature of 'to' matches
     # overload to `to.dtype_layout`
@@ -1713,16 +1719,22 @@ def to(
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
 ) -> TensorLikeType:
+    print("before: ", memory_format)
     device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(device, dtype, non_blocking, copy, memory_format, layout, pin_memory)
+    print("after: ", memory_format)
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
     if (
         (copy is True or dtype != a.dtype)
-        and memory_format == torch.preserve_format
+        and (memory_format is None or memory_format == torch.preserve_format)
         and non_blocking is False
+        and device is None
+        and layout is None
+        and pin_memory is None
     ):
         return prims.convert_element_type(a, dtype)
+    print("empty_like: ", memory_format)
     result = torch.empty_like(
         a, dtype=dtype, layout=layout, device=device, requires_grad=a.requires_grad, memory_format=memory_format
     )
