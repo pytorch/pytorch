@@ -597,8 +597,12 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if self.uses_sharded_strategy and not self.needs_unshard():
-            pass  # no need to prepare for an all-gather
+        if (
+            self.uses_sharded_strategy
+            and not self._config.offload_params
+            and not self.needs_unshard()
+        ):
+            pass  # no-op
         elif self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
             ret = True
