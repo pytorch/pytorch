@@ -865,7 +865,6 @@ make_fx_failures = {
     # unknown
     xfail('allclose'),
     xfail('equal'),
-    xfail('linalg.eigvals'),
     # empty
     skip('new_empty'),
     skip('empty_like'),
@@ -914,6 +913,7 @@ symbolic_tensor_failures = {
     # Needs complex-value support
     xfail('polar'),
     xfail('linalg.eig'),
+    xfail('linalg.eigvals'),
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -978,7 +978,6 @@ symbolic_tensor_failures = {
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('double', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('eig', ''),  # aten.eig.default - couldn't find symbolic meta function/decomposition
     xfail('einsum', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('expand_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1089,7 +1088,6 @@ symbolic_tensor_failures = {
     xfail('mm', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
-    xfail('mv', ''),  # aten.mv.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1104,7 +1102,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.batch_norm', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.bilinear', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
-    xfail('nn.functional.binary_cross_entropy_with_logits', ''),  # aten.binary_cross_entropy_with_logits.default - couldn'...
     xfail('nn.functional.conv1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.conv2d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.conv_transpose1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decompo...

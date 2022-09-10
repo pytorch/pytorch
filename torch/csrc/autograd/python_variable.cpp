@@ -218,6 +218,12 @@ static constexpr char trace_cuda_memory_deallocation_fn_name[] =
     "CUDAMemoryDeallocationCallbacks";
 static constexpr char trace_cuda_stream_creation_fn_name[] =
     "CUDAStreamCreationCallbacks";
+static constexpr char trace_cuda_device_synchronization_fn_name[] =
+    "CUDADeviceSynchronizationCallbacks";
+static constexpr char trace_cuda_stream_synchronization_fn_name[] =
+    "CUDAStreamSynchronizationCallbacks";
+static constexpr char trace_cuda_event_synchronization_fn_name[] =
+    "CUDAEventSynchronizationCallbacks";
 
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
@@ -261,6 +267,20 @@ struct ConcretePyInterpreterVTable final
   }
   void trace_gpu_stream_creation(uintptr_t stream) const override {
     concrete_trace_cuda<trace_cuda_stream_creation_fn_name>(stream);
+  }
+  void trace_gpu_device_synchronization() const override {
+    concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>();
+  }
+  void trace_gpu_stream_synchronization(uintptr_t stream) const override {
+    concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>(stream);
+  }
+  void trace_gpu_event_synchronization(uintptr_t event) const override {
+    concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
+  }
+
+  static ConcretePyInterpreterVTable* instance() {
+    static ConcretePyInterpreterVTable s;
+    return &s;
   }
 };
 
@@ -306,9 +326,11 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
 class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
-      : impl_(new c10::impl::PyInterpreter(new ConcretePyInterpreterVTable())) {
-  }
-  // NB: intentionally leaks the memory
+      : impl_(new c10::impl::PyInterpreter(
+            ConcretePyInterpreterVTable::instance())) {}
+  // NB: intentionally leaks the PyInterpreter, as there may still be
+  // references to it that are live, living in objects that aren't being
+  // destructed while Python is being cleaned up.
   ~PyInterpreterHolder() {
     impl_->disarm();
   }
