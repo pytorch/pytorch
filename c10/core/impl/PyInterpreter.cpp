@@ -64,6 +64,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
   void trace_gpu_stream_creation(uintptr_t stream) const override {}
+  void trace_gpu_device_synchronization() const override {}
+  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(uintptr_t event) const override {}
 };
 
 void PyInterpreter::disarm() noexcept {

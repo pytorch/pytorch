@@ -2054,7 +2054,7 @@
     CPU: empty_cpu
     CUDA: empty_cuda
     MPS: empty_mps
-    Meta: empty_meta
+    Meta: empty_meta_symint
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
@@ -2065,7 +2065,7 @@
 - func: new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutograd: new_empty
+    CompositeExplicitAutograd: new_empty_symint
   autogen: new_empty.out
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4439,6 +4439,13 @@
     CompositeExplicitAutogradNonFunctional: select_backward
   autogen: select_backward.out
 
+- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, int index) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_select_backward
+
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
 
@@ -5283,7 +5290,7 @@
 - func: _nested_tensor_size(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_get_nested_size_tensor
+    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_size
   autogen: _nested_tensor_size.out
 
 # _nested_from_padded is not usable from Python, so
@@ -5541,7 +5548,7 @@
 
 - func: zeros(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: zeros
+    CompositeExplicitAutograd: zeros_symint
 
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6882,8 +6889,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    Meta: view_meta
-    ZeroTensor, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
+    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorCUDA: view_nested
 
@@ -8106,15 +8112,6 @@
     CPU: _symeig_helper_cpu
     CUDA: _symeig_helper_cuda
   autogen: _symeig_helper.out
-
-- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CompositeExplicitAutograd: eig_out
-
-- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
@@ -12931,7 +12928,7 @@
 - func: expand_copy.out(Tensor self, SymInt[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: expand_copy_out
+    CompositeExplicitAutograd: expand_copy_out_symint
 
 
 - func: permute_copy.out(Tensor self, int[] dims, *, Tensor(a!) out) -> Tensor(a!)
@@ -13051,7 +13048,7 @@
 - func: view_copy.out(Tensor self, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_copy_out
+    CompositeExplicitAutograd: view_copy_out_symint
 
 
 - func: view_copy.dtype_out(Tensor self, ScalarType dtype, *, Tensor(a!) out) -> Tensor(a!)
@@ -13129,6 +13126,11 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+- func: _flash_scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool causal) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: flash_scaled_dot_product_attention
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function

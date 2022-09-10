@@ -532,6 +532,16 @@ class TestNestedTensorDeviceType(TestCase):
         answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
         self.assertEqual(nt[1, 1, :], answer)
 
+        # Test that indexing works when requires_grad_(True)
+        # previously this was failing because the backward kernel for select.int uses .sizes()
+        nt = torch.nested_tensor([x0, x1]).requires_grad_(True)
+        self.assertEqual(nt[0], x0)
+        self.assertEqual(nt[-1], x1)
+        grad_x0 = torch.randn((2, 5), device=device, dtype=dtype)
+        nt[0].backward(grad_x0)
+        expected_grad = torch.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
+        self.assertEqual(nt.grad, expected_grad)
+
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_nested_tensor_indexing_noncontiguous(self, device, dtype):
@@ -1067,7 +1077,7 @@ class TestNestedTensorDeviceType(TestCase):
             torch.functional.F.linear(nt, weight1, bias)
 
         # inconsistent last dim of nested tensor
-        msg = r"all tensors in NestedTensor must have the same trailing dim"
+        msg = r"Expected all tensors in nested tensor to have the same trailing dimension, instead last dimension equals:"
         nt2 = torch.nested_tensor([torch.randn(1, 2, device=device, dtype=dtype),
                                   torch.randn(2, 3, device=device, dtype=dtype)])
         with self.assertRaisesRegex(RuntimeError, msg):
