@@ -88,7 +88,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
-  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -158,6 +158,10 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   }
 
   return c10::SymIntArrayRef::fromIntArrayRef(sizes_custom());
+}
+
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
+  return sym_sizes_custom();
 }
 
 void LTCTensorImpl::setup_size_properties() {

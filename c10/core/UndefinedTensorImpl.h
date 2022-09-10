@@ -25,8 +25,6 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 
  protected:
   bool is_contiguous_custom(MemoryFormat format) const override;
-  IntArrayRef strides_custom() const override;
-  SymIntArrayRef sym_strides_custom() const override;
 
  private:
   UndefinedTensorImpl();
