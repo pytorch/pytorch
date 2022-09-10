@@ -98,6 +98,9 @@ def dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool =
 def alpha_dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 
+def dropout1d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
+
+
 def dropout2d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 

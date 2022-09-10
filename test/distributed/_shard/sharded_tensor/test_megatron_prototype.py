@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.api import (
     shard_parameter,
@@ -41,9 +40,18 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
 class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
-    def _run_megatron_linear(self, spec, input_size, linear_size):
+    def assertEdistNorm(self, t1, t2):
+        """
+        Use a normalized euclidean distance measure to validate two tensors
+        are close since comparing each element individually is not a good
+        measure where majority of elements are similar and maybe only a few
+        elements are slightly off.
+        """
+        dist = torch.sqrt(((t1 - t2) ** 2).sum() / t1.numel())
+        self.assertTrue(dist.item() <= 0.5)
+
+    def _run_megatron_linear(self, spec, input_size, linear_size, dtype):
         def _weight_override(module_dst, module_src):
             module_dst.fc1.weight = clone_module_parameter(module_src.fc1, "weight")
             module_dst.fc1.bias = clone_module_parameter(module_src.fc1, "bias")
@@ -56,18 +64,14 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
 
         # Use same seed.
         torch.manual_seed(0)
-        local_megatron_lm = SimpleMegatronLM(linear_size, rank=self.rank).cuda(
-            self.rank
-        )
-        sharded_megatron_lm = SimpleMegatronLM(linear_size)
+        local_megatron_lm = SimpleMegatronLM(linear_size, rank=self.rank, dtype=dtype)
+        sharded_megatron_lm = SimpleMegatronLM(linear_size, dtype=dtype)
         _weight_override(sharded_megatron_lm, local_megatron_lm)
 
         # Shard the parameter. First col-wise sharding and then row-wise
         _shard_parameter(sharded_megatron_lm, spec)
 
-        # Run sharded computation
-        torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.rand(*input_size).cuda(self.rank)
+        # Setup resharding of output.
         reshard_spec = copy.deepcopy(spec[1])
         reshard_spec.placements.sort(key=lambda placement: placement.rank())
         reshard_spec.dim = 0
@@ -75,17 +79,35 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         sharded_megatron_lm = _collect_local_shard(
             _reshard_output(sharded_megatron_lm, reshard_spec)
         )
-        sharded_output = sharded_megatron_lm(inp)
+
+
+        torch.manual_seed(self.rank)  # inputs different on each rank
+        inp = torch.rand(*input_size, requires_grad=True, device=self.rank, dtype=dtype)
 
         # Run local computation
         local_output = local_megatron_lm(inp)
 
-        # Verify
-        self.assertEqual(local_output, sharded_output)
-
         # Compute loss and run backward pass.
         local_output.sum().backward()
+
+        # Save and reset input grads.
+        local_input_grad = inp.grad
+        self.assertIsNotNone(inp.grad)
+        inp.grad = None
+
+        # Run sharded computation
+        sharded_output = sharded_megatron_lm(inp)
+
+        # Verify local and sharded results
+        self.assertEqual(local_output, sharded_output, atol=1e-3, rtol=1e-6)
+
         sharded_output.sum().backward()
+        sharded_input_grad = inp.grad
+        self.assertIsNotNone(inp.grad)
+
+        # Verify sharded and local grads.
+        self.assertEqual(local_input_grad, sharded_input_grad, atol=1e-3, rtol=1e-6)
+
         (
             local_weight_grad_fc1,
             local_weight_grad_fc2,
@@ -129,18 +151,18 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         )
 
         # Test backward gradient calculation.
-        self.assertEqual(sharded_weight_fc1.grad, local_grad_narrowed_fc1)
-        self.assertEqual(sharded_weight_fc2.grad, local_grad_narrowed_fc2)
-        self.assertEqual(bias_grad_fc1, local_bias_grad_fc1)
-        self.assertEqual(bias_grad_fc2, local_bias_grad_fc2)
+        self.assertEdistNorm(sharded_weight_fc1.grad, local_grad_narrowed_fc1)
+        self.assertEdistNorm(sharded_weight_fc2.grad, local_grad_narrowed_fc2)
+        self.assertEdistNorm(bias_grad_fc1, local_bias_grad_fc1)
+        self.assertEdistNorm(bias_grad_fc2, local_bias_grad_fc2)
 
         # Test optimizer.
         bias_fc1, bias_fc2 = sharded_megatron_lm.get_biases()
         local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_biases()
-        self.assertEqual(bias_fc1, local_bias_fc1)
-        self.assertEqual(bias_fc2, local_bias_fc2)
-        self.assertEqual(bias_fc1.grad, local_bias_fc1.grad)
-        self.assertEqual(bias_fc2.grad, local_bias_fc2.grad)
+        self.assertEdistNorm(bias_fc1, local_bias_fc1)
+        self.assertEdistNorm(bias_fc2, local_bias_fc2)
+        self.assertEdistNorm(bias_fc1.grad, local_bias_fc1.grad)
+        self.assertEdistNorm(bias_fc2.grad, local_bias_fc2.grad)
         previous_sharded_weight_fc1 = sharded_weight_fc1.clone()
         previous_sharded_weight_fc2 = sharded_weight_fc2.clone()
         previous_bias_fc1 = bias_fc1.clone()
@@ -148,7 +170,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
         optim.step()
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_megatron_lm)),
+            dict(sharded_megatron_lm.named_parameters()),
             torch.optim.SGD,
             lr=0.1,
         )
@@ -165,15 +187,15 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         self.assertEqual(sharded_weight_fc2.size(), local_weight_fc2_narrowed.size())
         self.assertNotEqual(previous_sharded_weight_fc1, sharded_weight_fc1)
         self.assertNotEqual(previous_sharded_weight_fc2, sharded_weight_fc2)
-        self.assertEqual(sharded_weight_fc1, local_weight_fc1_narrowed)
-        self.assertEqual(sharded_weight_fc2, local_weight_fc2_narrowed)
+        self.assertEdistNorm(sharded_weight_fc1, local_weight_fc1_narrowed)
+        self.assertEdistNorm(sharded_weight_fc2, local_weight_fc2_narrowed)
 
         # Test bias value after optimizer.
         local_bias_fc1, local_bias_fc2 = local_megatron_lm.get_biases()
         self.assertNotEqual(previous_bias_fc1, bias_fc1)
-        self.assertEqual(bias_fc1, local_bias_fc1)
+        self.assertEdistNorm(bias_fc1, local_bias_fc1)
         self.assertNotEqual(previous_bias_fc2, bias_fc2)
-        self.assertEqual(bias_fc2, local_bias_fc2)
+        self.assertEdistNorm(bias_fc2, local_bias_fc2)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -182,10 +204,22 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)
         for spec in zip(colwise_sharding_spec, rowwise_sharding_spec):
-            self._run_megatron_linear(spec, [22, 17], [[17, 12], [12, 29]])
-            self._run_megatron_linear(spec, [28, 21], [[21, 11], [11, 29]])
-            self._run_megatron_linear(spec, [37, 23], [[23, 13], [13, 24]])
-            self._run_megatron_linear(spec, [24, 15], [[15, 14], [14, 20]])
+            self._run_megatron_linear(spec, [22, 17], [[17, 12], [12, 29]], torch.float16)
+            self._run_megatron_linear(spec, [28, 21], [[21, 11], [11, 29]], torch.float32)
+            self._run_megatron_linear(spec, [37, 23], [[23, 13], [13, 24]], torch.float64)
+            self._run_megatron_linear(spec, [24, 15], [[15, 14], [14, 20]], torch.float16)
+
+            # Test multiple input dims
+            self._run_megatron_linear(spec, [10, 22, 17], [[17, 12], [12, 29]], torch.float32)
+            self._run_megatron_linear(spec, [13, 28, 21], [[21, 11], [11, 29]], torch.float16)
+            self._run_megatron_linear(spec, [27, 37, 23], [[23, 13], [13, 24]], torch.float32)
+            self._run_megatron_linear(spec, [100, 24, 15], [[15, 14], [14, 20]], torch.float64)
+
+            # Test single input dim
+            self._run_megatron_linear(spec, [17], [[17, 12], [12, 29]], torch.float16)
+            self._run_megatron_linear(spec, [21], [[21, 11], [11, 29]], torch.float32)
+            self._run_megatron_linear(spec, [23], [[23, 13], [13, 24]], torch.float64)
+            self._run_megatron_linear(spec, [15], [[15, 14], [14, 20]], torch.float16)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 import math
 import sys
 import errno
-import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -15,6 +14,7 @@ import unittest
 import itertools
 import warnings
 import tempfile
+import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch.utils.data import (
     ChainDataset,
@@ -35,7 +35,7 @@ from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS)
 
@@ -47,7 +47,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_IN_CI:
+    if IS_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -133,9 +133,46 @@ class TestDatasetRandomSplit(TestCase):
         self.assertEqual(len(splits[0]), 2)
         self.assertEqual(len(splits[1]), 4)
 
+        splits = random_split([1, 2, 3, 4, 5, 6], [0.5, 0.5])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 3)
+        self.assertEqual(len(splits[1]), 3)
+
+        # Odd size splits
+        self.assertEqual(
+            len(random_split(range(3), [0.5, 0.5], generator=torch.Generator().manual_seed(1))),
+            2
+        )
+
+        # Odd sized round-robin splits
+        splits = random_split(range(106), [0.1, 0.2, 0.3, 0.4],
+                              generator=torch.Generator().manual_seed(1))
+        self.assertEqual(len(splits[0]), 11)
+        self.assertEqual(len(splits[1]), 22)
+        self.assertEqual(len(splits[2]), 31)
+        self.assertEqual(len(splits[3]), 42)
+
+
     def test_splits_are_mutually_exclusive(self):
         data = [5, 2, 3, 4, 1, 6]
         splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        splits = random_split(data, [0.33, 0.67])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        data = [1, 2, 3, 4]
+        splits = random_split(data, [0.25, 0.75])
         all_values = []
         all_values.extend(list(splits[0]))
         all_values.extend(list(splits[1]))
@@ -166,6 +203,13 @@ class TestDatasetRandomSplit(TestCase):
         for batch in data_loader:
             pass
 
+        # fractional splitting
+        dataset = CustomDataset(self, x)
+        dataset = random_split(dataset, [1.0])[0]
+        data_loader = DataLoader(dataset)
+        for batch in data_loader:
+            pass
+
     def test_splits_reproducibility(self):
         self.assertEqual(
             [list(x) for x in random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(1))],
@@ -175,6 +219,23 @@ class TestDatasetRandomSplit(TestCase):
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
         )
+        self.assertEqual(
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+        )
+        self.assertEqual(
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+        )
+
+    def test_incomplete_fractional_splits(self):
+        with self.assertRaises(ValueError):
+            # should raise since the sum of fractions is not 1
+            random_split([1, 2, 3, 4], [0.1])
+
+        with self.assertRaises(ValueError):
+            # should raise since fraction > 1
+            random_split([1, 2, 3, 4], [1.1])
 
     def test_splits_generator(self):
         # A random_split without a specific generator should affect the default one
@@ -660,8 +721,6 @@ class TestProperExitIterableDataset(IterableDataset):
             raise StopIteration
         return torch.tensor(-1000)
 
-    next = __next__  # py2 compatibility
-
 
 # See TestDataLoader.test_proper_exit for usage
 def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
@@ -1065,6 +1124,8 @@ except RuntimeError as e:
             next(loader2_it)
             next(loader1_it)
             next(loader2_it)
+            del loader1_it
+            del loader2_it
 
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
@@ -1833,7 +1894,10 @@ except RuntimeError as e:
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
+                # TODO: Fix test for 'loader_kill' that would cause running out of shared memory.
+                # Killing loader process would prevent DataLoader iterator clean up all queues
+                # and worker processes
+                exit_methods = [None, 'loader_error', 'worker_error', 'worker_kill']
                 persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
@@ -2158,6 +2222,9 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+# Define a global function for testing purposes since local functions cannot be pickled
+def identity(x):
+    return x
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2168,10 +2235,10 @@ class TestDataLoader2(TestCase):
     def test_basics(self):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
-        dp = IterableWrapper(list(range(1000)))
-        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
+        dp = IterableWrapper(list(range(1000))).sharding_filter()
+        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
@@ -2189,24 +2256,18 @@ class TestDataLoader2(TestCase):
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
         self.assertEqual(items, list(dl))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
-        self.assertEqual(items, list(dl))
-
         dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
         self.assertNotEqual(items, list(dl))
         self.assertEqual(items, sorted(list(dl)))
 
         dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True,
-                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
         self.assertEqual(list(dl), items)
 
 
@@ -2268,6 +2329,65 @@ class TestDataLoader2_EventLoop(TestCase):
         self.assertEqual(input_len, len(local_datapipe))
 
         clean_me(process, req_queue, res_queue)
+
+
+class IntegrationTestDataLoaderDataPipe(TestCase):
+    r"""
+    Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
+    """
+
+    def test_shuffler_iterdatapipe(self):
+        r"""
+        Verify ``IterDataPipe.shuffle`` is controlled by ``DataLoader``
+        to generate different seeds deterministically per epoch.
+        """
+        exp = list(range(100))
+
+        def _create_dp(buffer_size):
+            input_ds = dp.iter.IterableWrapper(exp)
+            return input_ds.shuffle(buffer_size=buffer_size).sharding_filter()
+
+        for bs in (5, 20, 33):
+            # Test Deterministic
+            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
+                if num_workers == 0 and pw:
+                    continue
+
+                shuffle_dp = _create_dp(bs)
+
+                mp_ctx = "spawn" if num_workers > 0 else None
+                dl = DataLoader(
+                    shuffle_dp,
+                    num_workers=num_workers,
+                    shuffle=True,
+                    multiprocessing_context=mp_ctx,
+                    persistent_workers=pw
+                )
+
+                # No seed
+                dl_res_ns = list(dl)
+                self.assertEqual(sorted(dl_res_ns), exp)
+
+                # Same seeds
+                dl_res = []
+                for epoch in range(2):
+                    torch.manual_seed(123)
+                    dl_res.append(list(dl))
+                self.assertEqual(dl_res[0], dl_res[1])
+                self.assertEqual(sorted(dl_res[0]), exp)
+
+                # Different seeds
+                torch.manual_seed(321)
+                dl_res.append(list(dl))
+
+                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
+                self.assertNotEqual(dl_res[0], dl_res[2])
+                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+
+                if dl._iterator is not None:
+                    dl._iterator._shutdown_workers()
+                    dl._iterator = None
+                del dl
 
 
 class StringDataset(Dataset):
@@ -2670,22 +2790,28 @@ class SetAffinityDataset(IterableDataset):
         after = os.sched_getaffinity(0)
         return iter(after)
 
-
-def worker_set_affinity(_):
-    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
-
-
 @unittest.skipIf(
     not hasattr(os, 'sched_setaffinity'),
     "os.sched_setaffinity is not available")
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
+        # Query the current affinity mask to avoid setting a disallowed one
+        old_affinity = os.sched_getaffinity(0)
+        if not old_affinity:
+            self.skipTest("No affinity information")
+        # Choose any
+        expected_affinity = list(old_affinity)[-1]
+
+        def worker_set_affinity(_):
+            os.sched_setaffinity(0, [expected_affinity])
+
+
         dataset = SetAffinityDataset()
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
+            self.assertEqual(sample, [expected_affinity])
 
 class ConvDataset(Dataset):
     def __init__(self):

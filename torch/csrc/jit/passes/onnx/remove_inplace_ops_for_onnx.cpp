@@ -332,10 +332,12 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
             std::find(node->inputs().begin(), node->inputs().end(), input);
         if (it != node->inputs().end()) {
           int index = std::distance(node->inputs().begin(), it);
-          std::cerr << "Warning: ONNX Preprocess - Removing mutation from node "
-                    << node->kind().toQualString() << " on block input: '"
-                    << (*it)->debugName() << "'. This changes graph semantics."
-                    << std::endl;
+          TORCH_WARN(
+              "ONNX Preprocess - Removing mutation from node ",
+              node->kind().toQualString(),
+              " on block input: '",
+              (*it)->debugName(),
+              "'. This changes graph semantics.");
 
           Node* newNode =
               addDummyClone(b->owningGraph(), input, false, b->return_node());

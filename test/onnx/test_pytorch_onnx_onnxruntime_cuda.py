@@ -2,28 +2,34 @@
 
 import unittest
 
+import onnx_test_common
+
 import onnxruntime  # noqa: F401
-from test_pytorch_common import (
+import parameterized
+
+import torch
+from pytorch_test_common import (
     skipIfNoBFloat16Cuda,
     skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
-
-# TODO(justinchuby): Remove reference to other unit tests.
-from test_pytorch_onnx_onnxruntime import TestONNXRuntime
-
-import torch
+from test_pytorch_onnx_onnxruntime import (
+    _parameterized_class_attrs_and_values,
+    MAX_ONNX_OPSET_VERSION,
+    MIN_ONNX_OPSET_VERSION,
+)
 from torch.cuda.amp import autocast
-from torch.onnx._globals import GLOBALS
+from torch.testing._internal import common_utils
 
 
-class TestONNXRuntime_cuda(unittest.TestCase):
-
-    opset_version = GLOBALS.export_onnx_opset_version
-    keep_initializers_as_inputs = True
-    onnx_shape_inference = True
-
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values(
+        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+    ),
+    class_name_func=onnx_test_common.parameterize_class_name,
+)
+class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
     def test_gelu_fp16(self):
@@ -48,7 +54,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_layer_norm_fp16(self):
         class LayerNormModel(torch.nn.Module):
             def __init__(self):
-                super(LayerNormModel, self).__init__()
+                super().__init__()
                 self.layer_norm = torch.nn.LayerNorm([10, 10])
 
             @autocast()
@@ -72,7 +78,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
             def __init__(self):
-                super(FusionModel, self).__init__()
+                super().__init__()
                 self.loss = torch.nn.NLLLoss(reduction="none")
                 self.m = torch.nn.LogSoftmax(dim=1)
 
@@ -96,7 +102,7 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     def test_apex_o2(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
-                super(LinearModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(3, 5)
 
             def forward(self, x):
@@ -146,8 +152,5 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         self.run_test(Model(), (x, y))
 
 
-TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
-TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
-
 if __name__ == "__main__":
-    unittest.main(TestONNXRuntime_cuda())
+    common_utils.run_tests()

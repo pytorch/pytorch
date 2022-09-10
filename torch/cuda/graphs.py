@@ -161,7 +161,7 @@ class graph(object):
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-def make_graphed_callables(callables, sample_args):
+def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     r"""
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
@@ -189,6 +189,8 @@ def make_graphed_callables(callables, sample_args):
         sample_args (tuple of Tensors, or tuple of tuples of Tensors): Samples args for each callable.
             If a single callable was passed, ``sample_args`` must be a single tuple of argument Tensors.
             If a tuple of callables was passed, ``sample_args`` must be tuple of tuples of argument Tensors.
+        num_warmup_iters (int): The number of warmup iterations. Currently, ``DataDistributedParallel`` needs
+            11 iterations for warm up. Default: ``3``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -222,8 +224,15 @@ def make_graphed_callables(callables, sample_args):
         they appeared in that callable's ``sample_args``.
 
     .. warning::
+        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
+        caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
+
+    .. warning::
         All Tensor outputs of graphed callables must require grad.
     """
+    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+        raise RuntimeError("make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`.")
+
     just_one_callable = False
 
     if not isinstance(callables, tuple):
@@ -264,7 +273,7 @@ def make_graphed_callables(callables, sample_args):
         for func, args, static_input_surface in zip(callables,
                                                     sample_args,
                                                     per_callable_static_input_surfaces):
-            for _ in range(3):
+            for _ in range(num_warmup_iters):
                 outputs = func(*args)
                 outputs = (outputs,) if isinstance(outputs, torch.Tensor) else outputs
                 grad_inputs = torch.autograd.grad(outputs=outputs,

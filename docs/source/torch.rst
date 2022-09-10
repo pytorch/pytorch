@@ -224,6 +224,8 @@ Parallelism
     get_num_interop_threads
     set_num_interop_threads
 
+.. _torch-rst-local-disable-grad:
+
 Locally disabling gradient computation
 --------------------------------------
 The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
@@ -531,6 +533,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex
@@ -555,7 +558,6 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
     ger
     inner
@@ -611,6 +613,10 @@ Utilities
     vmap
     _assert
 
+Operator Tags
+------------------------------------
+.. autoclass:: Tag
+    :members:
 
 .. Empty submodules added only for tracking.
 .. py:module:: torch.contrib

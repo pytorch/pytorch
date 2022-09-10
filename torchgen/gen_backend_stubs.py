@@ -1,15 +1,18 @@
-import pathlib
 import argparse
 import os
-import yaml
+import pathlib
 import re
-from collections import namedtuple, Counter, defaultdict
-from typing import List, Dict, Union, Sequence, Optional
-from torchgen.gen import (
-    get_grouped_native_functions,
-    parse_native_yaml,
-    NamespaceHelper,
-)
+from collections import Counter, defaultdict, namedtuple
+from typing import Dict, List, Optional, Sequence, Set, Union
+
+import yaml
+
+import torchgen.api.dispatcher as dispatcher
+import torchgen.dest as dest
+from torchgen.api.types import DispatcherSignature
+from torchgen.code_template import CodeTemplate
+from torchgen.context import native_function_manager
+from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -19,12 +22,14 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target, concatMap, context, YamlLoader, FileManager
-from torchgen.context import native_function_manager
-from torchgen.code_template import CodeTemplate
-import torchgen.dest as dest
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.types import DispatcherSignature
+from torchgen.utils import (
+    concatMap,
+    context,
+    FileManager,
+    NamespaceHelper,
+    Target,
+    YamlLoader,
+)
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -61,6 +66,9 @@ def parse_backend_yaml(
         "supported",
         "autograd",
         "full_codegen",
+        "non_native",
+        "ir_gen",
+        "symint",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -89,6 +97,14 @@ def parse_backend_yaml(
         supported, list
     ), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
+    symint = yaml_values.pop("symint", [])
+    if symint is None:
+        symint = []  # Allow an empty list of symint ops
+    assert isinstance(
+        symint, list
+    ), f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
+    symint_set = set(symint)
+
     supported_autograd = yaml_values.pop("autograd", [])
     assert isinstance(
         supported_autograd, list
@@ -98,6 +114,12 @@ def parse_backend_yaml(
     full_codegen = yaml_values.pop("full_codegen", [])
     supported.extend(full_codegen)
 
+    # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    non_native = yaml_values.pop("non_native", {})
+
+    # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
+    _ = yaml_values.pop("ir_gen", {})
+
     assert (
         len(yaml_values.keys()) == 0
     ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
@@ -105,6 +127,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     def create_backend_index(
         backend_ops: List[str],
+        symint_ops: Set[str],
         dispatch_key: DispatchKey,
         *,
         use_out_as_primary: bool,
@@ -118,8 +141,12 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             ), f"Found an invalid operator name: {op_name}"
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
+            if op in symint_ops:
+                kernel_name += "_symint"
             # TODO: allow structured external backends later.
-            m = BackendMetadata(kernel=kernel_name, structured=False)
+            m = BackendMetadata(
+                kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
+            )
             metadata[op_name] = m
         return BackendIndex(
             dispatch_key=dispatch_key,
@@ -138,6 +165,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
         backend_idx = create_backend_index(
             supported,
+            symint_set,
             backend_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -155,6 +183,7 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
         autograd_idx = create_backend_index(
             supported_autograd,
+            symint_set,
             autograd_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -259,7 +288,10 @@ def error_on_missing_kernels(
             native_f
         )
 
-    kernel_defn_regex = rf"{class_name}::([\w\d]*)\([^\)]*\)\s*{{"
+    # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
+    # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
+    # here, then we get a nicer error message. If we miss it, you get a linker error.
+    kernel_defn_regex = rf"{class_name}::\s*([\w\d]*)\("
     actual_backend_kernel_name_counts = Counter(
         re.findall(kernel_defn_regex, backend_defns)
     )
@@ -369,7 +401,6 @@ def gen_dispatcher_registrations(
     fm: FileManager,
     output_dir: str,
     class_name: str,
-    cpp_namespace: str,
     backend_indices: Dict[DispatchKey, BackendIndex],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_dispatch_key: DispatchKey,
@@ -399,13 +430,14 @@ def gen_dispatcher_registrations(
                 Target.REGISTRATION,
                 selector,
                 rocm=False,
-                cpp_namespace=cpp_namespace,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
             ),
             grouped_native_functions,
         )
     )
+    newline = "\n"
+    ns_helper = NamespaceHelper(namespace_str="at")
     deferred_dispatch_registrations = ""
     static_init_dispatch_registrations = ""
     if eager_registration:
@@ -437,8 +469,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
         f"Register{dispatch_key}.cpp",
         "RegisterDispatchKey.cpp",
         lambda: {
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-            "deferred_dispatch_registrations": deferred_dispatch_registrations,
             "extra_cuda_headers": "",
             "external_backend_headers": external_backend_headers_str,
             "ops_headers": "#include <ATen/Functions.h>"
@@ -449,22 +479,31 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
-            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": list(
-                concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_index,
-                        Target.ANONYMOUS_DEFINITION,
-                        selector,
-                        rocm=False,
-                        cpp_namespace=cpp_namespace,
-                        class_method_name=f"{class_name}",
-                        skip_dispatcher_op_registration=False,
+            "dispatch_definitions": fm.substitute_with_template(
+                "RegisterDispatchDefinitions.ini",
+                lambda: {
+                    "ns_prologue": ns_helper.prologue,
+                    "ns_epilogue": ns_helper.epilogue,
+                    "static_init_dispatch_registrations": static_init_dispatch_registrations,
+                    "deferred_dispatch_registrations": deferred_dispatch_registrations,
+                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
+                    "dispatch_namespace": dispatch_key.lower(),
+                    "dispatch_namespaced_definitions": "",
+                    "dispatch_anonymous_definitions": list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.ANONYMOUS_DEFINITION,
+                                selector,
+                                rocm=False,
+                                class_method_name=f"{class_name}",
+                                skip_dispatcher_op_registration=False,
+                            ),
+                            grouped_native_functions,
+                        )
                     ),
-                    grouped_native_functions,
-                )
-            ),
+                },
+            ).split(newline),
         },
     )
 
@@ -544,7 +583,6 @@ def run(
             fm,
             output_dir,
             class_name,
-            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,

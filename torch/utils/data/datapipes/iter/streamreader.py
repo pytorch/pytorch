@@ -17,6 +17,7 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
             If ``None``, all bytes will be read util the EOF.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper, StreamReader
         >>> from io import StringIO
         >>> dp = IterableWrapper([("alphabet", StringIO("abcde"))])
@@ -32,5 +33,6 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
             while True:
                 d = stream.read(self.chunk)
                 if not d:
+                    stream.close()
                     break
                 yield (furl, d)

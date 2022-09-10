@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Runtime.h>
-#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -8,13 +7,11 @@ namespace api {
 
 namespace {
 
-
 void find_requested_layers_and_extensions(
     std::vector<const char*>& enabled_layers,
     std::vector<const char*>& enabled_extensions,
     const std::vector<const char*>& requested_layers,
     const std::vector<const char*>& requested_extensions) {
-
   // Get supported instance layers
   uint32_t layer_count = 0;
   VK_CHECK(vkEnumerateInstanceLayerProperties(&layer_count, nullptr));
@@ -55,27 +52,27 @@ void find_requested_layers_and_extensions(
 
 VkInstance create_instance(const RuntimeConfiguration& config) {
   const VkApplicationInfo application_info{
-    VK_STRUCTURE_TYPE_APPLICATION_INFO,  // sType
-    nullptr,  // pNext
-    "PyTorch Vulkan Backend",  // pApplicationName
-    0,  // applicationVersion
-    nullptr, // pEngineName
-    0,  // engineVersion
-    VK_API_VERSION_1_0,  // apiVersion
+      VK_STRUCTURE_TYPE_APPLICATION_INFO, // sType
+      nullptr, // pNext
+      "PyTorch Vulkan Backend", // pApplicationName
+      0, // applicationVersion
+      nullptr, // pEngineName
+      0, // engineVersion
+      VK_API_VERSION_1_0, // apiVersion
   };
 
   std::vector<const char*> enabled_layers;
   std::vector<const char*> enabled_extensions;
 
   if (config.enableValidationMessages) {
-    std::vector<const char*> requested_layers {
-      // "VK_LAYER_LUNARG_api_dump",
-      "VK_LAYER_KHRONOS_validation",
+    std::vector<const char*> requested_layers{
+        // "VK_LAYER_LUNARG_api_dump",
+        "VK_LAYER_KHRONOS_validation",
     };
-    std::vector<const char*> requested_extensions {
-      #ifdef VK_EXT_debug_report
-      VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-      #endif
+    std::vector<const char*> requested_extensions{
+#ifdef VK_EXT_debug_report
+        VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+#endif /* VK_EXT_debug_report */
     };
 
     find_requested_layers_and_extensions(
@@ -86,14 +83,14 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
   }
 
   const VkInstanceCreateInfo instance_create_info{
-    VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,  // sType
-    nullptr,  // pNext
-    0u,  // flags
-    &application_info,  // pApplicationInfo
-    static_cast<uint32_t>(enabled_layers.size()),  // enabledLayerCount
-    enabled_layers.data(),  // ppEnabledLayerNames
-    static_cast<uint32_t>(enabled_extensions.size()),  // enabledExtensionCount
-    enabled_extensions.data(),  // ppEnabledExtensionNames
+      VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      &application_info, // pApplicationInfo
+      static_cast<uint32_t>(enabled_layers.size()), // enabledLayerCount
+      enabled_layers.data(), // ppEnabledLayerNames
+      static_cast<uint32_t>(enabled_extensions.size()), // enabledExtensionCount
+      enabled_extensions.data(), // ppEnabledExtensionNames
   };
 
   VkInstance instance{};
@@ -102,15 +99,15 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
 
 #ifdef USE_VULKAN_VOLK
   volkLoadInstance(instance);
-#endif
+#endif /* USE_VULKAN_VOLK */
 
   return instance;
 }
 
-std::vector<Adapter> create_adapters(const VkInstance instance,
-                                        const uint32_t num_queues) {
+std::vector<Runtime::DeviceMapping> create_physical_devices(
+    const VkInstance instance) {
   if (VK_NULL_HANDLE == instance) {
-    return std::vector<Adapter>();
+    return std::vector<Runtime::DeviceMapping>();
   }
 
   uint32_t device_count = 0;
@@ -119,13 +116,13 @@ std::vector<Adapter> create_adapters(const VkInstance instance,
   std::vector<VkPhysicalDevice> devices(device_count);
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
 
-  std::vector<Adapter> adapters;
-  adapters.reserve(device_count);
+  std::vector<Runtime::DeviceMapping> device_mappings;
+  device_mappings.reserve(device_count);
   for (const VkPhysicalDevice physical_device : devices) {
-    adapters.emplace_back(physical_device, num_queues);
+    device_mappings.emplace_back(PhysicalDevice(physical_device), -1);
   }
 
-  return adapters;
+  return device_mappings;
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
@@ -157,21 +154,21 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
 }
 
 VkDebugReportCallbackEXT create_debug_report_callback(
-    const VkInstance instance, const RuntimeConfiguration config) {
+    const VkInstance instance,
+    const RuntimeConfiguration config) {
   if (VK_NULL_HANDLE == instance || !config.enableValidationMessages) {
     return VkDebugReportCallbackEXT{};
   }
 
   const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{
-    VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,  // sType
-    nullptr,  // pNext
-    VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
-      VK_DEBUG_REPORT_WARNING_BIT_EXT |
-      VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
-      VK_DEBUG_REPORT_ERROR_BIT_EXT |
-      VK_DEBUG_REPORT_DEBUG_BIT_EXT,  // flags
-    debug_report_callback_fn,  // pfnCallback
-    nullptr,  // pUserData
+      VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT, // sType
+      nullptr, // pNext
+      VK_DEBUG_REPORT_INFORMATION_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT |
+          VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
+          VK_DEBUG_REPORT_ERROR_BIT_EXT |
+          VK_DEBUG_REPORT_DEBUG_BIT_EXT, // flags
+      debug_report_callback_fn, // pfnCallback
+      nullptr, // pUserData
   };
 
   const auto vkCreateDebugReportCallbackEXT =
@@ -189,9 +186,7 @@ VkDebugReportCallbackEXT create_debug_report_callback(
       nullptr,
       &debug_report_callback));
 
-  TORCH_CHECK(
-      debug_report_callback,
-      "Invalid Vulkan debug report callback!");
+  TORCH_CHECK(debug_report_callback, "Invalid Vulkan debug report callback!");
 
   return debug_report_callback;
 }
@@ -200,21 +195,22 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 // Adapter selection methods
 //
 
-uint32_t select_first(const std::vector<Adapter>& adapters) {
-  if (adapters.size() == 0) {
-    TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
-    return adapters.size() + 1; // return out of range to signal invalidity
+uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
+  if (devices.size() == 0) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: no device devices are available for selection!");
+    return devices.size() + 1; // return out of range to signal invalidity
   }
 
   // Select the first adapter that has compute capability
-  for (const uint32_t i : c10::irange(adapters.size())) {
-    if (adapters[i].num_compute_queues() > 0) {
+  for (const uint32_t i : c10::irange(devices.size())) {
+    if (devices[i].first.num_compute_queues > 0) {
       return i;
     }
   }
 
-  TORCH_WARN("Pytorch Vulkan Runtime: no device adapters support compute!");
-  return adapters.size() + 1;
+  TORCH_WARN("Pytorch Vulkan Runtime: no device devices support compute!");
+  return devices.size() + 1;
 }
 
 //
@@ -241,30 +237,33 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
   const bool enableValidationMessages =
 #if defined(DEBUG)
-    true;
+      true;
 #else
-    false;
+      false;
 #endif /* DEBUG */
   const bool initDefaultDevice = true;
   const uint32_t numRequestedQueues = 1; // TODO: raise this value
 
-  const RuntimeConfiguration default_config {
-    enableValidationMessages,
-    initDefaultDevice,
-    AdapterSelector::First,
-    numRequestedQueues,
+  const RuntimeConfiguration default_config{
+      enableValidationMessages,
+      initDefaultDevice,
+      AdapterSelector::First,
+      numRequestedQueues,
   };
 
   try {
     return std::make_unique<Runtime>(Runtime(default_config));
-  }
-  catch (const std::exception& e) {
+  } catch (const c10::Error& e) {
     TORCH_WARN(
         "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
         "The global vulkan runtime is invalid. Error: ",
         e.what());
-  }
-  catch (...) {
+  } catch (const std::exception& e) {
+    TORCH_WARN(
+        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
+        "The global vulkan runtime is invalid. Error: ",
+        e.what());
+  } catch (...) {
     TORCH_WARN(
         "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
         "The global vulkan runtime is invalid. "
@@ -277,23 +276,30 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 } // namespace
 
 Runtime::Runtime(const RuntimeConfiguration config)
-  : instance_(create_instance(config)),
-    adapters_(create_adapters(instance_, config.numRequestedQueues)),
-    default_adapter_i_{},
-    debug_report_callback_(create_debug_report_callback(instance_, config)) {
+    : config_(config),
+      instance_(create_instance(config_)),
+      device_mappings_(create_physical_devices(instance_)),
+      adapters_{},
+      default_adapter_i_(UINT32_MAX),
+      debug_report_callback_(create_debug_report_callback(instance_, config_)) {
+  // List of adapters will never exceed the number of physical devices
+  adapters_.reserve(device_mappings_.size());
+
   if (config.initDefaultDevice) {
     try {
-      switch(config.defaultSelector) {
+      switch (config.defaultSelector) {
         case AdapterSelector::First:
-          default_adapter_i_ = init_adapter(select_first);
+          default_adapter_i_ = create_adapter(select_first);
       }
-    }
-    catch (const std::exception& e) {
+    } catch (const c10::Error& e) {
       TORCH_WARN(
           "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
           e.what());
-    }
-    catch (...) {
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
+          e.what());
+    } catch (...) {
       TORCH_WARN(
           "Pytorch Vulkan Runtime: Could not initialize default device! Error: "
           "Unknown.");
@@ -302,26 +308,27 @@ Runtime::Runtime(const RuntimeConfiguration config)
 }
 
 Runtime::~Runtime() {
-  if C10_LIKELY(VK_NULL_HANDLE == instance_) {
+  if C10_LIKELY (VK_NULL_HANDLE == instance_) {
     return;
   }
 
-  // Clear adapters list to trigger device destruction before destroying VkInstance
+  // Clear adapters list to trigger device destruction before destroying
+  // VkInstance
   adapters_.clear();
 
-  // Instance must be destroyed last as its used to destroy the debug report callback.
+  // Instance must be destroyed last as its used to destroy the debug report
+  // callback.
   if (debug_report_callback_) {
     const auto vkDestroyDebugReportCallbackEXT =
-      (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
-          instance_, "vkDestroyDebugReportCallbackEXT");
+        (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+            instance_, "vkDestroyDebugReportCallbackEXT");
 
-      TORCH_CHECK(
-          vkDestroyDebugReportCallbackEXT,
-          "Pytorch Vulkan Runtime: Could not load vkDestroyDebugReportCallbackEXT "
-          "when destroying debug_report_callback_");
+    TORCH_CHECK(
+        vkDestroyDebugReportCallbackEXT,
+        "Pytorch Vulkan Runtime: Could not load vkDestroyDebugReportCallbackEXT "
+        "when destroying debug_report_callback_");
 
-      vkDestroyDebugReportCallbackEXT(
-          instance_, debug_report_callback_, nullptr);
+    vkDestroyDebugReportCallbackEXT(instance_, debug_report_callback_, nullptr);
 
     debug_report_callback_ = {};
   }
@@ -331,29 +338,40 @@ Runtime::~Runtime() {
 }
 
 Runtime::Runtime(Runtime&& other) noexcept
-  : instance_(other.instance_),
-    adapters_(std::move(other.adapters_)),
-    default_adapter_i_(other.default_adapter_i_),
-    debug_report_callback_(other.debug_report_callback_) {
+    : config_(other.config_),
+      instance_(other.instance_),
+      adapters_(std::move(other.adapters_)),
+      default_adapter_i_(other.default_adapter_i_),
+      debug_report_callback_(other.debug_report_callback_) {
   other.instance_ = VK_NULL_HANDLE;
   other.debug_report_callback_ = {};
 }
 
-uint32_t Runtime::init_adapter(const Selector& selector) {
+uint32_t Runtime::create_adapter(const Selector& selector) {
   TORCH_CHECK(
-      adapters_.size() > 0,
+      device_mappings_.size() > 0,
       "Pytorch Vulkan Runtime: Could not initialize adapter because no "
       "devices were found by the Vulkan instance.");
 
-  uint32_t i = selector(adapters_);
+  uint32_t physical_device_i = selector(device_mappings_);
   TORCH_CHECK(
-      i < adapters_.size(),
+      physical_device_i < device_mappings_.size(),
       "Pytorch Vulkan Runtime: no suitable device adapter was selected! "
       "Device could not be initialized");
 
-  adapters_[i].init_device();
+  Runtime::DeviceMapping& device_mapping = device_mappings_[physical_device_i];
+  // If an Adapter has already been created, return that
+  int32_t adapter_i = device_mapping.second;
+  if (adapter_i >= 0) {
+    return adapter_i;
+  }
+  // Otherwise, create an adapter for the selected physical device
+  adapter_i = utils::safe_downcast<uint32_t>(adapters_.size());
+  adapters_.emplace_back(
+      new Adapter(instance_, device_mapping.first, config_.numRequestedQueues));
+  device_mapping.second = adapter_i;
 
-  return i;
+  return adapter_i;
 }
 
 Runtime* runtime() {
@@ -361,11 +379,14 @@ Runtime* runtime() {
   // non-static function to ensure it has external linkage. If it were a global
   // static variable there would be one copy per translation unit that includes
   // Runtime.h as it would have internal linkage.
-  static const std::unique_ptr<Runtime> p_runtime = init_global_vulkan_runtime();
+  static const std::unique_ptr<Runtime> p_runtime =
+      init_global_vulkan_runtime();
+
   TORCH_CHECK(
       p_runtime,
       "Pytorch Vulkan Runtime: The global runtime could not be retrieved "
       "because it failed to initialize.");
+
   return p_runtime.get();
 }
 

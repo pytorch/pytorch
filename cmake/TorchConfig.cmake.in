@@ -104,7 +104,7 @@ else()
   append_torchlib_if_found(onnx onnx_proto)
 
   append_torchlib_if_found(foxi_loader fmt)
-  append_torchlib_if_found(clog cpuinfo)
+  append_torchlib_if_found(cpuinfo clog)
 
   if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
     append_torchlib_if_found(pthreadpool)

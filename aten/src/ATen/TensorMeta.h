@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/DimVector.h>
+#include <ATen/core/Dimname.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/strides.h>
-#include <ATen/core/Dimname.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
@@ -30,17 +30,23 @@ namespace impl {
 //    }
 //
 #define TORCH_META_FUNC(name) void structured_##name::meta
-#define TORCH_META_FUNC2(name, overload) void structured_##name##_##overload::meta
+#define TORCH_META_FUNC2(name, overload) \
+  void structured_##name##_##overload::meta
 
-// These are versions of TORCH_META_FUNC(2) that include a precompute_out struct as a return value.
-// They should be used when the kernel in question has precomputed values declared in native_functions.yaml and
-// the corresponding implementation should return an instance of the aforementioned struct.
-#define TORCH_PRECOMPUTE_META_FUNC(name) structured_##name::meta_return_ty structured_##name::meta
-#define TORCH_PRECOMPUTE_META_FUNC2(name, overload) structured_##name##_##overload::meta_return_ty structured_##name##_##overload::meta
+// These are versions of TORCH_META_FUNC(2) that include a precompute_out struct
+// as a return value. They should be used when the kernel in question has
+// precomputed values declared in native_functions.yaml and the corresponding
+// implementation should return an instance of the aforementioned struct.
+#define TORCH_PRECOMPUTE_META_FUNC(name) \
+  structured_##name::meta_return_ty structured_##name::meta
+#define TORCH_PRECOMPUTE_META_FUNC2(name, overload) \
+  structured_##name##_##overload::meta_return_ty    \
+      structured_##name##_##overload::meta
 
 // Use this to create a precompute struct in a meta function.
 #define TORCH_PRECOMPUTE_STRUCT(name) structured_##name::precompute_out<>
-#define TORCH_PRECOMPUTE_STRUCT2(name, overload) structured_##name##_##overload::precompute_out<>
+#define TORCH_PRECOMPUTE_STRUCT2(name, overload) \
+  structured_##name##_##overload::precompute_out<>
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're
@@ -65,11 +71,12 @@ namespace impl {
 struct TORCH_API MetaBase {
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
 
+  // Note: [set_output_*]
   // See: https://github.com/pytorch/pytorch/issues/69813
-  // Whenever defining the output properties in the META function of a structured
-  // kernel (what was usually done with `set_output`), use one of these 3 variants,
-  // instead. In order to decide which variant to use, check the following
-  // decision tree:
+  // Whenever defining the output properties in the META function of a
+  // structured kernel (what was usually done with `set_output`), use one of
+  // these 3 variants, instead. In order to decide which variant to use, check
+  // the following decision tree:
   //
   // - Can the kernel you are going to implement support output tensors
   //   with arbitrary strides?
@@ -82,9 +89,9 @@ struct TORCH_API MetaBase {
   //         |
   //         -- NO: `set_output_strided`
   //
-  // Use this function whenever the kernel requires specific strides for the output.
-  // If `strides` does not match the given output strides, proxy outputs will be
-  // created and passed to the IMPL function.
+  // Use this function whenever the kernel requires specific strides for the
+  // output. If `strides` does not match the given output strides, proxy outputs
+  // will be created and passed to the IMPL function.
   virtual void set_output_strided(
       int64_t output_idx,
       IntArrayRef sizes,
@@ -94,9 +101,9 @@ struct TORCH_API MetaBase {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
   }
 
-  // Use this function whenever the kernel knows how to handle arbitrary strided outputs.
-  // This function has the same behavior as the old `set_output`: it will only
-  // re-stride if the given output was resized.
+  // Use this function whenever the kernel knows how to handle arbitrary strided
+  // outputs. This function has the same behavior as the old `set_output`: it
+  // will only re-stride if the given output was resized.
   virtual void set_output_raw_strided(
       int64_t output_idx,
       IntArrayRef sizes,
@@ -119,7 +126,9 @@ struct TORCH_API MetaBase {
 
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
-  const Tensor& maybe_get_output() { return maybe_get_output(0); }
+  const Tensor& maybe_get_output() {
+    return maybe_get_output(0);
+  }
   virtual ~MetaBase() {}
 };
 

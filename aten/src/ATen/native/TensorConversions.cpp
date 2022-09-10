@@ -4,11 +4,159 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/Parallel.h>
 
-#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/ATen_fwd.h>
+#include <ATen/native/IndexingUtils.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <numeric>
 
 namespace at {
 namespace native {
+
+namespace {
+// dense_to_sparse_{csr,bsr,csc,bsc} common helpers
+
+// Preparation fo the N-D dense -> sparse compressed conversion.
+// The N-D input is converted to 3-D (single batch dim) where we check that the
+// product of batch dims is nonzero and for each batch the sparse matrix
+// contained within has the same number of non-zero elements.
+// The batches are joined along the compressed axis. The generation of indices
+// for this matrix can be performed in a single step followed by a single step
+// conversion to restore the batch dimension.
+void dense_to_sparse_compressed_prepare_check_mask_values_batched(
+    const Layout& target_layout,
+    Tensor& values,
+    Tensor& mask,
+    const int64_t& n_batch_dim) {
+  if (n_batch_dim > 1) {
+    // For inputs with more than 1 batch dim we flatten them out.
+    // Input shape (b0, b1 ..., bn, r, c) -> (b0 * b1 * ... * bn, r ,c)
+    values = values.flatten(0, n_batch_dim - 1);
+    mask = mask.flatten(0, n_batch_dim - 1);
+  }
+
+  // For informative messaging form the name of the function
+  // to_sparse_{csr,csc,bsr,bsc}.
+  TORCH_CHECK(
+      mask.size(0) > 0,
+      "to_sparse_",
+      // We want the message to match the function name so generate the
+      // lowercase acronym for the layout
+      sparse_csr::layoutToString(target_layout, false, true),
+      ": Expected product of batch dimensions to be non-zero.");
+
+  // Compute the number of non-zero elements in the first batch, expand to full
+  // size
+  auto nse_per_batch = mask.select(0, 0).sum().expand(mask.size(0));
+  TORCH_CHECK(
+      mask.sum({-2, -1}).equal(nse_per_batch),
+      "Expect the same number of specified elements per batch.");
+
+  // We need to join batches into a matrix increasing the length of the
+  // compressed axis. This allows us to create indices for a compressed matrix
+  // and de-batch them later (two kernels). Otherwise we would have to create
+  // indices for each batch individually requiring n_batch kernels. For csr/bsr,
+  // we already have the batch dim adjacent to the compressed axis and can
+  // flatten them together. For csc/bsc, we need to transpose first.
+  // For BSR/CSR (b, r, c) -> (b*r, c)
+  // For BSC/CSC (b, c, r) -> (r, b*c)
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      target_layout,
+      "dense_to_sparse_compressed",
+      [&]() {
+        values = values.flatten(0, 1);
+        mask = mask.flatten(0, 1);
+      },
+      [&]() {
+        values = values.transpose(0, 1).flatten(1, 2);
+        mask = mask.transpose(0, 1).flatten(1, 2);
+      });
+}
+
+// This function unfolds the compressed indices of a compressed sparse matrix
+// into a batched compressed sparse tensor.
+// This is analogous to an unflatten-like operation:
+// unflatten(0, {b, r}) for csr/bsr with input shape (r*b, c)
+//          (output shape (b, r, c))
+// unflatten(1, {b, c}).transpose(0,1) for csc/bsc with input shape (r, c*b)
+//          (output shape (r, b, c) unflatten, (b, r, c) unflatten + transpose)
+// This only operates on the compressed indices as the plain indices and values
+// can be manipulated as described above without special handling.
+// It is a prerequisite for the conversion that the sparsity pattern is sane for
+// the batched shape. That is each batch has the same number of nonzero
+// elements.
+Tensor compressed_to_batched_compressed_indices(
+    const Tensor& compressed_in,
+    const int64_t& n_batch,
+    bool out_int32) {
+  auto n_compressed_per_batch = (compressed_in.size(0) - 1) / n_batch;
+  ScalarType out_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  auto batched_out = at::zeros(
+      {n_batch, n_compressed_per_batch + 1},
+      compressed_in.options().dtype(out_type));
+
+  // If the compressed dimension has length zero there is 1 element in each
+  // batch and it is zero we already have this result formed
+  if (n_compressed_per_batch > 0) {
+    // Slice the compressed indices ignoring the leading 0 element and reshape
+    // to n-batch rows
+    auto trailing_slice =
+        compressed_in.slice(0, 1, c10::nullopt, 1).reshape({n_batch, -1});
+    // Slice the compressed indices again selecting the elements corresponding
+    // to the batch boundary. The values here will be increasing multiples of
+    // nnz per batch. Reshape to n-batch rows (1 col) for broadcasting.
+    // This is equivalent to arange(n_batch) * nnz_per_batch with the same
+    // reshape
+    auto offsets = compressed_in.slice(0, 0, -1, n_compressed_per_batch)
+                       .reshape({n_batch, -1});
+    // Subtracting the offsets from each row of the reshaped compressed indices
+    // gives us the compressed indices within the batch. The leading element of
+    // each row is not computed as it is always zero.  We copy into the view on
+    // the output buffer.
+    batched_out.narrow(-1, 1, n_compressed_per_batch)
+        .copy_(trailing_slice - offsets);
+  }
+  return batched_out;
+}
+
+// After generating member tensors for sparse_compressed matrix, if the target
+// shape is N-D we must reform the batch dimensions.
+// Single kernel is used to restore one batch dimension in the compressed
+// indices. From there full batch shape is restored by reshape. No special
+// handling is needed for restoring batch dimensions of the values or
+// plain_indices it can be done with reshape/unflatten.
+void reshape_2d_sparse_compressed_members_to_nd_batched(
+    const IntArrayRef full_sizes,
+    const int64_t& n_batch_dim,
+    Tensor& compressed_indices,
+    Tensor& plain_indices,
+    Tensor& values) {
+  auto batch_shape = full_sizes.slice(0, n_batch_dim);
+  auto n_batch = std::accumulate(
+      batch_shape.begin(), batch_shape.end(), 1, std::multiplies<int64_t>());
+  // NOTE: using this conversion requires the nnz per batch is the same for all
+  // batches that will be formed. We ensured this was the case on the way in so
+  // it is safe to use this conversion.
+  compressed_indices = compressed_to_batched_compressed_indices(
+      compressed_indices, n_batch, /*out_int32*/ false);
+
+  // We can infer the last dim of the reshape targets, it will be nnz or
+  // nrow/ncol+1 depending on the layout and member tensor targeted.
+  auto batchsize_infer_last = DimVector(batch_shape);
+  batchsize_infer_last.push_back(-1);
+
+  // -1 will be nnz per batch
+  plain_indices = plain_indices.reshape(batchsize_infer_last);
+  // -1 will be ncols (bsc,csc) or nrows (bsr,csr) + 1
+  compressed_indices = compressed_indices.reshape(batchsize_infer_last);
+  // -1 will be nnz (per batch).
+  // Note: Unflatten rather than reshape as it will work
+  // for both blocked and unblocked layouts. reshape works for unblocked layouts
+  // only
+  values = values.unflatten(0, batchsize_infer_last);
+}
+} // namespace
 
 // Take a Device that may not have device_index set (i.e., having it as -1
 // representing the current device) and return the corresponding Device
@@ -326,22 +474,26 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype);
   }
-  if (tensor.layout() == c10::kSparseCsr || tensor.layout() == c10::kSparseCsc) {
+  if (tensor.layout() == c10::kSparseCsr ||
+      tensor.layout() == c10::kSparseCsc ||
+      tensor.layout() == c10::kSparseBsr ||
+      tensor.layout() == c10::kSparseBsc) {
     return tensor._to_dense(dtype);
   }
   if (tensor.layout() == c10::kMkldnn) {
     return tensor._to_dense(dtype);
   }
-  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  TORCH_CHECK(
+      tensor.layout() == c10::kStrided,
+      "to_dense does not support layout ",
+      tensor.layout());
   if (dtype) {
     return tensor.to(*dtype);
   }
   return tensor;
 }
 
-Tensor sparse_to_dense(
-    const Tensor& self,
-    c10::optional<ScalarType> dtype) {
+Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
@@ -352,10 +504,97 @@ Tensor sparse_compressed_to_dense(
     const Tensor& self,
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_csr_to_dense");
+      !dtype.has_value(),
+      "dtype argument is not supported by sparse_csr_to_dense");
+
+  // Guard upfront against hybrid tensors (causes segfault)
+  auto batch_ndim = sparse_csr::numBatchDimensions(self);
+
+  TORCH_CHECK(
+      (self.dim() - batch_ndim) == 2,
+      "sparse_compressed_to_dense: Hybrid tensors are not supported");
+
   if (self.layout() == kSparseCsr) {
     Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
     return dst.add_(self);
+  }
+  // dense.add_ is not yet implemented for CSC.
+  // Once it is there, use add_ instead.
+  // It is easier to implement it like this for now,
+  // because add_ will be modified to work with
+  // dense dimensions once CSR/CSC support them.
+  if (self.layout() == kSparseCsc) {
+    const auto batch_ndim = self.ccol_indices().dim() - 1;
+    auto dst_transposed_sizes = self.sizes().vec();
+    std::swap(dst_transposed_sizes[batch_ndim], dst_transposed_sizes[batch_ndim + 1]);
+    // TODO: write a utility function, or use a transpose once view semantics are there
+    const auto to_transposed_csr = at::native::_sparse_csr_tensor_unsafe(
+        self.ccol_indices(),
+        self.row_indices(),
+        self.values(),
+        dst_transposed_sizes,
+        self.values().scalar_type(),
+        kSparseCsr,
+        self.values().device());
+    auto dst_transposed = at::zeros(dst_transposed_sizes, self.options().layout(kStrided));
+    dst_transposed.add_(to_transposed_csr);
+    return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
+  }
+  if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+    Tensor compressed_indices;
+    Tensor plain_indices;
+    std::tie(compressed_indices, plain_indices) =
+        sparse_csr::getCompressedPlainIndices(self);
+
+    auto values = self.values();
+    Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
+    if (self.dim() == 2) {
+      // Pad shape so we can treat 2-d like batched, we will squeeze out the
+      // phantom batch dim at the end
+      compressed_indices.unsqueeze_(0);
+      plain_indices.unsqueeze_(0);
+      values = values.unsqueeze_(0);
+      dense = dense.unsqueeze_(0);
+    }
+    if (self.dim() > 3) {
+      // Flatten batch dims
+      compressed_indices = compressed_indices.flatten(0, batch_ndim - 1);
+      plain_indices = plain_indices.flatten(0, batch_ndim - 1);
+      values = values.flatten(0, batch_ndim - 1);
+      dense = dense.flatten(0, batch_ndim - 1);
+    }
+
+    // At this point everything has 3d shape either the batch dim was inserted,
+    // existed already or was flattened from multiple batch dims
+    std::array<int64_t, 2> blocksize = {values.size(-2), values.size(-1)};
+    auto n_batch = values.size(0);
+    // If we already had batch dim(s) and any of them were zero we can take the
+    // early exit.
+    if (n_batch == 0) {
+      return dense.reshape(self.sizes());
+    }
+    // Due to early exit above this reshape should always be valid
+    dense = dense.reshape({n_batch, -1, values.size(-2), values.size(-1)});
+    for (auto batch : c10::irange(n_batch)) {
+      Tensor batch_indices = at::_convert_indices_from_csr_to_coo(
+          compressed_indices[batch],
+          plain_indices[batch],
+          false,
+          self.layout() == kSparseBsc);
+      auto batch_row_indices = batch_indices.select(0, 0);
+      auto batch_col_indices = batch_indices.select(0, 1);
+      auto offsets = batch_col_indices +
+          batch_row_indices * (self.size(-1) / blocksize[1]);
+      dense[batch].index_add_(0, offsets, values[batch]);
+    }
+
+    // un-tile the result, NOTE: The final reshape uses the original
+    // self.sizes() which will squeeze out the extra batch dim if we put one in
+    return dense
+        .unflatten(
+            1, {self.size(-2) / blocksize[0], self.size(-1) / blocksize[1]})
+        .transpose(2, 3)
+        .reshape(self.sizes());
   }
   return self.to_sparse().to_dense();
 }
@@ -479,26 +718,278 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
+Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+  // This code turns a matrix into a sequence of blocks
+  //
+  // Given matrix
+  //
+  //  1  2  3  4
+  //  5  6  7  8
+  //  9 10 11 12
+  // 14 15 16 17
+  //
+  // _tile_tensor(matrix, {2, 2}) will yield the following 2 by 2 blocks
+  //
+  //  1  2 |  3  4 |  9 10 | 11 12
+  //  5  6 |  7  8 | 14 15 | 16 17
+  //
+  //  via a 4D Tensor of shape (2, 2, 2, 2)
+  //
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
+  auto block_size_0 = self.size(0) / blocksize[0];
+  auto block_size_1 = self.size(1) / blocksize[1];
+  return self.reshape({block_size_0, blocksize[0], block_size_1, blocksize[1]})
+      .transpose(1, 2)
+      .contiguous();
+}
+
+Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+  if (self.dim() == 2) {
+    return _tile_tensor(self, blocksize);
+  }
+  auto n_batch_dim = self.dim() - 2;
+  // Same as _tile_tensor, just per matrix entry of self, if self is 3D.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
+  auto block_size_0 = self.size(-2) / blocksize[0];
+  auto block_size_1 = self.size(-1) / blocksize[1];
+  auto tiled_sizes = DimVector(self.sizes().slice(0, n_batch_dim));
+  tiled_sizes.push_back(block_size_0);
+  tiled_sizes.push_back(blocksize[0]);
+  tiled_sizes.push_back(block_size_1);
+  tiled_sizes.push_back(blocksize[1]);
+
+  return self.reshape(tiled_sizes).transpose(-3, -2).contiguous();
+}
+
+Tensor _mask_to_indices(const Tensor& mask) {
+  // This function returns a vector of the indices at which given
+  // boolean mask is True. at::nonzero can achieve the same, but
+  // we yet have to compare the performance difference.
+  TORCH_CHECK(mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
+  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  return at::native::arange(
+      mask.numel(), at::kLong, kStrided, mask.device())
+      .masked_select(mask);
+}
+
+std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
+    Tensor not_zero_mask,
+    ScalarType index_dtype,
+    Device index_device) {
+  auto col_indices =
+      at::native::arange(not_zero_mask.size(-1), index_dtype, kStrided, index_device)
+          .view({1, not_zero_mask.size(-1)})
+          .expand_as(not_zero_mask)
+          .masked_select(not_zero_mask);
+  auto row_indices =
+      at::native::arange(
+          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
+          .view({not_zero_mask.size(-2), 1})
+          .expand_as(not_zero_mask)
+          .masked_select(not_zero_mask);
+  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+}
+
 // Sparse layout conversions Start
 
 Tensor dense_to_sparse_csr(const Tensor& self) {
-  return self.to_sparse().to_sparse_csr();
+  auto n_batch_dim = self.dim() - 2;
+  auto values = self;
+  auto not_zero_mask = self != 0;
+
+  if (n_batch_dim > 0) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseCsr, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, not_zero_mask.size(0), false /*out_int32*/);
+  {
+    auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
+    values = values.flatten().index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, crow_indices, col_indices, values);
+  }
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseCsr,
+      values.device());
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self) {
-  return self.to_sparse().to_sparse_csc();
+  auto n_batch_dim = self.dim() - 2;
+  auto values = self;
+  auto not_zero_mask = self != 0;
+
+  if (n_batch_dim > 0) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseCsc, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  // Compressed col indices are the same as the row indices of the transpose!
+  std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+  Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
+      col_indices, not_zero_mask.size(-1), false /*out_int32*/);
+  {
+    // We need to transpose the mask and values before flattening so the nnz dim
+    // will run in col-major order.
+    values = values.transpose(0, 1).flatten();
+    auto mask_indices =
+        _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
+    values = values.index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, ccol_indices, row_indices, values);
+  }
+  return at::native::_sparse_csc_tensor_unsafe(
+      ccol_indices,
+      row_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseCsc,
+      values.device());
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
-  return self;
+  TORCH_CHECK(
+      blocksize[0] > 0 && blocksize[1] > 0,
+      "blocksize needs to be non zero, but got ",
+      blocksize);
+  TORCH_CHECK(
+      self.size(-2) % blocksize[0] == 0,
+      "Tensor size(-2) ",
+      self.size(-2),
+      " needs to be divisible by blocksize[0] ",
+      blocksize[0]);
+  TORCH_CHECK(
+      self.size(-1) % blocksize[1] == 0,
+      "Tensor size(-1) ",
+      self.size(-1),
+      " needs to be divisible by blocksize[1] ",
+      blocksize[1]);
+
+  auto n_batch_dim = self.dim() - 2;
+
+  auto values = _batch_tile_tensor(self, blocksize);
+  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
+  auto mask_shape = DimVector(not_zero_mask.sizes().slice(0, n_batch_dim + 2));
+  // Can't use -1 here one of sparse/batch dims may be zero
+  mask_shape.push_back(blocksize[0] * blocksize[1]);
+  not_zero_mask = not_zero_mask.view(mask_shape).any(-1);
+
+  if (n_batch_dim > 0) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseBsr, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
+
+  Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, not_zero_mask.size(0), false /*out_int32*/);
+
+  {
+    auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
+    values = values.flatten(0, -3).index_select(0, mask_indices);
+  }
+
+  if (n_batch_dim > 0) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, crow_indices, col_indices, values);
+  }
+  return at::native::_sparse_bsr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseBsr,
+      values.device());
 }
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
-  return self;
+  TORCH_CHECK(
+      blocksize[0] > 0 && blocksize[1] > 0,
+      "blocksize needs to be non zero, but got ",
+      blocksize);
+  TORCH_CHECK(
+      self.size(-2) % blocksize[0] == 0,
+      "Tensor size(-2) ",
+      self.size(-2),
+      " needs to be divisible by blocksize[0] ",
+      blocksize[0]);
+  TORCH_CHECK(
+      self.size(-1) % blocksize[1] == 0,
+      "Tensor size(-1) ",
+      self.size(-1),
+      " needs to be divisible by blocksize[1] ",
+      blocksize[1]);
+  auto n_batch_dim = self.dim() - 2;
+  auto is_batched = n_batch_dim > 0;
+  auto values = _batch_tile_tensor(self, blocksize);
+  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
+  auto mask_shape = DimVector(not_zero_mask.sizes().slice(0, n_batch_dim + 2));
+  // Can't use -1 here one of sparse/batch dims may be zero
+  mask_shape.push_back(blocksize[0] * blocksize[1]);
+  not_zero_mask = not_zero_mask.view(mask_shape).any(-1);
+
+  if (is_batched) {
+    dense_to_sparse_compressed_prepare_check_mask_values_batched(
+        Layout::SparseBsc, values, not_zero_mask, n_batch_dim);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  // Compressed col indices are the same as the row indices of the transpose!
+  std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+  // This only works if the col_indices vector is in ascending order.
+  Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
+      col_indices, not_zero_mask.size(-1), false /*out_int32*/);
+  {
+    // We need the block-values in col major order, but blocks themselves to
+    // remain in row-major order, so we transpose the leading two dims, leaving
+    // the trailing two dims as is.
+    values = values.transpose(0, 1).flatten(0, -3);
+    // The mask must transpose as well to index it correctly.
+    auto mask_indices =
+        _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
+    values = values.index_select(0, mask_indices);
+  }
+  if (is_batched) {
+    reshape_2d_sparse_compressed_members_to_nd_batched(
+        self.sizes(), n_batch_dim, ccol_indices, row_indices, values);
+  }
+
+  return at::native::_sparse_bsc_tensor_unsafe(
+      ccol_indices,
+      row_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseBsc,
+      values.device());
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
@@ -977,4 +1468,31 @@ Tensor sparse_compressed_to_sparse(const Tensor& self) {
 }
 
 // Sparse layout conversions End
-}} // namespace at::native
+
+Tensor to_meta(const Tensor& tensor) {
+  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
+/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
+/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  // needs to handle wrapped numbers, so dtype promotion works properly.
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  return out;
+}
+c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return to_meta(*tensor);
+  }
+  return c10::nullopt;
+}
+
+std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+  std::vector<Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& i : c10::irange(t_list.size())) {
+    outs.push_back(to_meta(t_list[i]));
+  }
+  return outs;
+}
+} // namespace native
+} // namespace at

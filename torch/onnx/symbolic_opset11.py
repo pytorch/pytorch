@@ -1,52 +1,131 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
+from typing import Optional, Sequence, Union
 
 import torch
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_opset10 as opset10
-from torch.onnx import utils
+from torch import _C
+from torch._C import _onnx as _C_onnx
+from torch.onnx import (
+    _type_utils,
+    errors,
+    symbolic_helper,
+    symbolic_opset10 as opset10,
+    symbolic_opset9 as opset9,
+    utils,
+)
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# This file exports ONNX ops for opset 11
+__all__ = [
+    "add",
+    "append",
+    "arange",
+    "argsort",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "cat",
+    "chunk",
+    "clamp_max",
+    "clamp_min",
+    "clamp",
+    "constant_pad_nd",
+    "cumsum",
+    "Delete",
+    "embedding_bag",
+    "embedding_renorm",
+    "flatten",
+    "gather",
+    "hardtanh",
+    "im2col",
+    "index_fill",
+    "index",
+    "index_copy",
+    "index_put",
+    "insert",
+    "linalg_det",
+    "linalg_vector_norm",
+    "logdet",
+    "masked_scatter",
+    "masked_select",
+    "mm",
+    "narrow",
+    "normal",
+    "pad",
+    "pixel_shuffle",
+    "pop",
+    "Prim",
+    "reflection_pad",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "relu6",
+    "remainder",
+    "replication_pad",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "round",
+    "scatter",
+    "select",
+    "size",
+    "sort",
+    "split_with_sizes",
+    "split",
+    "squeeze",
+    "stack",
+    "topk",
+    "unbind",
+    "unique_dim",
+    "unsqueeze",
+    "upsample_bicubic2d",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+]
 
 
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
-def hardtanh(g, self, min_val, max_val):
+@_beartype.beartype
+def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            min_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            max_val, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
     return opset9.op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
     )
 
 
+@_beartype.beartype
 def clamp(g, self, min, max):
     dtype = self.type().scalarType()
 
+    @_beartype.beartype
     def _cast_if_not_none(tensor, dtype):
         if tensor is not None and not symbolic_helper._is_none(tensor):
             return g.op(
-                "Cast", tensor, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype]
+                "Cast",
+                tensor,
+                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
             )
         else:
             return tensor
@@ -72,9 +151,10 @@ def clamp(g, self, min, max):
 
 
 @symbolic_helper.parse_args("v", "v")
+@_beartype.beartype
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -85,9 +165,10 @@ def clamp_min(g, self, min):
 
 
 @symbolic_helper.parse_args("v", "v")
+@_beartype.beartype
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
+    max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
         return opset9.op_with_optional_float_cast(
@@ -97,36 +178,34 @@ def clamp_max(g, self, max):
         return opset9.op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
+@_beartype.beartype
 def relu6(g, input):
-    relu = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    relu_ = opset9.op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
-        dtype = symbolic_helper.scalar_type_to_onnx.index(
-            symbolic_helper.cast_pytorch_to_onnx[dtype]
-        )
+        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(0, dtype=scalar_type.dtype()),
     )
     max_val = g.op(
         "Constant",
-        value_t=torch.tensor(
-            6, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
-        ),
+        value_t=torch.tensor(6, dtype=scalar_type.dtype()),
     )
-    return clamp(g, relu, min_val, max_val)
+    return clamp(g, relu_, min_val, max_val)
 
 
 # Opset 11 gather accepts negative indices
+@symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
+@_beartype.beartype
 def select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+@_beartype.beartype
 def index_put(g, self, indices_list_value, values, accumulate=False):
     if symbolic_helper._is_packed_list(indices_list_value):
         indices_list = symbolic_helper._unpack_list(indices_list_value)
@@ -143,7 +222,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == "Bool":
+            if symbolic_helper._is_bool(indices_list[idx_]):
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -198,7 +277,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   return (%33)
         index = indices_list[0]
         bool_inp = index
-        if bool_inp.type() is not None and bool_inp.type().scalarType() == "Bool":
+        if symbolic_helper._is_bool(bool_inp):
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
@@ -217,17 +296,16 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
-        values = g.op("Cast", values, to_i=symbolic_helper.cast_pytorch_to_onnx[dtype])
-    dtype = symbolic_helper.scalar_type_to_onnx.index(
-        symbolic_helper.cast_pytorch_to_onnx[dtype]
-    )
-    dtype = symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        values = g.op(
+            "Cast", values, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
+        )
+    scalar_type = _type_utils.JitScalarType.from_name(dtype)
 
     if accumulate:
         zeros = g.op(
             "ConstantOfShape",
             g.op("Shape", self),
-            value_t=torch.tensor([0], dtype=dtype),
+            value_t=torch.tensor([0], dtype=scalar_type.dtype()),
         )
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
@@ -238,6 +316,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
 
 @symbolic_helper.parse_args("v", "i")
+@_beartype.beartype
 def pixel_shuffle(g, self, upscale_factor):
     rank = symbolic_helper._get_tensor_rank(self)
     if rank is not None and rank != 4:
@@ -245,6 +324,7 @@ def pixel_shuffle(g, self, upscale_factor):
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
+@_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
     return symbolic_helper._interpolate_helper(name, dim, interpolate_mode)
 
@@ -257,7 +337,17 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
+upsample_nearest1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_nearest3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_linear1d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bilinear2d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_trilinear3d.__module__ = "torch.onnx.symbolic_opset11"
+upsample_bicubic2d.__module__ = "torch.onnx.symbolic_opset11"
 
+
+@symbolic_helper.quantized_args(True, False, False, False, False, False, False)
+@_beartype.beartype
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -267,6 +357,7 @@ def __interpolate(
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
+@_beartype.beartype
 def gather(g, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True")
@@ -276,6 +367,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 
 @symbolic_helper.parse_args("v", "i", "v", "v")
+@_beartype.beartype
 def scatter(g, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
@@ -290,7 +382,9 @@ def scatter(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.JitScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
         return g.op(
             "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
@@ -298,12 +392,13 @@ def scatter(g, self, dim, index, src):
 
 
 @symbolic_helper.parse_args("v", "i", "none")
+@_beartype.beartype
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         cast = g.op(
-            "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", self, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     else:
         cast = self
@@ -311,11 +406,13 @@ def cumsum(g, self, dim, dtype=None):
     return csum
 
 
+@_beartype.beartype
 def masked_select(g, self, mask):
     index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     return g.op("GatherND", self, index)
 
 
+@_beartype.beartype
 def masked_scatter(g, self, mask, source):
     index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
@@ -333,6 +430,7 @@ def masked_scatter(g, self, mask, source):
     return g.op("ScatterND", self, index, source)
 
 
+@_beartype.beartype
 def _len(g, self):
     if (
         symbolic_helper._is_tensor_list(self)
@@ -343,6 +441,7 @@ def _len(g, self):
     return symbolic_helper._squeeze_helper(g, sz_0, [0])
 
 
+@_beartype.beartype
 def __getitem_(g, self, i):
     if symbolic_helper._is_tensor_list(self):
         # SequenceAt requires that the input be a List of Tensors
@@ -353,15 +452,18 @@ def __getitem_(g, self, i):
         return getitem(g, self, i)
 
 
+@_beartype.beartype
 def _set_item(g, tensor_list, i, v):
     tensor_list = g.op("SequenceErase", tensor_list, i)
     return g.op("SequenceInsert", tensor_list, v, i)
 
 
+@_beartype.beartype
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
 
+@_beartype.beartype
 def add(g, self, other, alpha=None):
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         tensor_list_node = other.node()
@@ -378,18 +480,22 @@ def add(g, self, other, alpha=None):
     return opset9.add(g, self, other, alpha)
 
 
+@_beartype.beartype
 def insert(g, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
 
 
+@_beartype.beartype
 def pop(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
 
+@_beartype.beartype
 def Delete(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
 
+@_beartype.beartype
 def cat(g, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
         return opset9.cat(g, tensor_list, dim)
@@ -398,6 +504,7 @@ def cat(g, tensor_list, dim):
         return g.op("ConcatFromSequence", tensor_list, axis_i=dim)
 
 
+@_beartype.beartype
 def stack(g, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
         return opset9.stack(g, tensor_list, dim)
@@ -407,6 +514,7 @@ def stack(g, tensor_list, dim):
 
 
 @symbolic_helper.parse_args("v", "i", "i", "i")
+@_beartype.beartype
 def _unique2(g, self, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, sorted_i=sorted, outputs=4
@@ -414,21 +522,25 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
     return u, inverse_indices, counts
 
 
+@_beartype.beartype
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
+    @_beartype.beartype
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Union[int, Sequence[int]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
+        assert isinstance(padding, tuple)
         if not stride:
             stride = kernel_size
         if count_include_pad:
@@ -458,6 +570,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 @symbolic_helper.parse_args("v", "i", "i", "i", "i")
+@_beartype.beartype
 def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, axis_i=dim, sorted_i=sorted, outputs=4
@@ -466,6 +579,7 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
 
 
 @symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
+@_beartype.beartype
 def topk(g, self, k, dim, largest, sorted, out=None):
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
@@ -473,14 +587,26 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 @symbolic_helper.parse_args("v", "i", "i", "none")
+@_beartype.beartype
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
+@symbolic_helper.parse_args("v", "i", "i", "none")
+@_beartype.beartype
+def argsort(g, self, dim, decending, out=None):
+    _, indices = symbolic_helper._sort_helper(
+        g, self, dim, decending=decending, out=out
+    )
+    return indices
+
+
+@_beartype.beartype
 def round(g, self):
     return g.op("Round", self)
 
 
+@_beartype.beartype
 def remainder(g, input, other):
     if symbolic_helper._is_fp(input) or symbolic_helper._is_fp(other):
         return opset9.remainder(g, input, other)
@@ -488,6 +614,7 @@ def remainder(g, input, other):
 
 
 @symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
@@ -525,11 +652,13 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
 
 
 @symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split(g, self, split_sizes, dim, _outputs)
 
 
 @symbolic_helper.parse_args("v", "i", "i")
+@_beartype.beartype
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -549,6 +678,7 @@ def unbind(g, self, dim=0, _outputs=None):
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
 #          where m is in range [0, n].
+@_beartype.beartype
 def _prepare_onnx_paddings(g, input, pad):
     if (
         not symbolic_helper._is_packed_list(pad)
@@ -574,7 +704,7 @@ def _prepare_onnx_paddings(g, input, pad):
     )
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     # Currently ONNX only supports int64 type for Pad
-    pad = g.op("Cast", pad, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"])
+    pad = g.op("Cast", pad, to_i=_C_onnx.TensorProtoDataType.INT64)
     paddings = g.op(
         "Concat",
         pad,
@@ -594,12 +724,11 @@ def _prepare_onnx_paddings(g, input, pad):
     paddings = symbolic_helper._reshape_helper(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
-    padding_c = g.op(
-        "Cast", paddings, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
-    )
+    padding_c = g.op("Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64)
     return padding_c
 
 
+@_beartype.beartype
 def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = symbolic_helper._maybe_get_scalar(value)
@@ -608,12 +737,14 @@ def constant_pad_nd(g, input, padding, value=None):
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
+@_beartype.beartype
 def reflection_pad(g, input, padding):
     mode = "reflect"
     paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
+@_beartype.beartype
 def replication_pad(g, input, padding):
     mode = "edge"
     paddings = _prepare_onnx_paddings(g, input, padding)
@@ -628,6 +759,7 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
+@_beartype.beartype
 def pad(g, input, pad, mode, value):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
@@ -639,18 +771,22 @@ def pad(g, input, pad, mode, value):
     elif mode == "circular":
         return opset9._pad_circular(g, input, pad)
     else:
-        raise RuntimeError(f"Unrecognized padding mode {mode}")
+        raise errors.SymbolicValueError(f"Unrecognized padding mode {mode}", input)
 
 
+@_beartype.beartype
 def linalg_det(g, self):
     return g.op("Det", self)
 
 
+@_beartype.beartype
 def logdet(g, input):
     return opset9.log(g, linalg_det(g, input))
 
 
+@_beartype.beartype
 def arange(g, *args):
+    @_beartype.beartype
     def _get_arange_dtype(dtype):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
@@ -662,22 +798,18 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[1])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, end=args[0], dtype=dtype
         )
         start_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(0, dtype=type_.dtype()),
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        arange_tensor = g.op("Range", start_default, end, delta_default)
+        return g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
             # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
@@ -685,31 +817,29 @@ def arange(g, *args):
         else:
             # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
             dtype = _get_arange_dtype(args[3])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
-        arange_tensor = g.op("Range", start, end, step)
+        return g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
-        type, end, start, step = symbolic_helper._arange_cast_helper(
+        type_, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], dtype=dtype
         )
         delta_default = g.op(
             "Constant",
-            value_t=torch.tensor(
-                1, dtype=symbolic_helper.scalar_type_to_pytorch_type[type]
-            ),
+            value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        arange_tensor = g.op("Range", start, end, delta_default)
+        return g.op("Range", start, end, delta_default)
     else:
-        raise NotImplementedError(
-            "Unknown aten::arange signature taking " + str(len(args)) + " arguments."
+        return symbolic_helper._unimplemented(
+            "aten::arange", f"with {len(args)} arguments"
         )
-    return arange_tensor
 
 
 @symbolic_helper.parse_args("v", "i")
+@_beartype.beartype
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op(
@@ -720,12 +850,14 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
+@_beartype.beartype
 def size(g, self, dim=None):
     if dim is None:
         return g.op("Shape", self)
     return symbolic_helper._size_helper(g, self, dim)
 
 
+@_beartype.beartype
 def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
@@ -777,6 +909,7 @@ def squeeze(g, self, dim=None):
     return symbolic_helper._squeeze_helper(g, self, [dim])
 
 
+@_beartype.beartype
 def unsqueeze(g, self, dim):
     if symbolic_helper._is_constant(dim):
         dim = symbolic_helper._get_const(dim, "i", "dim")
@@ -784,10 +917,12 @@ def unsqueeze(g, self, dim):
     return symbolic_helper._unsqueeze_helper(g, self, [dim])
 
 
+@_beartype.beartype
 def mm(g, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
 
 
+@_beartype.beartype
 def index(g, self, index):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index", self, index, overload_name="Tensor")
@@ -801,13 +936,14 @@ def index(g, self, index):
     if len(indices) == 1:
         index = indices[0]
         if not symbolic_helper._is_none(index) and (
-            index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"
+            symbolic_helper._is_bool(index) or index.type().scalarType() == "Byte"
         ):
             index = opset9.nonzero(g, index)
             return g.op("GatherND", self, index)
     return opset9.index(g, self, index)
 
 
+@_beartype.beartype
 def index_fill(g, self, dim, index, value):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -829,6 +965,7 @@ def index_fill(g, self, dim, index, value):
     return scatter(g, self, dim, expanded_index, expanded_value)
 
 
+@_beartype.beartype
 def index_copy(g, self, dim, index, source):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -839,6 +976,7 @@ def index_copy(g, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
+@_beartype.beartype
 def __rshift_(g, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
@@ -846,7 +984,9 @@ def __rshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -855,17 +995,18 @@ def __rshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
 
 
+@_beartype.beartype
 def __lshift_(g, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
@@ -873,7 +1014,9 @@ def __lshift_(g, self, other):
         other = g.op(
             "Cast",
             other,
-            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
 
     if self.type().scalarType() == "Byte":
@@ -882,17 +1025,18 @@ def __lshift_(g, self, other):
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
     # exponent (same type as self) has to be float or double in onnx::Pow
     if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=symbolic_helper.cast_pytorch_to_onnx["Float"])
+        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
 
 
+@_beartype.beartype
 def _get_im2col_indices_along_dim(
     g, input_d, kernel_size_d, dilation_d, padding_d, stride_d
 ):
@@ -936,6 +1080,7 @@ def _get_im2col_indices_along_dim(
     return block_mask
 
 
+@_beartype.beartype
 def _get_im2col_padded_input(g, input, padding_h, padding_w):
     # Input is always 4-D tensor (N, C, H, W)
     # Padding tensor has the following format: (padding_h, padding_w)
@@ -944,6 +1089,7 @@ def _get_im2col_padded_input(g, input, padding_h, padding_w):
     return g.op("Pad", input, pad)
 
 
+@_beartype.beartype
 def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
     batch_dim = size(g, input, g.op("Constant", value_t=torch.tensor(0)))
     channel_dim = size(g, input, g.op("Constant", value_t=torch.tensor(1)))
@@ -961,6 +1107,7 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
 
 
 @symbolic_helper.parse_args("v", "is", "is", "is", "is")
+@_beartype.beartype
 def im2col(g, input, kernel_size, dilation, padding, stride):
     # Input is always 4-D tensor (N, C, H, W)
     # All other args are int[2]
@@ -1012,6 +1159,7 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     return symbolic_helper._reshape_helper(g, output, output_shape)
 
 
+@_beartype.beartype
 def narrow(g, input, dim, start, length):
     end = g.op("Add", start, length)
     return symbolic_helper._slice_helper(
@@ -1021,6 +1169,7 @@ def narrow(g, input, dim, start, length):
 
 @symbolic_helper.quantized_args(True, False, False)
 @symbolic_helper.parse_args("v", "i", "i")
+@_beartype.beartype
 def flatten(g, input, start_dim, end_dim):
     dim = symbolic_helper._get_tensor_rank(input)
     if dim == 1:
@@ -1045,19 +1194,27 @@ def flatten(g, input, start_dim, end_dim):
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@symbolic_helper.parse_args("v", "f", "is", "i", "v")
-def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+@symbolic_helper.parse_args("v", "f", "is", "b", "v")
+@_beartype.beartype
+def linalg_vector_norm(
+    g, self, ord, dim: Optional[Sequence[int]], keepdim: bool, dtype
+):
     if ord == 0:
         if dim is None:
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = False
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=_type_utils.JitScalarType.from_name(
+                self.type().scalarType()
+            ).onnx_type(),
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim
@@ -1067,6 +1224,7 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
 
 
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
+@_beartype.beartype
 def embedding_bag(
     g,
     embedding_matrix,
@@ -1079,7 +1237,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
@@ -1154,6 +1312,7 @@ def embedding_bag(
 
 
 @symbolic_helper.parse_args("v", "v", "f", "f")
+@_beartype.beartype
 def embedding_renorm(g, weight, indices, max_norm, norm_type):
     unique_indices = g.op("Unique", indices)
     partial_weight = g.op("Gather", weight, unique_indices)
@@ -1163,9 +1322,10 @@ def embedding_renorm(g, weight, indices, max_norm, norm_type):
     elif norm_type == 2:
         norm_type = "ReduceL2"
     else:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
-            "Only 1. and 2. are supported."
+            "Only 1. and 2. are supported.",
+            weight,
         )
     partial_weight_norm = g.op(norm_type, partial_weight, axes_i=[1], keepdims_i=1)
     # https://github.com/pytorch/pytorch/blob/0a07488ed2c47765e337e290bd138c0e6e459cbd/aten/src/ATen/native/Embedding.cpp#L177
@@ -1190,6 +1350,7 @@ def embedding_renorm(g, weight, indices, max_norm, norm_type):
     )
 
 
+@_beartype.beartype
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
     dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
@@ -1206,20 +1367,34 @@ def chunk(g, self, chunks, dim):
     return split(g, self, chunk_vec, dim)
 
 
-def normal(g, loc, scale, seed):
+@_beartype.beartype
+def normal(
+    g,
+    mean,
+    std,
+    sizes=None,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
     # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
     # from a mean 0 and variance 1 distribution then
     #       σx+μ
     # is a sample with mean μ and variance σ's square.
-    result = opset9.mul(g, scale, g.op("RandomNormalLike", loc))
-    return add(g, result, loc)
+    if sizes is not None and not symbolic_helper._is_none(sizes):
+        mean = opset9.expand(g, mean, sizes, None)
+    result = opset9.mul(g, std, g.op("RandomNormalLike", mean))
+    return add(g, result, mean)
 
 
 class Prim:
     domain = "prim"
 
     @staticmethod
+    @_beartype.beartype
     def ConstantChunk(g, self, chunks, dim):
         input_shape = g.op("Shape", self)
         axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))

@@ -7,6 +7,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all, euler_constant
 
+__all__ = ['Gumbel']
 
 class Gumbel(TransformedDistribution):
     r"""
@@ -14,6 +15,7 @@ class Gumbel(TransformedDistribution):
 
     Examples::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Gumbel(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # sample from Gumbel distribution with loc=1, scale=2
         tensor([ 1.0124])

@@ -79,20 +79,13 @@ static void setupTranspose(
     std::pair<int, int> axes,
     TransposeConfig tc) {
   FusionGuard fg(fusion);
-  typedef std::pair<int, int> transpose_axes;
 
-  auto getTransposeMap =
-      [](const transpose_axes& axes) -> std::unordered_map<int, int> {
-    return {{axes.first, axes.second}, {axes.second, axes.first}};
+  auto optionalTranspose = [axes](TensorView* tv, bool is_transpose) {
+    return (is_transpose) ? transpose(tv, axes.first, axes.second) : tv;
   };
 
-  auto optionalTranspose = [&getTransposeMap, axes](
-                               TensorView* tv, bool is_transpose) {
-    return (is_transpose) ? transpose(tv, getTransposeMap(axes)) : tv;
-  };
-
-  auto input1 = makeContigTensor(num_dims);
-  auto input2 = makeContigTensor(num_dims);
+  auto input1 = makeContigTensor(num_dims, dtype);
+  auto input2 = makeContigTensor(num_dims, dtype);
   fusion->addInput(input1);
   fusion->addInput(input2);
 
@@ -414,8 +407,8 @@ static void Baseline_Transpose(
   auto at_input1 = aten_inputs[0];
   auto at_input2 = aten_inputs[1];
 
-  auto optionalTransposeAten = [&axes](at::Tensor at, bool is_transpose) {
-    return (is_transpose) ? at::transpose(at, axes.first, axes.second) : at;
+  auto optionalTransposeAten = [&axes](at::Tensor x, bool is_transpose) {
+    return (is_transpose) ? at::transpose(x, axes.first, axes.second) : x;
   };
 
   for (auto _ : benchmark_state) {

@@ -36,20 +36,29 @@ Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
-void set_apparent_shapes(NSMutableArray<NSNumber*> * input_shape,
-                         NSMutableArray<NSNumber*> * &apparent_input_shape,
+void set_apparent_shapes(NSArray<NSNumber*> * input_shape,
+                         NSArray<NSNumber*> * &apparent_input_shape,
                          int64_t num_input_dims,
                          IntArrayRef repeats,
                          NSMutableArray<NSNumber*> * &repeats_shape,
                          int64_t num_repeat_dims) {
 
 
-  // Set repeats_shape
+  bool repeat_empty = false;
+  if(num_repeat_dims == 0) {
+    num_repeat_dims = num_input_dims;
+    repeat_empty = true;
+  }
 
+  // Set repeats_shape
   repeats_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
 
-  for(int i = 0; i < num_repeat_dims; i++)
-    repeats_shape[i] = [NSNumber numberWithInt:repeats[i]];
+  for(int i = 0; i < num_repeat_dims; i++) {
+    if(repeat_empty)
+      repeats_shape[i] = [NSNumber numberWithInteger:1];
+    else
+      repeats_shape[i] = [NSNumber numberWithInteger:repeats[i]];
+  }
 
   // If no extension of the shape is needed
   if(num_repeat_dims == num_input_dims) {
@@ -57,13 +66,14 @@ void set_apparent_shapes(NSMutableArray<NSNumber*> * input_shape,
   }
   // num_repeat_dims > num_input_dims
   else {
-    apparent_input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
+    auto rc = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
 
     for(int i = 0; i < num_repeat_dims - num_input_dims; i++)
-      apparent_input_shape[i] = @1;
+      rc[i] = @1;
 
     for(int i = num_repeat_dims - num_input_dims; i < num_repeat_dims; i++)
-      apparent_input_shape[i] = input_shape[i + num_input_dims - num_repeat_dims];
+      rc[i] = input_shape[i + num_input_dims - num_repeat_dims];
+    apparent_input_shape = rc;
   }
 
 }
@@ -74,7 +84,6 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
@@ -84,7 +93,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
-  NSMutableArray<NSNumber*> *apparent_input_shape = nil;
+  NSArray<NSNumber*> *apparent_input_shape = nil;
   NSMutableArray<NSNumber*> *repeats_shape = nil;
 
   auto input_shape = getMPSShape(self);
@@ -116,7 +125,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
                       c10::nullopt);
 
   // Empty output
-  if(zero_tensor)
+  if(zero_tensor || output.numel() == 0)
     return output;
 
   auto stream = at::mps::getCurrentMPSStream();

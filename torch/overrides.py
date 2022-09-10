@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, MetaInitErrorInfo
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -47,6 +47,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -90,6 +91,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
+        torch.is_anomaly_check_nan_enabled,
         torch.is_grad_enabled,
         torch.merge_type_from_type_comment,
         torch.parse_ir,
@@ -250,7 +252,9 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,
+        Tensor.__hash__,
         Tensor.as_subclass,
+        Tensor.eig,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -473,6 +477,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.linalg.diagonal: lambda input, offset=0, dim1=-2, dim2=-1: -1,
         torch.diagonal_scatter: lambda input, src, offset=0, dim1=0, dim2=1: -1,
+        torch.as_strided_scatter: lambda self, src, size, stride, storage_offset=None: -1,
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, rounding_mode=None, out=None: -1,
@@ -483,7 +488,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
@@ -661,6 +665,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor_ex: lambda input, pivot=True, check_errors=False, out=None: -1,
+        torch.linalg.lu_solve: lambda LU, pivots, B, left=True, adjoint=False, out=None: -1,
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
@@ -688,6 +693,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),
         torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
+        torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
+        torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (lambda input, weight, bias, padding, output_padding, stride, dilation,
                                              groups, benchmark, deterministic: -1),
         torch.miopen_depthwise_convolution: (lambda input, weight, bias, padding, stride, dilation, groups, benchmark,
@@ -749,6 +756,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0,
                                        reduction='mean', zero_infinity=False: -1),
         torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,
+        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
@@ -919,6 +927,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
+        torch.linalg.vecdot: lambda input, other, dim=-1, out=None: -1,
         torch.view_as_real: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
@@ -944,7 +953,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -961,7 +970,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.smm: lambda input, mat2: -1,
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
-        torch.linalg.solve: lambda input, other, out=None: -1,
+        torch.linalg.solve: lambda A, B, left=True, out=None: -1,
+        torch.linalg.solve_ex: lambda A, B, left=True, check_errors=False, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -985,37 +995,61 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
+        torch.special.airy_ai: lambda input: -1,
+        torch.special.bessel_j0: lambda input: -1,
+        torch.special.bessel_j1: lambda input: -1,
+        torch.special.bessel_y0: lambda input: -1,
+        torch.special.bessel_y1: lambda input: -1,
+        torch.special.chebyshev_polynomial_t: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.chebyshev_polynomial_w: lambda input, n, out=None: -1,
+        torch.special.digamma: lambda input: -1,
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
         torch.special.erfc: lambda input: -1,
         torch.special.erfcx: lambda input: -1,
         torch.special.erfinv: lambda input: -1,
         torch.special.exp2: lambda input: -1,
-        torch.special.expm1: lambda input: -1,
         torch.special.expit: lambda input: -1,
-        torch.special.polygamma: lambda input, n, out=None: -1,
-        torch.special.digamma: lambda input: -1,
-        torch.special.psi: lambda input: -1,
+        torch.special.expm1: lambda input: -1,
         torch.special.gammainc: lambda input, other, out=None: -1,
         torch.special.gammaincc: lambda input, other, out=None: -1,
         torch.special.gammaln: lambda input: -1,
+        torch.special.hermite_polynomial_h: lambda input, n, out=None: -1,
+        torch.special.hermite_polynomial_he: lambda input, n, out=None: -1,
         torch.special.i0: lambda input: -1,
         torch.special.i0e: lambda input: -1,
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
+        torch.special.laguerre_polynomial_l: lambda input, n, out=None: -1,
+        torch.special.legendre_polynomial_p: lambda input, n, out=None: -1,
+        torch.special.log1p: lambda input: -1,
+        torch.special.log_ndtr: lambda input: -1,
+        torch.special.log_softmax: lambda input, dim, dtype=None: -1,
         torch.special.logit: lambda input: -1,
         torch.special.logsumexp: lambda input, dim, keepdim=False, out=None: -1,
-        torch.special.log1p: lambda input: -1,
-        torch.special.log_softmax: lambda input, dim, dtype=None: -1,
+        torch.special.modified_bessel_i0: lambda input: -1,
+        torch.special.modified_bessel_i1: lambda input: -1,
+        torch.special.modified_bessel_k0: lambda input: -1,
+        torch.special.modified_bessel_k1: lambda input: -1,
+        torch.special.multigammaln: lambda input, p: -1,
+        torch.special.ndtr: lambda input: -1,
+        torch.special.ndtri: lambda input: -1,
+        torch.special.polygamma: lambda input, n, out=None: -1,
+        torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.scaled_modified_bessel_k0: lambda input: -1,
+        torch.special.scaled_modified_bessel_k1: lambda input: -1,
+        torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_v: lambda input, n, out=None: -1,
+        torch.special.shifted_chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.sinc: lambda input: -1,
         torch.special.softmax: lambda input, dim, dtype=None: -1,
-        torch.special.multigammaln: lambda input, p: -1,
-        torch.special.ndtri: lambda input: -1,
-        torch.special.ndtr: lambda input: -1,
-        torch.special.log_ndtr: lambda input: -1,
-        torch.special.xlogy: lambda input, other, out=None: -1,
+        torch.special.spherical_bessel_j0: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
+        torch.special.xlogy: lambda input, other, out=None: -1,
         torch.special.zeta: lambda self, other, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
@@ -1043,6 +1077,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.true_divide: lambda input, other: -1,
         torch.trunc: lambda input, out=None: -1,
         torch.unbind: lambda input, dim=0: -1,
+        torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
@@ -1122,7 +1157,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
         Tensor.__long__: lambda self: -1,
-        Tensor.__hash__: lambda self: -1,
         Tensor.__index__: lambda self: -1,
         Tensor.__len__: lambda self: -1,
         Tensor.__format__: lambda self, format_spec: -1,
@@ -1149,6 +1183,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_cpu.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_ipu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
@@ -1243,6 +1278,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
+        Tensor._nested_tensor_size: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1733,7 +1769,12 @@ def is_tensor_like(inp):
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_function_mode(self.inner):
+        if isinstance(f, classmethod):
+            raise RuntimeError("TorchFunctionMode's torch_function function " +
+                               "should be a normal method not a class method")
+        inner = getattr(self, "inner", None)
+
+        with enable_torch_function_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -1749,13 +1790,6 @@ def _wrap_torch_function(f):
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
 # more difficult to interact with TorchFunctionModeMeta.
-
-
-class _TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
-    def __init__(self):
-        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
-
-
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
@@ -1772,8 +1806,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], _TorchFunctionMetaInitErrorInfo())
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1800,7 +1832,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
           ``NotImplemented``.
 
     Independent subclasses of :class:`TorchFunctionMode` are compositional:
-    modes can be pushed onto a stack with :func:`push_torch_function_mode`.
+    modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_function__`` implementation, by default, they will forward on to
     the next mode on the mode stack.  If you want recursively call back into
@@ -1818,10 +1850,31 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
+    def __enter__(self):
+        old = _get_torch_function_mode()
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
+        else:
+            self.inner = old
+            if old is None:
+                self.ancestors = set()
+            else:
+                self.ancestors = self.inner.ancestors.union({self.inner})
+        _set_torch_function_mode(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_torch_function_mode(self.inner)
+
+    @contextlib.contextmanager
+    def restore(self):
+        return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
+
     @classmethod
     def push(cls, *args, **kwargs):
-        return push_torch_function_mode(functools.partial(cls, *args, **kwargs))
-
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -1845,8 +1898,7 @@ def _no_torch_function_mode() -> Iterator[None]:
 
 class _TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode)
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
 
     def get_mode(self):
         return _get_torch_function_mode()
@@ -1861,8 +1913,8 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     Context manager that sets the current :class:`TorchFunctionMode`; see the
     class for more information on what modes are.  This function is
     non-compositional; if there is already an existing mode, it will raise an
-    error; prefer using :func:`push_torch_function_mode` if your
-    ``__torch_function__`` implementation can defer to an inner mode.
+    error; prefer using ``with MyMode():`` if your ``__torch_function__``
+    implementation can defer to an inner mode.
 
     This function is safe to use inside a ``__torch_function__`` mode handler,
     as the mode is guaranteed to be disabled in this context.  You can use
@@ -1887,28 +1939,19 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     """
     return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
-@contextlib.contextmanager
-def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
-    """
-    Context manager that pushes a :class:`TorchFunctionMode` onto the current
-    mode stack; see the class for more information on what modes are.  Stacked
-    modes can delegate to each other by invoking the ``__torch_function__``
-    method for the ``inner`` mode.
-
-    Args:
-        ctor: a function that when invoked as ``ctor(inner=...)`` produces
-            a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
-            has no ``__init__`` implementation, you can simply pass the class
-            itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
-            use ``functools.partial`` to partially apply the constructor with all
-            non-inner arguments (e.g.,
-            ``push_torch_function_mode(partial(MyMode, arg))``)
-    """
-    return _push_mode(ctor, _TorchFunctionModeInfo())
-
 class enable_reentrant_dispatch():
     def __enter__(self):
         self._raii_guard = torch._C._RestorePythonTLSSnapshot()
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._raii_guard
+
+def get_buffer(tensor_subclass, data, prefix):
+    import ctypes
+    assert prefix in {"stride", "size", "sym_size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
+        SizeType = ctypes.c_longlong * len(data)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
+    return (ptr, len(data))

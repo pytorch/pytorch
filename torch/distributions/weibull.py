@@ -6,6 +6,7 @@ from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
 from torch.distributions.gumbel import euler_constant
 
+__all__ = ['Weibull']
 
 class Weibull(TransformedDistribution):
     r"""
@@ -13,6 +14,7 @@ class Weibull(TransformedDistribution):
 
     Example:
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Weibull(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Weibull distribution with scale=1, concentration=1
         tensor([ 0.4784])

@@ -1,6 +1,6 @@
 import functools
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    _sharded_op_impl,
     Shard,
     ShardedTensor,
 )
@@ -12,11 +12,12 @@ def _sharded_op_common(op, early_stop_func, extra_check):
     different behaviors are done on either local shards or a local tensor.
 
     Example::
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> op = torch.transpose
-        >>> @sharded_op_impl(op)
+        >>> @_sharded_op_impl(op)
         >>> @_sharded_op_common(op, early_stop_func, extra_check)
         >>> def sharded_tensor_op(types, args, kwargs, process_group):
-        >>>   ....
+        >>>   ...
         >>>
         >>> st = sharded_tensor.rand(32, 16)
         >>> st.transpose(1, 2)
@@ -82,7 +83,7 @@ def _register_sharded_op_on_local_shards(
         func (Callable): registered implementation for sharded op for
         ``__torch_function__`` dispatch.
     """
-    @sharded_op_impl(op)
+    @_sharded_op_impl(op)
     @_sharded_op_common(op, early_stop_func, extra_check)
     def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
         st = args[0]

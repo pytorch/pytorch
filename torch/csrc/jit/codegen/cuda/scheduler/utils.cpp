@@ -188,30 +188,53 @@ size_t mergeNonReduction(
 
 void parallelizeAllLike(
     TensorView* reference_tv,
-    const std::vector<TensorView*>& all_tvs) {
+    int64_t pos,
+    std::vector<TensorView*> selected_tvs,
+    const std::unordered_set<ParallelType>& selected_parallel_types,
+    bool propagate_padding) {
   FusionGuard fg(reference_tv->fusion());
+
+  if (pos < 0) {
+    pos += reference_tv->nDims() + 1;
+  }
+  TORCH_CHECK(
+      pos >= 0 && pos <= reference_tv->nDims(),
+      "parallelizeAllLike called on an position outside valid range.");
+
+  std::unordered_map<IterDomain*, IterDomain*> concrete_to_reference_map;
 
   auto ca_map = ComputeAtMap(FusionGuard::getCurFusion());
 
-  for (auto id : reference_tv->domain()->domain()) {
-    ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
-        ->parallelize(id->getParallelType());
-    if (id->hasPaddingToMultipleOfWarp()) {
-      ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
-          ->padToMultipleOfWarp(id->getMaybeSizeAfterPadding());
-    }
+  const auto& reference_dom = reference_tv->domain()->domain();
+  for (auto it = reference_dom.begin(); it != reference_dom.begin() + pos;
+       it++) {
+    auto ca_id = ca_map.getConcreteMappedID(*it, IdMappingMode::PERMISSIVE);
+    concrete_to_reference_map[ca_id] = *it;
   }
 
-  for (auto tv : all_tvs) {
+  if (selected_tvs.empty()) {
+    selected_tvs = ir_utils::allTvs(reference_tv->fusion());
+  }
+  for (auto tv : selected_tvs) {
     if (tv->isFusionInput()) {
       continue;
     }
     for (const auto i : c10::irange(tv->domain()->domain().size())) {
       auto ca_id =
           ca_map.getConcreteMappedID(tv->axis(i), IdMappingMode::PERMISSIVE);
-      tv->axis(i)->parallelize(ca_id->getParallelType());
-      if (ca_id->hasPaddingToMultipleOfWarp()) {
-        tv->axis(i)->padToMultipleOfWarp(ca_id->getMaybeSizeAfterPadding());
+      if (concrete_to_reference_map.count(ca_id) > 0) {
+        auto reference_id = concrete_to_reference_map.at(ca_id);
+        auto reference_parallel_type = reference_id->getParallelType();
+        if (selected_parallel_types.empty() ||
+            selected_parallel_types.count(reference_parallel_type)) {
+          tv->axis(i)->parallelize(reference_parallel_type);
+        }
+        if (propagate_padding) {
+          if (reference_id->hasPaddingToMultipleOfWarp()) {
+            tv->axis(i)->padToMultipleOfWarp(
+                reference_id->getMaybeSizeAfterPadding());
+          }
+        }
       }
     }
   }
@@ -543,7 +566,7 @@ TvProperties getProperties(
       TORCH_INTERNAL_ASSERT(
           inferred_val.has_value(), "Error inferring reduction size.");
       inner_most_dimension_numel =
-          inner_most_dimension_numel * inferred_val.value();
+          inner_most_dimension_numel * inferred_val.value().as<int64_t>();
       inner_most_dimension_ndims++;
     }
   }
@@ -560,9 +583,9 @@ TvProperties getProperties(
         inferred_val.has_value(),
         "Error inferring dimensions of reduction fusion.");
     if (id->isReduction()) {
-      total_reduction_numel *= inferred_val.value();
+      total_reduction_numel *= inferred_val.value().as<int64_t>();
     } else {
-      total_iteration_numel *= inferred_val.value();
+      total_iteration_numel *= inferred_val.value().as<int64_t>();
     }
   }
 
@@ -801,7 +824,7 @@ PersistentBufferSizeReturn persistentBufferSize(
       if (persistent_buffer_sizes[buffer_i] == -1) {
         persistent_buffer_sizes[buffer_i] = id_size.value();
       } else {
-        persistent_buffer_sizes[buffer_i] *= id_size.value();
+        persistent_buffer_sizes[buffer_i] *= id_size.value().as<int64_t>();
       }
     }
 
@@ -1460,7 +1483,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
           tv->toString(),
           ", id: ",
           root_id->toString());
-      merged_size *= maybe_dimension_size.value();
+      merged_size *= maybe_dimension_size.value().as<int64_t>();
     }
   } else {
     auto maybe_dimension_size =
@@ -1499,32 +1522,64 @@ void scheduleWarpTileWithReduction(TensorView* tv, MatMulTileOptions tile) {
   auto instruction_tile = tile.instruction_tile;
 
   TORCH_CHECK(
-      warp_tile.k == cta_tile.k,
-      "schedule warp tile: currently no support for splitting k dimension to different warps");
+      cta_tile.k % warp_tile.k == 0,
+      "Number of warp on k dimension need to be integer");
+
+  int num_warp_k = cta_tile.k / warp_tile.k;
 
   mma_util::checkDimSize(
       tv, {-3, -2, -1}, {cta_tile.m, cta_tile.n, cta_tile.k});
 
-  //       -3   -2  -1
-  //[...    M,   N,  K]
+  if (num_warp_k == 1) {
+    // Non split K over warp case:
 
-  // Distribute warp tile:
-  tv->split(-3, warp_tile.m);
-  tv->split(-2, warp_tile.n);
+    //       -3   -2  -1
+    //[...    M,   N,  K]
+    // Distribute warp tile:
+    tv->split(-3, warp_tile.m);
+    tv->split(-2, warp_tile.n);
 
-  //  -5   -4   -3   -2   -1
-  // [Mwo  Mw  Nwo   Nw   K]
-  tv->split(-4, instruction_tile.m);
-  tv->split(-2, instruction_tile.n);
-  tv->split(-1, instruction_tile.k);
+    //  -5   -4   -3   -2   -1
+    // [Mwo  Mw  Nwo   Nw   K]
+    tv->split(-4, instruction_tile.m);
+    tv->split(-2, instruction_tile.n);
+    tv->split(-1, instruction_tile.k);
 
-  //   -8  -7 -6 -5 -4 -3 -2 -1
-  // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
+    //   -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
 
-  tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+    tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+    //   -8  -7  -6 -5 -4 -3 -2 -1
+    // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+  } else {
+    // Split K over warp case:
+    // Main difference is that an additional
+    //  thread dimension needs to be reserved
+    //  for cross warp reduction:
+    //       -3   -2  -1
+    //[...    M,   N,  K]
+    // Distribute warp tile:
+    tv->split(-3, warp_tile.m);
+    tv->split(-2, warp_tile.n);
+    tv->split(-1, warp_tile.k);
 
-  //   -8  -7  -6 -5 -4 -3 -2 -1
-  // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+    //   -6  -5   -4   -3   -2 -1
+    // [Mwo  Mw  Nwo   Nw   K, Kw]
+    tv->split(-5, instruction_tile.m);
+    tv->split(-3, instruction_tile.n);
+    tv->split(-1, instruction_tile.k);
+
+    //  -9  -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo Mw Mi Nwo Nw Ni Kwo Kw Ki]
+
+    tv->reorder({{-8, -6}, {-7, -3}, {-6, -8}, {-4, -2}, {-3, -7}, {-2, -4}});
+    //  -9   -8  -7 -6 -5 -4 -3 -2 -1
+    // [Mwo  Nwo Ko Mw Nw Kw, Mi Ni Ki]
+
+    tv->merge(-9);
+    //  -8  -7 -6 -5 -4   -3 -2 -1
+    // [MNwo Ko Mw Nw Kw, Mi Ni Ki]
+  }
 }
 
 void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
@@ -1535,6 +1590,12 @@ void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
   auto instruction_tile = tile.instruction_tile;
 
   mma_util::checkDimSize(tv, {-2, -1}, {cta_tile.m, cta_tile.n});
+
+  TORCH_CHECK(
+      cta_tile.k % warp_tile.k == 0,
+      "Number of warp on k dimension need to be integer");
+
+  int num_warp_k = cta_tile.k / warp_tile.k;
 
   //        -2  -1
   //[...    M,   N]
@@ -1555,30 +1616,460 @@ void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
 
   //  -6   -5  -4 -3 -2 -1
   // [Mwo  Nwo Mw Nw Mi Ni]
+
+  if (num_warp_k != 1) {
+    // The non reduction warps are merged together
+    //  to save one thread dim for cross dim reduce.
+    tv->merge(-6);
+    //  -5  -4 -3 -2 -1
+    // [MNo Mw Nw Mi Ni]
+  }
 }
 
 //! Split the innermost dim to a vectorized load
 void scheduleContiguousVectorLoad(
     TensorView* tv,
     MatMulTileOptions tile,
-    int vector_word) {
+    int vector_word,
+    bool vectorize) {
   auto warp_dims = tile.cta_tile / tile.warp_tile;
   int num_of_thread = warp_dims.m * warp_dims.n * warp_dims.k * 32;
 
   tv->split(-1, num_of_thread * vector_word);
   tv->split(-1, vector_word);
   // [..., thread, vec]
-  // distribute to warp:
+  // distribute to warp: for tidx
   tv->split(-2, 32);
-  tv->split(-3, warp_dims.n * warp_dims.k);
 
-  tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  //      -3    -2    -1
+  // [...warp, lane, vec]
+
+  if (warp_dims.k == 1) {
+    //      -4     -3    -2    -1
+    // [...warpM, warpN, lane, vec]
+    tv->split(-3, warp_dims.n);
+  } else {
+    //      -4     -3    -2    -1
+    // [...warpMN, warpR, lane, vec]
+    tv->split(-3, warp_dims.k);
+  }
+
+  if (vectorize) {
+    tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  }
+
   tv->axis(-2)->parallelize(ParallelType::TIDx);
   tv->axis(-3)->parallelize(ParallelType::TIDy);
   tv->axis(-4)->parallelize(ParallelType::TIDz);
 }
 
+void makeTile(TensorView* tv, std::vector<int> tile_sizes) {
+  TORCH_CHECK(
+      tv->domain()->domain().size() >= tile_sizes.size(),
+      "Tensor dimension less than tile dimension!");
+
+  // Number of inner dimensions we are tiling.
+  const auto tile_dimension_size = tile_sizes.size();
+
+  // Split the inner dimensions:
+  for (auto idx : c10::irange(tile_dimension_size)) {
+    // Using negative indexing to accomodate potential batching
+    //  dimensions on the further left. Eg.:
+    //  0, 1, 2   ->         -3,-2,-1
+    // [M, N, K]  -> [B0, B1, M, N, K]
+    tv->split(idx - tile_dimension_size, tile_sizes.at(idx));
+  }
+
+  // The transformation happened should look like:
+  //   Before               After
+  // [..., M, N, K] -> [..., Mo, Mi, No, Ni, Ko, Ki]
+
+  // Re-order the tiles so that all the outer tiles are
+  //  on the left of all the inner tiles
+  std::unordered_map<int, int> reorder_map_old_to_new;
+
+  // Number of tiled inner dimensions after we split.
+  const auto split_tile_dimension_size = 2 * tile_dimension_size;
+  for (auto idx : c10::irange(split_tile_dimension_size)) {
+    // We want to reorder as follows:
+    //           Before
+    //
+    // [..., Mo, Mi, No, Ni, Ko, Ki] ->
+    //                 After
+    //      vvv group0 vvv  vvv group1 vvv
+    // [..., Mo, No, Ko,     Mi, Ni, Ki]
+
+    // The index offset within group of current
+    //  iterdomain, with grouping specified above.
+    auto index_within_group = idx / 2;
+
+    // The index of the group the current id belongs
+    //  to, as specified above.
+    auto group_index = idx % 2;
+
+    // Calculate the actual index after reordering
+    auto index_after_reorder =
+        group_index * tile_dimension_size + index_within_group;
+
+    // Add pair {idx_before, idx_after} to re-order map.
+    reorder_map_old_to_new.insert(std::make_pair(
+        idx - split_tile_dimension_size,
+        index_after_reorder - split_tile_dimension_size));
+  }
+
+  // Apply the re-order map to tensor
+  tv->reorder(reorder_map_old_to_new);
+}
+
+namespace {
+
+c10::optional<IterDomain*> getMaybeRootIfInnermostTiled(
+    IterDomain* id,
+    const std::unordered_set<IterDomain*>& maybe_rfactor_id_set) {
+  // Root id defaults to an "innermost id".
+  while (id->definition() && !maybe_rfactor_id_set.count(id)) {
+    if (auto split = dynamic_cast<Split*>(id->definition())) {
+      if (id == split->inner()) {
+        id = split->in();
+        continue;
+      }
+    }
+    // Didn't pass the inner most check, return empty.
+    return c10::nullopt;
+  }
+
+  return id;
+}
+
+} // namespace
+
+TORCH_CUDA_CU_API void orderTiledConcreteIdAsRoot(TensorView* tv) {
+  auto ndims = tv->nDims();
+
+  // Keep track of the left most position where we will
+  //  be reordering the axes.
+  auto leftmost_pos = ndims;
+
+  // Pull the root id's of the given tv.
+  std::unordered_set<IterDomain*> maybe_rfactor_id_set{
+      tv->getMaybeRFactorDomain().begin(), tv->getMaybeRFactorDomain().end()};
+
+  // Keep track of leaf positions that is either a reduction
+  //  or a broadcast.
+  // Note: Currently don't really see a case where this function
+  //  should be called on a reduction output tv, but adding them
+  //  here for completeness.
+  std::deque<int> broadcast_or_reduction_pos;
+
+  // Map the root id's to their innermost concrete id's
+  //  on the leaf.
+  std::unordered_map<IterDomain*, int> root_id_to_inner_leaf_pos;
+
+  // Try to re-order inner iterdomains from the innermost
+  //  position backward. This utility only tries to re-order
+  //  inner tiles on the innermost positions, like the resulting
+  //  tensor from makeTile utility.
+  // The re-ordering would first try to decide the inner iterdomains
+  //  we want to re-order. For this we start from the innermost position
+  //  and move back and collect all the iterdomains that we know
+  //  are inner tiles of some root domain or broadcast/reduction domains
+  //  that won't affect the concrete id layout.
+  // The collection process would stop whenever a iterdomain that is
+  //  neither an inner tile nor reduction/broadcast is found, and would
+  //  not re-order any iterdomain beyond that point to keep the
+  //  outer loop structure unchanged.
+  for (int64_t i = static_cast<int64_t>(ndims) - 1; i >= 0; i--) {
+    auto leaf_id = tv->axis(i);
+    if (leaf_id->isBroadcast() || leaf_id->isReduction()) {
+      // Register this reduction or broadcast axis
+      //  to reorder.
+      broadcast_or_reduction_pos.push_front(i);
+      leftmost_pos = i;
+      continue;
+    }
+    auto maybe_root =
+        getMaybeRootIfInnermostTiled(leaf_id, maybe_rfactor_id_set);
+
+    if (maybe_root.has_value()) {
+      // Found an innermost id, add them to the
+      //  axes to reorder.
+      TORCH_INTERNAL_ASSERT(
+          root_id_to_inner_leaf_pos
+              .insert(std::make_pair(maybe_root.value(), i))
+              .second,
+          "Multiple \"innermost\" id seen for root id :",
+          maybe_root.value()->toString(),
+          " on ",
+          tv->toString(),
+          " very likely an invariant is broken.");
+      leftmost_pos = i;
+    } else {
+      break;
+    }
+  }
+
+  // Calculate the ordering:
+
+  // pointer to the current target postion after
+  //  repordering
+  int current_pos = leftmost_pos;
+  std::unordered_map<int, int> reorder_map_old_to_new;
+
+  // first place all the broadcast and reduction on the left:
+  for (auto original_broadcast_or_reduction_pos : broadcast_or_reduction_pos) {
+    reorder_map_old_to_new[original_broadcast_or_reduction_pos] = current_pos++;
+  }
+
+  // Next put all the innermost leaf id's, we make sure that
+  //  the inner tile ordering follows the corresponding root
+  //  domain ordering by iterating on the root domain and
+  //  find their corresponding inner tile iterdomains from
+  //  the populated root_id_to_inner_leaf_pos.
+  for (auto root_id : tv->getMaybeRFactorDomain()) {
+    auto leaf_id_pos_it = root_id_to_inner_leaf_pos.find(root_id);
+    if (leaf_id_pos_it != root_id_to_inner_leaf_pos.end()) {
+      reorder_map_old_to_new[leaf_id_pos_it->second] = current_pos++;
+    }
+  }
+
+  // Validate that we have processed all inner ids or broadcast/reduction
+  //  ids we have registered.
+  TORCH_INTERNAL_ASSERT(current_pos == ndims, "Inconsistent ordering logic");
+
+  // Apply the new order:
+  tv->reorder(reorder_map_old_to_new);
+}
+
 } // namespace matmul_utils
+
+//! Propagate current transformations on from_tv to all graphs
+TORCH_CUDA_CU_API void transformPropagateToAllFrom(
+    TensorView* from_tv,
+    int pos) {
+  TransformPropagator propagator(from_tv, pos);
+  MaxRootDomainInfoSpanningTree(from_tv, nullptr).traverse(&propagator);
+}
+
+namespace {
+
+//! Utility enum to signify which direction
+//! BoundedDirectionalTransformPropagator
+//!  passes will propagate the transforms.
+enum class PropagateDirection { Backward = 0, Forward };
+
+//! Returns true if the given tensorview is a fake boundary
+//!  TensorView, see Note [Fake Boundary Tensorview].
+//! This function assumes and would not check that tv is a boundary
+//!  of the select_tv set.
+bool isFakeBoundaryTensorview(
+    TensorView* tv,
+    const std::unordered_set<TensorView*>& selected_tv_set,
+    PropagateDirection direction) {
+  if (direction == PropagateDirection::Forward) {
+    // In the case of forward propagation,
+    //  a boundary tv is a fake boundary if
+    //  it has any consumer tv that's in the selected
+    //  set.
+    for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
+      if (selected_tv_set.count(consumer_tv)) {
+        // Found a consumer that's in selected tv set.
+        return true;
+      }
+    }
+
+  } else {
+    // In the case of backward propagation,
+    //  a boundary tv is a fake boundary if it has any producer
+    //  that is within the selected set.
+    for (auto producer_tv : ir_utils::producerTvsOf(tv)) {
+      if (selected_tv_set.count(producer_tv)) {
+        // Found a producer that's in selected tv set.
+        return true;
+      }
+    }
+  }
+
+  // Didn't find any producer/consumer in the selected tv set.
+  //  The given tv is not a fake boundary tv.
+  return false;
+}
+
+//! Utility function to generate the set of tensorviews to propagate
+//!  transform to by BoundedDirectionalTransformPropagator.
+std::unordered_set<TensorView*> getDirectionalPropagatePathSet(
+    TensorView* from_tv,
+    std::vector<TensorView*> boundary_tvs,
+    BoundedDirectionalTransformPropagator::Options options,
+    PropagateDirection direction) {
+  // Prepare to collect all candidate tensorviews
+  //  within the specified boundary.
+  std::vector<Val*> propagate_candidate;
+
+  // Collect boundary tvs in a set.
+  std::unordered_set<TensorView*> boundary_tv_set(
+      boundary_tvs.begin(), boundary_tvs.end());
+
+  if (direction == PropagateDirection::Forward) {
+    // In the case of forward propagation, collect all tvs
+    //  that are consumers of `from_tv` and producers of
+    //  boundary tvs.
+    propagate_candidate = DependencyCheck::getAllValsBetween(
+        {from_tv}, {boundary_tvs.begin(), boundary_tvs.end()});
+  } else {
+    // In the case of backward propagation, collect all tvs
+    //  that are producers of `from_tv` and consumers of
+    //  boundary tvs.
+    propagate_candidate = DependencyCheck::getAllValsBetween(
+        {boundary_tvs.begin(), boundary_tvs.end()}, {from_tv});
+  }
+
+  // Populate initial selected tensorviews in a set.
+  auto propagate_candidate_tv_view =
+      ir_utils::filterByType<TensorView>(propagate_candidate);
+  // Prepare to filter out un-wanted tensorviews according
+  //  to the option parameters.
+  std::unordered_set<TensorView*> propagate_path_set{
+      propagate_candidate_tv_view.begin(), propagate_candidate_tv_view.end()};
+
+  // Remove boundary tensorviews if we don't want to transform
+  //  tensorviews on the boundary.
+  if (!options.transform_boundary) {
+    // Additional refining step to identify "fake boundary" tensorviews.
+    //  We don't want to erase fake boundary tensorviews from the selected
+    //  set when we are erasing boundary tvs.
+    //
+    // Note [Fake Boundary Tensorview]
+    // A tensorview, tv0, is defined as fake boundary tv if
+    //  1. Tv0 is on the given boundary set.
+    //  2. There is a path from another boundary tv, Tv1 to from_tv that
+    // goes through Tv0.
+    //
+    // In this case the propagation behavior is not precisely defined.
+    // Our current decision is to treat such tensorview as non-boundary
+    //  tv to make sure the propagation paths are not blocked. E.g.:
+    //
+    //  T1 = T0
+    //  T2 = T1
+    //  T3 = T2 + T1
+    // if we propagate with from_tv = {T3}, boundary_tv = {T0, T2},
+    // transform_boundary=false
+    //
+    // Here T2 is a fake boundary and we will still transform T2 as it is
+    //  on the path between T3 and T0.
+
+    // Initialize set of fake boundary tvs.
+    std::unordered_set<TensorView*> fake_boundary_set;
+
+    // Populate the set of fake boundary tvs.
+    std::copy_if(
+        boundary_tvs.begin(),
+        boundary_tvs.end(),
+        std::inserter(fake_boundary_set, fake_boundary_set.end()),
+        [&propagate_path_set, direction](TensorView* tv) {
+          return isFakeBoundaryTensorview(tv, propagate_path_set, direction);
+        });
+
+    // Remove boundary tvs from the selected set, keeping fake boundary tvs.
+    for (auto boundary_tv : boundary_tvs) {
+      if (!fake_boundary_set.count(boundary_tv)) {
+        propagate_path_set.erase(boundary_tv);
+      }
+    }
+  }
+
+  return propagate_path_set;
+}
+
+} // namespace
+
+void BoundedDirectionalTransformPropagator::propagate(
+    TensorView* from_tv,
+    int pos,
+    std::unordered_set<TensorView*> included_tvs,
+    Options options) {
+  // Run transform propagation using the custom selector.
+  SetSelector selector(included_tvs);
+  TransformPropagator propagator(from_tv, pos);
+  MaxRootDomainInfoSpanningTree(from_tv, &selector).traverse(&propagator);
+
+  // Propagate parallel type if requested by option parameters.
+  if (options.propagate_parallel_type) {
+    scheduler_utils::parallelizeAllLike(
+        from_tv,
+        options.parallel_propagation_pos,
+        {included_tvs.begin(), included_tvs.end()},
+        allParallelTypesExcept({ParallelType::Vectorize, ParallelType::Mma}));
+  }
+}
+
+void BoundedDirectionalTransformPropagator::backward(
+    TensorView* from,
+    int pos,
+    std::vector<TensorView*> to,
+    c10::optional<Options> options) {
+  if (!options.has_value()) {
+    options = Options();
+  }
+  TORCH_INTERNAL_ASSERT(
+      !to.empty(),
+      "Propagation needs to be bounded, so no support for empty boundary.");
+
+  // Collect all tvs to included on the backward path as specified
+  //  by boundary and options.
+  auto included_tvs = getDirectionalPropagatePathSet(
+      from, to, *options, PropagateDirection::Backward);
+  // Actually run the propagation.
+  propagate(from, pos, included_tvs, *options);
+}
+
+void BoundedDirectionalTransformPropagator::forward(
+    TensorView* from,
+    int pos,
+    std::vector<TensorView*> to,
+    c10::optional<Options> options) {
+  if (!options.has_value()) {
+    options = Options();
+  }
+  TORCH_INTERNAL_ASSERT(
+      !to.empty(),
+      "Propagation needs to be bounded, so no support for empty boundary.")
+
+  // Collect all tvs to included on the forward path as specified
+  //  by boundary and options.
+  auto included_tvs = getDirectionalPropagatePathSet(
+      from, to, *options, PropagateDirection::Forward);
+
+  // Actually run the propagation.
+  propagate(from, pos, included_tvs, *options);
+}
+
+void BoundedDirectionalTransformPropagator::bothWays(
+    TensorView* from,
+    int pos,
+    std::vector<TensorView*> backward_to,
+    std::vector<TensorView*> forward_to,
+    c10::optional<Options> options) {
+  if (!options.has_value()) {
+    options = Options();
+  }
+  TORCH_INTERNAL_ASSERT(
+      !backward_to.empty() && !forward_to.empty(),
+      "Propagation needs to be bounded, so no support for empty boundary.")
+
+  // Collect all tvs to included on the backward and forward path as specified
+  //  by boundary and options.
+  auto backward_included_tvs = getDirectionalPropagatePathSet(
+      from, backward_to, *options, PropagateDirection::Backward);
+  auto forward_included_tvs = getDirectionalPropagatePathSet(
+      from, forward_to, *options, PropagateDirection::Forward);
+
+  // Combined the included tvs on both paths.
+  auto included_tvs = backward_included_tvs;
+  included_tvs.insert(forward_included_tvs.begin(), forward_included_tvs.end());
+
+  // Run the propagation on the combined set of tvs.
+  propagate(from, pos, included_tvs, *options);
+}
 
 // Grab all values and expressions used to make the merged_domain and remove
 // them from the fusion
@@ -1651,7 +2142,8 @@ size_t expandVectorizationToContigMergedDomains(
     int break_point,
     size_t default_word_size) {
   // Don't vectorize when RNG is used
-  if (fusion->isStochastic() && isDisabled(DisableOption::UnrollWithRng)) {
+  if (fusion->isStochastic() &&
+      isOptionDisabled(DisableOption::UnrollWithRng)) {
     return default_word_size;
   }
 

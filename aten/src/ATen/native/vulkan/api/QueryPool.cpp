@@ -1,117 +1,196 @@
 #include <ATen/native/vulkan/api/QueryPool.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
+
+#include <iostream>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-namespace {
 
-VkQueryPool create_query_pool(const VkDevice& device, const uint32_t queryCount) {
-  VkQueryPool queryPool{};
-  VkQueryPoolCreateInfo info{};
-  info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-  info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-  info.queryCount = queryCount;
-  VK_CHECK(vkCreateQueryPool(device, &info, nullptr, &queryPool));
-  return queryPool;
-};
+QueryPool::QueryPool(const VkDevice device, const QueryPoolConfig& config)
+    : mutex_{},
+      device_(device),
+      config_(config),
+      querypool_(VK_NULL_HANDLE),
+      shader_log_{},
+      in_use_(0u) {
+  const VkQueryPoolCreateInfo info{
+      VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      VK_QUERY_TYPE_TIMESTAMP, // queryType
+      config_.maxQueryCount, // queryCount
+      0u, // pipelineStatistics
+  };
 
-void destroy_query_pool(const VkDevice& device, const VkQueryPool& querypool) {
-  if (VK_NULL_HANDLE != device && VK_NULL_HANDLE != querypool) {
-    vkDestroyQueryPool(device, querypool, nullptr);
-  }
-}
+  VK_CHECK(vkCreateQueryPool(device_, &info, nullptr, &querypool_));
 
-} // namespace
-
-QueryPool::QueryPool(const VkDevice& device, const bool is_timestamps_supported, const float timestamp_period_us)
-  : device_(device),
-    is_timestamps_supported_(is_timestamps_supported),
-    timestamp_period_us_(timestamp_period_us),
-    querypool_(VK_NULL_HANDLE) {
+  shader_log_.reserve(config_.initialReserveSize);
 }
 
 QueryPool::~QueryPool() {
-  destroy_query_pool(device_, querypool_);
-  querypool_ = VK_NULL_HANDLE;
-  query_names_.clear();
-}
-
-bool QueryPool::is_enabled() const {
-  return VK_NULL_HANDLE != querypool_;
-}
-
-bool QueryPool::enable() {
-  TORCH_CHECK(VK_NULL_HANDLE == querypool_, "The query pool already exists.");
-  TORCH_CHECK(is_timestamps_supported_, "The device doesn't support for timestamps on all graphics and compute queues.");
-  querypool_ = create_query_pool(device_, Configuration::kMaxQueryCount);
-  return is_enabled();
-}
-
-std::vector<QueryPool::PerfInfo> QueryPool::disable(const bool waitfor_allqueries/* = true*/) {
-  auto out = result(waitfor_allqueries);
-  destroy_query_pool(device_, querypool_);
-  querypool_ = VK_NULL_HANDLE;
-  query_names_.clear();
-  return out;
-}
-
-int QueryPool::begin(const VkCommandBuffer& commandBuffer, const std::string& query_name) {
-  if (VK_NULL_HANDLE == querypool_ || VK_NULL_HANDLE == commandBuffer) {
-    return -1;
-  }
-  auto newQueryIndex = static_cast<uint32_t>(query_names_.size());
-  TORCH_CHECK(newQueryIndex < Configuration::kMaxQueryCount, "The query index cannot exceed Configuration::kMaxQueryCount.");
-  query_names_.push_back(query_name);
-
-  vkCmdWriteTimestamp(
-        commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, querypool_, newQueryIndex * Configuration::kTimestampsPerQuery);
-  return static_cast<int>(newQueryIndex);
-}
-
-void QueryPool::end(const VkCommandBuffer& commandBuffer, const int queryIndex) {
-  if (VK_NULL_HANDLE == querypool_ || VK_NULL_HANDLE == commandBuffer) {
+  if (VK_NULL_HANDLE == querypool_) {
     return;
   }
-  vkCmdWriteTimestamp(
-        commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, querypool_, static_cast<uint32_t>(queryIndex) * Configuration::kTimestampsPerQuery + 1u);
+  vkDestroyQueryPool(device_, querypool_, nullptr);
+  shader_log_.clear();
 }
 
-std::vector<QueryPool::PerfInfo> QueryPool::result(const bool waitfor_allqueries) const {
-  if (VK_NULL_HANDLE == querypool_) {
-    return std::vector<QueryPool::PerfInfo> {};
+void QueryPool::reset(const CommandBuffer& cmd) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  cmd.reset_querypool(querypool_, 0u, in_use_);
+  in_use_ = 0u;
+  shader_log_.clear();
+}
+
+uint32_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
+  TORCH_CHECK(
+      in_use_ < config_.maxQueryCount,
+      "Vulkan QueryPool: Exceeded the maximum number of queries "
+      "allowed by the queryPool (",
+      config_.maxQueryCount,
+      ")!");
+
+  cmd.write_timestamp(querypool_, in_use_);
+
+  return in_use_++;
+}
+
+uint32_t QueryPool::shader_profile_begin(
+    const CommandBuffer& cmd,
+    const std::string& kernel_name,
+    const VkExtent3D global_workgroup_size,
+    const VkExtent3D local_workgroup_size) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  uint32_t query_idx = write_timestamp(cmd);
+
+  uint32_t log_idx = shader_log_.size();
+  ShaderDuration log_entry{
+      log_idx,
+      // Execution Properties
+      kernel_name,
+      global_workgroup_size,
+      local_workgroup_size,
+      // Query indexes
+      query_idx, // start query idx
+      UINT32_MAX, // end query idx
+      // Timings
+      0u, // start time
+      0u, // end time
+      0u, // duration
+  };
+
+  shader_log_.emplace_back(log_entry);
+
+  return log_idx;
+}
+
+void QueryPool::shader_profile_end(
+    const CommandBuffer& cmd,
+    const uint32_t log_idx) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  uint32_t query_idx = write_timestamp(cmd);
+
+  shader_log_[log_idx].end_query_idx = query_idx;
+}
+
+void QueryPool::extract_results() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  const VkQueryResultFlags flags = VK_QUERY_RESULT_64_BIT;
+
+  std::vector<uint64_t> query_data;
+  query_data.resize(in_use_);
+
+  VK_CHECK(vkGetQueryPoolResults(
+      device_,
+      querypool_,
+      0u, // firstQuery
+      in_use_, // queryCount
+      sizeof(uint64_t) * in_use_, // dataSize
+      query_data.data(), // pData
+      sizeof(uint64_t), // stride
+      flags)); // flags
+
+  for (ShaderDuration& entry : shader_log_) {
+    entry.start_time_ns = query_data.at(entry.start_query_idx);
+    entry.end_time_ns = query_data.at(entry.end_query_idx);
+
+    entry.execution_duration_ns = entry.end_time_ns - entry.start_time_ns;
+  }
+}
+
+std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
+  os << "{" << extents.width << ", " << extents.height << ", " << extents.depth
+     << "}";
+  return os;
+}
+
+std::string stringize(const VkExtent3D& extents) {
+  std::stringstream ss;
+  ss << "{" << extents.width << ", " << extents.height << ", " << extents.depth
+     << "}";
+  return ss.str();
+}
+
+std::string QueryPool::generate_string_report() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  std::stringstream ss;
+
+  int kernel_name_w = 25;
+  int global_size_w = 15;
+  int duration_w = 25;
+
+  ss << std::left;
+  ss << std::setw(kernel_name_w) << "Kernel Name";
+  ss << std::setw(global_size_w) << "Workgroup Size";
+  ss << std::right << std::setw(duration_w) << "Duration (ns)";
+  ss << std::endl;
+
+  ss << std::left;
+  ss << std::setw(kernel_name_w) << "===========";
+  ss << std::setw(global_size_w) << "==============";
+  ss << std::right << std::setw(duration_w) << "===========";
+  ss << std::endl;
+
+  for (ShaderDuration& entry : shader_log_) {
+    std::chrono::duration<size_t, std::nano> exec_duration_ns(
+        entry.execution_duration_ns);
+
+    ss << std::left;
+    ss << std::setw(kernel_name_w) << entry.kernel_name;
+    ss << std::setw(global_size_w) << stringize(entry.global_workgroup_size);
+    ss << std::right << std::setw(duration_w) << exec_duration_ns.count();
+    ss << std::endl;
   }
 
-  std::vector<QueryPool::PerfInfo> perfInfo;
-  const VkQueryResultFlags flags = waitfor_allqueries ? (VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) : VK_QUERY_RESULT_64_BIT;
-  std::array<uint64_t, 2> counter_data{};
-  for (uint32_t queryIndex = 0u; queryIndex < query_names_.size(); ++queryIndex) {
-    const auto& query_name = query_names_[queryIndex];
+  return ss.str();
+}
 
-    // Grab the gpu timings (nanoseconds)
-    auto ret = vkGetQueryPoolResults(device_, querypool_, queryIndex * Configuration::kTimestampsPerQuery, Configuration::kTimestampsPerQuery,
-        sizeof(uint64_t) * counter_data.size(), counter_data.data(), sizeof(uint64_t),
-        flags);
-    if (ret != VK_SUCCESS) {
-      std::stringstream msg;
-      msg << "vkGetQueryPoolResults() for \"" << query_name << "\"" << " returned an error code " << ret << ".";
-      TORCH_WARN(msg.str());
-      continue;
+void QueryPool::print_results() {
+  std::cout << generate_string_report() << std::endl;
+}
+
+uint64_t QueryPool::get_total_op_ns(std::string op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  uint64_t sum = 0;
+  for (ShaderDuration& entry : shader_log_) {
+    if (entry.kernel_name == op_name) {
+      sum += entry.execution_duration_ns;
     }
+  }
+  return sum;
+}
 
-    // Tally up GPU time
-    int64_t gpu_time_us = static_cast<int64_t>(
-        (static_cast<double>(counter_data[1] - counter_data[0]) *
-            timestamp_period_us_) / 1'000.f);    // convert ns to us
-
-    perfInfo.emplace_back(QueryPool::PerfInfo {
-        query_name,
-        static_cast<int64_t>(static_cast<double>(counter_data[0]) * timestamp_period_us_ / 1'000.f),
-        static_cast<int64_t>(static_cast<double>(counter_data[1]) * timestamp_period_us_ / 1'000.f),
-        gpu_time_us });
- }
-  return perfInfo;
+void QueryPool::shader_log_for_each(
+    std::function<void(const ShaderDuration&)> fn) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::for_each(shader_log_.begin(), shader_log_.end(), fn);
 }
 
 } // namespace api

@@ -12,8 +12,10 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#ifdef SYCL_LANGUAGE_VERSION
-#include <CL/sycl.hpp>
+#if defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp> // for SYCL 2020
+#elif defined(CL_SYCL_LANGUAGE_VERSION)
+#include <CL/sycl.hpp> // for SYCL 1.2.1
 #endif
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -98,7 +100,7 @@ inline C10_HOST_DEVICE Half operator-(const Half& a) {
     defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #elif defined(__SYCL_DEVICE_ONLY__)
-  return -static_cast<sycl::half>(a);
+  return -sycl::bit_cast<sycl::half>(a);
 #else
   return -static_cast<float>(a);
 #endif

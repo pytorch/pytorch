@@ -1,24 +1,25 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
+#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <c10/core/MemoryFormat.h>
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
-
 
 namespace torch {
 namespace utils {
 
 namespace {
 // Intentionally leaked
-std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>  memory_format_registry = {};
+std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>
+    memory_format_registry = {};
 } // anonymous namespace
 
 py::object getTHPMemoryFormat(at::MemoryFormat memory_format) {
-  return py::reinterpret_borrow<py::object>(memory_format_registry[static_cast<size_t>(memory_format)]);
+  return py::reinterpret_borrow<py::object>(
+      memory_format_registry[static_cast<size_t>(memory_format)]);
 }
 
 void initializeMemoryFormats() {
@@ -43,7 +44,6 @@ void initializeMemoryFormats() {
   add_memory_format(at::MemoryFormat::Contiguous, "contiguous_format");
   add_memory_format(at::MemoryFormat::ChannelsLast, "channels_last");
   add_memory_format(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
-
 }
 
 } // namespace utils

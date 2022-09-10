@@ -10,7 +10,7 @@ from itertools import permutations, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, slowTest)
+    (TestCase, run_tests, skipIfTorchDynamo, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -118,6 +118,13 @@ class TestSortAndSelect(TestCase):
 
             # Test that we still have proper sorting with duplicate keys
             self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+
+            # Test argument sorting with and without stable
+            x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 3)
+            self.assertEqual(torch.argsort(x, stable=True), torch.sort(x, stable=True).indices)
+            self.assertEqual(torch.argsort(x, stable=False), torch.sort(x, stable=False).indices)
+            self.assertEqual(torch.argsort(x), torch.sort(x).indices)
+
 
             # Test sorting with NaNs
             x = torch.rand(4, SIZE, device=device)
@@ -350,6 +357,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/982")
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)

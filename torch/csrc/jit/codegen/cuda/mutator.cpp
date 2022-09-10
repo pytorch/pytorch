@@ -63,20 +63,13 @@ void OptOutMutator::mutate(IterDomain* id) {
       stop_offset->sameAs(id->stopOffset())) {
     return;
   }
-
-  Val* mutated_val = IrBuilder::create<IterDomain>(
-      id->container(),
-      start,
-      extent,
-      stop_offset,
-      id->getParallelType(),
-      id->getIterType(),
-      id->isRFactorProduct());
-  if (id->hasPaddingToMultipleOfWarp()) {
-    mutated_val->as<IterDomain>()->padToMultipleOfWarp(
-        id->getMaybeSizeAfterPadding());
-  }
-  registerMutation(id, mutated_val);
+  registerMutation(
+      id,
+      IterDomainBuilder(id)
+          .start(start)
+          .extent(extent)
+          .stop_offset(stop_offset)
+          .build());
 }
 
 void OptOutMutator::mutate(TensorDomain* td) {
@@ -136,7 +129,7 @@ void OptOutMutator::mutate(UnaryOp* uop) {
   auto container = uop->container();
   auto uop_type = uop->getUnaryOpType();
   container->removeExpr(uop);
-  IrBuilder::create<UnaryOp>(container, uop_type, out, in);
+  IrBuilder::create<UnaryOp>(container, uop_type, out, in, uop->getRNGOffset());
 }
 
 void OptOutMutator::mutate(BinaryOp* bop) {
@@ -290,6 +283,20 @@ void OptOutMutator::mutate(MmaOp* mma) {
       IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
 }
 
+void OptOutMutator::mutate(LoadStoreOp* ldst) {
+  Val* out = maybeMutated(ldst->out());
+  Val* in = maybeMutated(ldst->in());
+  auto op_type = ldst->opType();
+
+  if (out->sameAs(ldst->out()) && in->sameAs(ldst->in())) {
+    return;
+  }
+
+  auto container = ldst->container();
+  container->removeExpr(ldst);
+  IrBuilder::create<LoadStoreOp>(container, op_type, out, in);
+}
+
 void OptOutMutator::mutate(BroadcastOp* bop) {
   Val* out = maybeMutated(bop->out());
   Val* in = maybeMutated(bop->in());
@@ -316,6 +323,32 @@ void OptOutMutator::mutate(TransposeOp* top) {
   auto new2old = top->new2old();
   container->removeExpr(top);
   IrBuilder::create<TransposeOp>(container, out, in, new2old);
+}
+
+void OptOutMutator::mutate(ExpandOp* eop) {
+  bool is_same = true;
+
+  TensorView* out = maybeMutated(eop->out())->as<TensorView>();
+  is_same = is_same && out->sameAs(eop->out());
+  TensorView* in = maybeMutated(eop->in())->as<TensorView>();
+  is_same = is_same && in->sameAs(eop->in());
+
+  std::vector<Val*> expanded_extents;
+  expanded_extents.reserve(eop->expanded_extents().size());
+  for (auto expanded_extent : eop->expanded_extents()) {
+    expanded_extents.push_back(maybeMutated(expanded_extent));
+    if (!expanded_extents.back()->sameAs(expanded_extent)) {
+      is_same = false;
+    }
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = eop->container();
+  container->removeExpr(eop);
+  IrBuilder::create<ExpandOp>(container, out, in, expanded_extents);
 }
 
 void OptOutMutator::mutate(ShiftOp* sop) {
@@ -412,6 +445,26 @@ void OptOutMutator::mutate(Merge* m) {
   C10_UNUSED auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
 }
 
+void OptOutMutator::mutate(Swizzle2D* m) {
+  IterDomain* outx = maybeMutated(m->outX())->as<IterDomain>();
+  IterDomain* outy = maybeMutated(m->outY())->as<IterDomain>();
+
+  IterDomain* inx = maybeMutated(m->inX())->as<IterDomain>();
+  IterDomain* iny = maybeMutated(m->inY())->as<IterDomain>();
+
+  auto swizzle_type = m->swizzleType();
+
+  if (outx->sameAs(m->outX()) && outy->sameAs(m->outY()) &&
+      inx->sameAs(m->inX()) && iny->sameAs(m->inY())) {
+    return;
+  }
+  auto container = m->container();
+  container->removeExpr(m);
+  FusionGuard::getCurFusion()->removeExpr(m);
+  C10_UNUSED auto new_node = IrBuilder::create<Swizzle2D>(
+      container, outx, outy, inx, iny, swizzle_type);
+}
+
 void OptOutMutator::mutate(kir::Allocate*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
@@ -419,6 +472,12 @@ void OptOutMutator::mutate(kir::BlockSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridSync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::CpAsyncWait*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::CpAsyncCommit*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {
@@ -446,6 +505,15 @@ void OptOutMutator::mutate(kir::GridWelford*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::AllocateFusedReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::Swizzle2DInt*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::PairSelect*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::IntPair*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 

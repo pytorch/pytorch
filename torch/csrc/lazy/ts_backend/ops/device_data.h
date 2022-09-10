@@ -38,6 +38,10 @@ class TORCH_API DeviceData : public TsNode {
   // instead of calling the constructor directly.
   static NodePtr Create(std::shared_ptr<BackendData> data);
 
+  TSOpVector Lower(
+      std::shared_ptr<torch::jit::GraphFunction> function,
+      TSLoweringContext* loctx) const override;
+
  private:
   std::shared_ptr<BackendData> data_;
 };

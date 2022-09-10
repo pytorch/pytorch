@@ -1,21 +1,22 @@
 #pragma once
 
-#include <ATen/core/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace torch {
 namespace torch_dispatch_mode {
 
 struct StashTorchDispatchModeGuard {
-public:
+ public:
   StashTorchDispatchModeGuard() {
-    saved_ = at::impl::TorchDispatchModeTLS::get_state();
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+    saved_ = c10::impl::TorchDispatchModeTLS::get_state();
+    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
   }
 
   ~StashTorchDispatchModeGuard() {
-    at::impl::TorchDispatchModeTLS::set_state(saved_);
+    c10::impl::TorchDispatchModeTLS::set_state(saved_);
   }
-private:
+
+ private:
   std::shared_ptr<at::SafePyObject> saved_;
 };
 

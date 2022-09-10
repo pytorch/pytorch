@@ -6,6 +6,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Uniform']
 
 class Uniform(Distribution):
     r"""
@@ -16,6 +17,7 @@ class Uniform(Distribution):
 
         >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
+        >>> # xdoctest: +SKIP
         tensor([ 2.3418])
 
     Args:

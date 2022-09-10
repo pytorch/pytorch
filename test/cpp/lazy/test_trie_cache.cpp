@@ -33,8 +33,13 @@ class TrieCacheNode : public Node {
     operands_.push_back(std::move(v.node));
   }
 
-  hash_t hash() const override { return hash_; }
-  hash_t shapeHash() const override { return hash_; }
+  hash_t hash() const override {
+    return hash_;
+  }
+  hash_t shapeHash() const override {
+    return hash_;
+  }
+
  private:
   size_t id_;
   hash_t hash_;
@@ -56,12 +61,12 @@ TEST(TrieCacheTest, TestSinglePath) {
 }
 
 /*
-*    0
-*    |
-*    1
-*   / \
-*  2   3
-*/
+ *    0
+ *    |
+ *    1
+ *   / \
+ *  2   3
+ */
 TEST(TrieCacheTest, TestTwoPaths) {
   FLAGS_torch_lazy_reuse_ir = true;
   TrieCache::Get()->Clear();

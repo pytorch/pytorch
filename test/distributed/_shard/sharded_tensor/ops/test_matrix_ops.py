@@ -101,8 +101,8 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
             enumerable_spec, 10, 10, init_rrefs=False, dtype=torch.double
         )
         with self.assertRaisesRegex(
-            NotImplementedError,
-            "Only ChunkShardingSpec supported for 'transpose'",
+            RuntimeError,
+            "not supported",
         ):
             st.transpose(1, 0)
 

@@ -1,14 +1,29 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import operator
 
 import torch
 import torch.fx
 from torch.fx.experimental import const_fold
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.testing._internal.common_utils import TestCase
 
 
 class TestConstFold(TestCase):
+    def _get_attr(self, node):
+        mod = node.graph.owning_module
+        target = str(node.target)
+        target_atoms = target.split(".")
+        curr_obj = mod
+        for i, atom in enumerate(target_atoms):
+            if not hasattr(curr_obj, atom):
+                raise RuntimeError(
+                    f"Node referenced nonexistent target '{'.'.join(target_atoms[:i])}'; "
+                    f" original whole target: '{target}'"
+                )
+            curr_obj = getattr(curr_obj, atom)
+        return curr_obj
+
     def _verify_const_fold_mod(self, mod_folded: const_fold.FoldedGraphModule):
         self.assertTrue(mod_folded.const_subgraph_module is not None)
 
@@ -653,3 +668,44 @@ class TestConstFold(TestCase):
         # Now run both folded and non-folded to check results equal.
         inp = torch.randn(4, 4)
         self.assertTrue(torch.equal(mod_folded(inp), mod(inp)))
+
+    def test_const_fold_tensor_meta(self):
+        self._test_const_fold_tensor_meta(True)
+        self._test_const_fold_tensor_meta(False)
+
+    def _test_const_fold_tensor_meta(self, requires_grad):
+        """
+        Verify tensor_meta is handled correctly.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr_1 = torch.nn.Parameter(torch.tensor([[-0.9]]), requires_grad)
+                self.attr_2 = torch.nn.Parameter(torch.tensor([[17.1]]), requires_grad)
+
+            def forward(self, x, y):
+                a = self.attr_1 + self.attr_1
+                x = x - a
+                return x * y + self.attr_2
+
+        mod = ConstFoldTestModule()
+        gm = torch.fx.symbolic_trace(mod)
+        in_x, in_y = torch.tensor([[-0.45]]), torch.tensor([0.9])
+        ShapeProp(gm).propagate(in_x, in_y)
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            gm, device_for_folded_attrs="cpu"
+        )
+        self._verify_const_fold_mod(mod_folded)
+
+        mod_folded.run_folding()
+
+        for n in mod_folded.graph.nodes:
+            if n.op == "get_attr":
+                attr = self._get_attr(n)
+                self.assertEquals(_extract_tensor_metadata(attr), n.meta["tensor_meta"])
+
+        # Now run both folded and non-folded to check results equal.
+        base_result = mod(in_x, in_y)
+        fold_result = mod_folded(in_x, in_y)
+        self.assertTrue(torch.equal(fold_result, base_result))

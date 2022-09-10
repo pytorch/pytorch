@@ -50,7 +50,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
+void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
@@ -178,7 +178,7 @@ void index_copy_kernel_impl(
 }
 
 template <typename scalar_t>
-void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+void index_kernel_impl(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
   });
@@ -191,7 +191,7 @@ void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArra
   });
 }
 
-static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+static void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
@@ -347,7 +347,7 @@ void masked_scatter_cuda_impl(
   auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
   auto mask_data = mask_cont.data_ptr<mask_t>();
 
-  at::cuda::cub::exclusive_sum_in_common_type(
+  at::cuda::cub::mask_exclusive_sum(
       mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
