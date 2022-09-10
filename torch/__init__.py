@@ -961,3 +961,5 @@ if sys.executable != 'torch_deploy':
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
+
+from ._dispatch import python
