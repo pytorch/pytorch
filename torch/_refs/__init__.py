@@ -1671,7 +1671,7 @@ def _to_will_alias(
         and (
             memory_format is None
             or memory_format == torch.preserve_format
-            or a.is_contiguous(memory_format=memory_format)
+            or utils.is_contiguous_for_memory_format(a, memory_format=memory_format)
         )
     )
 
@@ -1687,20 +1687,28 @@ def _to_dispatch(
 ):
     if isinstance(device, TensorLike):
         # overload to `to.other`
-        other = device
-        memory_format = copy
-        copy = non_blocking
-        non_blocking = dtype
+        if isinstance(copy, torch.memory_format):
+            memory_format = copy
+        # we need to make sure that dtype is bool, otherwise, non_blocking could be passed as kwarg
+        if isinstance(non_blocking, bool) and isinstance(dtype, bool):
+            copy = non_blocking
+        if isinstance(dtype, bool):
+            non_blocking = dtype
         # extract tensor options
+        other = device
         device = other.device
         dtype = other.dtype
         layout = other.layout
         pin_memory = other.pin_memory
     elif isinstance(device, torch.dtype):
         # overload to `to.dtype`
-        memory_format = copy
-        copy = non_blocking
-        non_blocking = dtype
+        if isinstance(copy, torch.memory_format):
+            memory_format = copy
+        # we need to make sure that dtype is bool, otherwise, non_blocking could be passed as kwarg
+        if isinstance(non_blocking, bool) and isinstance(dtype, bool):
+            copy = non_blocking
+        if isinstance(dtype, bool):
+            non_blocking = dtype
         dtype = device
         layout = None
         pin_memory = None
