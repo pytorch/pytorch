@@ -2527,20 +2527,29 @@ def native_layer_norm(
         + ", but got input of size "
         + str(input.shape),
     )
+
+    input = input.contiguous()
+    if weight is not None:
+        weight = weight.contiguous()
+    if bias is not None:
+        bias = bias.contiguous()
+
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
     out, mean, rstd = _normalize(input, reduction_dims, eps)
+
     if weight is None and bias is not None:
         out = out + bias
     elif weight is not None and bias is None:
         out = out * weight
     elif weight is not None and bias is not None:
         out = out * weight + bias
+
     out = prims.convert_element_type(out, input.dtype)
     if input.device.type == "cpu":
         mean = prims.convert_element_type(mean, input.dtype)
         rstd = prims.convert_element_type(rstd, input.dtype)
-    return (out.contiguous(), mean, rstd)
+    return (out, mean, rstd)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
