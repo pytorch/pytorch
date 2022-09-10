@@ -44,7 +44,6 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const override;
-  virtual c10::SymIntArrayRef sym_sizes() const override;
   virtual c10::SymIntArrayRef sym_strides_custom() const override;
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
