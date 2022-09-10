@@ -20,7 +20,7 @@ python test/test_eager_transforms.py -v || EXIT_STATUS=$?
 python test/test_compile_cache.py -v || EXIT_STATUS=$?
 python test/test_minifier.py -v || EXIT_STATUS=$?
 python test/test_memory_efficient_fusion.py -v || EXIT_STATUS=$?
-python test/test_pythonkey.py -v || EXIT_STATUS=$?
+python test/test_aotdispatcher.py -v || EXIT_STATUS=$?
 python test/test_vmap.py -v || EXIT_STATUS=$?
 python test/test_ops.py -v || EXIT_STATUS=$?
 exit $EXIT_STATUS

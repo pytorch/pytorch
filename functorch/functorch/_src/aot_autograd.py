@@ -18,6 +18,7 @@ from torch.nn.utils import stateless
 from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
+from torch._decomp import register_decomposition
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
@@ -285,6 +286,14 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
+# Translate view => reshape to maintain a "stride-agnostic" trace
+def _make_stride_agnostic(fx_g: torch.fx.GraphModule):
+    for node in fx_g.graph.nodes:
+        if node.target == aten.view.default:
+            node.target = aten.reshape.default
+    fx_g.recompile()
+
+
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
@@ -304,6 +313,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
+        _make_stride_agnostic(fx_g)
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
@@ -623,6 +634,7 @@ def aot_function(
         compile_cache = CompileCache()
     if bw_compiler is None:
         bw_compiler = fw_compiler
+
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
