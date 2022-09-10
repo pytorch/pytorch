@@ -1020,7 +1020,6 @@ symbolic_tensor_failures = {
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('double', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('eig', ''),  # aten.eig.default - couldn't find symbolic meta function/decomposition
     xfail('einsum', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition

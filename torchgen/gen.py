@@ -349,13 +349,12 @@ def static_dispatch_extra_headers(backends: List[BackendIndex]) -> List[str]:
     ]
 
 
-# Translates arguments of a native function from DispatcherSignature form to CppSignature form with support for
-# supporting usecases even when there is a memory_format argument along with tensor_option arguments.
-# This usecase is not covered by tools.codegen.api.translate() yet as its application is limited to static dispatch
-def translate_args_dispatcher_to_cpp(
-    sig: DispatcherSignature,
+# Translates arguments of `sig` to CppSignature bindings.
+# Note that we have a special case for `memory_format` argument and this case is not covered by
+# tools.codegen.api.translate() yet as its application is limited to static dispatch.
+def translate_args(
+    sig: Union[CppSignature, DispatcherSignature],
     cpp_sig: CppSignature,
-    f: NativeFunction,
 ) -> str:
 
     # Adds SpecialArgName.possibly_redundant_memory_format NamedCType for memory_format bindings
@@ -377,20 +376,29 @@ def translate_args_dispatcher_to_cpp(
                 output_bindings.append(binding)
         return output_bindings
 
+<<<<<<< HEAD
     disp_sig = sig
     disp_bindings = disp_sig.arguments()
+=======
+    src_bindings = list(sig.arguments())
+    goal_bindings = list(cpp_sig.arguments())
+>>>>>>> 21bf9a467eb86a152e471e04837b98617098f32f
     # When last argument of CPP signature has SpecialArgName.possibly_redundant_memory_format NCType,
     # get memory_format bindings of dispatcher signature to have the same NCType as well
-    for arg in cpp_sig.arguments():
+    for arg in goal_bindings:
         if arg.nctype.name == SpecialArgName.possibly_redundant_memory_format:
-            disp_bindings = add_spl_memory_format_binding(disp_sig.arguments())
+            src_bindings = add_spl_memory_format_binding(src_bindings)
             break
-    exprs = translate(disp_bindings, cpp_sig.arguments())
+    exprs = translate(src_bindings, goal_bindings)
     return ", ".join(a.expr for a in exprs)
 
 
 def generate_static_dispatch_backend_call(
+<<<<<<< HEAD
     sig: DispatcherSignature,
+=======
+    sig: Union[CppSignature, DispatcherSignature],
+>>>>>>> 21bf9a467eb86a152e471e04837b98617098f32f
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
@@ -403,7 +411,7 @@ def generate_static_dispatch_backend_call(
         cpp_sig = cpp_sigs.signature
     assert cpp_sig is not None
     name = cpp_sig.name()
-    exprs = translate_args_dispatcher_to_cpp(sig, cpp_sig, f)
+    exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
     kernel_ns = (
         backend_metadata.cpp_namespace
@@ -415,7 +423,11 @@ def generate_static_dispatch_backend_call(
 
 
 def generate_static_dispatch_fallback_call(
+<<<<<<< HEAD
     sig: DispatcherSignature,
+=======
+    sig: Union[CppSignature, DispatcherSignature],
+>>>>>>> 21bf9a467eb86a152e471e04837b98617098f32f
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
@@ -428,7 +440,7 @@ def generate_static_dispatch_fallback_call(
         cpp_sig = cpp_sigs.signature
     assert cpp_sig is not None
     name = cpp_sig.name()
-    exprs = translate_args_dispatcher_to_cpp(sig, cpp_sig, f)
+    exprs = translate_args(sig, cpp_sig)
     ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
@@ -444,10 +456,24 @@ def generate_static_dispatch_fallback_call(
 
 
 def static_dispatch(
+<<<<<<< HEAD
     sig: DispatcherSignature,
+=======
+    sig: Union[CppSignature, DispatcherSignature],
+>>>>>>> 21bf9a467eb86a152e471e04837b98617098f32f
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
+    """
+    For a given `NativeFunction`, find out the corresponding backend and dispatch to it. If more than one
+    backends exsit, fallback to static dispatch by determining dispatch key from inputs.
+    Arguments:
+        sig: A CppSignature or DispatcherSignature for this native function we want to use.
+        f: NativeFunction to generate static dispatch.
+        backend_indices: All available backends.
+    Return:
+        C++ code to call backend-specific functions, e.g., "return at::cpu::add(self, other, scale);"
+    """
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return ""
 
