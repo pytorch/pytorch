@@ -820,8 +820,7 @@ class FSDPTest(MultiProcessTestCase):
                 # Post-forward, if CPU offloading model param should be on CPU.
                 if cpu_offload_params and isinstance(model, FSDP):
                     for p in model.parameters():
-                        # Params should always be on CPU, even if
-                        # p._is_sharded=False
+                        # Params should always be on CPU
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
@@ -857,8 +856,7 @@ class FSDPTest(MultiProcessTestCase):
             # Post-backward, if CPU offloading model params should be on CPU.
             if cpu_offload_params and isinstance(model, FSDP):
                 for p in model.parameters():
-                    # Params should always be on CPU, even if
-                    # p._is_sharded=False
+                    # Params should always be on CPU
                     self.assertEqual(p.device, torch.device("cpu"))
             # Unscale the gradients and step
             sharded_grad_scaler.step(optim)
