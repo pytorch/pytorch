@@ -706,7 +706,7 @@ RegisterOperators reg_reshape_copy({
             pop(stack, self, shape);
             push(
                 stack,
-                at::native::reshape(self.toTensor(), shape.toIntVector()));
+                at::reshape(self.toTensor(), shape.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),

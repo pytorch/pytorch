@@ -1356,8 +1356,8 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
-  self: grad.reshape(self.sizes())
+- name: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
+  self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
 - name: round(Tensor self) -> Tensor
@@ -1702,7 +1702,7 @@
   self: not_implemented("_unique2")
 
 - name: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
-  self: grad.reshape(self.sizes())
+  self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
