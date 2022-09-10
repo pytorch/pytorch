@@ -2,8 +2,10 @@ import contextlib
 import ctypes
 import sys
 import types
+from typing import Dict
 
 import torch._C
+from torch._C import DispatchKey
 
 import torch.jit
 from torch import _utils_internal
@@ -41,6 +43,7 @@ class OpOverload:
         self.name = self._schema.name
         if schema.overload_name:
             self.name += "." + schema.overload_name
+        self.py_kernels: Dict[DispatchKey, Any] = {}
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
@@ -75,6 +78,12 @@ class OpOverload:
             return self._op_dk(dk, *args, **kwargs)
         else:
             return NotImplemented
+
+    def py_impl(self, k):
+        def inner(impl):
+            self.py_kernels[k] = impl
+            return impl
+        return inner
 
     @property
     def overloadpacket(self):
