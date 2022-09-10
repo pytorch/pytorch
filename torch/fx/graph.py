@@ -148,7 +148,7 @@ class _Namespace:
         num = num if num else 0
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            num += 1
+            num += len(self._used_names)
             candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate, 0)
