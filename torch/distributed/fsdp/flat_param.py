@@ -600,7 +600,7 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if not self.needs_unshard():
+        if self.uses_sharded_strategy and not self.needs_unshard():
             pass  # no need to prepare for an all-gather
         elif self._uses_param_mixed_precision and not self._force_full_precision:
             self._use_low_precision_shard()
@@ -630,16 +630,6 @@ class FlatParamHandle:
         )
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
-
-    def needs_pre_unshard(self) -> bool:
-        """Returns if this handle needs the pre-unshard."""
-        if self.uses_sharded_strategy and not self.needs_unshard():
-            # Do not prepare the sharded flattened parameter for an all-gather
-            # if the handle does not need to be unsharded
-            return False
-        return (
-            self._config.offload_params or self._uses_param_mixed_precision
-        )
 
     def unshard(self):
         """
