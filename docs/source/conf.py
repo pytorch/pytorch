@@ -96,6 +96,10 @@ coverage_ignore_functions = [
     "check_error",
     "cudart",
     "is_bf16_supported",
+    # torch.cuda._sanitizer
+    "format_log_message",
+    "zip_arguments",
+    "zip_by_key",
     # torch.distributed.autograd
     "is_available",
     # torch.distributed.elastic.events
@@ -266,6 +270,15 @@ coverage_ignore_classes = [
     "ShortStorage",
     "ShortTensor",
     "cudaStatus",
+    # torch.cuda._sanitizer
+    "Access",
+    "AccessType",
+    "CUDASanitizer",
+    "CUDASanitizerDispatchMode",
+    "CUDASanitizerErrors",
+    "EventHandler",
+    "SynchronizationError",
+    "UnsynchronizedAccessError",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
