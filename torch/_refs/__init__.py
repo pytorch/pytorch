@@ -1655,39 +1655,67 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
-# TODO: extend to device and layout similar to
-# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
 def _to_will_alias(
     a: TensorLikeType,
-    dtype: torch.dtype,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype],
     copy: bool,
-    memory_format: torch.memory_format,
+    memory_format: Optional[torch.memory_format],
+    layout: Optional[torch.layout] = None,
 ) -> bool:
     return (
         not copy
-        and a.dtype == dtype
+        and (device is None or a.device == device)
+        and (dtype is None or a.dtype == dtype)
+        and (layout is None or a.layout== layout)
         and (
-            memory_format == torch.preserve_format
+            memory_format is None
+            or memory_format == torch.preserve_format
             or a.is_contiguous(memory_format=memory_format)
         )
     )
 
+def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_format=None, layout=None, pin_memory=None):
+    if isinstance(device, TensorLike):
+        # overload to `to.other`
+        memory_format = copy
+        copy = non_blocking
+        non_blocking = dtype
+        other = device
+        # extract tensor options
+        device = other.device
+        dtype = other.dtype
+        layout = other.layout
+        pin_memory = other.pin_memory
+    elif isinstance(device, torch.dtype):
+        # overload to `to.dtype`
+        memory_format = copy
+        copy = non_blocking
+        non_blocking = dtype
+        dtype = device
+        layout = None
+        pin_memory = None
+        device = None
+    # overload to `to.device`
+    # do nothing because signature of 'to' matches
+    # overload to `to.dtype_layout`
+    # do nothing because the `to.dtype_layout` takes all kwargs.
+    return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
 
-# TODO: there are multiple overloads of to, but we only support one here
-# aten/src/ATen/native/native_functions.yaml lists all overloads
-# Missing overloads:
-# to.dtype_layout
-# to.device
-# to.other
-# https://github.com/pytorch/pytorch/issues/84264
 def to(
     a: TensorLikeType,
-    dtype: torch.dtype,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
     non_blocking: bool = False,
     copy: bool = False,
-    memory_format: torch.memory_format = torch.preserve_format,
+    memory_format: Optional[torch.memory_format] = None,
+    *,
+    layout: Optional[torch.layout] = None,
+    pin_memory: Optional[bool] = None,
 ) -> TensorLikeType:
-    if _to_will_alias(a, dtype, copy, memory_format):
+    device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(device, dtype, non_blocking, copy, memory_format, layout, pin_memory)
+
+    if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
     if (
         (copy is True or dtype != a.dtype)
@@ -1696,7 +1724,7 @@ def to(
     ):
         return prims.convert_element_type(a, dtype)
     result = torch.empty_like(
-        a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
+        a, dtype=dtype, layout=layout, device=device, requires_grad=a.requires_grad, memory_format=memory_format
     )
     copy_to(result, a)
     return result
