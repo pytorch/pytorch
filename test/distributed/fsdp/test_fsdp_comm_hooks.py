@@ -169,8 +169,6 @@ class TestCommunicationHooks(FSDPTest):
 
             # For each worker, the gradient on the weight should be worker_rank.
             grad = net_default_hook.params[0].grad
-            if sharding_strategy != ShardingStrategy.NO_SHARD:
-                self.assertTrue(net_default_hook.params[0]._is_sharded, "Expected parameter to be a sharded chunk.")
             expected_grad = (
                 sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
             )
