@@ -269,6 +269,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
+DispatchKey = torch._C.DispatchKey
 
 
 def _broadcast_shapes(*_shapes):
@@ -2124,7 +2125,7 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
-@torch.ops.aten.matmul.default.py_impl("CompositeImplicitAutograd")
+@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper()
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
@@ -2258,7 +2259,11 @@ def broadcast_shapes(*shapes) -> ShapeType:
     return torch.Size(_broadcast_shapes(*shapes))
 
 
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
+    if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
+        tensors = tensors[0]
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 

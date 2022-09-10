@@ -59,6 +59,7 @@ class PyOperator(PyOperatorABC):
         self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
 
     def py_impl(self, dispatch_key):
+        assert isinstance(dispatch_key, torch._C.DispatchKey)
         def inner(fn):
             assert dispatch_key not in self.table
             self.table[dispatch_key] = fn
@@ -173,13 +174,14 @@ class OpOverload(PyOperatorABC):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
-        dk = "CompositeImplicitAutograd"
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
-            return self._op_dk(dk, *args, **kwargs)
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk) or dk in self.py_kernels:
+            return self.dispatch(dk, *args, **kwargs)
         else:
             return NotImplemented
 
     def py_impl(self, k):
+        assert isinstance(k, torch._C.DispatchKey)
         def inner(impl):
             self.py_kernels[k] = impl
             return impl
