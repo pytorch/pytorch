@@ -1657,11 +1657,11 @@ def item(a: TensorLikeType) -> NumberType:
 
 def _to_will_alias(
     a: TensorLikeType,
-    device: Optional[torch.device] = None,
+    device: Optional[torch.device],
     dtype: Optional[torch.dtype],
     copy: bool,
     memory_format: Optional[torch.memory_format],
-    layout: Optional[torch.layout] = None,
+    layout: Optional[torch.layout],
 ) -> bool:
     return (
         not copy
