@@ -1572,7 +1572,20 @@ class TestRefsOpsInfo(TestCase):
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    # 'set' filters out repeated ref names (such as those with variants)
+    ref_db_names_set = set(ref_op.name for ref_op in python_ref_db)
+    # sort to always use the same order
+    ref_db_names = sorted(ref_db_names_set)
+    # Note: this deliberately uses 'op.torch_opinfo' because 'op.aliases' is
+    # empty.
+    # TODO: some refs (like 'ops.nvprims.var_mean') don't use the '_refs'
+    # prefix.  Those are skipped here since it's not clear how to check
+    # those yet.
+    ref_alias_names_set = set(
+        "_refs." + alias.name
+        for op in python_ref_db
+        for alias in op.torch_opinfo.aliases
+    )
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1600,6 +1613,7 @@ class TestRefsOpsInfo(TestCase):
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
+        '_refs.logit',  # already registered by _refs.special.logit
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
         '_refs.var',
@@ -1682,7 +1696,15 @@ class TestRefsOpsInfo(TestCase):
     def test_refs_are_in_python_ref_db(self, op):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
-        self.assertIn(op, self.ref_db_names)
+        # skip aliases since we don't want them defined in the ref db
+        if op in self.ref_alias_names_set:
+            return
+        self.assertIn(op, self.ref_db_names_set)
+
+    @parametrize("op", ref_db_names)
+    def test_ref_db_has_no_aliases(self, op):
+        self.assertTrue(op not in self.ref_alias_names_set,
+                        f"alias {op} in python_ref_db, which is not allowed")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):

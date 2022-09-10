@@ -79,6 +79,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "logit",
     "log_softmax",
     "nan_to_num",
     "neg",
@@ -611,6 +612,9 @@ def log1p(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log2(a):
     return prims.log2(a)
+
+
+logit = torch.special.logit  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)

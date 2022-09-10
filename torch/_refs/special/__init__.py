@@ -49,16 +49,16 @@ def i1e(a):
 @register_decomposition(torch.ops.aten.logit)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("input",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
+def logit(input: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     if eps is None:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return torch.log(torch.true_divide(self, torch.sub(1, self)))
+    input = torch.clamp(input, lo, hi)
+    return torch.log(torch.true_divide(input, torch.sub(1, input)))
 
 
 # CompositeImplicitAutograd - don't register decomp
