@@ -30,6 +30,9 @@ __all__ = [
     "FlatParamShardMetadata",
     "ParamInfo",
     "SharedParamInfo",
+    "HandleConfig",
+    "HandleShardingStrategy",
+    "HandleTrainingState",
 ]
 
 
