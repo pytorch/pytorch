@@ -389,7 +389,7 @@ class _ExecOrderData:
         self.handles_post_forward_order: List[int] = []
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
-        self.is_first_iter: Optional[bool] = None
+        self.is_first_iter = True
 
         # Data structures for execution order validation
         self._checking_order: bool = (
@@ -487,7 +487,7 @@ class _ExecOrderData:
         self.handles_to_post_forward_order_index[handles_key] = index
         self.handles_post_forward_order.append(handles_key)
 
-    def record_pre_forward(self, handles: List[FlatParamHandle]) -> None:
+    def record_pre_forward(self, handles: List[FlatParamHandle], is_training: bool) -> None:
         """
         Records ``handles`` in the pre-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -499,7 +499,7 @@ class _ExecOrderData:
         if not handles:
             return
         handles_key = tuple(handles)
-        self._check_order(handles_key)
+        self._check_order(handles_key, is_training)
         # Only record the first usage of a handles key
         if handles_key in self.handles_to_post_forward_order_index:
             return
@@ -507,9 +507,10 @@ class _ExecOrderData:
         self.handles_to_pre_forward_order_index[handles_key] = index
         self.handles_pre_forward_order.append(handles_key)
 
-    def _check_order(self, handles_key: _HandlesKey) -> None:
+    def _check_order(self, handles_key: _HandlesKey, is_training: bool) -> None:
         """
-        Checks the forward execution order.
+        Checks the forward execution order as long as ``is_training`` is
+        ``True`` since checking in eval mode is not supported.
 
         - On the first iteration, this uses all-gathers to check that all ranks
         are all-gathering the same handles and hence ``FlatParameter`` s,
@@ -520,6 +521,10 @@ class _ExecOrderData:
         This issues a warning on the first deviating iteration and stops
         warning thereafter.
         """
+        # Do not check order in eval mode since the post-backward callback does
+        # not run so it cannot be used to mark the end of an iteration
+        if not is_training:
+            return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
             local_indices: Optional[Tuple[int, ...]] = self._get_handle_indices(
@@ -677,13 +682,10 @@ class _ExecOrderData:
     def next_iter(self):
         """
         Advances the internal data structures per iteration. This should be
-        called in the root's pre-forward rather than in the post-backward
-        callback since the backward may not run (e.g. inference).
+        called in the post-backward callback since that marks the true end of
+        an iteration.
         """
-        if self.is_first_iter is None:
-            self.is_first_iter = True
-        else:
-            self.is_first_iter = False
+        self.is_first_iter = False
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         self.handles_to_pre_forward_order_index.clear()
@@ -1833,13 +1835,7 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _init_param_attributes(self, handle: FlatParamHandle) -> None:
         """
-        We manage several attributes on each Parameter instance. The first is
-        set by :func:`_shard_parameters`:
-            ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
-                if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param). Currently the way
-                `_is_sharded = False` is if world_size = 1 or sharding strategy
-                is NO_SHARD.
+        We manage several attributes on each Parameter instance.
         A few attributes are set here:
             ``_local_shard``: a single shard of the parameter. This is needed to
                 recover the shard after rebuilding full parameter in forward
@@ -2705,7 +2701,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             self.training_state = TrainingState_.FORWARD
-            self._exec_order_data.record_pre_forward(handles)
+            self._exec_order_data.record_pre_forward(handles, self.training)
             for handle in handles:
                 handle._training_state = HandleTrainingState.FORWARD
             if unshard_fn is not None:
@@ -2791,7 +2787,6 @@ class FullyShardedDataParallel(nn.Module):
         assert self._is_root is not None, "Expects a root FSDP to have been set"
         if not self._is_root:
             return args, kwargs
-        self._exec_order_data.next_iter()
         self._wait_for_previous_optim_step()
         args, kwargs = self._cast_forward_inputs(*args, **kwargs)
         return args, kwargs
@@ -3107,10 +3102,10 @@ class FullyShardedDataParallel(nn.Module):
                 # Queue the post-backward callback once for the root FSDP
                 # instance to attach it to the outermost backward graph task so
                 # that it is called after all backward calls complete
-                if self._is_root:
+                if self._is_root and not self._post_backward_callback_queued:
                     self._queue_wait_for_post_backward()
-
-                self._assert_state([TrainingState_.IDLE])
+                elif _handles_key:
+                    self._assert_state([TrainingState_.IDLE])
                 self.training_state = TrainingState_.BACKWARD_PRE
                 # Queueing the post-backward callback is the only logic that is
                 # not per-handle in the pre-backward hook, so we can return
@@ -3374,17 +3369,19 @@ class FullyShardedDataParallel(nn.Module):
         )
 
     def _queue_wait_for_post_backward(self) -> None:
-        """Try to queue a `wait_for_post_backward` callback.
-        Only called on root and only queue one callback at the beginning of
-        outer most backward.
         """
-        assert (
-            self._is_root
-        ), "_queue_wait_for_post_backward can only be called on root."
-        if not self._post_backward_callback_queued:
-            self._assert_state([TrainingState_.IDLE])
-            self._post_backward_callback_queued = True
-            Variable._execution_engine.queue_callback(self._wait_for_post_backward)
+        Queues a post-backward callback from the root FSDP instance, which
+        should happen at the beginning of its pre-backward.
+        """
+        p_assert(
+            self._is_root,
+            "`_queue_wait_for_post_backward()` should be called on the root FSDP instance"
+        )
+        if self._post_backward_callback_queued:
+            return
+        self._assert_state([TrainingState_.IDLE])
+        self._post_backward_callback_queued = True
+        Variable._execution_engine.queue_callback(self._wait_for_post_backward)
 
     @torch.no_grad()
     def _wait_for_post_backward(self) -> None:
@@ -3404,6 +3401,7 @@ class FullyShardedDataParallel(nn.Module):
                 # stream to finish GPU -> CPU copies unless we explicitly block the
                 # host-side with synchronize().
                 torch.cuda.current_stream().synchronize()
+        self._exec_order_data.next_iter()
 
         # A backward pass is done, clean up below.
         def _catch_all_reshard(fsdp_module: FullyShardedDataParallel) -> None:
