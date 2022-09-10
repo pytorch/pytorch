@@ -97,7 +97,7 @@ void printDTypeYAML(
 void printDTypesYAML(
     std::ostream& out,
     const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
-kernel_tags) {
+        kernel_tags) {
   for (auto& it : kernel_tags) {
     printDTypeYAML(out, 2, it.first, it.second);
   }
@@ -106,7 +106,7 @@ kernel_tags) {
 void printCustomClassesYAML(
     std::ostream& out,
     const torch::jit::mobile::CustomClassTracer::custom_classes_type&
-loaded_classes) {
+        loaded_classes) {
   for (auto& class_name : loaded_classes) {
     out << "- " << class_name << std::endl;
   }
