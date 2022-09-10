@@ -78,6 +78,9 @@ def python_dispatcher(op, ks, args, kwargs):
         print(op, ks, args, kwargs)
     """
     k = resolve_key(op, ks.highestPriorityTypeId())
-    return op.dispatch(k, *args, **kwargs)
+    source = f'torch.ops.{op}.dispatch(k, *args, **kwargs)'
+    filename = f'{op}[{torch._C._dispatch_key_name(k)}]'
+    compiled = compile(source, filename, 'eval')  # TODO: maybe cache?
+    return eval(compiled, {'torch': torch, 'k': k, 'args': args, 'kwargs': kwargs})
 
 torch._C._set_python_dispatcher(python_dispatcher)
