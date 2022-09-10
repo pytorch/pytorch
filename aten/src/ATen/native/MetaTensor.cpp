@@ -39,12 +39,10 @@ Tensor empty_strided_meta_symint(
 ) {
   auto opt_size = asIntArrayRefSlowOpt(size);
   auto opt_stride = asIntArrayRefSlowOpt(stride);
-  if (opt_size.has_value()) {
-    TORCH_CHECK(opt_stride.has_value(), "empty_strided(): sizes are symbolic but not strides");
+  if (opt_size.has_value() && opt_stride.has_value()) {
     return at::detail::empty_strided_meta(
         *opt_size, *opt_stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   }
-  TORCH_CHECK(!opt_stride.has_value(), "empty_strided(): strides are symbolic but not sizes");
   return at::detail::empty_strided_symint_meta(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
