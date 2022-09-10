@@ -850,6 +850,11 @@ def meta_masked_fill_(self, mask, value):
     return self
 
 
+@register_meta(aten.index_put_.default, register_dispatcher=False)
+def meta_index_put_(self, indices, values, accumulate=False):
+    return self
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
