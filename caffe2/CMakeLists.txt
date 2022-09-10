@@ -1033,6 +1033,10 @@ if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
   )
 endif()
 
+message(STATUS "Tracing Based Flag: ${TRACING_BASED}")
+message(STATUS "Build Lite Interpreter Flag: ${BUILD_LITE_INTERPRETER}")
+message(STATUS "Intern Build Mobile Flag: ${INTERN_BUILD_MOBILE}")
+
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")

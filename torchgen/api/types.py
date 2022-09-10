@@ -577,8 +577,10 @@ class DispatcherSignature:
     # and need to avoid naming collisions.
     prefix: str = ""
 
+    symint: bool = True
+
     def arguments(self) -> List[Binding]:
-        return dispatcher.arguments(self.func)
+        return dispatcher.arguments(self.func, symint=self.symint)
 
     def name(self) -> str:
         return self.prefix + dispatcher.name(self.func)
@@ -604,7 +606,7 @@ class DispatcherSignature:
         return [Expr(a.name, a.nctype) for a in self.arguments()]
 
     def returns_type(self) -> CType:
-        return dispatcher.returns_type(self.func.returns)
+        return dispatcher.returns_type(self.func.returns, symint=self.symint)
 
     def ptr_type(self) -> str:
         dispatcher_args_types_str = ", ".join(a.type for a in self.arguments())
@@ -616,8 +618,10 @@ class DispatcherSignature:
         return f"{self.returns_type().cpp_type()} ({dispatcher_args_types_str})"
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, prefix: str = "") -> "DispatcherSignature":
-        return DispatcherSignature(func, prefix)
+    def from_schema(
+        func: FunctionSchema, *, prefix: str = "", symint: bool = True
+    ) -> "DispatcherSignature":
+        return DispatcherSignature(func, prefix, symint)
 
 
 @dataclass(frozen=True)
@@ -778,15 +782,16 @@ def kernel_signature(
     # so we'd like to keep the differences as small as possible.
     # With external backends, we'd like to enforce that they write their kernels with schemas
     # that match the Dispatcher API directly, if they can.
+    meta = backend_index.get_kernel(f)
+    symint = meta is not None and meta.supports_symint()
+    if symint:
+        assert (
+            f.func.has_symint()
+        ), f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
     if backend_index.external:
-        # Dispatcher signature faithfully does SymInt, which is good for XLA,
-        # not so good for more conventional backends but we don't have any of
-        # those.  If we do, that's time to add a new Signature that is a cross
-        # between DispatcherSignature and NativeSignature
-        assert backend_index.symint
-        return DispatcherSignature.from_schema(f.func, prefix=prefix)
+        return DispatcherSignature.from_schema(f.func, prefix=prefix, symint=symint)
     else:
-        return NativeSignature(f.func, prefix=prefix, symint=backend_index.symint)
+        return NativeSignature(f.func, prefix=prefix, symint=symint)
 
 
 # Functions only, no types

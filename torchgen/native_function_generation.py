@@ -304,6 +304,8 @@ def generate_function(
         if func.kind() == SchemaKind.out
         else cpp.name(func)
     )
+    if f.func.has_symint():
+        kernel_name += "_symint"
     backend_metadata = {
         DispatchKey.CompositeExplicitAutograd: {
             func.name: BackendMetadata(
@@ -555,7 +557,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
     return f"""
-{sig.defn()} {{
+{sig.defn(name=sig.name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   {clone_mutable_inputs_str}
   {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
   {ret_str}
@@ -615,7 +617,7 @@ def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     # Kernel name needs to follow the naming convention defined in `generate_function()`
     return f"""
-{sig.defn(name=g.out.func.name.unambiguous_name())} {{
+{sig.defn(name=g.out.func.name.unambiguous_name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call({exprs});
   {copy_outs_str}
   {return_str(g.out.func.returns, rets)}
