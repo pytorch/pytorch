@@ -1734,7 +1734,9 @@ def to(
         and pin_memory is None
     ):
         return prims.convert_element_type(a, dtype)
+    memory_format = memory_format if memory_format is not None or torch.preserve_format
     print("empty_like: ", memory_format)
+
     result = torch.empty_like(
         a, dtype=dtype, layout=layout, device=device, requires_grad=a.requires_grad, memory_format=memory_format
     )
