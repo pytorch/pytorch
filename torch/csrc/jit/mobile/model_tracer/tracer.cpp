@@ -89,27 +89,28 @@ void printDTypeYAML(
     const std::set<std::string> dtypes) {
   std::string indent_str = std::string(indent, ' ');
   out << indent_str << kernel_tag_name << ":" << std::endl;
-  for (auto& dtype: dtypes) {
+  for (auto& dtype : dtypes) {
     out << indent_str << "- " << dtype << std::endl;
   }
 }
 
 void printDTypesYAML(
     std::ostream& out,
-    const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type& kernel_tags) {
-  for (auto& it: kernel_tags) {
+    const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
+kernel_tags) {
+  for (auto& it : kernel_tags) {
     printDTypeYAML(out, 2, it.first, it.second);
   }
 }
 
 void printCustomClassesYAML(
     std::ostream& out,
-    const torch::jit::mobile::CustomClassTracer::custom_classes_type& loaded_classes) {
-  for (auto& class_name: loaded_classes) {
+    const torch::jit::mobile::CustomClassTracer::custom_classes_type&
+loaded_classes) {
+  for (auto& class_name : loaded_classes) {
     out << "- " << class_name << std::endl;
   }
 }
-
 
 /**
  * Converts a pytorch model (full/lite) to lite interpreter model for
