@@ -18,7 +18,6 @@ from torch.nn.utils import stateless
 from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
-from torch._decomp import register_decomposition
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
@@ -287,6 +286,11 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 
 # Translate view => reshape to maintain a "stride-agnostic" trace
+# The issue here is that if we're tracing multiple times, reshapes in the
+# original trace might get turned into views.
+# As our decompositions don't necessarily preserve the strides, we need to
+# ensure our trace is still "stride-agnostic".
+# This function does so.
 def _make_stride_agnostic(fx_g: torch.fx.GraphModule):
     for node in fx_g.graph.nodes:
         if node.target == aten.view.default:
