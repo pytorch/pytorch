@@ -344,7 +344,7 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
   // TODO: This is an expensive function that shouldn't be in heuristics without
   // caching.
   auto expanded_vector_word_size =
-      scheduler_utils::expandVectorizationToContigMergedDomains(
+      vectorize_helper::expandVectorizationToContigMergedDomains(
           fusion,
           runtime_info,
           vectorizable_inputs_outputs,

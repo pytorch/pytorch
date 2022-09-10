@@ -909,7 +909,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
-  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+  vectorize_factor = vectorize_helper::expandVectorizationToContigMergedDomains(
       fusion,
       runtime_info,
       vectorizable_inputs_outputs,
