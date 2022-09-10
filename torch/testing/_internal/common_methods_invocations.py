@@ -15995,12 +15995,11 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
         supports_nvfuser=False,
     ),
-    # TODO: https://github.com/pytorch/pytorch/issues/84264
-    # PythonRefInfo(
-    #     "_refs.to",
-    #     torch_opinfo_name="to",
-    #     supports_nvfuser=False,
-    # ),
+    PythonRefInfo(
+        "_refs.to",
+        torch_opinfo_name="to",
+        supports_nvfuser=False,
+    ),
     PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",

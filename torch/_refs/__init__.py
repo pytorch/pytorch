@@ -1664,10 +1664,10 @@ def _to_will_alias(
     layout: Optional[torch.layout],
 ) -> bool:
     return (
-        not (copy is not None and copy == True)
+        not copy
         and (device is None or a.device == device)
         and (dtype is None or a.dtype == dtype)
-        and (layout is None or a.layout== layout)
+        and (layout is None or a.layout == layout)
         and (
             memory_format is None
             or memory_format == torch.preserve_format
@@ -1675,7 +1675,16 @@ def _to_will_alias(
         )
     )
 
-def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_format=None, layout=None, pin_memory=None):
+
+def _to_dispatch(
+    device=None,
+    dtype=None,
+    non_blocking=None,
+    copy=None,
+    memory_format=None,
+    layout=None,
+    pin_memory=None,
+):
     if isinstance(device, TensorLike):
         # overload to `to.other`
         other = device
@@ -1702,6 +1711,7 @@ def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_f
     # do nothing because the `to.dtype_layout` takes all kwargs.
     return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
 
+
 def to(
     a: TensorLikeType,
     device: Optional[torch.device] = None,
@@ -1713,23 +1723,32 @@ def to(
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
 ) -> TensorLikeType:
-    device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(device, dtype, non_blocking, copy, memory_format, layout, pin_memory)
+    device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(
+        device, dtype, non_blocking, copy, memory_format, layout, pin_memory
+    )
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
     if (
-        ((copy is None and copy == True) or dtype != a.dtype)
+        (copy or dtype != a.dtype)
         and (memory_format is None or memory_format == torch.preserve_format)
-        and (non_blocking is None or none_blocking == False)
+        and (not non_blocking)
         and device is None
         and layout is None
         and pin_memory is None
     ):
         return prims.convert_element_type(a, dtype)
-    memory_format = memory_format if memory_format is not None else torch.preserve_format
+    memory_format = (
+        memory_format if memory_format is not None else torch.preserve_format
+    )
 
     result = torch.empty_like(
-        a, dtype=dtype, layout=layout, device=device, requires_grad=a.requires_grad, memory_format=memory_format
+        a,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=a.requires_grad,
+        memory_format=memory_format,
     )
     copy_to(result, a)
     return result
