@@ -11,7 +11,7 @@ def has_key(op, k):
         or k in op.py_kernels
     )
 
-is_included_in_alias = torch._C._dispatch_is_included_in_alias # type: ignore[attr-defined]
+is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
 # Equivalent to computeDispatchTableEntryWithDebug
 # TODO: memoize this or something
@@ -28,7 +28,7 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[va
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         return cand
     has_backend_kernel = (
-        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k)) # type: ignore[attr-defined]
+        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k))
         or has_key(op, DispatchKey.CompositeExplicitAutograd)
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
@@ -49,7 +49,7 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[va
     if is_included_in_alias(k, cand) and has_key(op, cand):
         return cand
     # Backend fallback
-    if torch._C._dispatch_has_backend_fallback(k): # type: ignore[attr-defined]
+    if torch._C._dispatch_has_backend_fallback(k):
         # The dispatch key itself will implicitly route to backend fallback.
         # This is probably not great for the pure Python implementation.
         return k
@@ -57,7 +57,7 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[va
 
 @contextmanager
 def no_python_dispatcher():
-    g = torch._C._DisablePythonDispatcher() # type: ignore[attr-defined]
+    g = torch._C._DisablePythonDispatcher()
     try:
         yield
     finally:
@@ -65,7 +65,7 @@ def no_python_dispatcher():
 
 @contextmanager
 def enable_python_dispatcher():
-    g = torch._C._EnablePythonDispatcher() # type: ignore[attr-defined]
+    g = torch._C._EnablePythonDispatcher()
     try:
         yield
     finally:
@@ -80,4 +80,4 @@ def python_dispatcher(op, ks, args, kwargs):
     k = resolve_key(op, ks.highestPriorityTypeId())
     return op.dispatch(k, *args, **kwargs)
 
-torch._C._set_python_dispatcher(python_dispatcher) # type: ignore[attr-defined]
+torch._C._set_python_dispatcher(python_dispatcher)
