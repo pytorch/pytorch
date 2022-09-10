@@ -238,7 +238,6 @@ class TestFlattenParams(TestCase):
             rank and world size.
             """
             flat_param = flat_module.flat_param
-            flat_param._is_sharded = True
             flat_param._shard_param_offsets, flat_param._shard_indices = \
                 flat_param_handle._get_shard_metadata(kwargs["start"], kwargs["end"])
             self.assertEqual(
