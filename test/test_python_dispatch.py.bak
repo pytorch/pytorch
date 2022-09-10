@@ -386,10 +386,9 @@ $4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 $0 = input('x')
 $1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
 $2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3 = torch._ops.aten.slice.Tensor($0)
-$4 = torch._ops.aten.slice.Tensor($3, 1, 1, 2)
-$5 = torch._ops.aten.as_strided.default($4, [2], [2], 1)
-$6 = torch._ops.aten.clone.default($5, memory_format=torch.contiguous_format)''')
+$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4 = torch._ops.aten.select.int($3, 1, 1)
+$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns

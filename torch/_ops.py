@@ -2,11 +2,16 @@ import contextlib
 import ctypes
 import sys
 import types
+from abc import ABC
+from typing import Any, Dict
 
 import torch._C
 
 import torch.jit
 from torch import _utils_internal
+from torch._C import DispatchKey  # type: ignore[attr-defined]
+from torch.overrides import handle_torch_function, has_torch_function
+from torch.utils._pytree import tree_flatten
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -26,9 +31,102 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
+# TODO(voz) We are missing an entire axis of registration - Modes for the python key
+class PyOperatorABC(ABC):
+    def __call__(self, *args, **kwargs):
+        pass
+
+    def py_impl(self, dispatch_key, fn):
+        pass
+
+    def name(self):
+        pass
+
+    def dispatch(self, dispatch_key, *args, **kwargs):
+        pass
+
+
+class PyOperator(PyOperatorABC):
+    def __init__(self, name):
+        self._name = name
+        self.table = {}
+
+        # Make _OPNamespace not scream, this whole name based association needs a good hard look
+        self.__name__ = "pyop." + name
+        pyop_namespace.py_ops[name] = self
+
+    def fallthrough(self, dispatch_key):
+        self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
+
+    def py_impl(self, dispatch_key):
+        def inner(fn):
+            assert dispatch_key not in self.table
+            self.table[dispatch_key] = fn
+            return fn
+
+        return inner
+
+    def dispatch(self, dispatch_key, *args, **kwargs):
+        assert dispatch_key in self.table
+        return self.table[dispatch_key](*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        flat_args = _to_flat_tuple(args, kwargs)
+        if has_torch_function(flat_args):
+            return handle_torch_function(self, flat_args, *args, **kwargs)
+
+        dispatch_key_set = _compute_keyset(args, kwargs)
+        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
+
+    def name(self):
+        return self.name
+
+    # TODO(voz): Should rewrite fallthrough register as the impl for keys we do not specify
+    # as opposed to being this sort of explicit thing where ops are a little too key aware...
+    def _fallthrough_fn(self, operator, dispatch_key):
+        def inner(*args, **kwargs):
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)  # type: ignore[attr-defined]
+            all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
+                args, kwargs
+            )  # type: ignore[attr-defined]
+            return self.dispatch(
+                all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
+            )
+
+        return inner
+
+
+def _to_flat_tuple(args, kwargs):
+    flat_args, _ = tree_flatten(args)
+    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_all = flat_args + flat_kwargs
+    return flat_all
+
+
+def _compute_keyset(args, kwargs):
+    tensors = _get_tensors(args, kwargs)
+    return key_extractor(tensors)
+
+
+def _get_tensors(args, kwargs):
+    flat_all = _to_flat_tuple(args, kwargs)
+    tensor_args = [t for t in flat_all if isinstance(t, torch.Tensor)]
+    return tuple(tensor_args)
+
+
+# Note - this should maintain identical impl to the C++ dispatcher key extraction logic
+# at ATen/core/dispatch/DispatchKeyExtractor.h
+def key_extractor(tensors):
+    key_set = torch._C._dispatch_tls_local_include_set()  # type: ignore[attr-defined]
+    for tensor in tensors:
+        key_set = key_set | torch._C._dispatch_keys(tensor)  # type: ignore[attr-defined]
+    key_set = key_set - torch._C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
+    return key_set
+
+
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
-class OpOverload:
+class OpOverload(PyOperatorABC):
     def __init__(self, overloadpacket, op, op_dk, schema, tags):
         self._op = op
         self._op_dk = op_dk
@@ -38,9 +136,10 @@ class OpOverload:
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
-        self.name = self._schema.name
+        self._name = self._schema.name
         if schema.overload_name:
-            self.name += "." + schema.overload_name
+            self._name += "." + schema.overload_name
+        self.py_kernels: Dict[DispatchKey, Any] = {}
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
@@ -71,10 +170,26 @@ class OpOverload:
 
     def decompose(self, *args, **kwargs):
         dk = "CompositeImplicitAutograd"
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name, dk):
+        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
             return NotImplemented
+
+    def py_impl(self, k):
+        def inner(impl):
+            self.py_kernels[k] = impl
+            return impl
+
+        return inner
+
+    def dispatch(self, dispatch_key, *args, **kwargs):
+        if dispatch_key in self.py_kernels:
+            return self.py_kernels[dispatch_key](*args, **kwargs)
+        else:
+            return self._op_dk(dispatch_key, *args, **kwargs)
+
+    def name(self):
+        return self._name
 
     @property
     def overloadpacket(self):
@@ -218,8 +333,15 @@ class _OpNamespace(types.ModuleType):
     def __init__(self, name):
         super(_OpNamespace, self).__init__("torch.ops." + name)
         self.name = name
+        if self.name == "pyop":
+            self.pyops = pyop_namespace
+        else:
+            self.pyops = None  # type: ignore[assignment]
 
     def __getattr__(self, op_name):
+        pyops = object.__getattribute__(self, "pyops")
+        if pyops is not None:
+            return pyops.py_ops[op_name]
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
@@ -249,6 +371,15 @@ class _OpNamespace(types.ModuleType):
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
         return opoverloadpacket
+
+
+class _PyOpNamespace(_OpNamespace):
+    def __init__(self):
+        super(_PyOpNamespace, self).__init__("torch.ops.pyop")
+        self.py_ops = {}
+
+
+pyop_namespace = _PyOpNamespace()
 
 
 class _Ops(types.ModuleType):
