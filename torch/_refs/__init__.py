@@ -1659,12 +1659,12 @@ def _to_will_alias(
     a: TensorLikeType,
     device: Optional[torch.device],
     dtype: Optional[torch.dtype],
-    copy: bool,
+    copy: Optional[bool],
     memory_format: Optional[torch.memory_format],
     layout: Optional[torch.layout],
 ) -> bool:
     return (
-        not copy
+        not (copy is not None and copy == True)
         and (device is None or a.device == device)
         and (dtype is None or a.dtype == dtype)
         and (layout is None or a.layout== layout)
@@ -1679,10 +1679,10 @@ def _to_dispatch(device=None, dtype=None, non_blocking=None, copy=None, memory_f
     if isinstance(device, TensorLike):
         print("overload to 'to.other'")
         # overload to `to.other`
+        other = device
         memory_format = copy
         copy = non_blocking
         non_blocking = dtype
-        other = device
         # extract tensor options
         device = other.device
         dtype = other.dtype
@@ -1712,8 +1712,8 @@ def to(
     a: TensorLikeType,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
-    non_blocking: bool = False,
-    copy: bool = False,
+    non_blocking: Optional[bool] = False,
+    copy: Optional[bool] = False,
     memory_format: Optional[torch.memory_format] = None,
     *,
     layout: Optional[torch.layout] = None,
@@ -1726,9 +1726,9 @@ def to(
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
     if (
-        (copy is True or dtype != a.dtype)
+        ((copy is None and copy == True) or dtype != a.dtype)
         and (memory_format is None or memory_format == torch.preserve_format)
-        and non_blocking is False
+        and (non_blocking is None or none_blocking == False)
         and device is None
         and layout is None
         and pin_memory is None
