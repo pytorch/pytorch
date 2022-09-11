@@ -139,15 +139,15 @@ def make_tensor(
         result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         rand_val = torch.rand(shape, device=device, dtype=dtype)
-        result = _lerp(low, high, rand_val)
+        result = _lerp(m_low, m_high, rand_val)
     elif dtype in _complex_types:
         float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         rand_val = torch.rand(shape + (2,), device=device, dtype=float_dtype)
-        result = torch.view_as_complex(_lerp(low, high, rand_val))
+        result = torch.view_as_complex(_lerp(m_low, m_high, rand_val))
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")

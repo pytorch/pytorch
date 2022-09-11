@@ -5260,7 +5260,7 @@ else:
         self.assertEqual(1, t.item())
 
     @onlyNativeDeviceTypes
-    @dtypes(*torch.testing.floating_and_complex_types())
+    @dtypes(*floating_and_complex_types())
     def test_lerp_scalar(self, device, dtype):
         low, high = 5, 30
         low_t = torch.scalar_tensor(low, device=device, dtype=dtype)
