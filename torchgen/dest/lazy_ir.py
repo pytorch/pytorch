@@ -19,15 +19,16 @@ from torchgen.api.types import (
     deviceT,
     DispatcherSignature,
     kernel_signature,
+    NativeSignature,
     OptionalCType,
     VectorCType,
 )
-from torchgen.api.translate import translate
 from torchgen.context import method_with_native_function
 from torchgen.dest.lazy_ts_lowering import ts_lowering_body
 from torchgen.model import (
     Argument,
     BackendIndex,
+    BackendMetadata,
     BaseTy,
     BaseType,
     FunctionSchema,
@@ -106,15 +107,17 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
     return ", ".join(node_ctor_values)
 
 
-def gen_fallback_code(schema: LazyIrSchema, sig, overload_name: str) -> str:
+def gen_fallback_code(
+    schema: LazyIrSchema,
+    sig: Union[DispatcherSignature, NativeSignature],
+    overload_name: str,
+) -> str:
     """
     Generate code that falls back to eager conditioned on a predicate
     """
     dispatcher_sig = DispatcherSignature.from_schema(schema.func)
     exprs = translate(sig.arguments(), dispatcher_sig.arguments())
-    fallback_args = ",\n                ".join(
-        [a.expr for a in exprs]
-    )
+    fallback_args = ",\n                ".join([a.expr for a in exprs])
     if len(overload_name):
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
@@ -173,8 +176,12 @@ class GenLazyIR(ABC):
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        metadata = self.backend_index.get_kernel(f.functional if isinstance(f, NativeFunctionsGroup) else f)
-        schema = LazyIrSchema(func, symint=metadata and metadata.supports_symint())
+        metadata = self.backend_index.get_kernel(
+            f.functional if isinstance(f, NativeFunctionsGroup) else f
+        )
+        schema = LazyIrSchema(
+            func, symint=metadata is not None and metadata.supports_symint()
+        )
         return self.gen(schema)
 
     # there is no lowering functionality generated unless this IR base class is subclassed and
@@ -451,9 +458,17 @@ class GenLazyNativeFuncDefinition:
                 )
         return ("\n        ").join(lazy_tensor_decls)
 
-    def force_eager_fallback(self, func: NativeFunction, schema: LazyIrSchema, metadata, sig) -> str:
+    def force_eager_fallback(
+        self,
+        func: NativeFunction,
+        schema: LazyIrSchema,
+        metadata: BackendMetadata,
+        sig: Union[DispatcherSignature, NativeSignature],
+    ) -> str:
         if self.gen_forced_fallback_code:
-            return gen_fallback_code(schema, sig, overload_name=func.func.name.overload_name)
+            return gen_fallback_code(
+                schema, sig, overload_name=func.func.name.overload_name
+            )
         return ""
 
     def metrics(self, func: NativeFunction, schema: LazyIrSchema) -> str:
@@ -532,7 +547,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         auto out_meta = at::{dispatch_ns}::{aten_name}({', '.join(meta_call_args)});
         {meta_out}"""
         else:
-            shape_sig = ComputeShapeSignature(metadata.kernel, func, symint=metadata.supports_symint())
+            shape_sig = ComputeShapeSignature(
+                metadata.kernel, func, symint=metadata.supports_symint()
+            )
             shape_str = f"""
             auto shapes = {shape_sig.shape_call};"""
 
@@ -667,7 +684,9 @@ class GenLazyShapeInferenceDefinition:
         if is_structured or is_view_copy_op:
             return []
         else:
-            shape_sig = ComputeShapeSignature(metadata.kernel, f, symint=metadata.supports_symint())
+            shape_sig = ComputeShapeSignature(
+                metadata.kernel, f, symint=metadata.supports_symint()
+            )
             return ["\n".join([f"{shape_sig.shape_decl};"])]
 
 

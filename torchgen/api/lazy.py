@@ -338,7 +338,11 @@ class LazyIrSchema:
     opkind: Optional[str] = None
 
     def __init__(
-        self, func: FunctionSchema, properties: Optional[LazyIrProperties] = None, *, symint: bool
+        self,
+        func: FunctionSchema,
+        properties: Optional[LazyIrProperties] = None,
+        *,
+        symint: bool,
     ):
         if properties:
             self.properties = properties
@@ -349,7 +353,9 @@ class LazyIrSchema:
         for arg_field in ["pre_self_positional", "self_arg", "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = getattr(func.arguments, "self_arg").argument
-                positional_args.append(LazyArgument(arg, self.properties, symint=symint))
+                positional_args.append(
+                    LazyArgument(arg, self.properties, symint=symint)
+                )
             elif getattr(func.arguments, arg_field) is not None:
                 positional_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)
@@ -375,7 +381,8 @@ class LazyIrSchema:
                         ), "We expect there is only one generator arg"
                         self.generator_arg = NamedCType(arg.name, arg.type)
                 keyword_args.extend(
-                    LazyArgument(arg, self.properties, symint=symint) for arg in curr_args
+                    LazyArgument(arg, self.properties, symint=symint)
+                    for arg in curr_args
                 )
         self.keyword_args = tuple(keyword_args)
         self.name = func.name
