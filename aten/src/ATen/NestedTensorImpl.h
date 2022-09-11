@@ -99,6 +99,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // TODO: numel_custom and is_contiguous_custom can be profitably overridden
   // with real implementations
   int64_t numel_custom() const override;
+  c10::SymInt sym_numel_custom() const override;
   bool is_contiguous_custom(MemoryFormat) const override;
   int64_t size_custom(int64_t d) const override {
     return this->size(d);
@@ -108,7 +109,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   }
   IntArrayRef sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
-  c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
 
