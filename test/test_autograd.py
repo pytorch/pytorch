@@ -1069,6 +1069,13 @@ class TestAutograd(TestCase):
 
     def test_sparse_mm_backward(self):
         size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "The backward pass for this operation requires the 'mat1' tensor to be strided,"):
+            z = dense.addmm(sparse, dense)
 
         mm_test_cases = [
             # a requires grad, a is sparse, b requires grad, b is sparse, error message
@@ -1775,31 +1782,6 @@ class TestAutograd(TestCase):
         tensor = b + 0
         tensor[a != 0] = tensor[a != 0]
         tensor.backward(torch.zeros_like(tensor))
-
-    def test_sym_access_does_not_save_self(self):
-        # Function that uses size only
-        a = torch.rand(2, 1, requires_grad=True)
-        out = a.expand(2, 2)
-        fn = out.grad_fn
-        for attr_name in dir(fn):
-            if attr_name.startswith("_saved"):
-                self.assertIn("self_sym_sizes", attr_name)
-
-        # Function that uses size and stride
-        m1 = torch.rand(2, 2, requires_grad=True)
-        m2 = torch.rand(2, 2, requires_grad=False)
-        out = torch.mm(m1, m2)
-        fn = out.grad_fn
-        for attr_name in dir(fn):
-            # We should never save self when m2 doesn't require gradients
-            if attr_name == "_saved_self":
-                self.assertIsNone(fn._saved_self)
-            if attr_name.startswith("_saved_self"):
-                # We are only saving size and stride for self
-                valid_save = ["_saved_self",
-                              "_saved_self_sym_sizes",
-                              "_saved_self_sym_strides"]
-                self.assertIn(attr_name, valid_save)
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)
