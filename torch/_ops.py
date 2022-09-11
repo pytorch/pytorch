@@ -88,6 +88,7 @@ class PyOperator(PyOperatorABC):
             assert (
                 curr_mode in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
+            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
             assert (
                 self.table[dispatch_key] is self.python_key_mode_table[curr_mode]
             ), f"Current active mode {curr_mode} registered, but with a mismatched function Table: {self.table[dispatch_key]} Mode: {self.python_key_mode_table[curr_mode]}"
