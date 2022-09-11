@@ -21,6 +21,10 @@ class TransposeParams : public HeuristicParams {
     return 128;
   }
 
+  static constexpr size_t getDefaultTileSize() {
+    return 32;
+  }
+
   // See note [Supporting small transpose dimensions], all dims are positions in
   // reference1
   std::vector<std::pair<size_t, size_t>> split_before_tiling = {};
@@ -37,10 +41,10 @@ class TransposeParams : public HeuristicParams {
   // https://github.com/csarofeen/pytorch/pull/1854#discussion_r928143729
 
   // Tile size for the inner most dim of tensors in the first group
-  size_t tile_size1 = 32;
+  size_t tile_size1 = getDefaultTileSize();
 
   // Tile size for the inner most dim of tensors in the second group
-  size_t tile_size2 = 32;
+  size_t tile_size2 = getDefaultTileSize();
 
   using HeuristicParams::HeuristicParams;
 
@@ -65,8 +69,7 @@ class TransposeParams : public HeuristicParams {
     std::stringstream ss;
     ss << "\n===== Transpose Parameters ========\n"
        << (tag == "" ? "" : "Tag: ") << tag << " Transpose Characteristics:\n"
-       << " Gridx: " << lparams.gdimx() << " BlckX: " << lparams.bdimx()
-       << "\n";
+       << " BlckX: " << lparams.bdimx() << "\n";
     ss << " input tile size: " << tile_size1 << "\n";
     ss << " output tile size: " << tile_size2 << "\n";
     int elements_per_tile = tile_size1 * tile_size2;

@@ -986,6 +986,84 @@ class ReductionScheduler : public SchedulerEntry {
   }
 };
 
+class TransposeScheduler : public SchedulerEntry {
+ public:
+  explicit TransposeScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr)
+      : SchedulerEntry(ScheduleHeuristic::Transpose) {
+    computeHeuristics(fusion, runtime_info, data_cache);
+  }
+
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    // Temporarily disallow view in transpose scheduler
+    // TODO Add more testing before enabling
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "No support for view op");
+      return false;
+    }
+
+    if (!hasAtLeastTwoValidGroups(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose,
+          "cannot find two mismatching inner most dimensions");
+      return false;
+    }
+
+    // TODO: add support for trivial reduction
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+
+    if (!reduction_ops.empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "no support for reduction ops");
+      return false;
+    }
+
+    if (hasNonUniqueBcast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose,
+          "Broadcasting dimension might be broadcasting to multiple sizes.");
+      return false;
+    }
+
+    return true;
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    FUSER_PERF_SCOPE("TransposeScheduler::canScheduleRunTime");
+
+    auto reason =
+        getTransposeRuntimeRejectReason(fusion, data_cache, runtime_info);
+    if (!reason.empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, reason);
+      return false;
+    }
+    return true;
+  }
+
+  void schedule(Fusion* fusion) override {
+    FUSER_PERF_SCOPE("Schedule Transpose Fusion");
+    scheduleTranspose(fusion, transposeParams());
+  }
+
+ private:
+  void computeHeuristics(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    params_ = getTransposeHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params_ != nullptr);
+  }
+};
+
 class PointWiseScheduler : public SchedulerEntry {
  public:
   explicit PointWiseScheduler(
@@ -1037,6 +1115,18 @@ class PointWiseScheduler : public SchedulerEntry {
       Fusion* fusion,
       SchedulerRuntimeInfo& runtime_info,
       HeuristicSummary* data_cache = nullptr) {
+    auto can_schedule_transpose_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::CanScheduleTranspose>(
+            data_cache, [fusion]() {
+              return std::make_unique<bool>(
+                  TransposeScheduler::canScheduleCompileTime(fusion));
+            });
+    if (can_schedule_transpose_entry.get()) {
+      auto reason =
+          getTransposeRuntimeRejectReason(fusion, data_cache, runtime_info);
+      return !reason.empty();
+    }
+
     return true;
   }
 
@@ -1283,81 +1373,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 };
 
-class TransposeScheduler : public SchedulerEntry {
- public:
-  explicit TransposeScheduler(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr)
-      : SchedulerEntry(ScheduleHeuristic::Transpose) {
-    computeHeuristics(fusion, runtime_info, data_cache);
-  }
-
-  static bool canScheduleCompileTime(Fusion* fusion) {
-    if (!isOptionEnabled(EnableOption::TransposeScheduler)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Transpose, "not enabled");
-      return false;
-    }
-
-    // Temporarily disallow view in transpose scheduler
-    // TODO Add more testing before enabling
-    auto view_tvs = scheduler_utils::getViewTVs(fusion);
-    if (view_tvs.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Transpose, "No support for view op");
-      return false;
-    }
-
-    if (!hasAtLeastTwoValidGroups(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Transpose,
-          "cannot find two mismatching inner most dimensions");
-      return false;
-    }
-
-    // TODO: add support for trivial reduction
-    auto reduction_ops =
-        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
-
-    if (!reduction_ops.empty()) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Transpose, "no support for reduction ops");
-      return false;
-    }
-
-    if (hasNonUniqueBcast(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Transpose,
-          "Broadcasting dimension might be broadcasting to multiple sizes.");
-      return false;
-    }
-
-    return true;
-  }
-
-  static bool canScheduleRunTime(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    return true;
-  }
-
-  void schedule(Fusion* fusion) override {
-    FUSER_PERF_SCOPE("Schedule Transpose Fusion");
-    scheduleTranspose(fusion, transposeParams());
-  }
-
- private:
-  void computeHeuristics(
-      Fusion* fusion,
-      SchedulerRuntimeInfo& runtime_info,
-      HeuristicSummary* data_cache = nullptr) {
-    params_ = getTransposeHeuristics(fusion, runtime_info, data_cache);
-    TORCH_INTERNAL_ASSERT(params_ != nullptr);
-  }
-};
-
 // Schedule Table
 const std::vector<ScheduleHeuristic>& all_heuristics() {
   static const std::vector<ScheduleHeuristic> hlist = {
@@ -1550,6 +1565,26 @@ void HeuristicSummary::validate() const {
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::CAN_SCHEDULE_TRANSPOSE));
+      auto can_schedule_transpose =
+          entry_type_map_.at(EntryType::CAN_SCHEDULE_TRANSPOSE)
+              ->as<
+                  CompileTimeInfo<HeuristicCompileTime::CanScheduleTranspose>>()
+              ->get();
+      if (!*can_schedule_transpose) {
+        break;
+      }
+    }
+    case ScheduleHeuristic::Transpose: {
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::TRANSPOSE_DOMAIN_MAP));
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(
+          EntryType::INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::REFERENCE_TENSORS_FOR_GROUPS));
+      TORCH_INTERNAL_ASSERT(
+          entry_type_map_.count(EntryType::INNER_MOST_DIMS_INFO));
       break;
     }
     case ScheduleHeuristic::Reduction: {
@@ -1577,11 +1612,6 @@ void HeuristicSummary::validate() const {
       TORCH_INTERNAL_ASSERT(
           !persistent_buffer_info->persistent_buffers.empty() &&
           entry_type_map_.count(EntryType::SCOPE_PERSISTENT_FACTOR_INFO));
-      break;
-    }
-    case ScheduleHeuristic::Transpose: {
-      TORCH_INTERNAL_ASSERT(entry_type_map_.count(
-          EntryType::INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS));
       break;
     }
     default:
@@ -1620,7 +1650,10 @@ HeuristicSummaryEntry<EntryClass>::HeuristicSummaryEntry(
 
 // Template instantiation for pre-defined cache entries
 template class HeuristicSummaryEntry<HeuristicCompileTime::DomainMap>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::TransposeDomainMap>;
 template class HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensors>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::ReferenceTensorsForGroups>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::VectorizableInputsAndOutputs>;
 template class HeuristicSummaryEntry<
@@ -1633,6 +1666,9 @@ template class HeuristicSummaryEntry<
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::ScopePersistentFactorInfo>;
 template class HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::InnerMostDimInfo>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::CanScheduleTranspose>;
 
 } // namespace cuda
 } // namespace fuser

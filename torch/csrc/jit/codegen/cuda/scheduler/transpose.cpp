@@ -24,8 +24,6 @@ namespace cuda {
 
 namespace {
 
-constexpr int64_t kMaxTileSize = 32;
-
 // DomainMap uses the ComputeAtMap to find a reference TensorView
 // that maps to all iterDomains in the fusion.
 class DomainMap : public pointwise_utils::DomainMap {
@@ -162,6 +160,12 @@ class DomainMap : public pointwise_utils::DomainMap {
         // Then we still want to T1 and T2 to be grouped together.
         auto group =
             scheduler_utils::getInputsOutputsWithInnerDim(tv, true, false);
+        if (group.empty()) {
+          // In case that the inner most dim of tv is not found (for example, tv
+          // is a fusion input with only reductions), we just return a null
+          // result which will tell the scheduler to reject the fusion
+          return {};
+        }
         for (auto member_tv : group) {
           if (grouped.count(member_tv) == 0) {
             grouped.emplace(member_tv);
@@ -212,11 +216,25 @@ class DomainMap : public pointwise_utils::DomainMap {
 //   T0[I0*I1o*I5*I6{1024*1024/4*8}, I1i*I2*I3*I4{32}]
 void maybeBuildVirtualInnerDims(
     TransposeParams& params,
+    int64_t device_multiprocessor_count,
+    int64_t n_elems,
     const std::vector<int64_t>& shape_in_ref1,
     int64_t inner_most1,
     int64_t inner_most2) {
   int64_t merged_size1 = shape_in_ref1[inner_most1];
   int64_t merged_size2 = shape_in_ref1[inner_most2];
+
+  int64_t actual_tile_size1 =
+      std::min<int64_t>(merged_size1, params.tile_size1);
+  int64_t actual_tile_size2 =
+      std::min<int64_t>(merged_size2, params.tile_size2);
+  int64_t wave_elements =
+      device_multiprocessor_count * actual_tile_size1 * actual_tile_size2;
+
+  if (wave_elements >= n_elems) {
+    // if one full wave can handle all elements, don't create virtual inner dims
+    return;
+  }
 
   // merge inner_most1 and inner_most2 left until we are done or we can no
   // longer do so
@@ -281,10 +299,16 @@ void maybeBuildVirtualInnerDims(
   bool split_inner_most;
   if (merged_size1 < params.tile_size1) {
     if (params.dims_merged_with_2.empty()) {
+#if SUPPORT_SPLITTING_INNERMOST_DIM
+      // https://github.com/csarofeen/pytorch/issues/1964
       // case 2
       split_inner_most = true;
       large_dim = inner_most2;
       split_factor = params.tile_size2;
+#else
+      // disabled due to indexing error
+      return;
+#endif
     } else {
       // case 1
       split_inner_most = false;
@@ -294,10 +318,16 @@ void maybeBuildVirtualInnerDims(
     }
   } else {
     if (params.dims_merged_with_1.empty()) {
+#if SUPPORT_SPLITTING_INNERMOST_DIM
+      // https://github.com/csarofeen/pytorch/issues/1964
       // case 2
       split_inner_most = true;
       large_dim = inner_most1;
       split_factor = params.tile_size1;
+#else
+      // disabled due to indexing error
+      return;
+#endif
     } else {
       // case 1
       split_inner_most = false;
@@ -334,7 +364,186 @@ void maybeBuildVirtualInnerDims(
   }
 }
 
+HeuristicSummaryEntry<HeuristicCompileTime::TransposeDomainMap> getDomainMap(
+    HeuristicSummary* data_cache,
+    Fusion* fusion) {
+  auto domain_map_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::TransposeDomainMap>(
+          data_cache,
+          [fusion]() { return std::make_unique<DomainMap>(fusion); });
+  return domain_map_entry;
+}
+
+HeuristicSummaryEntry<HeuristicCompileTime::InputsOutputsInnerDimGroups>
+getInputsOutputsGroups(HeuristicSummary* data_cache, DomainMap& domain_map) {
+  auto grouped_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::InputsOutputsInnerDimGroups>(
+          data_cache, [&domain_map]() {
+            return std::make_unique<std::vector<std::vector<TensorView*>>>(
+                domain_map.groupInputsOutputsByInnerDim());
+          });
+  auto& grouped_inputs_outputs = grouped_inputs_outputs_entry.get();
+
+  TORCH_INTERNAL_ASSERT(
+      grouped_inputs_outputs.size() >= 2,
+      "Can not find mismatched inner most dim, should use pointwise scheduler.");
+
+  return grouped_inputs_outputs_entry;
+}
+
+HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensorsForGroups>
+getReferenceTensors(
+    HeuristicSummary* data_cache,
+    DomainMap& domain_map,
+    std::vector<std::vector<TensorView*>>& grouped_inputs_outputs) {
+  auto reference_tensors_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensorsForGroups>(
+          data_cache, [&domain_map, &grouped_inputs_outputs]() {
+            std::vector<TensorView*> data{
+                domain_map.findReferenceFor(grouped_inputs_outputs[0]),
+                domain_map.findReferenceFor(grouped_inputs_outputs[1])};
+            return std::make_unique<std::vector<TensorView*>>(std::move(data));
+          });
+  auto& reference_tensors = reference_tensors_entry.get();
+  TORCH_INTERNAL_ASSERT(reference_tensors.size() == 2);
+  TensorView* reference1 = reference_tensors[0];
+  TensorView* reference2 = reference_tensors[1];
+  TORCH_INTERNAL_ASSERT(
+      reference1 != nullptr, "Unable to find reference tensor for group 1");
+  TORCH_INTERNAL_ASSERT(
+      reference2 != nullptr, "Unable to find reference tensor for group 2");
+  return reference_tensors_entry;
+}
+
+std::pair<std::vector<int64_t>, int64_t> getShapeInReference(
+    HeuristicSummary* data_cache,
+    SchedulerRuntimeInfo& runtime_info,
+    TensorView* reference,
+    DomainMap& domain_map) {
+  auto ref_root = reference->getMaybeRFactorDomain();
+  std::vector<int64_t> shape_in_ref;
+  shape_in_ref.reserve(reference->nDims());
+  int64_t n_elems = 1;
+  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
+    auto id = ref_root[ref_i];
+    auto concrete_id = domain_map.getComputeAtMap().getConcreteMappedID(
+        id, IdMappingMode::EXACT);
+    auto inferred_val =
+        runtime_info.expressionEvaluator().evaluate(concrete_id->extent());
+    TORCH_INTERNAL_ASSERT(
+        inferred_val.has_value(),
+        "Error inferring size for pointwise scheduler: ",
+        ref_root[ref_i]->extent()->toInlineString());
+    int64_t size = inferred_val->as<int64_t>();
+    n_elems *= size;
+    shape_in_ref.push_back(size);
+  }
+  return {shape_in_ref, n_elems};
+}
+
+HeuristicSummaryEntry<HeuristicCompileTime::InnerMostDimInfo>
+getInnerMostDimInfoInReference(
+    HeuristicSummary* data_cache,
+    const std::vector<TensorView*>& group_references,
+    TensorView* global_reference,
+    DomainMap& domain_map) {
+  auto innermost_info_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::InnerMostDimInfo>(
+          data_cache, [&]() {
+            std::vector<int64_t> data;
+            data.reserve(group_references.size());
+            for (auto ref_tv : group_references) {
+              auto inner_most_id = scheduler_utils::innerMostRootDim(ref_tv);
+              auto inner_most_pos_in_global_ref =
+                  domain_map.getInnerLeafDim(global_reference, inner_most_id);
+              data.emplace_back(inner_most_pos_in_global_ref);
+            }
+            return std::make_unique<std::vector<int64_t>>(std::move(data));
+          });
+  return innermost_info_entry;
+}
+
 } // namespace
+
+std::string getTransposeRuntimeRejectReason(
+    Fusion* fusion,
+    HeuristicSummary* data_cache,
+    SchedulerRuntimeInfo& runtime_info) {
+  auto domain_map_entry = getDomainMap(data_cache, fusion);
+  auto& domain_map = dynamic_cast<DomainMap&>(domain_map_entry.get());
+  auto grouped_inputs_outputs_entry =
+      getInputsOutputsGroups(data_cache, domain_map);
+  auto grouped_inputs_outputs = grouped_inputs_outputs_entry.get();
+  auto reference_tensors_entry =
+      getReferenceTensors(data_cache, domain_map, grouped_inputs_outputs);
+  auto reference_tensors = reference_tensors_entry.get();
+  TensorView* reference1 = reference_tensors[0];
+
+  auto pair =
+      getShapeInReference(data_cache, runtime_info, reference1, domain_map);
+  auto& shape_in_ref1 = pair.first;
+  auto& n_elems = pair.second;
+
+  auto innermost_info_entry = getInnerMostDimInfoInReference(
+      data_cache, reference_tensors, reference1, domain_map);
+  auto innermost_info = innermost_info_entry.get();
+
+  constexpr size_t default_tile_elements =
+      TransposeParams::getDefaultTileSize() *
+      TransposeParams::getDefaultTileSize();
+
+  // don't schedule with transpose scheduler if less than a full wave
+  const int64_t device_multiprocessor_count =
+      (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  auto elements_per_wave = device_multiprocessor_count * default_tile_elements;
+  if (elements_per_wave > n_elems) {
+    return "Transpose scheduler does not perform well on small problem sizes.";
+  }
+
+  auto inner_most_pos1_in_ref1 = innermost_info[0];
+  auto inner_most_pos2_in_ref1 = innermost_info[1];
+
+  auto inner_size1 = shape_in_ref1[inner_most_pos1_in_ref1];
+  auto inner_size2 = shape_in_ref1[inner_most_pos2_in_ref1];
+
+  // For cases like
+  //   transpose(T0[1000000000, 2, 2], 1, 2)
+  // the pointwise scheduler should provide better performance, because it
+  // provides coalesced memory access
+  if (inner_size1 * inner_size2 < default_tile_elements) {
+    auto inner_elements = inner_size1 * inner_size2;
+    for (int64_t i = inner_most_pos2_in_ref1 + 1; i < inner_most_pos1_in_ref1;
+         i++) {
+      inner_elements *= shape_in_ref1[i];
+    }
+    // note that the algorithm here is only an approximation because it only
+    // checks reference1. In principle, we need to check all inputs and outputs
+    // to get an accurate result, but that is too much work. I think checking
+    // only reference 1 is fine for now. Below is an example where the
+    // approximation here will not work:
+    //   T0[10000000, 2, 3] (reference 1)
+    //   T1[2, 10000000, 3] input/output
+    //   T2[2, 10000000, 3] input/output
+    //   T3[2, 10000000, 3] input/output
+    //   T4[3, 10000000, 2] input/output
+    //   T5[3, 10000000, 2] input/output
+    if (inner_elements < default_tile_elements) {
+      return "Inner transpose of small dimensions should be scheduled by the "
+             "pointwise scheduler because it provides better memory coalescing";
+    }
+  }
+
+#if !SUPPORT_SPLITTING_INNERMOST_DIM
+  if (n_elems / inner_size1 < TransposeParams::getDefaultTileSize() ||
+      n_elems / inner_size2 < TransposeParams::getDefaultTileSize()) {
+    return "Splitting of inner most dim for the creation of virtual inner most dim "
+           "is disabled due to indexing bug, skipping this case at runtime for now"
+           "See: https://github.com/csarofeen/pytorch/issues/1964";
+  }
+#endif
+
+  return "";
+}
 
 bool hasAtLeastTwoValidGroups(Fusion* fusion) {
   return DomainMap::hasAtLeastTwoValidGroups(fusion);
@@ -359,84 +568,43 @@ std::shared_ptr<TransposeParams> getTransposeHeuristics(
   // Incase any buffer is of type DataType::Index
   DataType index_type = indexModeToDtype(runtime_info.getIndexMode());
 
-  auto domain_map_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::DomainMap>(
-          data_cache,
-          [fusion]() { return std::make_unique<DomainMap>(fusion); });
-  const auto& domain_map = dynamic_cast<DomainMap&>(domain_map_entry.get());
-
+  auto domain_map_entry = getDomainMap(data_cache, fusion);
+  auto& domain_map = dynamic_cast<DomainMap&>(domain_map_entry.get());
   auto grouped_inputs_outputs_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::InputsOutputsInnerDimGroups>(
-          data_cache, [&domain_map]() {
-            return std::make_unique<std::vector<std::vector<TensorView*>>>(
-                domain_map.groupInputsOutputsByInnerDim());
-          });
+      getInputsOutputsGroups(data_cache, domain_map);
   auto grouped_inputs_outputs = grouped_inputs_outputs_entry.get();
-
-  TORCH_INTERNAL_ASSERT(
-      grouped_inputs_outputs.size() >= 2,
-      "Can not find mismatched inner most dim, should use pointwise scheduler.");
-
   auto reference_tensors_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensors>(
-          data_cache, [&domain_map, &grouped_inputs_outputs]() {
-            std::vector<TensorView*> data{
-                domain_map.findReferenceFor(grouped_inputs_outputs[0]),
-                domain_map.findReferenceFor(grouped_inputs_outputs[1])};
-            return std::make_unique<std::vector<TensorView*>>(std::move(data));
-          });
-  auto& reference_tensors = reference_tensors_entry.get();
-  TORCH_INTERNAL_ASSERT(reference_tensors.size() == 2);
+      getReferenceTensors(data_cache, domain_map, grouped_inputs_outputs);
+  auto reference_tensors = reference_tensors_entry.get();
   TensorView* reference1 = reference_tensors[0];
   TensorView* reference2 = reference_tensors[1];
-  TORCH_INTERNAL_ASSERT(
-      reference1 != nullptr, "Unable to find reference tensor for group 1");
-  TORCH_INTERNAL_ASSERT(
-      reference2 != nullptr, "Unable to find reference tensor for group 2");
+  auto pair =
+      getShapeInReference(data_cache, runtime_info, reference1, domain_map);
+  auto& shape_in_ref1 = pair.first;
+  auto& n_elems = pair.second;
 
   const int64_t device_multiprocessor_count =
       (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-  auto ref_root = reference1->getMaybeRFactorDomain();
-  std::vector<int64_t> shape_in_ref1;
-  shape_in_ref1.reserve(reference1->nDims());
-  int64_t n_elems = 1;
-  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
-    auto id = ref_root[ref_i];
-    auto concrete_id = domain_map.getComputeAtMap().getConcreteMappedID(
-        id, IdMappingMode::EXACT);
-    auto inferred_val =
-        runtime_info.expressionEvaluator().evaluate(concrete_id->extent());
-    TORCH_INTERNAL_ASSERT(
-        inferred_val.has_value(),
-        "Error inferring size for pointwise scheduler: ",
-        ref_root[ref_i]->extent()->toInlineString());
-    int64_t size = inferred_val->as<int64_t>();
-    n_elems *= size;
-    shape_in_ref1.push_back(size);
-  }
+  auto innermost_info_entry = getInnerMostDimInfoInReference(
+      data_cache, reference_tensors, reference1, domain_map);
+  auto innermost_info = innermost_info_entry.get();
+
+  auto inner_most_pos1_in_ref1 = innermost_info[0];
+  auto inner_most_pos2_in_ref1 = innermost_info[1];
 
   auto params = std::make_shared<TransposeParams>("Transpose heuristics");
 
-  // If the problem size is small use small tile sizes.
-  if (n_elems < device_multiprocessor_count * kMaxTileSize * kMaxTileSize) {
-    params->tile_size1 = 8;
-    params->tile_size2 = 8;
-  }
-
   // Expand inner-most dims to virtual inner-most dims so that the inner-most
   // dims has at least tile_size elements
-  auto inner_most_id1 = scheduler_utils::innerMostRootDim(reference1);
-  auto inner_most_id2 = scheduler_utils::innerMostRootDim(reference2);
-
-  auto inner_most_pos1_in_ref1 =
-      domain_map.getInnerLeafDim(reference1, inner_most_id1);
-  auto inner_most_pos2_in_ref1 =
-      domain_map.getInnerLeafDim(reference1, inner_most_id2);
-
   // See note [Supporting small transpose dimensions]
   maybeBuildVirtualInnerDims(
-      *params, shape_in_ref1, inner_most_pos1_in_ref1, inner_most_pos2_in_ref1);
+      *params,
+      device_multiprocessor_count,
+      n_elems,
+      shape_in_ref1,
+      inner_most_pos1_in_ref1,
+      inner_most_pos2_in_ref1);
 
   // Note [vectorization and unroll of input and output]
   //
@@ -529,13 +697,20 @@ std::shared_ptr<TransposeParams> getTransposeHeuristics(
     std::cerr << "\n===== Transpose Stats ========\n"
               << "inputs: " << ir_utils::toString(fusion->inputs()) << "\n"
               << "outputs: " << ir_utils::toString(fusion->outputs()) << "\n"
+              << "shape: " << shape_in_ref1 << "\n"
               << "num_elems: " << n_elems << "\n"
               << "n_input_tensors: " << n_input_tensors << "\n"
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "group 1: " << ir_utils::toString(grouped_inputs_outputs[0])
               << "\n"
+              << "reference1: " << reference1 << "\n"
+              << "inner_most_id1 position: " << inner_most_pos1_in_ref1
+              << " (in reference 1)\n"
               << "group 2: " << ir_utils::toString(grouped_inputs_outputs[1])
-              << std::endl;
+              << "\n"
+              << "reference2: " << reference2 << "\n"
+              << "inner_most_id2 position: " << inner_most_pos2_in_ref1
+              << " (in reference 1)" << std::endl;
     if (!params->split_before_tiling.empty() ||
         !params->dims_merged_with_1.empty() ||
         !params->dims_merged_with_2.empty()) {
