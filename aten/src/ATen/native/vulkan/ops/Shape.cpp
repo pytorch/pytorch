@@ -3,8 +3,6 @@
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {
