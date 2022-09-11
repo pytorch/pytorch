@@ -75,7 +75,48 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
 }
 
 
+template <typename scalar_t>
+void lerp_scalar_start_end_kernel_impl(
+    at::TensorIteratorBase& iter, scalar_t start, scalar_t end) {
+  cpu_kernel_vec(
+      iter,
+      [=](scalar_t weight) {
+        return lerp(start, end, weight);
+      },
+      [=](Vectorized<scalar_t> weight) {
+        const Vectorized<scalar_t> start_vec(start), end_vec(end);
+        return lerp_vec(start_vec, end_vec, weight);
+      });
+}
+
+void lerp_scalar_start_end_kernel(at::TensorIteratorBase& iter, const Scalar& start_, const Scalar& end_) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf, kBFloat16, iter.common_dtype(), "lerp_scalar_start_end", [&] {
+    lerp_scalar_start_end_kernel_impl(
+        iter,
+        start_.to<scalar_t>(),
+        end_.to<scalar_t>());
+  });
+}
+
+
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
+  if (iter.is_scalar(1) && iter.is_scalar(2)) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.common_dtype(), "lerp_scalar_start_end", [&] {
+      auto start = iter.scalar_value<scalar_t>(1);
+      auto end = iter.scalar_value<scalar_t>(2);
+
+      iter.remove_operand(2);
+      iter.remove_operand(1);
+      lerp_scalar_start_end_kernel_impl(
+          iter,
+          start,
+          end);
+    });
+    return;
+  }
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_tensor", [&] {
     at::native::cpu_kernel_vec(
         iter,
@@ -92,6 +133,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_start_end_stub, &lerp_scalar_start_end_kernel);
 
 } // namespace native
 } // namespace at
