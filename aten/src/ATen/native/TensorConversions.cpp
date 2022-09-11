@@ -830,19 +830,13 @@ Tensor dense_to_batched_sparse_compressed_nonblock(const Tensor& self, const Lay
   compressed_indices_size.push_back(compressed_dim_size + 1);
   Tensor compressed_indices = batch_compressed_indices.reshape(compressed_indices_size);
 
-  Tensor batch_flat_indices = non_zero_mask.to(kByte).argsort(true /*stable*/, -1 /*dim*/, true /*descending*/)
-    .slice(1, 0, max_nse, 1);
-  /* computing batch_flat_indices using argsort as above is equivalent to
-
-        batch_flat_indices = torch.zeros((nbatches, max_nse), dtype=torch.int64)
-        for i in range(nbatches):
-            tmp = torch.arange(ncols * nrows).masked_select(non_zero_mask[i])
-            batch_flat_indices[i, :tmp.numel()] = tmp
-
-     (up to non_zero_mask elements with True values that we only care
-     about). topk cannot be used because its sort is not stable.
-   */
-
+  Tensor batch_flat_indices = at::zeros({nbatches, max_nse}, flat_compressed_indices.options());
+  at::parallel_for(0, nbatches, 0, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        Tensor tmp = non_zero_mask[i].nonzero().flatten();
+        batch_flat_indices.select(0, i).narrow(0, 0, tmp.numel()).copy_(tmp);
+      }
+  });
   if (nvalues > 0) {
     batch_flat_indices.add_(at::native::arange(0, nvalues, compressed_dim_size * plain_dim_size, index_dtype, kStrided, index_device)
                             .reshape({nbatches, 1}));

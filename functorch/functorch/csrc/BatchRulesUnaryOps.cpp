@@ -79,7 +79,7 @@ to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
   return std::make_tuple(self.to(other, non_blocking, copy, memory_format), self_bdim);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
 #define UNARY_POINTWISE_ALL2(op, overload) \
   POINTWISE_BOXED2(op ## _, overload); \
