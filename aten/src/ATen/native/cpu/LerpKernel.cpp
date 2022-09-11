@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -10,27 +11,21 @@ namespace {
 
 void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_scalar", [&] {
-    using value_t = typename c10::scalar_value_type<scalar_t>::type;
-    scalar_t weight_val = weight.to<scalar_t>();
+    auto weight_val = weight.to<scalar_t>();
     at::native::cpu_kernel(
         iter,
         [weight_val](scalar_t self_val, scalar_t end_val) {
-          return (zabs<scalar_t, value_t>(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val - (end_val - self_val) * (scalar_t(1) - weight_val);
+          return lerp(self_val, end_val, weight_val);
         });
   });
 }
 
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_tensor", [&] {
-    using value_t = typename c10::scalar_value_type<scalar_t>::type;
     at::native::cpu_kernel(
         iter,
         [](scalar_t self_val, scalar_t end_val, scalar_t weight_val) {
-          return (zabs<scalar_t, value_t>(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val - (end_val - self_val) * (scalar_t(1) - weight_val);
+          return lerp(self_val, end_val, weight_val);
         });
   });
 }
