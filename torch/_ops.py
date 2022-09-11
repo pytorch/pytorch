@@ -64,35 +64,36 @@ class PyOperator(PyOperatorABC):
         def inner(fn):
             if isinstance(dispatch_key_or_mode, type(TorchDispatchMode)):
                 mode = dispatch_key_or_mode
-                dispatch_key = (
-                    torch._C.DispatchKey.Python
-                )  # Mode registration is a python only notion
                 assert mode not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
                 self.python_key_mode_table[mode] = fn
                 return fn
-            else:
-                dispatch_key = dispatch_key_or_mode
-                assert isinstance(dispatch_key, torch._C.DispatchKey)
-                assert dispatch_key not in self.table
-                self.table[dispatch_key] = fn
-                return fn
+
+            dispatch_key = dispatch_key_or_mode
+            assert (
+                dispatch_key != torch._C.DispatchKey.Python
+            ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
+            assert isinstance(dispatch_key, torch._C.DispatchKey)
+            assert dispatch_key not in self.table
+            self.table[dispatch_key] = fn
+            return fn
 
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        assert dispatch_key in self.table
         if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
             curr_mode = type(torch._C._get_torch_dispatch_mode())
             assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+            assert (
                 curr_mode in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            assert (
-                self.table[dispatch_key] is self.python_key_mode_table[curr_mode]
-            ), f"Current active mode {curr_mode} registered, but with a mismatched function Table: {self.table[dispatch_key]} Mode: {self.python_key_mode_table[curr_mode]}"
+            return self.python_key_mode_table[curr_mode](*args, **kwargs)
 
+        assert dispatch_key in self.table
         return self.table[dispatch_key](*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
@@ -168,6 +169,8 @@ class OpOverload(PyOperatorABC):
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
+        # TODO(voz): Lots of shared logic around python_key_mode_table, maybe pull into base...
+        self.python_key_mode_table = {}
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
 
@@ -203,16 +206,38 @@ class OpOverload(PyOperatorABC):
         else:
             return NotImplemented
 
-    def py_impl(self, k):
-        assert isinstance(k, torch._C.DispatchKey)
+    def py_impl(self, dispatch_key_or_mode):
+        def inner(fn):
+            if isinstance(dispatch_key_or_mode, type(TorchDispatchMode)):
+                mode = dispatch_key_or_mode
+                assert mode not in self.python_key_mode_table
+                # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
+                self.python_key_mode_table[mode] = fn
+                return fn
 
-        def inner(impl):
-            self.py_kernels[k] = impl
-            return impl
+            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)
+            assert (
+                dispatch_key_or_mode != torch._C.DispatchKey.Python
+            ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
+
+            self.py_kernels[dispatch_key_or_mode] = fn
+            return fn
 
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        if dispatch_key == torch._C.DispatchKey.Python:
+            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+            assert (
+                curr_mode in self.python_key_mode_table
+            ), f"Current active mode {curr_mode} not registered"
+            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
+            return self.python_key_mode_table[curr_mode](*args, **kwargs)
+
         if dispatch_key in self.py_kernels:
             return self.py_kernels[dispatch_key](*args, **kwargs)
         else:

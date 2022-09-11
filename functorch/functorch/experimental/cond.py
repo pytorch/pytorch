@@ -123,7 +123,6 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
     return cond(pred, true_fn, false_fn, *operands)
 
 
-@cond.py_impl(DispatchKey.Python)
 @cond.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
