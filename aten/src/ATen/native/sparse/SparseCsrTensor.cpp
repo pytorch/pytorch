@@ -789,10 +789,19 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
 
   if (dim < n_batch) {
     // Selecting batch dimension
+    Tensor item_compressed_indices = compressed_indices.select(dim, index);
+    Tensor item_plain_indices = plain_indices.select(dim, index);
+    Tensor item_values = self.values().select(dim, index);
+    int64_t nse = AT_DISPATCH_INTEGRAL_TYPES(item_compressed_indices.scalar_type(), "select",
+                                             [&]() -> int64_t { return item_compressed_indices.select(-1, -1).max().item<scalar_t>(); });
+    if (nse < item_plain_indices.size(-1)) {
+      item_plain_indices = item_plain_indices.slice(0, 0, nse, 1);
+      item_values = item_values.slice(0, 0, nse, 1);
+    }
     return at::native::_sparse_compressed_tensor_unsafe(
-        compressed_indices.select(dim, index),
-        plain_indices.select(dim, index),
-        self.values().select(dim, index),
+        item_compressed_indices,
+        item_plain_indices,
+        item_values,
         new_sizes,
         optTypeMetaToScalarType(options.dtype_opt()),
         options.layout_opt(),

@@ -2780,7 +2780,7 @@ class TestSparseCSR(TestCase):
                 dense_back = sparse.to_dense()
                 self.assertEqual(dense, dense_back)
 
-            # if batches have different nnz we expect the conversion to throw
+            # if batches have different nnz we expect the conversion to throw for blocked layouts
             mask_0 = mask[0]
             mask_1 = mask[0].clone().fill_(True)
             mask_2 = mask[0].clone().fill_(False)
@@ -2789,9 +2789,13 @@ class TestSparseCSR(TestCase):
             mask = torch.stack([(mask_0, mask_1, mask_2)[i % 3] for i in range(n_batch)], dim=0).reshape(batch_shape + mask_0.shape)
             dense = make_tensor(shape, dtype=torch.float, device=device)
             dense = dense * mask
-            msg = "Expect the same number of specified elements per batch."
-            with self.assertRaisesRegex(RuntimeError, msg):
-                self._convert_to_layout(dense, layout, blocksize)
+            if layout in blocked_layouts:
+                msg = "Expect the same number of specified elements per batch."
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    self._convert_to_layout(dense, layout, blocksize)
+            else:
+                sparse = self._convert_to_layout(dense, layout, blocksize)
+                check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
 
             # Should throw if there is a zero in the batch size
             dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
