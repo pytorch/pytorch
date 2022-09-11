@@ -996,14 +996,12 @@ Tensor new_empty_batching_rule(
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
-    c10::SymIntArrayRef sym_size,
-    c10::SymIntArrayRef sym_stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
-  auto size = asIntArrayRefSlow(sym_size);
-  auto stride = asIntArrayRefSlow(sym_stride);
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 
