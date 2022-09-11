@@ -28,7 +28,11 @@ at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 // TODO: this print is bad
 std::ostream& operator<<(std::ostream& os, SymInt s) {
-  os << "SymInt(" << s.as_int_unchecked() << ")";
+  if (s.is_symbolic()) {
+    os << "SymInt(" << s.toSymIntNodeImpl()->str() << ")";
+  } else {
+    os << "SymInt(" << s.as_int_unchecked() << ")";
+  }
   return os;
 }
 
