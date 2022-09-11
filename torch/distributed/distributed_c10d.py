@@ -2000,9 +2000,6 @@ def scatter_object_list(
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
 
-    .. note:: Note that this API does not support the NCCL backend, as the
-        tensor-based scatter collective is not supported by ProcessGroupNCCL.
-
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
