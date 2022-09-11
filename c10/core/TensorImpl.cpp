@@ -944,8 +944,10 @@ void TensorImpl::set_sizes_and_strides(
   }
   extra_meta_->numel_ = numel;
   extra_meta_->is_contiguous_ = _compute_contiguous(*extra_meta_);
-  extra_meta_->is_channels_last_contiguous_ = _compute_contiguous(*extra_meta_, {1, 3, 2, 0});
-  extra_meta_->is_channels_last_3d_contiguous_ = _compute_contiguous(*extra_meta_, {1, 4, 3, 2, 0});
+  extra_meta_->is_channels_last_contiguous_ =
+      _compute_contiguous(*extra_meta_, {1, 3, 2, 0});
+  extra_meta_->is_channels_last_3d_contiguous_ =
+      _compute_contiguous(*extra_meta_, {1, 4, 3, 2, 0});
 }
 
 namespace impl {

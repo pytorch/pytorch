@@ -729,7 +729,10 @@ class FakeTensorMode(TorchDispatchMode):
             aten.detach.default,
         ]
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if has_symbolic_sizes and func not in functions_with_cpp_meta_impl_that_support_symint:
+        if (
+            has_symbolic_sizes
+            and func not in functions_with_cpp_meta_impl_that_support_symint
+        ):
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
