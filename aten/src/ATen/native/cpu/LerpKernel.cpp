@@ -15,10 +15,10 @@ Vectorized<scalar_t> is_lerp_weight_small(Vectorized<scalar_t> weight) {
   return weight.abs() < Vectorized<scalar_t>(0.5);
 }
 
-// is_lerp_weight_small doesn't work for complex because z.abs()
-// return a complex vector which can't be compared. Either implement
-// it with z.abs_2_(), or fallback to the scalar function.
-#if !defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+// is_lerp_weight_small doesn't work for complex because z.abs() returns a
+// complex vector which can't be compared. Either implement it with z.abs_2_(),
+// or fallback to the scalar function.
+#if !(defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER))
 template <typename value_t>
 Vectorized<c10::complex<value_t>> is_lerp_weight_small(Vectorized<c10::complex<value_t>> weight) {
   using vec_reg_t = decltype(weight.abs_2_());
