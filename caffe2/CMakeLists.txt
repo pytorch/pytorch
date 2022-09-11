@@ -1035,10 +1035,6 @@ if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
 endif()
 
-message(STATUS "Tracing Based Flag: ${TRACING_BASED}")
-message(STATUS "Build Lite Interpreter Flag: ${BUILD_LITE_INTERPRETER}")
-message(STATUS "Intern Build Mobile Flag: ${INTERN_BUILD_MOBILE}")
-
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
