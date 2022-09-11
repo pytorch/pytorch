@@ -3,6 +3,9 @@
 
 namespace at { namespace functorch {
 
+// This is the interpreter that handles the functionalize() transform.
+// See NOTE: [functorch interpreter stack] for more details.
+
 struct VmapInterpreterPtr {
   explicit VmapInterpreterPtr(const Interpreter* base): base_(base) { TORCH_INTERNAL_ASSERT(base->key() == TransformType::Vmap); }
   TransformType key() const { return base_->key(); }

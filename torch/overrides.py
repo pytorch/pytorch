@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -254,6 +254,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__subclasshook__,
         Tensor.__hash__,
         Tensor.as_subclass,
+        Tensor.eig,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -487,7 +488,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
@@ -1806,8 +1806,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
