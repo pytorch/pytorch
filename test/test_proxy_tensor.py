@@ -664,6 +664,26 @@ def forward(self, x_1):
         self.assertFalse(has_proxy(torch.randn(5)))
         make_fx(f)(torch.randn(5))
 
+    def test_strides(self):
+        def f(x):
+            self.assertTrue(x.is_contiguous())
+            self.assertFalse(x.is_contiguous(memory_format=torch.channels_last))
+            x = x.permute(0, 3, 1, 2)
+            self.assertFalse(x.is_contiguous())
+            self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+            return x
+        make_fx(f)(torch.randn(2, 3, 4, 5))
+
+        def f(x):
+            self.assertTrue(x.is_contiguous())
+            y = x[:, 1]
+            self.assertFalse(y.is_contiguous())
+            y = x[:, ::2]
+            self.assertFalse(y.is_contiguous())
+            return x.cos()
+
+        make_fx(f)(torch.randn(2, 3, 4, 5))
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -849,6 +869,7 @@ def forward(self, a_1):
         self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
         self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
 
+
     def test_symbolic_meta(self):
         def f(a, b):
             d = a.new_empty(a.shape[0] + b.shape[0])
@@ -859,6 +880,7 @@ def forward(self, a_1):
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
+
 
 
 make_fx_failures = {
