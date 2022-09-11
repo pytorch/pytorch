@@ -1153,53 +1153,9 @@ Tensor convolution_backward_jvp_grad_bias(
   }
 }
 
-// This function is used by load_derivatives.py to replace tensor.strides()
-// calls that appear in derivative formulas. If the tensor has requires_grad
-// set, this function returns its strides or throws an error if the tensor
-// is sparse. If requires_grad is not set, an empty array is returned since
-// there will be no backward pass. There has one special case, if input is
-// MKLDNN tensor and has requires_grad set, just return an empty array, the
-// reason is that MKLDNN tensor is a opaque tensor which has not stride info.
-//
-// This function only supports the case where `input` is the tensor whose
-// single derivative is being calculated.
-//
-// This function does not support `self` derivatives for inplace functions.
-//
-// Args:
-//  input              Tensor to call .strides() on
-//  input_name         Name of `input` tensor, from derivative formula
-at::IntArrayRef strides_or_error(
-    const Tensor& input,
-    c10::string_view const& input_name) {
-  // TODO: Ideally, this function would never be called if requires_grad is
-  // not set. Once codegen is updated to avoid the call, we can remove this
-  // check.
-  if (input.requires_grad()) {
-    TORCH_CHECK(
-        !input.is_sparse(),
-        "The backward pass for this operation requires the '",
-        input_name,
-        "' tensor to be strided, but a sparse tensor was given instead. ",
-        "Please either use a strided tensor or set requires_grad=False for '",
-        input_name,
-        "'");
-    if (input.is_mkldnn())
-      return IntArrayRef({});
-    if (input.is_sparse_csr())
-      return IntArrayRef({});
-    return input.strides();
-  } else {
-    return IntArrayRef({});
-  }
-}
-
 Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::IntArrayRef mat1_sizes,
-    at::IntArrayRef mat1_strides,
-    c10::Layout mat1_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1_layout == c10::kStrided) {
@@ -1216,9 +1172,6 @@ Tensor mm_mat1_backward(
 Tensor mm_mat2_backward(
     const Tensor& grad,
     const Tensor& mat1,
-    IntArrayRef mat2_sizes,
-    IntArrayRef mat2_strides,
-    c10::Layout mat2_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
       mat2_layout == c10::kStrided) {
