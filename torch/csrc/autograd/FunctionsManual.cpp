@@ -1182,7 +1182,7 @@ Tensor convolution_backward_jvp_grad_bias(
 // Args:
 //  input              Tensor to call .strides() on
 //  input_name         Name of `input` tensor, from derivative formula
-at::IntArrayRef strides_or_error(
+at::SymIntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name) {
   // TODO: Ideally, this function would never be called if requires_grad is
@@ -1198,12 +1198,12 @@ at::IntArrayRef strides_or_error(
         input_name,
         "'");
     if (input.is_mkldnn())
-      return IntArrayRef({});
+      return {};
     if (input.is_sparse_csr())
-      return IntArrayRef({});
-    return input.strides();
+      return {};
+    return input.sym_strides();
   } else {
-    return IntArrayRef({});
+    return {};
   }
 }
 

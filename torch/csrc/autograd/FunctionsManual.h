@@ -252,7 +252,7 @@ at::Tensor clamp_jvp(
     const Tensor& min_t,
     const Tensor& max_p,
     const Tensor& max_t);
-at::IntArrayRef strides_or_error(
+at::SymIntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name);
 at::Tensor mm_mat1_backward(
