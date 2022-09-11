@@ -6,6 +6,7 @@ from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_pro
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.fx.experimental.proxy_tensor import track_tensor_tree
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
 """
@@ -123,6 +124,7 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
 
 
 @cond.py_impl(DispatchKey.Python)
+@cond.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
