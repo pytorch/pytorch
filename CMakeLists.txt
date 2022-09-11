@@ -572,6 +572,22 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
   set(BUILD_LAZY_TS_BACKEND OFF)
 
+  # Set -ffunction-sections and -fdata-sections so that each method has its own
+  # text section. This allows the linker to remove unused section when the flag
+  # -Wl,-gc-sections is provided at link time.
+  string(APPEND CMAKE_CXX_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_C_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_CXX_FLAGS " -fdata-sections")
+  string(APPEND CMAKE_C_FLAGS " -fdata-sections")
+
+  # Please note that the use of the following flags is required when linking
+  # against libtorch_cpu.a for mobile builds.
+  # -Wl,--whole-archive -ltorch_cpu -Wl,--no-whole-archive
+  #
+  # This allows global constructors to be included and run. Global
+  # constructors are used for operator/kernel registration with the
+  # PyTorch Dispatcher.
+
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
