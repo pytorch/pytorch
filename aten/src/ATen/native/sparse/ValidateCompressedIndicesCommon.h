@@ -89,6 +89,20 @@ _check_last_cidx_is_nnz(const index_t& cidx, const index_t& nnz) {
   }
 }
 
+// Invariant 5.2 modified, to allow different NSE in between batches.
+// compressed_index[..., -1] <= nnz.
+template <CDimName cdim_name, typename index_t>
+INVARIANT_CHECK_FUNC_API
+_check_last_cidx_is_nnz_or_less(const index_t& cidx, const index_t& nnz) {
+  const bool invariant = cidx <= nnz;
+  if (cdim_name == CDimName::CRow) {
+    _assert(invariant, "`crow_indices[..., -1] <= nnz` is not satisfied.");
+  }
+  else {
+    _assert(invariant, "`ccol_indices[..., -1] <= nnz` is not satisfied.");
+  }
+}
+
 // Invariant 5.3
 // 0 <= compressed_indices[..., 1:] - compressed_indices[..., :-1] <= plain_dim.
 template <CDimName cdim_name, typename index_t>
@@ -263,11 +277,11 @@ void _validate_compressed_sparse_indices_kernel(
       .add_input(batch_idx)
       .build();
 
-    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, &idx, dim, nnz] () {
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [&iter, &idx, dim, nnz, batch_count] () {
         const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
         const auto zero = index_t {0};
         KernelLauncher::launch(iter,
-            [zero, dim, nnz, ptr_idx] FUNCAPI (
+            [zero, dim, nnz, batch_count, ptr_idx] FUNCAPI (
               index_t cidx_first,
               index_t cidx_last,
               index_t cidx_curr,
@@ -276,7 +290,11 @@ void _validate_compressed_sparse_indices_kernel(
               // Invariant 5.1
               _check_first_cidx_is_zero<cdim_name, index_t>(cidx_first, zero);
               // Invariant 5.2
-              _check_last_cidx_is_nnz<cdim_name, index_t>(cidx_last, nnz);
+              if (batch_count>1) {
+                _check_last_cidx_is_nnz_or_less<cdim_name, index_t>(cidx_last, nnz);
+              } else {
+                _check_last_cidx_is_nnz<cdim_name, index_t>(cidx_last, nnz);
+              }
               // Invariant 5.3
               _check_cidx_nondecreasing_locally_bounded_sequence<cdim_name, index_t>(cidx_curr, cidx_next, zero, dim);
               // Invariant 5.6
