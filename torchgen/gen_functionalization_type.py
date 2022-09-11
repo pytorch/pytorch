@@ -84,7 +84,7 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     # clone() calls in their graph (which is normally needed by reshape).
     if str(g.view_copy.func.name) == "view_copy":
         return """\
-at::Tensor view_copy(const at::Tensor & self, at::SymIntArrayRef size) {
+at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
   if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
     return self.reshape_symint(size);

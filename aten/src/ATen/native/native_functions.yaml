@@ -12857,7 +12857,7 @@
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: view_copy
+    CompositeExplicitAutogradNonFunctional: view_copy_symint
   tags: view_copy
 
 - func: view_copy.dtype(Tensor self, ScalarType dtype) -> Tensor
