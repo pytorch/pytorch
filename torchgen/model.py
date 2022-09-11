@@ -1098,6 +1098,9 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    def supports_symint(self) -> bool:
+        return "_symint" in self.kernel
+
 
 @dataclass(frozen=True)
 class UfuncInnerLoop:
@@ -1141,8 +1144,6 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
-    # Whether or not this backend handles symbolic ints or not
-    symint: bool
 
     @staticmethod
     def grow_index(
