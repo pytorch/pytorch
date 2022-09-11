@@ -772,7 +772,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     // TODO: handle symbolic shapes correctly
-    // Hack to make debug builds work - should be removed by the next PR in the stack.
+    // Hack to make debug builds work - should be removed by the next PR in the
+    // stack.
     if (!has_symbolic_sizes_strides_)
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
 
