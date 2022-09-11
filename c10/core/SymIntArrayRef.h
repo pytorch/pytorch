@@ -18,8 +18,8 @@ TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
 TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar);
 
-  // Prefer using a more semantic constructor, like
-  // fromIntArrayRefKnownNonNegative
+// Prefer using a more semantic constructor, like
+// fromIntArrayRefKnownNonNegative
 inline SymIntArrayRef fromIntArrayRefUnchecked(IntArrayRef array_ref) {
   return SymIntArrayRef(
       reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());

@@ -308,7 +308,7 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t = empty_symint(
-      c10::SymIntArrayRef::fromIntArrayRef(size),
+      c10::fromIntArrayRef(size),
       dtype,
       layout,
       device,
