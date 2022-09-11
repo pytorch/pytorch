@@ -1425,7 +1425,7 @@ Tensor repeat_backward(
   // reduce the whole grad tensor into a scalar rather than keeping original
   // dimensions.
   if (!sum_dims.empty()) {
-    grad = grad.contiguous().view_symint(grad_size);  // TODO: reshape
+    grad = grad.reshape_symint(grad_size);
     grad = grad.sum(sum_dims);
   }
   return grad;

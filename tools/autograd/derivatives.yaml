@@ -1732,7 +1732,7 @@
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   dispatch:
     Default:
-      self: grad.contiguous().view_symint(self.sym_sizes())
+      self: grad.reshape_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       self: grad.reshape_as(self)

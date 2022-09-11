@@ -2170,16 +2170,13 @@ def matmul(tensor1, tensor2):
         if dim_tensor2 <= 1:
             tensor2 = tensor2.unsqueeze(-1)
 
-        # TODO: use reshape
         tensor1_expanded = (
             tensor1.expand(tensor1_expand_size)
-            .contiguous()
-            .view(expand_batch_product, n, m1)
+            .reshape(expand_batch_product, n, m1)
         )
         tensor2_expanded = (
             tensor2.expand(tensor2_expand_size)
-            .contiguous()
-            .view(expand_batch_product, m2, p)
+            .reshape(expand_batch_product, m2, p)
         )
 
         # todo: copy ?

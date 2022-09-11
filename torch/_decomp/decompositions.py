@@ -846,8 +846,7 @@ def embedding(
     for d in weight.shape[1:]:
         size.append(d)
 
-    # TODO: make reshape work
-    return weight.index_select(0, indices.view(-1)).view(size)
+    return weight.index_select(0, indices.reshape(-1)).view(size)
 
 
 # TODO: Correct the type promotion semantics
@@ -860,9 +859,9 @@ def embedding_dense_backward(
     scale_grad_by_freq: bool,
 ):
     numel = indices.numel()
-    grad = grad_output.contiguous().view(numel, grad_output.size(-1))
+    grad = grad_output.reshape(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.contiguous().view(numel)
+    indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
@@ -2016,3 +2015,11 @@ def binary_cross_entropy_with_logits(
         loss = loss * weight
 
     return apply_loss_reduction(loss, reduction)
+
+
+
+@register_decomposition(aten._unsafe_view)
+def _unsafe_view(
+    self, shape
+):
+    return self.view(shape)

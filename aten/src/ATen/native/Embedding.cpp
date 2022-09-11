@@ -29,21 +29,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     size.push_back(d);
   }
 
-  // note: it is not clear why the above code uses a loop and a slice(1),
-  // since the iteration domain is gauranteed to be 1 due to asserting 2-D weight
-  // but this should be safe
-  auto emb_dim = weight.sym_sizes()[1];
-
-  // if index's strides were
-  // [Sn, ..., S1, 1], we should expect index_select to return strides like
-  // [d*Sn, ..., d*S1, d, 1] because we added one new dim size d as most contiguous
-  auto new_strides = indices.sym_strides().vec();
-  for (auto& s : new_strides) {
-    s *= emb_dim;
-  }
-  new_strides.push_back(1);
-
-  return weight.index_select(0, indices.contiguous().view(-1)).as_strided_symint(size, new_strides);
+  return weight.index_select(0, indices.reshape(-1)).view_symint(size);
 }
 
 Tensor embedding_backward_symint(
