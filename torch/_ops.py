@@ -232,9 +232,10 @@ class OpOverload(PyOperatorABC):
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
-            assert (
-                curr_mode in self.python_key_mode_table
-            ), f"Current active mode {curr_mode} not registered"
+            if (
+                curr_mode not in self.python_key_mode_table
+            ):
+                return self._op_dk(dispatch_key, *args, **kwargs)
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
             return self.python_key_mode_table[curr_mode](*args, **kwargs)
 
