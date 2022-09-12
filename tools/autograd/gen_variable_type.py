@@ -160,7 +160,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # This function returns nested_tensor shape as a tensor that is non-differentiable
     "_nested_tensor_size",
     # This is essentially as factory function like the *_like ops
-    "_shape_as_tensor"
+    "_shape_as_tensor",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
