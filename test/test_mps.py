@@ -7197,8 +7197,7 @@ class TestConsistency(TestCase):
              'dot': ['torch.float32',
                      'torch.int16',
                      'torch.int32',
-                     'torch.int64',
-                     'torch.uint8'],
+                     'torch.int64',],
              'einsum': ['torch.float32'],
              'equal': ['torch.bool',
                        'torch.float16',
@@ -8087,6 +8086,11 @@ class TestConsistency(TestCase):
         'trapz': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         'nn.functional.local_response_norm': ['torch.int64'],
         'index_select': ['torch.bool'],
+        'repeat': ['torch.bool'],
+        'rot90': ['torch.bool'],
+        'tile': ['torch.bool'],
+        'split': ['torch.float32'],
+        'dot': ['torch.uint8']
     }
 
     # Used for accept mode only
