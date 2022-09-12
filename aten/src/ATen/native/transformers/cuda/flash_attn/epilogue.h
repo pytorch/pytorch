@@ -4,15 +4,15 @@
 
 #pragma once
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
-#include <third_party/cutlass/include/cutlass/epilogue/threadblock/default_epilogue_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/epilogue/threadblock/default_thread_map_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/epilogue/warp/fragment_iterator_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/gemm/warp/default_mma_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/layout/layout.h>
-#include <third_party/cutlass/include/cutlass/arch/mma.h>
-#include <third_party/cutlass/include/cutlass/array.h>
-#include <third_party/cutlass/include/cutlass/numeric_types.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/epilogue/threadblock/default_epilogue_tensor_op.h>
+#include <cutlass/epilogue/threadblock/default_thread_map_tensor_op.h>
+#include <cutlass/epilogue/warp/fragment_iterator_tensor_op.h>
+#include <cutlass/gemm/warp/default_mma_tensor_op.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/arch/mma.h>
+#include <cutlass/array.h>
+#include <cutlass/numeric_types.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/gemm.h>
 #include <ATen/native/transformers/cuda/flash_attn/epilogue_predicated_tile_iterator.h>
