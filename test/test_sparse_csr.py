@@ -554,6 +554,8 @@ class TestSparseCompressed(TestCase):
         # TODO: Normaly, we should use DecorateInfo instead of
         # skipTest but this requires implemening OpInfo support for
         # layout as a test parameter (similar to device and dtype).
+        if op.name == 'bmm':
+            self.skipTest(f"{op.name} expects > 2D tensor samples")
         if not (layout == torch.sparse_csr and op.supports_sparse_csr
                 or layout == torch.sparse_csc and op.supports_sparse_csc
                 or layout == torch.sparse_bsr and op.supports_sparse_bsr
