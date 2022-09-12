@@ -383,7 +383,7 @@ c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldstride,
     IntArrayRef newshape) {
   auto toResult = [](const IntArrayRef& a) { return a.vec(); };
-  return computeStride_impl<std::vector<int64_t>, IntArrayRef>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
 c10::optional<SymDimVector> computeStride(
@@ -399,7 +399,7 @@ c10::optional<DimVector> computeStride(
     IntArrayRef oldstride,
     const DimVector& newshape) {
   auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
-  return computeStride_impl<DimVector, DimVector>(oldshape, oldstride, newshape, toResult);
+  return computeStride_impl<DimVector, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail
