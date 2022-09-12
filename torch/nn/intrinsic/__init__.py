@@ -13,6 +13,8 @@ from torch.ao.nn.intrinsic import BNReLU2d
 from torch.ao.nn.intrinsic import BNReLU3d
 from torch.ao.nn.intrinsic import LinearBn1d
 
+# Include the `module` in case user imports from it directly
+from . import modules
 
 __all__ = [
     '_FusedModule',

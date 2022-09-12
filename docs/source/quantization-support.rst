@@ -268,15 +268,15 @@ to configure quantization settings for individual ops.
     default_activation_only_qconfig
     default_qat_qconfig_v2
 
-torch.nn.intrinsic
-~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic
-.. automodule:: torch.nn.intrinsic.modules
+torch.ao.nn.intrinsic
+~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic
+.. automodule:: torch.ao.nn.intrinsic.modules
 
 This module implements the combined (fused) modules conv + relu which can
 then be quantized.
 
-.. currentmodule:: torch.nn.intrinsic
+.. currentmodule:: torch.ao.nn.intrinsic
 
 .. autosummary::
     :toctree: generated
