@@ -395,6 +395,7 @@ set(GENERATED_CXX_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nested_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
@@ -1033,10 +1034,6 @@ if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
   )
   string(APPEND CMAKE_CXX_FLAGS " -DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
 endif()
-
-message(STATUS "Tracing Based Flag: ${TRACING_BASED}")
-message(STATUS "Build Lite Interpreter Flag: ${BUILD_LITE_INTERPRETER}")
-message(STATUS "Intern Build Mobile Flag: ${INTERN_BUILD_MOBILE}")
 
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)

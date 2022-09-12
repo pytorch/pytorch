@@ -4,7 +4,8 @@
 namespace at {
 namespace detail {
 
-inline void check_size_nonnegative(IntArrayRef size) {
+template <class ArrayRefType>
+inline void check_size_nonnegative(ArrayRefType size) {
   for (auto x : size) {
     TORCH_CHECK(
         x >= 0,
@@ -13,12 +14,6 @@ inline void check_size_nonnegative(IntArrayRef size) {
         ": ",
         size);
   }
-}
-
-inline void check_size_nonnegative(SymIntArrayRef size) {
-  // TODO: do this.  Note that naive implementation will choke on truly
-  // unknown sizes without on the fly reasoning
-  return;
 }
 
 TORCH_API size_t computeStorageNbytesContiguous(
