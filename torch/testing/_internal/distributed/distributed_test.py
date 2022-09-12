@@ -5093,6 +5093,7 @@ class DistributedTest:
 
             self.assertEqual(averager2.step, 0)
 
+            dist.barrier()
             if self.rank == 0:
                 os.remove(chkpt_file)
 
@@ -9011,6 +9012,7 @@ class DistributedTest:
             for orig_param, dummy_param in zip(ddp_model.parameters(), dummy_ddp_model.parameters()):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
+            dist.barrier()
             if rank == 0:
                 os.remove(chkpt_file)
 
