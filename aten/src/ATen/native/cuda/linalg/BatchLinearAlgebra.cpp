@@ -32,7 +32,6 @@
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
 #include <ATen/ops/linalg_solve_triangular.h>
-#include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #endif
