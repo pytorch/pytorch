@@ -885,6 +885,7 @@ class ReductionScheduler : public SchedulerEntry {
         !scheduler_utils::allMatchingViews(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Reduction, "Unsupported view fusion.");
+      return false;
     }
 
     // Make sure reduction axes are consistent through the fusion
