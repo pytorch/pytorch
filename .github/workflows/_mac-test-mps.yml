@@ -6,7 +6,7 @@ on:
       build-environment:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
+        description: Top-level label for whats being built/tested.
       sync-tag:
         required: false
         type: string
@@ -32,17 +32,21 @@ jobs:
           git clean -fxd
 
       - name: Download build artifacts
+        id: download-build-artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
           use-gha: true
+        continue-on-error: true
 
       - name: Setup miniconda
+        if: steps.download-build-artifacts.outcome == 'success'
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
 
       - name: Install PyTorch
+        if: steps.download-build-artifacts.outcome == 'success'
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.9
@@ -56,6 +60,7 @@ jobs:
           ${CONDA_RUN} python3 -mpip install dist/*.whl
 
       - name: Run MPS tests
+        if: steps.download-build-artifacts.outcome == 'success'
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
         shell: arch -arch arm64 bash {0}
