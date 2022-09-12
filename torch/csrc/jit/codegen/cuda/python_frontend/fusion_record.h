@@ -307,7 +307,6 @@ struct OutputRecord : RecordFunctor {
 
 //! Specialized Record Functor for recording removing of outputs.
 
-template <class OutputType>
 struct RemoveOutputRecord : RecordFunctor {
   RemoveOutputRecord(std::vector<size_t> _args)
       : RecordFunctor(std::move(_args), {}) {}
@@ -320,12 +319,7 @@ struct RemoveOutputRecord : RecordFunctor {
         input->isFusionOutput(),
         "This tensor was not marked as output before.");
 
-    // With C++17, this statement should be "if constexpr"
-    if (std::is_same<OutputType, NvfTensorView>::value) {
-      fd.removeOutput(input->template as<NvfTensorView>());
-    } else {
-      fd.removeOutput(input);
-    }
+    fd.removeOutput(input->template as<NvfTensorView>());
   }
 };
 

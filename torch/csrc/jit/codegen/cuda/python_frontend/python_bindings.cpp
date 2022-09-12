@@ -94,7 +94,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "remove_output",
           [](nvfuser::FusionDefinition& self, nvfuser::Tensor* output) {
-            self.defineRecord(new nvfuser::RemoveOutputRecord<NvfTensorView>(
+            self.defineRecord(new nvfuser::RemoveOutputRecord(
                 {output->index}));
           })
       .def(
