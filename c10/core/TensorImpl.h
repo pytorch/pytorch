@@ -631,14 +631,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
-<<<<<<< HEAD
-    return sym_strides_default();
-  }
-  inline c10::SymIntArrayRef sym_strides_default() const {
-    return c10::SymIntArrayRef(
-        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.strides_data()),
-        sizes_and_strides_.size());
-=======
     return c10::fromIntArrayRefKnownNonNegative(strides_default());
   }
 
@@ -655,10 +647,34 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       return c10::fromIntArrayRefKnownNonNegative(strides_default());
     }
->>>>>>> 9e5563dbb1c (Delete SymIntArrayRef wrapper struct (#84837))
   }
 
-  virtual c10::SymIntArrayRef sym_strides_custom() const;
+  /**
+   * Whether or not a tensor is laid out in contiguous memory.
+   *
+   * Tensors with non-trivial strides are not contiguous.  See
+   * compute_contiguous() for the exact definition of whether or not
+   * a tensor is contiguous or not.
+   */
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+      return is_contiguous_custom(memory_format);
+    }
+    return is_contiguous_default(memory_format);
+  }
+
+  // These are factored into separate functions in case subclasses
+  // want to use them
+  bool is_contiguous_default(at::MemoryFormat memory_format) const {
+    // TODO: handle symbolic shapes correctly
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      return is_channels_last_contiguous_;
+    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
+    }
+    return is_contiguous_;
+  }
 
   /**
    * Return the size of a tensor at some dimension, wrapping the dimension if
