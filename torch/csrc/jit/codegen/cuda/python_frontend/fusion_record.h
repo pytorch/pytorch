@@ -305,24 +305,6 @@ struct OutputRecord : RecordFunctor {
   }
 };
 
-//! Specialized Record Functor for recording removing of outputs.
-
-struct RemoveOutputRecord : RecordFunctor {
-  RemoveOutputRecord(std::vector<size_t> _args)
-      : RecordFunctor(std::move(_args), {}) {}
-  virtual ~RemoveOutputRecord() = default;
-
-  void operator()(FusionDefinition& fd) final {
-    auto input = fd.getFusionState(args.at(0));
-
-    TORCH_CHECK(
-        input->isFusionOutput(),
-        "This tensor was not marked as output before.");
-
-    fd.removeOutput(input->template as<NvfTensorView>());
-  }
-};
-
 //! Specialized Record Functor for the FusionDefinition's sum/min/max ops.
 
 struct ReductionOpRecord : RecordFunctor {

@@ -48,9 +48,6 @@ void FusionDefinition::addInput(NvfVal* input) {
 void FusionDefinition::addOutput(NvfVal* output) {
   fusionPtr()->addOutput(output);
 }
-void FusionDefinition::removeOutput(NvfVal* output) {
-  fusionPtr()->removeOutput(output);
-}
 
 NvfVal* FusionDefinition::getFusionState(size_t index) const {
   return fusion_state_.at(index);

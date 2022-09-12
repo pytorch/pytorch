@@ -99,8 +99,6 @@ class FusionDefinition {
   void addInput(NvfVal* input);
   //! Adds a Tensor/Scalar output to the Fusion object
   void addOutput(NvfVal* output);
-  //! Removes a Tensor/Scalar output from the Fusion object
-  void removeOutput(NvfVal* output);
   //! Gets a Fusion IR Tensor/Scalar object
   NvfVal* getFusionState(size_t index) const;
   //! Sets a Fusion IR Tensor/Scalar object
