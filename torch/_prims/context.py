@@ -200,7 +200,7 @@ def _is_node_supported_nvfuser(node):
 
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch.no_grad(), torch.overrides.enable_torch_function_mode(
+    with torch.overrides.enable_torch_function_mode(
         torch_function_mode, replace=torch_function_mode.inner
     ):
         gm = get_isolated_graphmodule(func, args, kwargs)
