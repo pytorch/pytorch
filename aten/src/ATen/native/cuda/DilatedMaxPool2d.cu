@@ -44,8 +44,8 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const uint64_t channels, const uint64_t height,
+    const uint64_t width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w, scalar_t* top_data,
@@ -65,7 +65,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
-    const scalar_t* btm_data = bottom_data + ((uint64_t) n * channels + c) * ((uint64_t) height * width);
+    const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
@@ -83,8 +83,8 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
-                                   const int channels, const int height,
-                                   const int width, const int pooled_height, const int pooled_width,
+                                   const uint64_t channels, const uint64_t height,
+                                   const uint64_t width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
@@ -140,7 +140,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
       for (int ih = hstart; ih < hend; ih += dilation_h) {
         for (int iw = wstart; iw < wend; iw += dilation_w) {
           int cached_index = threadIdx.x;
-          const scalar_t *ptr_input = bottom_data + ((uint64_t) ih * in_stride_h) + ((uint64_t) iw * in_stride_w);
+          const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
             if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || at::_isnan(val)) {
@@ -176,8 +176,8 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
 __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
-    const int64_t* top_mask, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+    const int64_t* top_mask, const int num, const uint64_t channels,
+    const uint64_t height, const uint64_t width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
@@ -192,7 +192,7 @@ __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
     for (int n = blockIdx.y; n < num; n += gridDim.y) {
       for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
         accscalar_t gradient = accscalar_t(0);
-        uint64_t offset = ((uint64_t) (n * channels + c)) * ((uint64_t) pooled_height * pooled_width);
+        int offset = (n * channels + c) * pooled_height * pooled_width;
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
             if (top_mask[ph * pooled_width + pw + offset] == h * width + w) {
@@ -209,8 +209,8 @@ __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int channels,
-                                    const int height, const int width, const int pooled_height,
+                                    const int64_t* top_mask, const int nbatch, const uint64_t channels,
+                                    const uint64_t height, const uint64_t width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
@@ -242,9 +242,9 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
   int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
+  int iendH = ::min((uint64_t) istartH+iH, height);
   int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
+  int iendW = ::min((uint64_t) istartW+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
@@ -261,7 +261,7 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
             for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
               if (ptr_top_mask[c*out_stride_c] == index_shift) {
                 out_cached[cached_index] +=
-                  static_cast<accscalar_t>(top_diff[((uint64_t) oh * out_stride_h) + ((uint64_t) ow * out_stride_w) + ((uint64_t) c*out_stride_c)]);
+                  static_cast<accscalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c*out_stride_c]);
               }
               cached_index += blockDim.x;
             }
@@ -281,7 +281,7 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
           if (ptr_top_mask[c*out_stride_c] == index_shift) {
             ptr_bottom_diff[c] =
-              static_cast<scalar_t>(top_diff[((uint64_t) phstart * out_stride_h) + ((uint64_t) pwstart * out_stride_w) + ((uint64_t) c*out_stride_c)]);
+              static_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
           }
           cached_index += blockDim.x;
         }
