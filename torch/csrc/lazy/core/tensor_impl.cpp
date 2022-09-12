@@ -157,7 +157,7 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
     return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());
   }
 
-  return c10::SymIntArrayRef::fromIntArrayRef(sizes_custom());
+  return c10::fromIntArrayRef(sizes_custom());
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {

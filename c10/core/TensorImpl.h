@@ -559,10 +559,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
       return sym_sizes_custom();
     }
-    return sym_sizes_default();
+    // Sizes guaranteed to be non-negative, so unchecked cast is OK
+    return c10::fromIntArrayRefKnownNonNegative(
+        sizes_and_strides_.sizes_arrayref());
   }
 
-  virtual c10::SymIntArrayRef sym_sizes_custom() const;
+  IntArrayRef sizes_default() const {
+    // TODO: force backtrace to be printed on this error
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "Cannot call sizes() on tensor with symbolic sizes/strides");
+    return sizes_and_strides_.sizes_arrayref();
+  }
+
+  SymIntArrayRef sym_sizes_default() const {
+    if (has_symbolic_sizes_strides_) {
+      return extra_meta_->sizes_;
+    } else {
+      // Sizes guaranteed to be non-negative, so unchecked cast is OK
+      return c10::fromIntArrayRefKnownNonNegative(sizes_default());
+    }
+  }
+
+  /**
+   * The number of elements in a tensor.
+   *
+   * WARNING: Previously, if you were using the Caffe2 API, you could
+   * test numel() == -1 to see if a tensor was uninitialized.  This
+   * is no longer true; numel always accurately reports the product
+   * of sizes of a tensor.
+   */
+  int64_t numel() const {
+    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+      return numel_custom();
+    }
+    return numel_;
+  }
 
   c10::SymInt sym_numel() const {
     if (C10_UNLIKELY(
@@ -599,12 +631,31 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
+<<<<<<< HEAD
     return sym_strides_default();
   }
   inline c10::SymIntArrayRef sym_strides_default() const {
     return c10::SymIntArrayRef(
         reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.strides_data()),
         sizes_and_strides_.size());
+=======
+    return c10::fromIntArrayRefKnownNonNegative(strides_default());
+  }
+
+  IntArrayRef strides_default() const {
+    TORCH_CHECK(
+        !has_symbolic_sizes_strides_,
+        "Cannot call strides() on tensor with symbolic sizes/strides");
+    return sizes_and_strides_.strides_arrayref();
+  }
+
+  c10::SymIntArrayRef sym_strides_default() const {
+    if (has_symbolic_sizes_strides_) {
+      return extra_meta_->strides_;
+    } else {
+      return c10::fromIntArrayRefKnownNonNegative(strides_default());
+    }
+>>>>>>> 9e5563dbb1c (Delete SymIntArrayRef wrapper struct (#84837))
   }
 
   virtual c10::SymIntArrayRef sym_strides_custom() const;
