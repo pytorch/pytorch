@@ -16,7 +16,6 @@
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <functorch/csrc/Constants.h>
 #include <ATen/VmapGeneratedPlumbing.h>
 
 // This file contains helper functions for batching rules.
@@ -122,7 +121,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -246,7 +245,7 @@ inline void boxed_existing_bdim_all_batch_rule(
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
@@ -302,7 +301,7 @@ inline void boxed_all_tensors_have_optional_bdim(
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
