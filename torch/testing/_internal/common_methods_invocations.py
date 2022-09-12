@@ -3898,32 +3898,16 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
 
     # to.device overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
-        kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
-            "memory_format": mem_f,
-        }
-        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64, nb, cp, mem_f))
 
     # to.dtype overload
     for nb, cp, mem_f in product([True, False], [True, False], memory_formats):
-        kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
-            "memory_format": mem_f,
-        }
-        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64, nb, cp, mem_f))
 
     # to.other overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
-        kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
-            "memory_format": mem_f,
-        }
         other = make_arg((S, S, S, S), dtype=torch.float64, device=device)
-        yield SampleInput(make_arg((S, S, S, S)), args=(other,), kwargs=kwargs)
-
+        yield SampleInput(make_arg((S, S, S, S)), args=(other, nb, cp, mem_f))
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):

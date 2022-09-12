@@ -1677,73 +1677,88 @@ def _to_will_alias(
 
 
 def _to_dispatch(
-    device=None,
-    dtype=None,
-    non_blocking=None,
-    copy=None,
-    memory_format=None,
-    layout=None,
-    pin_memory=None,
-):
-    if isinstance(device, TensorLike):
-        # overload to `to.other`
-        if isinstance(copy, torch.memory_format):
-            memory_format = copy
-        # we need to make sure that dtype is bool, otherwise, non_blocking could be passed as kwarg
-        if isinstance(non_blocking, bool) and isinstance(dtype, bool):
-            copy = non_blocking
-        if isinstance(dtype, bool):
-            non_blocking = dtype
-        # extract tensor options
-        other = device
-        device = other.device
-        dtype = other.dtype
-        layout = other.layout
-        pin_memory = other.pin_memory
-    elif isinstance(device, torch.dtype):
-        # overload to `to.dtype`
-        if isinstance(copy, torch.memory_format):
-            memory_format = copy
-        # we need to make sure that dtype is bool, otherwise, non_blocking could be passed as kwarg
-        if isinstance(non_blocking, bool) and isinstance(dtype, bool):
-            copy = non_blocking
-        if isinstance(dtype, bool):
-            non_blocking = dtype
-        dtype = device
-        layout = None
-        pin_memory = None
-        device = None
-    # overload to `to.device`
-    # do nothing because signature of 'to' matches
-    # overload to `to.dtype_layout`
-    # do nothing because the `to.dtype_layout` takes all kwargs.
-    return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
-
-
-def to(
     a: TensorLikeType,
+    *args,
+    *,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
     non_blocking: Optional[bool] = None,
     copy: Optional[bool] = None,
     memory_format: Optional[torch.memory_format] = None,
-    *,
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
+):
+    arg0, *arg = arg if arg else [None, ]
+    if isinstance(arg0, TensorLike):
+        # overload to `to.other`
+        device = arg0.device
+        dtype = arg0.dtype
+        layout = arg0.layout
+        pin_memory = arg0.pin_memory
+        # load positional arguments:
+        if arg:
+            assert non_blocking is None
+            non_blocking, *arg = arg
+        if arg:
+            assert copy is None
+            copy, *arg = arg
+        if arg:
+            assert memory_format is None
+            memory_format, *arg = arg
+    elif isinstance(arg0, torch.dtype):
+        # overload to `to.dtype`
+        dtype = arg0
+        if arg:
+            assert non_blocking is None
+            non_blocking, *arg = arg
+        if arg:
+            assert copy is None
+            copy, *arg = arg
+        if arg:
+            assert memory_format is None
+            memory_format, *arg = arg
+    elif isinstance(arg0, torch.device):
+        # overload to `to.device`
+        device = arg0
+        if arg:
+            assert dtype is None
+            dtype, *arg = arg
+        if arg:
+            assert non_blocking is None
+            non_blocking, *arg = arg
+        if arg:
+            assert copy is None
+            copy, *arg = arg
+        if arg:
+            assert memory_format is None
+            memory_format, *arg = arg
+    else:
+        # overload to `to.dtype_layout` takes no positional args
+        assert arg0 is None
+    # assert that we have processed all positional argument
+    assert not arg
+    return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
+
+
+def to(
+    a: TensorLikeType,
+    *args,
+    **kwargs
 ) -> TensorLikeType:
     device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(
-        device, dtype, non_blocking, copy, memory_format, layout, pin_memory
+        a, *args, **kwargs
     )
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
+    # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
         (copy or dtype != a.dtype)
         and (memory_format is None or memory_format == torch.preserve_format)
         and (not non_blocking)
-        and device is None
-        and layout is None
-        and pin_memory is None
+        and (device is None or device == a.device)
+        and (layout is None or layout == a.layout)
+        and (pin_memory is None or pin_memory == a.pin_memory)
     ):
         return prims.convert_element_type(a, dtype)
     memory_format = (
@@ -1756,8 +1771,10 @@ def to(
         layout=layout,
         device=device,
         requires_grad=a.requires_grad,
+        pin_memory=pin_memory
         memory_format=memory_format,
     )
+    # TODO: copy_to should support non_blocking
     copy_to(result, a)
     return result
 
