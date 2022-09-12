@@ -227,7 +227,7 @@ for method, _func in magic_methods.items():
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
-    # this should be wrapped transparently into torch._C.SymIntNode
+    # this should be wrapped transparently into torch.SymIntNode
     setattr(PySymInt, method, _create_magic_impl(_func))
     setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
     if method in reflectable_magic_methods:
@@ -268,7 +268,7 @@ class ShapeEnv(object):
             return val
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         self.var_to_val[sympy_expr] = val
         return cpp_sym_int
 
