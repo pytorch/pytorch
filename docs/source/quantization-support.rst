@@ -296,16 +296,16 @@ then be quantized.
     BNReLU2d
     BNReLU3d
 
-torch.nn.intrinsic.qat
-~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic.qat
-.. automodule:: torch.nn.intrinsic.qat.modules
+torch.ao.nn.intrinsic.qat
+~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic.qat
+.. automodule:: torch.ao.nn.intrinsic.qat.modules
 
 
 This module implements the versions of those fused operations needed for
 quantization aware training.
 
-.. currentmodule:: torch.nn.intrinsic.qat
+.. currentmodule:: torch.ao.nn.intrinsic.qat
 
 .. autosummary::
     :toctree: generated
