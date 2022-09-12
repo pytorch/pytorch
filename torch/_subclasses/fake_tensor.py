@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -660,7 +661,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
@@ -730,10 +731,12 @@ class FakeTensorMode(TorchDispatchMode):
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
-                    raise RuntimeError(
+                    sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
 
             with self.restore():
                 if func in meta_table:
