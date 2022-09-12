@@ -337,7 +337,7 @@ class MaskedTensor(torch.Tensor):
         self._validate_members()
 
     @staticmethod
-    def from_values(data, mask):
+    def _from_values(data, mask):
         """ Differentiable constructor for MaskedTensor """
         class Constructor(torch.autograd.Function):
             @staticmethod
