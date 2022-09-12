@@ -24,7 +24,22 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-#define BINARY_OP_API static constexpr FUNCAPI INLINE
+#define CALL(...) __VA_ARGS__();
+#define EXPAND(b, n, ...)         \
+  if (b) {                        \
+    using index_t ## n = int32_t; \
+    __VA_ARGS__                   \
+  }                               \
+  else {                          \
+    using index_t ## n = int64_t; \
+    __VA_ARGS__                   \
+  }
+#define BOOL_TO_INDEX_TYPE1(b1, ...) \
+  EXPAND(b1, 1, CALL(__VA_ARGS__))
+#define BOOL_TO_INDEX_TYPE2(b2, b1, ...) \
+  EXPAND(b2, 2, BOOL_TO_INDEX_TYPE1(b1, __VA_ARGS__))
+#define BOOL_TO_INDEX_TYPE3(b3, b2, b1, ...) \
+  EXPAND(b3, 3, BOOL_TO_INDEX_TYPE2(b2, b1, __VA_ARGS__))
 
 namespace at {
 namespace native {
@@ -510,6 +525,7 @@ void _sparse_binary_op_intersection_kernel_out(
     max_hash_val *= broadcasted_shape[d];
   }
 
+  const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
   // Optimization: use 32-bit hash values when possible.
   const auto is_max_hash_32bits = max_hash_val <= std::numeric_limits<int>::max();
   // Intersection nnz could get larger than nnz of either arguments.
@@ -517,33 +533,20 @@ void _sparse_binary_op_intersection_kernel_out(
   // then the size of intersection is exactly the product of their nnzs.
   // This nnz defines offsets per thread which are computed using cumsum on values
   // of hash dtype. This becomes a problem when hash_t=int32_t and res_nnz > max(int32_t).
-  // const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
-  const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
+  const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
 
-  if (is_max_hash_32bits && is_32bit_indexing) {
-    using index_t = int32_t;
-    using hash_t = int32_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
-        res, x, y, broadcasted_shape, is_commutative);
-  }
-  else if (is_max_hash_32bits && !is_32bit_indexing) {
-    using index_t = int64_t;
-    using hash_t = int32_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
-        res, x, y, broadcasted_shape, is_commutative);
-  }
-  else if (!is_max_hash_32bits && is_32bit_indexing) {
-    using index_t = int32_t;
-    using hash_t = int64_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
-        res, x, y, broadcasted_shape, is_commutative);
-  }
-  else {
-    using index_t = int64_t;
-    using hash_t = int64_t;
-    _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t>(
-        res, x, y, broadcasted_shape, is_commutative);
-  }
+  BOOL_TO_INDEX_TYPE3(is_32bit_indexing, is_max_hash_32bits, is_max_offset_32bits, [&]() {
+      // Given 3 booleans b1, b2, b3, index_t<i> is defined as
+      // index_t<i> = int32_t if b<2 - i> is true else int64_t.
+      // The goal is to use int32_t whenever possible for better
+      // performance.
+      // NOTE: order of types given booleans is reversed.
+      using index_t = index_t3;
+      using hash_t = index_t2;
+      using offset_t = index_t1;
+      _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t, offset_t>(
+          res, x, y, broadcasted_shape, is_commutative);
+  });
 }
 
 } // anonymous namespace
