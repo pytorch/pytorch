@@ -251,6 +251,10 @@
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
+  dispatch:
+    # _shape_as_tensor doesn't decompose into a valid trace
+    # (it just decomposes into empty()), so we make it a primitive
+    CompositeExplicitAutograd: _shape_as_tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
   tags: nondeterministic_seeded
