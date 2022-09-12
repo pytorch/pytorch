@@ -411,8 +411,9 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def(
-      "_dispatch_get_backend_keyset_from_autograd",
-      c10::getBackendKeySetFromAutograd);
+      "_dispatch_get_backend_keyset_from_autograd", [](c10::DispatchKey k) {
+        return c10::getBackendKeySetFromAutograd(k);
+    });
 
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
