@@ -115,22 +115,6 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 
-def _default_meta_device_init_fn(module):
-    """
-    Default initializer for modules initialized on the meta device.
-    """
-    # TODO: move module to device_id here once device_id is available.
-    module.to_empty(device=torch.cuda.current_device())
-    try:
-        with torch.no_grad():
-            module.reset_parameters()
-    except BaseException as e:
-        warnings.warn(
-            f"Unable to call reset_parameters() for module on meta device with error {str(e)}. "
-            "Please ensure your module implements a ``reset_parameters`` function."
-        )
-        raise e
-
 
 class ShardingStrategy(Enum):
     """
@@ -4201,19 +4185,6 @@ class FullyShardedDataParallel(nn.Module):
                     not hasattr(p, "_params_exec_order_hook_handle")
                 ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
         return is_prep_stage
-
-def _get_default_cuda_device(module: nn.Module) -> torch.device:
-    """Try to infer CUDA device from module parameters."""
-    try:
-        compute_device = next(module.parameters()).device
-        if compute_device.type == "cuda":
-            return compute_device
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return cuda device.
-    except StopIteration:
-        pass
-    # Fall back to current CUDA device
-    return torch.device("cuda", torch.cuda.current_device())
 
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
