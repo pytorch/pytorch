@@ -4,7 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mma_type.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 //! Nodes in here should generally not be used by users. They should be behind
@@ -23,6 +23,7 @@ namespace cuda {
 class ViewTransform;
 class Scope;
 class IrCloner;
+struct AnalyzeViewResult;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
@@ -37,7 +38,12 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
+  UnaryOp(
+      IrBuilderPasskey,
+      UnaryOpType type,
+      Val* out,
+      Val* in,
+      int rng_offset = -1);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -52,12 +58,23 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  // TODO: pull RNG op out of Unary ops
+  // https://github.com/csarofeen/pytorch/pull/1892
+  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -150,7 +167,9 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       BinaryOpType reduction_op_type,
       Val* init,
       Val* out,
-      Val* in);
+      Val* in,
+      bool is_allreduce = false,
+      ExprType expr_type = ExprType::ReductionOp);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
@@ -168,6 +187,10 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
+  bool isAllreduce() const {
+    return is_allreduce_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -175,6 +198,64 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  //! True if broadcast is fused
+  bool is_allreduce_ = false;
+};
+
+//! Grouped reduction operation for horizontal fusions. It works like
+//! batched GEMMs in the sense that multiple independent reductions are
+//! performed together. The main benefit is when reducing tensors across thread
+//! blocks, a single grid sync can be done for all individual
+//! reductions. As grid sync is very expensive, this can be a
+//! significant performance impact.
+class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
+ public:
+  GroupedReductionOp(
+      IrBuilderPasskey,
+      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<Val*> init,
+      std::vector<Val*> out,
+      std::vector<Val*> in,
+      bool is_allreduce = false,
+      ExprType expr_type = ExprType::GroupedReductionOp);
+
+  GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
+
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping.
+  size_t numExprs() const {
+    return reduction_op_types_.size();
+  }
+
+  const std::vector<Val*>& initVals() const {
+    return init_vals_;
+  }
+
+  Val* initVal(size_t index) const {
+    return init_vals_.at(index);
+  }
+
+  const std::vector<BinaryOpType>& getReductionOpTypes() const {
+    return reduction_op_types_;
+  }
+
+  BinaryOpType getReductionOpType(size_t index) const {
+    return reduction_op_types_.at(index);
+  }
+
+  bool isAllreduce() const {
+    return is_allreduce_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  //! Reduction ops of grouped reductions
+  const std::vector<BinaryOpType> reduction_op_types_;
+  //! Initial values of grouped reductions
+  const std::vector<Val*> init_vals_;
+  //! True if using the fused reduction kernel
+  bool is_allreduce_ = false;
 };
 
 //! Welford Scan operation.
@@ -190,7 +271,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
       Val* init_N,
       Val* in_avg,
       Val* in_var,
-      Val* in_N);
+      Val* in_N,
+      bool is_fused = false);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
@@ -250,6 +332,12 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !init_N_->isZeroInt();
   }
 
+  bool isAllreduce() const {
+    return is_allreduce_;
+  }
+
+  std::vector<Val*> getInitVals() const;
+
  private:
   Val* const out_avg_;
   Val* const out_var_;
@@ -260,6 +348,87 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   Val* const in_avg_;
   Val* const in_var_;
   Val* const in_N_;
+  //! True if using the fused reduction kernel (not implemented yet)
+  bool is_allreduce_ = false;
+};
+
+//! Fused Matmul operation
+class TORCH_CUDA_CU_API MmaOp : public Expr {
+ public:
+  // This is a temporary data structure to for the
+  //  scheduling specific parameters that we still need
+  //  to store on an mma node. Eventually will only be
+  //  the mma macro type that will stay on the IR node
+  //  after additional cleaning ups.
+  struct OptionsInMma {
+    MmaOptions::MacroType macro = MmaOptions::MacroType::NoMMA;
+    MmaOptions::MmaInputLayout operand_layout = MmaOptions::MmaInputLayout::TT;
+    int accumulator_stride = 0;
+
+    bool operator==(const OptionsInMma& other) const {
+      return macro == other.macro && operand_layout == other.operand_layout &&
+          accumulator_stride == other.accumulator_stride;
+    }
+  };
+
+  MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
+
+  MmaOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in_a,
+      Val* in_b,
+      Val* init,
+      OptionsInMma options);
+
+  MmaOp(const MmaOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+
+  Val* inA() const {
+    return in_a_;
+  }
+
+  Val* inB() const {
+    return in_b_;
+  }
+
+  Val* init() const {
+    return init_;
+  }
+
+  const auto& options() const {
+    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
+    return options_.value();
+  }
+
+  bool sameAs(const Statement* const other) const override;
+
+  auto accStride() const {
+    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
+    return options_->accumulator_stride;
+  }
+
+  void configureOptions(MmaOptions options) {
+    options_ = OptionsInMma();
+    TORCH_INTERNAL_ASSERT(
+        options.macro != MmaOptions::MacroType::NoMMA,
+        "Un-configured mma type from options.");
+    TORCH_INTERNAL_ASSERT(
+        options.accumulator_stride > 0, "Un-configured accumulator stride.");
+    options_->accumulator_stride = options.accumulator_stride;
+    options_->macro = options.macro;
+    options_->operand_layout = options.operand_layout;
+  }
+
+ private:
+  Val* const out_ = nullptr;
+  Val* const in_a_ = nullptr;
+  Val* const in_b_ = nullptr;
+  Val* const init_ = nullptr;
+  c10::optional<OptionsInMma> options_ = c10::nullopt;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
@@ -268,7 +437,7 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
       IrBuilderPasskey,
       TensorView* out,
       TensorView* in,
-      std::vector<int> new2old);
+      std::vector<int64_t> new2old);
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
@@ -280,14 +449,44 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
     return in_;
   }
 
-  const std::vector<int>& new2old() const {
+  const std::vector<int64_t>& new2old() const {
     return new2old_;
+  }
+
+  std::vector<int64_t> old2new() const;
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  const std::vector<int64_t> new2old_;
+};
+
+class TORCH_CUDA_CU_API ExpandOp : public Expr {
+ public:
+  ExpandOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      std::vector<Val*> _expanded_extents);
+
+  ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+  const std::vector<Val*>& expanded_extents() const {
+    return expanded_extents_;
   }
 
  private:
   TensorView* const out_ = nullptr;
   TensorView* const in_ = nullptr;
-  const std::vector<int> new2old_;
+  std::vector<Val*> expanded_extents_;
 };
 
 class TORCH_CUDA_CU_API TernaryOp : public Expr {
@@ -429,6 +628,44 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   std::vector<std::vector<int>> pad_width_;
 };
 
+class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
+ public:
+  ViewAsScalar(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      IterDomain* vector_id,
+      Val* index = nullptr);
+
+  ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+
+  Val* in() const {
+    return in_;
+  }
+
+  IterDomain* vector_id() const {
+    return vector_id_;
+  }
+
+  Val* index() const {
+    return index_;
+  }
+
+ private:
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+
+  // The IterDomain of type VectorComponent newly appended to the output
+  IterDomain* vector_id_ = nullptr;
+
+  // The index that vector_id_ is lowered into
+  Val* index_ = nullptr;
+};
+
 class TORCH_CUDA_CU_API ViewOp : public Expr {
  public:
   ViewOp(IrBuilderPasskey, TensorView* out, TensorView* in);
@@ -448,6 +685,84 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
   TensorView* const in_ = nullptr;
 };
 
+//! This operator explicitly models data movement between
+//!   state spaces on GPU. Currently the modeled state spaces include
+//!   global memory, shared memory and register.
+//!
+//! The main usage of this op is to facilitate generation of hardware
+//!   accelerated memory ops, i.e. ldmatrix, cp.async and more to come.
+class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
+ public:
+  LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
+
+  LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+
+  Val* in() const {
+    return in_;
+  }
+
+  LoadStoreOpType opType() const {
+    return load_store_type_;
+  }
+
+ private:
+  LoadStoreOpType load_store_type_ = LoadStoreOpType::LdMatrix;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+};
+
+// Convenience utility to initialize IterDomain's without having to sort through
+// all the default values. Intended to be used with
+// IterDomain::IterDomain(IrBuilderPasskey IterDomainBuildArgs)
+class TORCH_CUDA_CU_API IterDomainBuilder {
+ public:
+  // Match legacy constructor
+  IterDomainBuilder(Val* _start, Val* _extent);
+
+  // Grab all the parameters from id to set the IterDomainBuilder
+  IterDomainBuilder(const IterDomain* id);
+
+  // Resets defaults for rfactor, is padded dim, padded to size, and is mma
+  // swizzle which should only be set during scheduling.
+  IterDomainBuilder& resetSchedulingParams();
+
+  // Resets is_rfactor_domain
+  IterDomainBuilder& resetRfactor();
+
+  IterDomainBuilder& start(Val* _start);
+  IterDomainBuilder& extent(Val* _extent);
+  IterDomainBuilder& expanded_extent(Val* _expanded_extent);
+  IterDomainBuilder& stop_offset(Val* _stop_offset);
+  IterDomainBuilder& parallel_type(ParallelType _parallel_type);
+  IterDomainBuilder& iter_type(IterType _iter_type);
+  IterDomainBuilder& is_rfactor_domain(bool _is_rfactor_domain);
+  IterDomainBuilder& is_padded_dimension(bool _is_padded_dimension);
+  IterDomainBuilder& padded_to_size(c10::optional<int64_t> _padded_to_size);
+  IterDomainBuilder& is_mma_swizzled(bool _is_mma_swizzled);
+
+  IterDomain* build() const;
+
+  // Must have start and extent at least
+  IterDomainBuilder() = delete;
+
+  Val* start_ = nullptr;
+  Val* extent_ = nullptr;
+  Val* expanded_extent_ = nullptr;
+  Val* stop_offset_ = nullptr;
+  ParallelType parallel_type_ = ParallelType::Serial;
+  IterType iter_type_ = IterType::Iteration;
+
+  // Only relevant at scheduling time or compile time.
+  bool is_rfactor_domain_ = false;
+  bool is_padded_dimension_ = false;
+  c10::optional<int64_t> padded_to_size_ = c10::nullopt;
+  bool is_mma_swizzled_ = false;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;
@@ -458,29 +773,31 @@ class IndexReferenceReplay;
 //! on IterDomains.
 class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
-  IterDomain(
-      IrBuilderPasskey,
-      Val* start,
-      Val* extent,
-      ParallelType parallel_type = ParallelType::Serial,
-      IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false);
+  IterDomain(IrBuilderPasskey, const IterDomainBuilder& args);
 
+  // Legacy constructor, TODO: should start moving to use IterDomainBuildArgs
+  // constructor Same as the above but can set the offset of the stop point
   IterDomain(
       IrBuilderPasskey,
       Val* start,
       Val* extent,
+      Val* expanded_extent,
       Val* stop_offset,
-      ParallelType parallel_type = ParallelType::Serial,
-      IterType iter_type = IterType::Iteration,
-      bool is_rfactor_domain = false);
+      ParallelType parallel_type,
+      IterType iter_type,
+      bool is_rfactor_domain,
+      bool is_padded_dimension,
+      c10::optional<int64_t> padded_to_size_,
+      bool is_mma_swizzled);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
 
-  // Returns a new IterDomain matching properties of this
-  IterDomain* clone() const;
+  //! Returns a new IterDomain matching properties of this
+  //!
+  //! This does NOT copy the is_rfactor_domain flag.
+  IterDomain* cloneWithoutRFactor() const;
 
   //! Clone a vector domains
   static std::vector<IterDomain*> clone(
@@ -518,8 +835,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   bool isBroadcast() const {
-    return getIterType() == IterType::BroadcastWithStride ||
-        getIterType() == IterType::BroadcastWithoutStride;
+    return getIterType() == IterType::Broadcast;
   }
 
   bool isGather() const {
@@ -528,6 +844,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool isStride() const {
     return getIterType() == IterType::Stride;
+  }
+
+  bool isVectorComponent() const {
+    return getIterType() == IterType::VectorComponent;
   }
 
   bool isParallelized() const {
@@ -547,25 +867,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! Return if this iter domain is either mapped to a block or grid dimension
   bool isThread() const {
     return (isBlockDim() || isThreadDim());
-  }
-
-  //! Convert to strided broadcast, used for supporting broadcast on output
-  void toStridedBroadcast() {
-    TORCH_INTERNAL_ASSERT(
-        isBroadcast(),
-        "toStridedBroadCast: converting an non-broadcast iterdomain",
-        this);
-    iter_type_ = IterType::BroadcastWithStride;
-  }
-
-  // Convert a serial iterdomain to broadcast, used for implicit broadcast
-  void convertToBroadcast() {
-    TORCH_INTERNAL_ASSERT(
-        !isBroadcast() && !isReduction(),
-        "convertToBroadcast: converting an non-serial iterdomain",
-        this);
-
-    iter_type_ = IterType::BroadcastWithStride;
   }
 
   void parallelize(ParallelType t);
@@ -589,6 +890,18 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
+  }
+
+  bool hasExpandedExtent() const {
+    return expanded_extent_ != nullptr;
+  }
+
+  // Returns the expanded extent of a strided broadcast entry.
+  Val* expandedExtent() const {
+    TORCH_INTERNAL_ASSERT(
+        hasExpandedExtent(),
+        "Requested expanded extent, but none found on this dimension.");
+    return expanded_extent_;
   }
 
   //! Dimension padding interface:
@@ -662,6 +975,58 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return definition() == nullptr;
   }
 
+  //! Marks that this id represents a
+  //!  instruction loop, mma use only.
+  //!
+  //! An instruction loop can be considered a generalization of
+  //!  vectorization. It also represents a loop that's implemented
+  //!  by an instruction and should not be realized by codegen and
+  //!  cannot be inlined with.
+  //! As an example, if a mma macro, call it mma_eg implements:
+  //!  for m in M
+  //!    for n in N
+  //!      for k in K
+  //!         C[m,n] += A[m,k]*B[k,n],
+  //! But the generated code should simply be:
+  //!  mma_eg(C,A,B)
+  //! without the 3 level loopnest, i.e. they're instruction loops.
+  //!
+  //! In the actual mma macros, the loopnests it implements is a
+  //!  transformed version of above to match the mma swizzle.
+  //!  So it's different implicit loopnest for different macros.
+  //!  WarpMmaSwizzler will label the instruction loops case-by-case.
+  bool isMma() const {
+    return parallel_type_ == ParallelType::Mma;
+  }
+
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains.
+  static std::pair<IterDomain*, IterDomain*> swizzle(
+      Swizzle2DType swizzle_type,
+      IterDomain* in_x,
+      IterDomain* in_y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
+  bool isMmaSwizzled() const {
+    return is_mma_swizzled_;
+  }
+
+  //! Used by WarpMmaSwizzler, this is an utility for WarpMmaSwizzler
+  //!  to lock the thread swizzled iterdomains.
+  //! Only true for the iterdomains produced by WarpMmaSwizzler.
+  //! Mma ops require specific swizzle patterns
+  //!  and this label utility is to prevent any further transform on the
+  //!  iterdomains involved in the swizzle so that the pattern remain correct in
+  //!  generated code.
+  //!
+  //! Note:
+  //!    Used only through WarpMmaSwizzler only and mma validation relies on
+  //!    this
+  //!  flag being set on the correct iterdomains.
+  void toMmaSwizzled() {
+    is_mma_swizzled_ = true;
+  }
+
  protected:
   friend TensorDomain;
   friend ReplayTransformations;
@@ -671,6 +1036,20 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   //! Valid range is defined as [start:-stop_offset]
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
+
+  // Broadcast dimensions are assumed to be size 1 for the sake of code
+  // generation. If a user though calls `expand` on a tensor that dimension is
+  // still considered a broadcast dimension. However if we ever output that
+  // dimension it should be a size dictated by the `expand` operation, and have
+  // a stride of zero. Since this extent is important to track, but not
+  // necessarily generate code for (still want loops on broadcast to be of size
+  // 0), we simply store it separately from extent_. Having an expanded_extent_
+  // is only allowed with broadcasted dimsneions. Only in this instance does it
+  // make sense to have an expanded_extent_, because it's used when users are
+  // expecting return tensors to have a physical domain. If a user simply
+  // "broadcasts" an operation
+  Val* const expanded_extent_ = nullptr;
+
   //! Distance of stop from the end
   Val* const stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
@@ -682,6 +1061,11 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   // TODO: Remove only used in kernel IR because IterDomains don't maintain
   // definitions of split/merge.
   bool is_simple_ = true;
+
+  //! Tracks if this id represents a thread swizzled loop or
+  //!   models an implicit loop within instructions. Should not make
+  //!   any changes once an id is warp mapped.
+  bool is_mma_swizzled_ = false;
 };
 
 //! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
@@ -760,6 +1144,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
+
+  // Returns if rfactor domain only consists of id's of iter type.
+  bool hasViewLikeRFactor() const;
+
   bool hasVectorize() const;
 
   c10::optional<unsigned int> getReductionAxis() const;
@@ -822,9 +1210,18 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   // Reorder axes according to map[old_pos] = new_pos
   void reorder(const std::unordered_map<int, int>& old2new);
 
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains contained in this domain.
+  void swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
   // Transform TensorView according to merge and split transformations
-  TensorDomain* view(
-      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
+  TensorDomain* view(const AnalyzeViewResult& view_analysis);
+
+  TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
 
   static std::vector<IterDomain*> orderedAs(
       const std::vector<IterDomain*>& td,
@@ -948,6 +1345,104 @@ class TORCH_CUDA_CU_API Merge : public Expr {
   IterDomain* const out_ = nullptr;
   IterDomain* const outer_ = nullptr;
   IterDomain* const inner_ = nullptr;
+};
+
+//! Applies 2D swizzles on a rectangular tile defined by 2 iterdomains.
+class TORCH_CUDA_CU_API Swizzle2D : public Expr {
+ public:
+  Swizzle2D(
+      IrBuilderPasskey,
+      IterDomain* out_x,
+      IterDomain* out_y,
+      IterDomain* in_x,
+      IterDomain* in_y,
+      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
+  Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+
+  IterDomain* outX() const {
+    return out_x_;
+  }
+
+  IterDomain* outY() const {
+    return out_y_;
+  }
+
+  IterDomain* inX() const {
+    return in_x_;
+  }
+
+  IterDomain* inY() const {
+    return in_y_;
+  }
+
+  auto swizzleType() const {
+    return swizzle_type_;
+  }
+
+  auto swizzleMode() const {
+    return swizzle_mode_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  // Output iterdomain pair corresponding
+  //  to the original input iterdomain pair.
+  IterDomain* const out_x_ = nullptr;
+  IterDomain* const out_y_ = nullptr;
+
+  // Input iterdomain pair.
+  IterDomain* const in_x_ = nullptr;
+  IterDomain* const in_y_ = nullptr;
+
+  // The type of predefined 1-to-1 functions
+  //  used for swizzling math.
+  Swizzle2DType swizzle_type_ = Swizzle2DType::NoSwizzle;
+
+  // Swizzle mode of this swizzle instance.
+  // [Note on swizzle mode]
+  // On the current implementations we support two modes of
+  //  swizzle math, namely, data mode and loop mode.
+  // `Data` mode swizzling is a swizzle that will change the
+  //  data layout in shared memory, likely in global memory buffers
+  //  as well in the future. see also IndexSwizzle in index_compute.cpp.
+  //
+  //  Most important use cases are transpose bank conflict removal, and mma
+  //  swizzled shared memory layout. Example illustrated in 1D case:
+  //
+  // for (int i = 0; i<I; i++){
+  //   # This is a `Data` mode swizzle.
+  //  Tshared [swizzled(i)] = Tin[i];
+  // }
+  // # Now Tshared holds swizzled data, i.e. the data layout of
+  //    Tshared does not map to Tin with affine relationships.
+  //
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[swizzled(i)];
+  // }
+  //
+  // `Loop` mode swizzling does not affect the data layout of any buffer
+  //   but only permutes the iteration order of serial or parallel loop.
+  // This is useful when we want to designate non-affine mapping of thread
+  //   to data or we want to generate non-affine loops.
+  // Exampe illustrated in 1D case:
+  //   for (int i = 0; i<I; i++){
+  //     # This is a `Loop` mode swizzle
+  //    Tshared [swizzled(i)] = Tin[swizzled(i)];
+  //   }
+  // # Now Tshared holds normal data, i.e. it still has
+  //   the same data layout as if the swizzle wasn't there.
+  //
+  // # Consumers of Tshared does not need to know about the
+  //   loop swizzle at previous op if not inlined.
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[i];
+  // }
+  //  TODO: Loop swizzles eventually will be piped through in all mappings
+  //  and replay of the fusion IR infrastructure.
+  SwizzleMode swizzle_mode_ = SwizzleMode::Data;
 };
 
 //! Integer value which has a special name

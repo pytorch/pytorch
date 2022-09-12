@@ -64,6 +64,9 @@ fi
 if [[ -x ./cuda_cub_test ]]; then
   ./cuda_cub_test
 fi
+if [[ -x ./cuda_atomic_ops_test ]]; then
+  ./cuda_atomic_ops_test
+fi
 if [ "$VALGRIND" == "ON" ]; then
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
   if [[ -x ./tensor_interop_test ]]; then

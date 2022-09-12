@@ -9,11 +9,11 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/schema_info.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/enum_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -1428,7 +1428,7 @@ struct Graph {
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
-  friend void Lint(const AliasDb* db);
+  friend TORCH_API void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
@@ -1624,9 +1624,10 @@ TORCH_API std::vector<Node*> findAllNodes(
     Symbol kind,
     bool recurse);
 
-struct OperatorSet {
+struct TORCH_API OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
   std::vector<std::shared_ptr<Operator>> getOps() const;
+  void insert(std::initializer_list<const char*> sig_literals);
 
  private:
   friend struct Node;

@@ -9,7 +9,7 @@ namespace native {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    at::IntArrayRef proposed_shape,
+    const at::DimVector& proposed_shape,
     bool infer_size = true);
 at::Tensor& to_copy_out(
     Tensor& out,
@@ -165,9 +165,26 @@ inline std::string PrintNode(const Node* node) {
 }
 
 inline void LogAndDumpSchema(const Node* node) {
-  VLOG(1) << "Found schema mismatch";
-  node->schema().dump();
+  VLOG(1) << "Found schema mismatch for: " << node->schema();
 }
+
+inline bool sr_schema_check(torch::jit::Node*) {
+  return true;
+}
+
+template <typename Schema, typename... Schemas>
+bool sr_schema_check(
+    torch::jit::Node* node,
+    Schema&& first,
+    Schemas&&... rest) {
+  auto is_match = node->matches(first) || sr_schema_check(node, rest...);
+  if (!is_match) {
+    torch::jit::LogAndDumpSchema(node);
+  }
+  return is_match;
+}
+
+bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
 
 } // namespace jit
 } // namespace torch

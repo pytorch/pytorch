@@ -4,8 +4,8 @@
 
 #include <gtest/gtest.h>
 
-#include <c10/util/Exception.h>
 #include <ATen/TensorIndexing.h>
+#include <c10/util/Exception.h>
 #include <torch/nn/cloneable.h>
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -53,8 +53,10 @@ struct WarningCapture : public WarningHandler {
     return c10::Join("\n", messages_);
   }
 
-  void process(const SourceLocation& source_location, const std::string& msg, const bool /*verbatim*/)
-      override {
+  void process(
+      const SourceLocation& source_location,
+      const std::string& msg,
+      const bool /*verbatim*/) override {
     messages_.push_back(msg);
   }
 
@@ -67,22 +69,30 @@ inline bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data_ptr() == second.data_ptr();
 }
 
-// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
-// in `TestCase.assertEqual` in torch/testing/_internal/common_utils.py
-inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false) {
+// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y,
+// torch.Tensor)` branch in `TestCase.assertEqual` in
+// torch/testing/_internal/common_utils.py
+inline void assert_tensor_equal(
+    at::Tensor a,
+    at::Tensor b,
+    bool allow_inf = false) {
   ASSERT_TRUE(a.sizes() == b.sizes());
   if (a.numel() > 0) {
-    if (a.device().type() == torch::kCPU && (a.scalar_type() == torch::kFloat16 || a.scalar_type() == torch::kBFloat16)) {
+    if (a.device().type() == torch::kCPU &&
+        (a.scalar_type() == torch::kFloat16 ||
+         a.scalar_type() == torch::kBFloat16)) {
       // CPU half and bfloat16 tensors don't have the methods we need below
       a = a.to(torch::kFloat32);
     }
-    if (a.device().type() == torch::kCUDA && a.scalar_type() == torch::kBFloat16) {
+    if (a.device().type() == torch::kCUDA &&
+        a.scalar_type() == torch::kBFloat16) {
       // CUDA bfloat16 tensors don't have the methods we need below
       a = a.to(torch::kFloat32);
     }
     b = b.to(a);
 
-    if ((a.scalar_type() == torch::kBool) != (b.scalar_type() == torch::kBool)) {
+    if ((a.scalar_type() == torch::kBool) !=
+        (b.scalar_type() == torch::kBool)) {
       TORCH_CHECK(false, "Was expecting both tensors to be bool type.");
     } else {
       if (a.scalar_type() == torch::kBool && b.scalar_type() == torch::kBool) {
@@ -116,8 +126,9 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
   }
 }
 
-// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
-// in `TestCase.assertNotEqual` in torch/testing/_internal/common_utils.py
+// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y,
+// torch.Tensor)` branch in `TestCase.assertNotEqual` in
+// torch/testing/_internal/common_utils.py
 inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
   if (x.sizes() != y.sizes()) {
     return;
@@ -139,7 +150,9 @@ inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
   }
 }
 
-inline int count_substr_occurrences(const std::string& str, const std::string& substr) {
+inline int count_substr_occurrences(
+    const std::string& str,
+    const std::string& substr) {
   int count = 0;
   size_t pos = str.find(substr);
 
@@ -154,12 +167,14 @@ inline int count_substr_occurrences(const std::string& str, const std::string& s
 // A RAII, thread local (!) guard that changes default dtype upon
 // construction, and sets it back to the original dtype upon destruction.
 //
-// Usage of this guard is synchronized across threads, so that at any given time,
-// only one guard can take effect.
+// Usage of this guard is synchronized across threads, so that at any given
+// time, only one guard can take effect.
 struct AutoDefaultDtypeMode {
   static std::mutex default_dtype_mutex;
 
-  AutoDefaultDtypeMode(c10::ScalarType default_dtype) : prev_default_dtype(torch::typeMetaToScalarType(torch::get_default_dtype())) {
+  AutoDefaultDtypeMode(c10::ScalarType default_dtype)
+      : prev_default_dtype(
+            torch::typeMetaToScalarType(torch::get_default_dtype())) {
     default_dtype_mutex.lock();
     torch::set_default_dtype(torch::scalarTypeToTypeMeta(default_dtype));
   }
@@ -170,11 +185,13 @@ struct AutoDefaultDtypeMode {
   c10::ScalarType prev_default_dtype;
 };
 
-
-inline void assert_tensor_creation_meta(torch::Tensor& x, torch::autograd::CreationMeta creation_meta) {
+inline void assert_tensor_creation_meta(
+    torch::Tensor& x,
+    torch::autograd::CreationMeta creation_meta) {
   auto autograd_meta = x.unsafeGetTensorImpl()->autograd_meta();
   TORCH_CHECK(autograd_meta);
-  auto view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(autograd_meta);
+  auto view_meta =
+      static_cast<torch::autograd::DifferentiableViewMeta*>(autograd_meta);
   TORCH_CHECK(view_meta->has_bw_view());
   ASSERT_EQ(view_meta->get_creation_meta(), creation_meta);
 }

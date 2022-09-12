@@ -1,3 +1,4 @@
+#include <ATen/autocast_mode.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -146,14 +147,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.mH());
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.layout());
         },
         aliasAnalysisFromSchema()),
 
@@ -419,6 +412,30 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
+        sym_size,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
+        sym_size_int,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.strides());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+        sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
+        sym_stride,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -471,6 +488,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         dtype,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> Layout"),
+        layout,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__not__(bool self) -> bool"),
         _not,
         aliasAnalysisFromSchema()),
@@ -503,7 +524,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
         [](Stack& stack) {
-          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+          RECORD_FUNCTION("get_device", c10::ArrayRef<const c10::IValue>{});
           auto result =
               at::get_device((std::move(peek(stack, 0, 1))).toTensor());
           drop(stack, 1);
@@ -513,7 +534,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::storage_offset(Tensor self) -> int"),
         [](Stack& stack) {
-          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
+          RECORD_FUNCTION("storage_offset", c10::ArrayRef<const c10::IValue>{});
           auto result =
               ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
           drop(stack, 1);
@@ -523,7 +544,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::is_contiguous(Tensor self) -> bool"),
         [](Stack& stack) {
-          RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+          RECORD_FUNCTION("is_contiguous", c10::ArrayRef<const c10::IValue>{});
           auto result =
               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
@@ -649,6 +670,28 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, a != b);
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_cpu_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_cpu_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
         unInitialized,
@@ -985,9 +1028,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
         [](Stack& stack) {
-          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
           auto self = pop(stack).toTensor();
-          auto result = at::index(self, indices);
+          auto result = at::index(self, opt_list_indices);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
@@ -998,10 +1046,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto unsafe = pop(stack).toBool();
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
           auto self = pop(stack).toTensor();
-          auto result =
-              at::_index_put_impl_(self, indices, values, accumulate, unsafe);
+          auto result = at::_index_put_impl_(
+              self, opt_list_indices, values, accumulate, unsafe);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
@@ -1011,9 +1064,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
           auto self = pop(stack).toTensor();
-          auto result = at::index_put_(self, indices, values, accumulate);
+          auto result =
+              at::index_put_(self, opt_list_indices, values, accumulate);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
@@ -1023,9 +1082,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto accumulate = pop(stack).toBool();
           auto values = pop(stack).toTensor();
-          auto indices = pop(stack).to<c10::List<c10::optional<at::Tensor>>>();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
           auto self = pop(stack).toTensor();
-          auto result = at::index_put_(self, indices, values, accumulate);
+          auto result =
+              at::index_put(self, opt_list_indices, values, accumulate);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
@@ -1056,6 +1121,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_cuda(Tensor a) -> bool"),
         isCuda,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_cpu(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_cpu());
+        },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
@@ -2245,11 +2318,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::is_mlc(Tensor a) -> bool"),
+        TORCH_SELECTIVE_SCHEMA("prim::is_mps(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, a.is_mlc());
+          push(stack, a.is_mps());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2258,6 +2331,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_vulkan());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_ipu(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_ipu());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2282,6 +2363,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_ort());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_nested(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_nested());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

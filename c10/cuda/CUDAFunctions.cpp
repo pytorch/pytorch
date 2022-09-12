@@ -10,16 +10,13 @@ namespace {
 // returns -1 on failure
 int32_t driver_version() {
   int driver_version = -1;
-  cudaError_t err = cudaDriverGetVersion(&driver_version);
-  if (err != cudaSuccess) {
-    cudaError_t last_err C10_UNUSED = cudaGetLastError();
-  }
+  C10_CUDA_IGNORE_ERROR(cudaDriverGetVersion(&driver_version));
   return driver_version;
 }
 
 int device_count_impl(bool fail_if_no_driver) {
   int count;
-  auto err = cudaGetDeviceCount(&count);
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
   }
@@ -135,6 +132,10 @@ void set_device(DeviceIndex device) {
 }
 
 void device_synchronize() {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization();
+  }
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 

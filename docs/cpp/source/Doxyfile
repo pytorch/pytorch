@@ -44,12 +44,14 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../aten/src/ATen/core/Tensor.h \
+                         ../../../aten/src/ATen/native/TensorShape.h \
                          ../../../build/aten/src/ATen/Functions.h \
                          ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
                          ../../../c10/core/DeviceType.h \
                          ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
+                         ../../../c10/util/OptionalArrayRef.h \
                          ../../../c10/util/Exception.h \
                          ../../../c10/util/Optional.h \
                          ../../../c10/cuda/CUDAGuard.h \

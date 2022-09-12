@@ -438,7 +438,7 @@ def _get_bundled_inputs_attributes_and_methods(script_module: torch.jit.ScriptMo
             num_bundled_inputs: int = len(bundled_inputs_fn())
 
             # Check inflate helper functions for each function, argument and bundled input
-            func = getattr(script_module, function_name, None)
+            func = getattr(script_module, function_name)
             for arg_idx in range(len(func.schema.arguments) - 1):
                 for input_idx in range(num_bundled_inputs):
                     helper_fn_name = _get_inflate_helper_fn_name(

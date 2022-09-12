@@ -7,15 +7,10 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::SparseCPU)) {
-      return kCPU;
-    } else if (key_set.has(DispatchKey::SparseXPU)) {
-      return kXPU;
-    } else if (key_set.has(DispatchKey::SparseCUDA)) {
-      return kCUDA;
-    } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
-    }
+    auto k = c10::highestPriorityBackendTypeId(key_set);
+    TORCH_CHECK(c10::toFunctionalityKey(k) == DispatchKey::Sparse,
+      "cannot create sparse tensor with non sparse dispatch key ", k);
+    return c10::dispatchKeyToDeviceType(k);
   }
 }
 
@@ -51,21 +46,17 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
-  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
 void SparseTensorImpl::release_resources() {
   TensorImpl::release_resources();
   values_.reset();
   indices_.reset();
 }
 
-IntArrayRef SparseTensorImpl::strides() const {
-  AT_ERROR("sparse tensors do not have strides");
-}
-int64_t SparseTensorImpl::stride(int64_t d) const {
-  AT_ERROR("sparse tensors do not have strides");
-}
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");
 }
@@ -118,7 +109,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = false;
+  coalesced_ = nnz() < 2;
 }
 
 

@@ -12,15 +12,14 @@
 
 #include <stack>
 #include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-// TODO: Turn on autocast by default. default turned off to avoid tests failures
-// as we prototype the support
-bool autocast_enabled = false;
+bool autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
@@ -44,7 +43,7 @@ bool isAutocastNode(Value* value) {
   return class_name.has_value() &&
       (*class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast" ||
        *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
-       *class_name == "__torch__.torch.autocast_mode.autocast");
+       *class_name == "__torch__.torch.amp.autocast_mode.autocast");
 }
 
 // If we have an autocast instance, return it
@@ -149,17 +148,23 @@ void castTensorInputs(
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
+  // need to also keep the inputs in order, otherwise tracing fails
+  // sanity checks because casting ops are inserted in random order
+  std::vector<Value*> casted_inputs_ordered;
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
     if (input_tensor_type && input->node()->kind() != cast_op) {
-      casted_inputs.insert(input);
+      auto has_inserted = casted_inputs.insert(input);
+      if (has_inserted.second) {
+        casted_inputs_ordered.push_back(input);
+      }
     }
   }
 
   WithInsertPoint insert_point(node);
 
-  for (auto input : casted_inputs) {
+  for (auto input : casted_inputs_ordered) {
     if (cast_op == aten::_autocast_to_full_precision) {
       const auto new_input = graph->insert(
           cast_op,
@@ -209,6 +214,39 @@ void castInputsToWidestType(Node* node, const AutocastContext& context) {
       }
     }
   }
+}
+
+// Users can call torch.is_autocast_enabled() or is_autocast_cpu_enabled() to
+// determine whether autocasting is enabled. With JIT-scripted functions, we
+// actually need to return true if eager autocast OR jit autocast are enabled.
+//
+// In the case where JIT autocast is enabled, we replace
+//    %x : bool = aten::is_autocast_enabled()
+// with a constant "True".
+//
+// More context on eager vs JIT autocasting:
+//
+// Autocasting actually has two settings: eager autocasting, and JIT
+// autocasting. Eager autocasting is the thread-local setting that turns on
+// the relevant bit in the dispatcher settings. JIT autocasting is the pass
+// implemented in this file, which makes changes to the graph to insert casting
+// ops in order to achieve the same behavior as eager autocasting.
+//
+// If eager autocasting is enabled at the time when a JIT-scripted function is
+// invoked, then autocasting will occur regardless of what the JIT-autocasting
+// settings are.
+void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
+  if (!is_jit_enabled) {
+    return;
+  }
+
+  auto graph = node->owningGraph();
+
+  WithInsertPoint insert_point(node);
+
+  Value* true_constant = graph->insertConstant(IValue(true));
+  node->output()->replaceAllUsesWith(true_constant);
+  node->destroy();
 }
 
 // [Note: implicit type promotion in Autocast]
@@ -314,6 +352,14 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         }
         break;
 
+      case aten::is_autocast_enabled:
+        updateAutocastEnabledCheck(node, current_state().gpu_enabled);
+        break;
+
+      case aten::is_autocast_cpu_enabled:
+        updateAutocastEnabledCheck(node, current_state().cpu_enabled);
+        break;
+
       // CastPolicy::fp16 (cast all inputs to float16)
       case aten::_convolution:
       case aten::conv1d:
@@ -389,6 +435,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
+      case aten::logsumexp:
         if (!node->schema().is_mutable()) {
           castTensorInputs(
               node, aten::_autocast_to_full_precision, current_state());
@@ -397,7 +444,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // CastPolicy::fp32_set_opt_dtype
       case aten::prod:
-      case aten::softmax:
       case aten::log_softmax:
       case aten::cumprod:
       case aten::cumsum:
@@ -408,13 +454,21 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         }
         break;
 
+      // cast softmax to fp32 only on GPU
+      case aten::softmax:
+        if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
+          auto context = current_state();
+          context.cpu_enabled = false;
+          castTensorInputs(node, aten::_autocast_to_full_precision, context);
+        }
+        break;
+
       // CastPolicy::promote (promote inputs to the widest type)
       case aten::addcdiv:
       case aten::addcmul:
       case aten::atan2:
       case aten::bilinear:
       case aten::cat:
-      case aten::_cat:
       case aten::cross:
       case aten::dot:
       case aten::equal:
@@ -436,7 +490,9 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
-        AT_ERROR("Unsafe to autocast");
+        if (current_state()) {
+          AT_ERROR("Unsafe to autocast");
+        }
     }
 
     // process sub-blocks, if any

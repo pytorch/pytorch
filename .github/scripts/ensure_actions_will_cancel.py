@@ -9,14 +9,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-
-
-def concurrency_key(filename: Path) -> str:
-    workflow_name = filename.with_suffix("").name.replace("_", "-")
-    if workflow_name.startswith("generated-"):
-        workflow_name = workflow_name[len("generated-"):]
-    return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}" \
-        "-${{ github.event_name == 'workflow_dispatch' }}"
+EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+    "-${{ github.event_name == 'workflow_dispatch' }}"
 
 
 def should_check(filename: Path) -> bool:
@@ -38,12 +32,19 @@ if __name__ == "__main__":
 
     errors_found = False
     files = [f for f in files if should_check(f)]
+    names = set()
     for filename in files:
         with open(filename, "r") as f:
             data = yaml.safe_load(f)
 
+        name = data.get("name")
+        if name is not None and name in names:
+            print("ERROR: duplicate workflow name:", name, file=sys.stderr)
+            errors_found = True
+        names.add(name)
+
         expected = {
-            "group": concurrency_key(filename),
+            "group": EXPECTED_GROUP,
             "cancel-in-progress": True,
         }
         actual = data.get("concurrency", None)

@@ -65,6 +65,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const Bool*) override;
   void handle(const Double*) override;
   void handle(const Int*) override;
+  void handle(const ComplexDouble*) override;
   void handle(const NamedScalar*) override;
 
   void handle(const UnaryOp*) override;
@@ -72,14 +73,20 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const TernaryOp*) override;
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
+  void handle(const GroupedReductionOp*) override;
   void handle(const WelfordOp*) override;
+  void handle(const LoadStoreOp*) override;
+  void handle(const MmaOp*) override;
   void handle(const TransposeOp*) override;
+  void handle(const ExpandOp*) override;
   void handle(const ShiftOp*) override;
   void handle(const GatherOp*) override;
+  void handle(const ViewAsScalar*) override;
   void handle(const ViewOp*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
+  void handle(const Swizzle2D*) override;
 
  protected:
   // We keep track of the original -> clone map so we don't

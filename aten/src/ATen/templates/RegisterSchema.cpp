@@ -4,10 +4,10 @@
 
 namespace at {
 TORCH_LIBRARY(aten, m) {
-  ${schema_registrations};
-
+  ${aten_schema_registrations};
   // Distributed Ops
   // Implementations located in torch/csrc/jit/runtime/register_distributed_ops.cpp
   m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
 }
+${schema_registrations}
 }  // namespace at

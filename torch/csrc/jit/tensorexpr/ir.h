@@ -397,6 +397,10 @@ bool immediateEquals(ExprPtr e, T val) {
 
 TORCH_API bool immediateIsNegative(ExprPtr e);
 
+TORCH_API bool immediateIsPositive(ExprPtr e);
+
+TORCH_API bool immediateIsZero(ExprPtr e);
+
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
 class TORCH_API Ramp : public ExprNode<Ramp> {

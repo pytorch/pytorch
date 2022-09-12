@@ -12,11 +12,7 @@
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
-#if !AT_ROCM_ENABLED()
 #include <ATen/native/cuda/CUDAJitLoops.cuh>
-#else
-#error Jiterator not supported on ROCm
-#endif
 
 namespace at {
 namespace native {
@@ -132,7 +128,7 @@ void jitted_gpu_kernel(
         /*f_inputs_type=*/f_inputs_type,
         arity,
         at::cuda::jit::BinaryFuncVariant::NoScalar>(
-        iter, f, needs_dynamic_casting, /*scalar_val=*/0, extra_args);
+        iter, f, needs_dynamic_casting, /*scalar_val=*/scalar_val, extra_args);
   } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
     jitted_gpu_kernel_impl<
         /*name*/ name,

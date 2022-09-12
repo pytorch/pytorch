@@ -179,6 +179,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                            torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],
@@ -261,4 +262,98 @@ Args:
         casted to :attr:`dtype` before the operation is
         performed. This is useful for preventing data type
         overflows. Default: None
+""")
+
+
+spdiags = _add_docstr(
+    _sparse._spdiags,
+    r"""
+sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
+
+Creates a sparse 2D tensor by placing the values from rows of
+:attr:`diagonals` along specified diagonals of the output
+
+The :attr:`offsets` tensor controls which diagonals are set.
+
+- If :attr:`offsets[i]` = 0, it is the main diagonal
+- If :attr:`offsets[i]` < 0, it is below the main diagonal
+- If :attr:`offsets[i]` > 0, it is above the main diagonal
+
+The number of rows in :attr:`diagonals` must match the length of :attr:`offsets`,
+and an offset may not be repeated.
+
+Args:
+    diagonals (Tensor): Matrix storing diagonals row-wise
+    offsets (Tensor): The diagonals to be set, stored as a vector
+    shape (2-tuple of ints): The desired shape of the result
+Keyword args:
+    layout (:class:`torch.layout`, optional): The desired layout of the
+        returned tensor. ``torch.sparse_coo``, ``torch.sparse_csc`` and ``torch.sparse_csr``
+        are supported. Default: ``torch.sparse_coo``
+
+Examples:
+
+Set the main and first two lower diagonals of a matrix::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3))
+    >>> s
+    tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
+                           [0, 1, 2, 0, 1, 0]]),
+           values=tensor([0, 1, 2, 3, 4, 6]),
+           size=(3, 3), nnz=6, layout=torch.sparse_coo)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+
+Change the output layout::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3), layout=torch.sparse_csr)
+    >>> s
+    tensor(crow_indices=tensor([0, 1, 3, 6]),
+           col_indices=tensor([0, 0, 1, 0, 1, 2]),
+           values=tensor([0, 3, 1, 6, 4, 2]), size=(3, 3), nnz=6,
+           layout=torch.sparse_csr)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+Set partial diagonals of a large output::
+
+    >>> diags = torch.tensor([[1, 2], [3, 4]])
+    >>> offsets = torch.tensor([0, -1])
+    >>> torch.sparse.spdiags(diags, offsets, (5, 5)).to_dense()
+    tensor([[1, 0, 0, 0, 0],
+            [3, 2, 0, 0, 0],
+            [0, 4, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+
+.. note::
+
+    When setting the values along a given diagonal the index into the diagonal
+    and the index into the row of :attr:`diagonals` is taken as the
+    column index in the output. This has the effect that when setting a diagonal
+    with a positive offset `k` the first value along that diagonal will be
+    the value in position `k` of the row of :attr:`diagonals`
+
+Specifying a positive offset::
+
+    >>> diags = torch.tensor([[1, 2, 3], [1, 2, 3], [1, 2, 3]])
+    >>> torch.sparse.spdiags(diags, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
+    tensor([[1, 2, 3, 0, 0],
+            [0, 2, 3, 0, 0],
+            [0, 0, 3, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
 """)

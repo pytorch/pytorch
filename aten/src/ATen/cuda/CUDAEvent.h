@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
@@ -32,15 +33,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-    #if !defined(USE_ROCM)
       device_index_ = device_index;
       CUDAGuard guard(device_index_);
 
       AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
       is_created_ = true;
-    #else
-      AT_ERROR("cuIpcOpenEventHandle with HIP is not supported");
-    #endif
   }
 
   // Note: event destruction done on creating device to avoid creating a
@@ -49,6 +46,10 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     try {
       if (is_created_) {
         CUDAGuard guard(device_index_);
+        const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+        if (C10_UNLIKELY(interp)) {
+          (*interp)->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
+        }
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -117,6 +118,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          reinterpret_cast<uintptr_t>(event_),
+          reinterpret_cast<uintptr_t>(stream.stream())
+      );
+    }
     was_recorded_ = true;
   }
 
@@ -126,6 +134,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_wait(
+            reinterpret_cast<uintptr_t>(event_),
+            reinterpret_cast<uintptr_t>(stream.stream())
+        );
+      }
     }
   }
 
@@ -142,13 +157,16 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   // Note: cudaEventSynchronize can be safely called from any device
   void synchronize() const {
     if (is_created_) {
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+          (*interp)->trace_gpu_event_synchronization(reinterpret_cast<uintptr_t>(event_));
+      }
       AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
   void ipc_handle(cudaIpcEventHandle_t * handle) {
-    #if !defined(USE_ROCM)
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.
@@ -156,9 +174,6 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       }
       CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
-    #else
-      AT_ERROR("cuIpcGetEventHandle with HIP is not supported");
-    #endif
   }
 
 private:
@@ -172,6 +187,10 @@ private:
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(reinterpret_cast<uintptr_t>(event_));
+    }
     is_created_ = true;
   }
 

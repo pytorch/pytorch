@@ -6,6 +6,7 @@ from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Beta']
 
 class Beta(ExponentialFamily):
     r"""
@@ -13,6 +14,7 @@ class Beta(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Beta(torch.tensor([0.5]), torch.tensor([0.5]))
         >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
         tensor([ 0.1046])
@@ -47,6 +49,10 @@ class Beta(ExponentialFamily):
     @property
     def mean(self):
         return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def mode(self):
+        return self._dirichlet.mode[..., 0]
 
     @property
     def variance(self):

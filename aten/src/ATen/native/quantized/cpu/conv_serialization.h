@@ -3,7 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/List.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
 
 #include <tuple>
@@ -306,6 +307,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   }
   for (const auto i : c10::irange(kSpatialDim)) {
     (void)i; // Suppress unused variable
+    TORCH_INTERNAL_ASSERT(idx < static_cast<int64_t>(config_vals.size()),
+        "Unexpected index = ", idx, " for config_vals of size ",
+        config_vals.size());
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }
@@ -358,6 +362,20 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     );
   }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+  if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+      weight.value(),
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose
+    );
+  }
+#endif // AT_MKLDNN_ENABLED()
 TORCH_CHECK(
   false,
   "Didn't find engine for when deserializing ConvPackedParams: ",
