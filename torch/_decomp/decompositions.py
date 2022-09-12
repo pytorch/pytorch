@@ -1129,7 +1129,10 @@ def native_batch_norm(
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
-            running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+            # ATen implementation keeps running_mean detached from the autograd graph
+            assert running_mean.requires_grad is False
+            with torch.no_grad():
+                running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
         if running_var is not None:
             n = input.numel() / input.shape[1]
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
@@ -1138,7 +1141,12 @@ def native_batch_norm(
             unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
                 n / (n - 1)
             )
-            running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+            # ATen implementation keeps running_var detached from the autograd graph
+            assert running_var.requires_grad is False
+            with torch.no_grad():
+                running_var.copy_(
+                    momentum * unbiased_var + (1 - momentum) * running_var
+                )
     else:
         assert running_mean is not None and running_var is not None
         running_mean = running_mean.to(dtype=computation_dtype)

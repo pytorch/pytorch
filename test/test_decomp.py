@@ -510,6 +510,23 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
+    def test_batch_norm_requires_grad_consistency(self, device):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+
+        samples_iter = sample_inputs_batch_norm(None, device, torch.float32, requires_grad=True)
+        sample = next(samples_iter)
+        args = sample.args
+        kwargs = sample.kwargs
+        # args[0] and args[1] are running_mean and running_var, which must have requires_grad=False
+        train = True
+        all_args = [sample.input, args[2], args[3], args[0], args[1], train, kwargs['momentum'], kwargs['eps']]
+        real_out = torch.ops.aten.native_batch_norm.default(*all_args)
+        self.assertFalse(args[0].requires_grad)
+        self.assertFalse(args[1].requires_grad)
+        decomp_out = decomposition_table[torch.ops.aten.native_batch_norm.default](*all_args)
+        self.assertFalse(args[0].requires_grad)
+        self.assertFalse(args[1].requires_grad)
+        self.assertEqual(real_out, decomp_out)
 
 instantiate_device_type_tests(TestDecomp, globals())
 
