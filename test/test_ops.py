@@ -167,7 +167,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -184,6 +186,8 @@ class TestCommon(TestCase):
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                continue
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -391,7 +395,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1616,6 +1622,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isfinite',
         '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.poisson_nll_loss',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
@@ -1706,6 +1714,7 @@ fake_skips = (
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
+    "narrow",  # Fails only for one overload with DataDependentOutputException (hence skip).
 )
 
 fake_autocast_device_skips = defaultdict(dict)
@@ -1732,6 +1741,13 @@ dynamic_output_op_tests = (
 sometimes_dynamic_output_op_test = (
     "__getitem__",
     "index_select",
+)
+
+data_dependent_op_tests = (
+    "equal",
+    "corrcoef",
+    "nn.functional.gaussian_nll_loss",
+    "allclose",
 )
 
 aliasing_failures = (
@@ -1778,7 +1794,7 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(inner=None)
+                mode = FakeTensorMode(throw_on_data_dependent_ops=True)
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
@@ -1834,12 +1850,14 @@ class TestFakeTensorNonErroring(TestCase):
                         real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
                         self.assertEqual(fake_aliasing, real_aliasing)
 
-                self.assertTrue(name not in dynamic_output_op_tests)
+                self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
+                self.assertTrue(name in data_dependent_op_tests)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
