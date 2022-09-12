@@ -15,37 +15,37 @@ torch.sparse
 Why and when to use sparsity
 ++++++++++++++++++++++++++++
 
-:class:`torch.Tensor` by default stores memory contiguously in memory
-leading to efficient implementations of various array processing
-algorithms that rely on the fast access to elements. However, some
+:class:`torch.Tensor` by default stores elements contiguously in
+physical memory leading to efficient implementations of various array
+processing algorithms that require fast access to elements. However, some
 users might decide to represent data such as graph adjacency matrices,
 pruned weights or points clouds by Tensors whose elements are compromised
 primarily of zeros. We can provide performance optimizations for these
 use cases by providing sparse storage formats.
 
 Various sparse storage formats (`such as COO, CSR/CSC, LIL, etc.`__)
-have been developed over the years. They all have in common that they
-track the positions of non-zero valued elements and maybe some, but most
-importantly not all, zero valued elements.
+have been developed over the years. They all compress data by only
+tracking the positions of non-zero valued elements and perhaps some,
+but not all, zero valued elements.
 
-By compressing repeat zeros sparse storage formats aim to save memory and
-computational resources on various CPUs and GPUs. Especially for high
-degrees of sparsity this can have significant performance implications.
+By compressing repeat zeros sparse storage formats aim to save memory
+and computational resources on various CPUs and GPUs. Especially for high
+degrees of sparsity or highly structured sparsity this can have significant
+performance implications.
 
-The exact details or a given sparse storage format can matter a lot
-depending on the device and array processing algorithm in question.
-Therefore it is important to note that using a sparse storage format
+It is important to note that using a sparse storage format
 is not always advantageous. Details such as the distribution of zero
 valued elements and the level of sparsity matter. We aim to make it
 easy to try these different compression techniques, but we do not
-provide a means of determining the best one for your particular
-application.
+provide a programmatic means of determining the best one for your
+particular application. Of course you are always welcome to ask for
+help in our Discussion forum https://dev-discuss.pytorch.org/.
 
 Overview
 ++++++++
 
-It is straightforward to construct a sparse Tensor from a given dense Tensor by using
-the conversion routines.
+We want it to be straightforward to construct a sparse Tensor from a
+given dense Tensor by providing conversion routines for each layout.
 
     >>> a = torch.tensor([[0, 1.], [0, 0]])
     >>> b = torch.tensor([[0, 2.], [3, 0]])
@@ -61,9 +61,8 @@ the conversion routines.
            values=tensor([2., 3.]),
            size=(2, 2), nnz=2, layout=torch.sparse_coo)
 
-PyTorch currently supports the sparse storage formats: :ref:`COO<sparse-coo-docs>`,
-:ref:`CSR<sparse-csr-docs>`, :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`,
-and :ref:`BSC<sparse-bsc-docs>`.
+PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
+:ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
 
 Note that we provide slight generalizations of these formats with support. Devices such as
 GPUs require batching for optimal performance and thus we support batch dimensions.
