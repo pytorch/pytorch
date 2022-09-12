@@ -28,7 +28,6 @@ struct TracerResult {
   std::set<std::string> enabled_backends;
 };
 
-
 /**
  * Trace a single model and return the TracerResult.
  */
