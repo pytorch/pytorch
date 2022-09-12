@@ -1704,7 +1704,8 @@ class TestRefsOpsInfo(TestCase):
     @parametrize("op", ref_db_names)
     def test_ref_db_has_no_aliases(self, op):
         self.assertTrue(op not in self.ref_alias_names_set,
-                        f"alias {op} in python_ref_db, which is not allowed")
+                        f"Alias {op} in python_ref_db, which is not allowed, "
+                        f"aliases are tested automatically")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
