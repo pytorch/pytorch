@@ -601,7 +601,7 @@ auto ${tmp_var} = ([&]() {
   if (${try_jit_decomposition_bool} && ${any_has_forward_grad}) {
     static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
     static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
-    return impl::run_jit_decomposition_with_args_for_jvp<${returns_and_args}>("${op_name}", *opt_op, ks, ${arg_names});
+    return impl::run_jit_decomposition_with_args_for_jvp<${return_types}>("${op_name}", *opt_op, ks, ${arg_names});
   } else {
     ${guard}
     return ${base_type_call};
@@ -1396,10 +1396,6 @@ def emit_body(
         if len(f.func.returns) > 1:
             return_types = f"std::tuple<{return_types}>"
 
-        arg_types = [
-            cpp.argument_type(a, binds="", symint=True).cpp_type()
-            for a in f.func.arguments.flat_all
-        ]
         arg_names = [
             a.name
             for a in cpp.arguments(
@@ -1422,7 +1418,7 @@ def emit_body(
                 any_has_forward_grad=any_has_forward_grad,
                 op_name=cpp.name(f.func),
                 op_overload=f.func.name.overload_name,
-                returns_and_args=return_types + ", " + ", ".join(arg_types),
+                return_types=return_types,
                 arg_names=arg_names,
             )
 

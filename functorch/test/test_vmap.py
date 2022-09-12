@@ -3197,6 +3197,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('allclose'),  # returns a boolean
+        xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
         xfail('randint_like'),  # randomness is tested separately
         xfail('randn_like'),  # randomness is tested separately
@@ -3243,6 +3244,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3293,7 +3295,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
-        xfail('eig'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
@@ -3302,10 +3303,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.matrix_rank'),
-        xfail('linalg.matrix_rank', 'hermitian'),
-        xfail('linalg.pinv'),
-        xfail('linalg.pinv', 'hermitian'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
@@ -3368,6 +3365,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd_lowrank', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
@@ -3832,6 +3830,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.norm'),  # can accept vector inputs
+        xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
         xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),

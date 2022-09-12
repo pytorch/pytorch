@@ -18,21 +18,24 @@ Return run_jit_decomposition_with_args_for_jvp(
     c10::string_view name,
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
-    Args... args) {
+    Args&&... args) {
   bool has_decomp = jit::has_jit_decomposition(opHandle.schema());
 
   TORCH_CHECK_NOT_IMPLEMENTED(
       has_decomp,
       "Trying to use forward AD with ",
       name,
-      " that does not support it"
-      "because it has not been implemented yet and does not have a decomposition.\\nPlease file an issue "
+      " that does not support it "
+      "because it has not been implemented yet and does not have a decomposition.\nPlease file an issue "
       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
-      "so that we can prioritize its implementation.");
+      "so that we can prioritize its implementation.\n"
+      "Note that forward AD support for some operators require JIT to be enabled. If the environment var "
+      "PYTORCH_JIT=0 is set, some operators may no longer be used with forward AD.");
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunction<&jit::run_jit_decomposition>())
-      .call<Return, Args...>(opHandle, dispatchKeySet, args...);
+      .call<Return, Args...>(
+          opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 } // namespace impl
