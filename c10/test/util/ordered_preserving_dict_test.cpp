@@ -48,7 +48,7 @@ dict_int_int test_dict(dict_int_int& dict) {
   }
   dict.erase(begin, end);
 
-  std::vector<size_t> order;
+  std::vector<int64_t> order;
   for (const auto i : c10::irange(100)) {
     if (!erase_set.count(i)) {
       order.push_back(i);
@@ -211,12 +211,12 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::int64_t>;
 
-  const std::size_t nb_values = 1000;
+  const int64_t nb_values = 1000;
   HMap map;
   for (const auto i : c10::irange(nb_values)) {
     map[c10::guts::to_string(i)] = i;
     auto begin = map.begin();
-    for (size_t j = 0; j <= i; ++j, begin++) {
+    for (int64_t j = 0; j <= i; ++j, begin++) {
       TORCH_INTERNAL_ASSERT(begin->second == j);
     }
   }

@@ -5,7 +5,13 @@ import os
 from typing import Any, List, Union
 
 try:
-    from junitparser import JUnitXml, TestSuite, TestCase, Error, Failure  # type: ignore[import]
+    from junitparser import (  # type: ignore[import]
+        Error,
+        Failure,
+        JUnitXml,
+        TestCase,
+        TestSuite,
+    )
 except ImportError:
     raise ImportError(
         "junitparser not found, please install with 'pip install junitparser'"
@@ -16,12 +22,15 @@ try:
 except ImportError:
     print("rich not found, for color output use 'pip install rich'")
 
+
 def parse_junit_reports(path_to_reports: str) -> List[TestCase]:  # type: ignore[no-any-unimported]
     def parse_file(path: str) -> List[TestCase]:  # type: ignore[no-any-unimported]
         try:
             return convert_junit_to_testcases(JUnitXml.fromfile(path))
         except Exception as err:
-            rich.print(f":Warning: [yellow]Warning[/yellow]: Failed to read {path}: {err}")
+            rich.print(
+                f":Warning: [yellow]Warning[/yellow]: Failed to read {path}: {err}"
+            )
             return []
 
     if not os.path.exists(path_to_reports):
@@ -46,6 +55,7 @@ def convert_junit_to_testcases(xml: Union[JUnitXml, TestSuite]) -> List[TestCase
             testcases.append(item)
     return testcases
 
+
 def render_tests(testcases: List[TestCase]) -> None:  # type: ignore[no-any-unimported]
     num_passed = 0
     num_skipped = 0
@@ -64,12 +74,13 @@ def render_tests(testcases: List[TestCase]) -> None:  # type: ignore[no-any-unim
             else:
                 num_skipped += 1
                 continue
-            rich.print(f"{icon} [bold red]{testcase.classname}.{testcase.name}[/bold red]")
+            rich.print(
+                f"{icon} [bold red]{testcase.classname}.{testcase.name}[/bold red]"
+            )
             print(f"{result.text}")
     rich.print(f":white_check_mark: {num_passed} [green]Passed[green]")
     rich.print(f":dash: {num_skipped} [grey]Skipped[grey]")
     rich.print(f":rotating_light: {num_failed} [grey]Failed[grey]")
-
 
 
 def parse_args() -> Any:

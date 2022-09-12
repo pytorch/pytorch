@@ -25,43 +25,63 @@ struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(double, weight_decay) = 1e-2;
   TORCH_ARG(bool, amsgrad) = false;
-public:
+
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(const AdamWOptions& lhs, const AdamWOptions& rhs);
+  TORCH_API friend bool operator==(
+      const AdamWOptions& lhs,
+      const AdamWOptions& rhs);
   ~AdamWOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
 
-struct TORCH_API AdamWParamState : public OptimizerCloneableParamState<AdamWParamState> {
+struct TORCH_API AdamWParamState
+    : public OptimizerCloneableParamState<AdamWParamState> {
   TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, exp_avg);
   TORCH_ARG(torch::Tensor, exp_avg_sq);
   TORCH_ARG(torch::Tensor, max_exp_avg_sq) = {};
 
-public:
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs);
+  TORCH_API friend bool operator==(
+      const AdamWParamState& lhs,
+      const AdamWParamState& rhs);
   ~AdamWParamState() override = default;
 };
 
 class TORCH_API AdamW : public Optimizer {
  public:
-   explicit AdamW(std::vector<OptimizerParamGroup> param_groups,
-       AdamWOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<AdamWOptions>(defaults)) {
-     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
-     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
-     auto betas = defaults.betas();
-     TORCH_CHECK(0 <= std::get<0>(betas) && std::get<0>(betas) < 1.0, "Invalid beta parameter at index 0: ", std::get<0>(betas));
-     TORCH_CHECK(0 <= std::get<1>(betas) && std::get<1>(betas) < 1.0, "Invalid beta parameter at index 1: ", std::get<1>(betas));
-     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
-   }
-   explicit AdamW(
-       std::vector<Tensor> params,
-       // NOLINTNEXTLINE(performance-move-const-arg)
-       AdamWOptions defaults = {}) : AdamW({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit AdamW(
+      std::vector<OptimizerParamGroup> param_groups,
+      AdamWOptions defaults = {})
+      : Optimizer(
+            std::move(param_groups),
+            std::make_unique<AdamWOptions>(defaults)) {
+    TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
+    TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
+    auto betas = defaults.betas();
+    TORCH_CHECK(
+        0 <= std::get<0>(betas) && std::get<0>(betas) < 1.0,
+        "Invalid beta parameter at index 0: ",
+        std::get<0>(betas));
+    TORCH_CHECK(
+        0 <= std::get<1>(betas) && std::get<1>(betas) < 1.0,
+        "Invalid beta parameter at index 1: ",
+        std::get<1>(betas));
+    TORCH_CHECK(
+        defaults.weight_decay() >= 0,
+        "Invalid weight_decay value: ",
+        defaults.weight_decay());
+  }
+  explicit AdamW(
+      std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      AdamWOptions defaults = {})
+      : AdamW({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

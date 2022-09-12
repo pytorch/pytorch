@@ -8,11 +8,11 @@ on:
 
 jobs:
   update-html:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     if: ${{ github.repository == 'pytorch/pytorch' }}
     strategy:
       matrix:
-        prefix: ["whl", "whl/test", "whl/nightly"]
+        prefix: ["whl", "whl/test", "whl/nightly", "whl/lts/1.8"]
     steps:
       - name: Run updater image
         env:

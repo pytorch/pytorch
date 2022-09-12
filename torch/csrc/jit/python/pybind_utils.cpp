@@ -4,10 +4,27 @@
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_list.h>
 
+#include <ATen/ScalarOps.h>
+
+#include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+
+#include <limits>
 
 namespace torch {
 namespace jit {
+
+static thread_local bool allow_numbers_as_tensors = false;
+
+ToIValueAllowNumbersAsTensors::ToIValueAllowNumbersAsTensors(bool enable)
+    : old_(allow_numbers_as_tensors) {
+  allow_numbers_as_tensors = enable;
+}
+
+ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
+  allow_numbers_as_tensors = old_;
+}
 
 // This is a hack to remove instances deleted in C++ from the PyBind cache
 // C++->Python. We need this because otherwise we may get the old Python object
@@ -30,9 +47,48 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }
-      auto var = py::cast<autograd::Variable>(obj);
-      guardAgainstNamedTensor<autograd::Variable>(var);
-      return var;
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        guardAgainstNamedTensor<autograd::Variable>(var);
+        return var;
+      } else {
+        if (!allow_numbers_as_tensors) {
+          throw py::cast_error(
+              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+        }
+        bool save_symint = false;
+        at::Scalar scalar;
+        if (PyBool_Check(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
+        } else if (THPUtils_checkLong(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackLong(obj.ptr()));
+        } else if (PyComplex_Check(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
+        } else if (THPUtils_checkDouble(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
+        } else if (torch::is_symint_node(py::handle(obj))) {
+          save_symint = true;
+          scalar = at::Scalar(7777777);
+        } else if (torch::is_symfloat_node(py::handle(obj))) {
+          save_symint = true;
+          scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+        } else {
+          throw py::cast_error(
+              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+        }
+        at::Tensor tensor = at::scalar_to_tensor(scalar);
+        tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+
+        if (save_symint) {
+          auto py_tensor = py::cast(tensor);
+          if (PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
+            throw python_error();
+          }
+        }
+
+        return tensor;
+      }
     }
     case TypeKind::StorageType:
       return py::cast<at::Storage>(obj);
@@ -43,9 +99,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<c10::complex<double>>(c_obj);
     }
     case TypeKind::IntType:
-    // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
-    case TypeKind::LayoutType:
-    case TypeKind::ScalarTypeType:
+      // TODO: Properly fake this type
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      // For backwards compatibility
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -57,6 +116,39 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (THPLayout_Check(obj.ptr())) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
+      }
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
+      }
+      return py::cast<int64_t>(obj);
+    case TypeKind::LayoutType: {
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::ScalarTypeType: {
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::MemoryFormatType: {
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
+      }
+      // For backwards compatibility
+      return py::cast<int64_t>(obj);
+    }
+    case TypeKind::SymIntType:
+      if (torch::is_symint_node(obj.ptr())) {
+        return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -140,6 +232,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             }
             return repeated;
           }
+        case TypeKind::SymIntType: {
+          c10::List<c10::SymInt> symints;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            auto si = py::cast<c10::SymInt>(elm);
+            symints.push_back(si);
+          }
+          return symints;
+        }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
             return IValue(py::cast<std::vector<double>>(obj));
@@ -185,7 +286,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType(), N);
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
@@ -323,12 +424,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
+    case TypeKind::QSchemeType: {
+      if (py::isinstance<py::int_>(obj)) {
+        return static_cast<at::QScheme>(py::cast<int64_t>(obj));
+      }
+      throw py::cast_error(
+          c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
+    }
+    case TypeKind::GeneratorType:
+      return py::cast<at::Generator>(obj);
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
-    case TypeKind::GeneratorType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
-    case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:

@@ -55,7 +55,7 @@ class DummyTransform : public Transform {
       return false;
     }
     // which index are we trying to append the new node to?
-    int pattern_idx = subgraph.size();
+    auto pattern_idx = subgraph.size();
     // type doesn't match
     if (g.node(idx).op.type() != pattern_chain[pattern_idx]) {
       return false;

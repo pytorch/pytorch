@@ -19,7 +19,7 @@ class Var(object):
             token = token[0]
 
         obj = object.__new__(cls)
-        obj.token = token
+        obj.token = token  # type: ignore[attr-defined]
         return obj
 
     def __str__(self):
@@ -60,12 +60,13 @@ def variables(*variables):
     True
     >>> print(isvar(1))
     False
-    Normal approach
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> # Normal approach
     >>> from unification import unify
     >>> x = var('x')
     >>> unify(x, 1)
     {~x: 1}
-    Context Manager approach
+    >>> # Context Manager approach
     >>> with variables('x'):
     ...     print(unify('x', 1))
     {'x': 1}

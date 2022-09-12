@@ -295,3 +295,11 @@ TEST(TestScalarTensor, TestScalarTensorCUDA) {
     test(CUDA(kFloat));
   }
 }
+
+TEST(TestScalarTensor, TestScalarTensorMPS) {
+  manual_seed(123);
+
+  if (at::hasMPS()) {
+    test(MPS(kFloat));
+  }
+}

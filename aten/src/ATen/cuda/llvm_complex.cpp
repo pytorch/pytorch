@@ -48,6 +48,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (const value_type& __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(const value_type& __re) {__re_ += __re; return *this;}
@@ -106,6 +110,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (float __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(float __re) {__re_ += __re; return *this;}
@@ -161,6 +169,10 @@ public:
 
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
+
+    constexpr operator bool() const {
+        return real() || imag();
+    }
 
     complex& operator= (double __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
@@ -477,6 +489,22 @@ operator!=(const _Tp& __x, const complex<_Tp>& __y)
     return !(__x == __y);
 }
 
+template<class _Tp>
+inline constexpr
+bool
+operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return bool(__x) && bool(__y);
+}
+
+template<class _Tp>
+inline constexpr
+bool
+operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return bool(__x) || bool(__y);
+}
+
 // 26.3.7 values:
 
 template <class _Tp, bool = is_integral<_Tp>::value,
@@ -583,8 +611,39 @@ arg(_Tp __re)
 
 )ESCAPE";
 
+const std::string complex_half_body = R"ESCAPE(
+namespace std {
+template <>
+struct alignas(2) complex<at::Half> {
+  at::Half real_;
+  at::Half imag_;
+
+  // Constructors
+  complex() = default;
+
+  // implicit casting to and from `complex<float>`.
+  // NOTE: computation of `complex<Half>` will occur in `complex<float>`
+  __host__ __device__ inline complex(const std::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  inline __host__ __device__ operator std::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  at::Half real() const {return real_;}
+  at::Half imag() const {return imag_;}
+
+};
+}
+)ESCAPE";
+
+
 const std::string &get_complex_body_string() {
   return complex_body;
+}
+
+const std::string &get_complex_half_body_string() {
+  return complex_half_body;
 }
 
 const std::string complex_math = R"ESCAPE(
@@ -724,6 +783,16 @@ log10(const complex<_Tp>& __x)
     return log(__x) / log(_Tp(10));
 }
 
+// log2
+
+template<class _Tp>
+inline
+complex<_Tp>
+log2(const complex<_Tp>& __x)
+{
+    return log(__x) / log(_Tp(2));
+}
+
 // sqrt
 
 template<class _Tp>
@@ -785,7 +854,7 @@ complex<typename __promote<_Tp, _Up>::type>
 pow(const complex<_Tp>& __x, const complex<_Up>& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 template<class _Tp, class _Up>
@@ -798,7 +867,7 @@ typename enable_if
 pow(const complex<_Tp>& __x, const _Up& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 template<class _Tp, class _Up>
@@ -811,7 +880,7 @@ typename enable_if
 pow(const _Tp& __x, const complex<_Up>& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 // __sqr, computes pow(x, 2)

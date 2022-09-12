@@ -240,6 +240,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> vjp(exp_reducer, inputs, v)
         (tensor([5.7817, 7.2458, 5.7830, 6.7782]),
          tensor([[1.4458, 1.3962, 1.3042, 1.6354],
@@ -336,6 +337,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4, 4)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> jvp(exp_reducer, inputs, v)
         (tensor([6.3090, 4.6742, 7.9114, 8.2106]),
          tensor([6.3090, 4.6742, 7.9114, 8.2106]))
@@ -416,11 +418,12 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
     total_numel = sum(tensor_numels)
-    diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
     chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
                    for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+    diag_start_idx = 0
+    for chunk, numel in zip(chunks, tensor_numels):
         chunk.diagonal(diag_start_idx).fill_(1)
+        diag_start_idx -= numel
     return chunks
 
 
@@ -534,6 +537,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> jacobian(exp_reducer, inputs)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
@@ -685,7 +689,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))
 
-            jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()
+            jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()  # type: ignore[operator]
                          + inputs[el_idx].size()) for (el_idx, jac_i_el) in enumerate(jac_i)), )
 
         jacobian = _grad_postprocess(jacobian, create_graph)
@@ -743,6 +747,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> hessian(pow_reducer, inputs)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
@@ -846,6 +851,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> vhp(pow_reducer, inputs, v)
         (tensor(0.5591),
          tensor([[1.0689, 1.2431],
@@ -935,6 +941,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> hvp(pow_reducer, inputs, v)
         (tensor(0.1448),
          tensor([[2.0239, 1.6456],

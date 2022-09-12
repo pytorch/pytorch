@@ -8,11 +8,11 @@ import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.qat as nnqat
 import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -23,6 +23,7 @@ from torch.ao.quantization import (
     default_qconfig,
     default_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
@@ -39,6 +40,7 @@ from torch.testing._internal.common_quantization import (
     ManualDropoutQATModel,
     ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
+    ManualConvLinearSymmQATModel,
     ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
     test_only_eval_fn,
@@ -50,6 +52,8 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
+
+from torch.testing._internal.common_utils import skipIfNoXNNPACK
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -154,9 +158,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
@@ -337,6 +341,37 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = ManualConvLinearQATModel()
+                model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
+                checkQuantized(model)
+
+    @skipIfNoXNNPACK
+    def test_conv_linear_symm(self):
+        r"""Same as test_conv_linear but with Symmetric quantization.
+        Supported only with qengine=qnnpack, which uses symmetric
+        kernels from xnnpack library."""
+        for qengine in supported_qengines:
+            if qengine != 'qnnpack':
+                continue
+            with override_quantized_engine(qengine):
+                model = ManualConvLinearSymmQATModel()
+
+                model = prepare_qat(model)
+                self.checkObservers(model)
+
+                test_only_train_fn(model, self.img_data_2d_train)
+                model = convert(model)
+
+                def checkQuantized(model):
+                    self.assertEqual(type(model.conv), nnq.Conv2d)
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.fc2), nnq.Linear)
+                    test_only_eval_fn(model, self.img_data_2d)
+                    self.checkScriptable(model, self.img_data_2d)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = ManualConvLinearSymmQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
@@ -522,7 +557,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -543,7 +578,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -999,6 +1034,29 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         m_ref_copy = copy.deepcopy(m_ref)
         m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
         qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m_ref_copy[0].qconfig = qconfig
+        m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
+
+        # without fake_quants, fused QAT module should match fp32 module
+        m.apply(torch.quantization.disable_fake_quant)
+        data = torch.randn(4, 4)
+        r1 = m_ref(data)
+        r2 = m(data)
+        self.assertTrue(torch.allclose(r1, r2))
+
+    @skipIfNoXNNPACK
+    @override_qengines
+    def test_linear_bn_symm_numerics(self):
+        qengine = torch.backends.quantized.engine
+        if qengine != "qnnpack":
+            return  # Only qnnpack support symmetric quantization
+        m_ref = nn.Sequential(
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        m_ref_copy = copy.deepcopy(m_ref)
+        m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
+        qconfig = default_symmetric_qnnpack_qat_qconfig
         m_ref_copy[0].qconfig = qconfig
         m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 

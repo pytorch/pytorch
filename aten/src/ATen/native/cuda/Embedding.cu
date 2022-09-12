@@ -1,5 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -15,6 +17,18 @@
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
 #include <thrust/iterator/reverse_iterator.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/embedding_dense_backward_native.h>
+#include <ATen/ops/embedding_renorm_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at { namespace native {
@@ -84,10 +98,9 @@ __global__ void embedding_backward_feature_kernel
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx && src_row < n) // Per-warp exit condition, safe with ballot_sync
       {
-        int match_found_this_thread =
-          (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
-        if(threadIdx.x >= n_this_chunk)
-          match_found_this_thread = 0;
+        int match_found_this_thread = 0;
+        if(threadIdx.x < n_this_chunk)
+          match_found_this_thread = (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
 #if defined(USE_ROCM)
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
         int first_remaining_peer = __ffsll(matchmask) - 1;

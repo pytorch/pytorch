@@ -1,5 +1,5 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 
@@ -41,6 +41,9 @@ See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )
@@ -89,6 +92,9 @@ See :class:`~torch.nn.Conv2d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )
@@ -139,6 +145,9 @@ See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
+
+Note:
+    This operator supports complex data types i.e. ``complex32, complex64, complex128``.
 """.format(
         **reproducibility_notes, **tf32_notes
     )
@@ -1004,8 +1013,8 @@ def max_unpool3d(
 
 
 def lp_pool2d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
+    input: Tensor, norm_type: Union[int, float],
+    kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
@@ -1029,7 +1038,7 @@ def lp_pool2d(
 
 
 def lp_pool1d(
-    input: Tensor, norm_type: float,
+    input: Tensor, norm_type: Union[int, float],
     kernel_size: int,
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
@@ -1255,6 +1264,44 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
     return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
 
 
+def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
+    r"""
+    Randomly zero out entire channels (a channel is a 1D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
+
+    See :class:`~torch.nn.Dropout1d` for details.
+
+    Args:
+        p: probability of a channel to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Default: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(dropout1d, (input,), input, p=p, training=training, inplace=inplace)
+    if p < 0.0 or p > 1.0:
+        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+    inp_dim = input.dim()
+    if inp_dim not in (2, 3):
+        raise RuntimeError(f"dropout1d: Expected 2D or 3D input, but received a {inp_dim}D input. "
+                           "Note that dropout1d exists to provide channel-wise dropout on inputs with 1 "
+                           "spatial dimension, a channel dimension, and an optional batch dimension "
+                           "(i.e. 2D or 3D inputs).")
+
+    is_batched = inp_dim == 3
+    if not is_batched:
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+    return result
+
+
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
@@ -1283,14 +1330,18 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
         warnings.warn(warn_msg)
 
-    is_batched = inp_dim == 4
-    if not is_batched:
-        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+    # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
+    # a 3D input will perform dropout1d behavior instead. This was done historically and the
+    # behavior is maintained here for now.
+    # See https://github.com/pytorch/pytorch/issues/77081
+    if inp_dim == 3:
+        warnings.warn("dropout2d: Received a 3D input to dropout2d and assuming that channel-wise "
+                      "1D dropout behavior is desired - input is interpreted as shape (N, C, L), where C "
+                      "is the channel dim. This behavior will change in a future release to interpret the "
+                      "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
+                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
 
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
-
-    if not is_batched:
-        result = result.squeeze_(0) if inplace else result.squeeze(0)
 
     return result
 
@@ -1442,7 +1493,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1.0, max_val: float = 1.0, inplace: bool = False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -1485,8 +1536,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Applies element-wise,
-    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
+    r"""Applies the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
@@ -1600,6 +1650,14 @@ prelu = _add_docstr(
 Applies element-wise the function
 :math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
 learnable parameter.
+
+.. note::
+    `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
+    its size must match the number of input channels, determined by
+    `input.size(1)` when `input.dim() >= 2`, otherwise 1.
+    In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
+    to the shape of `input` in a way that is not possible using normal
+    :ref:`broadcasting semantics<broadcasting-semantics>`.
 
 See :class:`~torch.nn.PReLU` for more details.
 """)
@@ -2040,9 +2098,8 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardswish(input)
 
 
-def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tensor:
-    with torch.no_grad():
-        torch.embedding_renorm_(weight, input, max_norm, norm_type)
+def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tuple[Tensor, Tensor]:
+    torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
 
 def embedding(
@@ -2073,7 +2130,7 @@ def embedding(
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
         sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2087,9 +2144,10 @@ def embedding(
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding(input, embedding_matrix)
         tensor([[[ 0.8490,  0.9625,  0.6753],
                  [ 0.9666,  0.7761,  0.6108],
@@ -2180,10 +2238,10 @@ def embedding_bag(
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
                                      Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  Default: ``"mean"``
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2227,6 +2285,7 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
@@ -2332,7 +2391,8 @@ def embedding_bag(
     return ret
 
 
-embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
+if embedding_bag.__doc__:
+    embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
 def _verify_batch_size(size: List[int]) -> None:
@@ -2534,7 +2594,7 @@ def ctc_loss(
             Lengths of the targets
         blank (int, optional):
             Blank label. Default :math:`0`.
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken, ``'sum'``: the output will be
@@ -2566,7 +2626,8 @@ def ctc_loss(
     )
 
 
-ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
+if ctc_loss.__doc__:
+    ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
 
 
 def nll_loss(
@@ -2603,7 +2664,7 @@ def nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2616,7 +2677,7 @@ def nll_loss(
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.tensor([1, 0, 4])
-        >>> output = F.nll_loss(F.log_softmax(input), target)
+        >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -2670,7 +2731,7 @@ def poisson_nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2720,7 +2781,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic).
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
-        reduction (string, optional): specifies the reduction to apply to the output:
+        reduction (str, optional): specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
@@ -2812,7 +2873,7 @@ def kl_div(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
             ``'none'``: no reduction will be applied
             ``'batchmean'``: the sum of the output will be divided by the batchsize
@@ -2878,12 +2939,12 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+        input (Tensor) : Predicted unnormalized logits;
             see Shape section below for supported shapes.
         target (Tensor) : Ground truth class indices or class probabilities;
             see Shape section below for supported shapes.
@@ -2903,7 +2964,7 @@ def cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2988,7 +3049,7 @@ def binary_cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3058,7 +3119,7 @@ def binary_cross_entropy_with_logits(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3636,7 +3697,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
+        mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -3670,7 +3731,8 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
+if upsample.__doc__:
+    upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -3720,7 +3782,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
-            its length has to match `input.dim()`.
+            its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
@@ -3911,7 +3973,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     )
 
 
-interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
+if interpolate.__doc__:
+    interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -3948,7 +4011,8 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
-upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
+if upsample_nearest.__doc__:
+    upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
@@ -4003,7 +4067,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
-upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_notes)
+if upsample_bilinear.__doc__:
+    upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_notes)
 
 GRID_SAMPLE_INTERPOLATION_MODES = {
     "bilinear": 0,
@@ -4263,109 +4328,70 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
-    r"""Pads tensor.
+pad = _add_docstr(
+    torch._C._nn.pad,
+    r"""
+pad(input, pad, mode="constant", value=None) -> Tensor
 
-    Padding size:
-        The padding size by which to pad some dimensions of :attr:`input`
-        are described starting from the last dimension and moving forward.
-        :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor` dimensions
-        of ``input`` will be padded.
-        For example, to pad only the last dimension of the input tensor, then
-        :attr:`pad` has the form
-        :math:`(\text{padding\_left}, \text{padding\_right})`;
-        to pad the last 2 dimensions of the input tensor, then use
-        :math:`(\text{padding\_left}, \text{padding\_right},`
-        :math:`\text{padding\_top}, \text{padding\_bottom})`;
-        to pad the last 3 dimensions, use
-        :math:`(\text{padding\_left}, \text{padding\_right},`
-        :math:`\text{padding\_top}, \text{padding\_bottom}`
-        :math:`\text{padding\_front}, \text{padding\_back})`.
+Pads tensor.
 
-    Padding mode:
-        See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-        :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-        padding modes works. Constant padding is implemented for arbitrary dimensions.
-        Replicate and reflection padding is implemented for padding the last 3
-        dimensions of 5D input tensor, or the last 2 dimensions of 4D input
-        tensor, or the last dimension of 3D input tensor.
+Padding size:
+    The padding size by which to pad some dimensions of :attr:`input`
+    are described starting from the last dimension and moving forward.
+    :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor` dimensions
+    of ``input`` will be padded.
+    For example, to pad only the last dimension of the input tensor, then
+    :attr:`pad` has the form
+    :math:`(\text{padding\_left}, \text{padding\_right})`;
+    to pad the last 2 dimensions of the input tensor, then use
+    :math:`(\text{padding\_left}, \text{padding\_right},`
+    :math:`\text{padding\_top}, \text{padding\_bottom})`;
+    to pad the last 3 dimensions, use
+    :math:`(\text{padding\_left}, \text{padding\_right},`
+    :math:`\text{padding\_top}, \text{padding\_bottom}`
+    :math:`\text{padding\_front}, \text{padding\_back})`.
 
-    Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+Padding mode:
+    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
+    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
+    padding modes works. Constant padding is implemented for arbitrary dimensions.
+    Replicate and reflection padding are implemented for padding the last 3
+    dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
+    or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
 
-    Args:
-        input (Tensor): N-dimensional tensor
-        pad (tuple): m-elements tuple, where
-            :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
-            Default: ``'constant'``
-        value: fill value for ``'constant'`` padding. Default: ``0``
+Note:
+    When using the CUDA backend, this operation may induce nondeterministic
+    behaviour in its backward pass that is not easily switched off.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
-    Examples::
+Args:
+    input (Tensor): N-dimensional tensor
+    pad (tuple): m-elements tuple, where
+        :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
+    mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
+        Default: ``'constant'``
+    value: fill value for ``'constant'`` padding. Default: ``0``
 
-        >>> t4d = torch.empty(3, 3, 4, 2)
-        >>> p1d = (1, 1) # pad last dim by 1 on each side
-        >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
-        >>> print(out.size())
-        torch.Size([3, 3, 4, 4])
-        >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
-        >>> out = F.pad(t4d, p2d, "constant", 0)
-        >>> print(out.size())
-        torch.Size([3, 3, 8, 4])
-        >>> t4d = torch.empty(3, 3, 4, 2)
-        >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
-        >>> out = F.pad(t4d, p3d, "constant", 0)
-        >>> print(out.size())
-        torch.Size([3, 9, 7, 3])
+Examples::
 
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(_pad, (input,), input, pad, mode=mode, value=value)
-    assert len(pad) % 2 == 0, "Padding length must be divisible by 2"
-    assert len(pad) // 2 <= input.dim(), "Padding length too large"
-    if mode == "constant":
-        return _VF.constant_pad_nd(input, pad, value)
-    else:
-        assert value == 0.0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
-        if len(pad) == 2 and (input.dim() == 2 or input.dim() == 3):
-            if mode == "reflect":
-                return torch._C._nn.reflection_pad1d(input, pad)
-            elif mode == "replicate":
-                return torch._C._nn.replication_pad1d(input, pad)
-            elif mode == "circular":
-                return _pad_circular(input, pad)
-            else:
-                raise NotImplementedError
+    >>> t4d = torch.empty(3, 3, 4, 2)
+    >>> p1d = (1, 1) # pad last dim by 1 on each side
+    >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
+    >>> print(out.size())
+    torch.Size([3, 3, 4, 4])
+    >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
+    >>> out = F.pad(t4d, p2d, "constant", 0)
+    >>> print(out.size())
+    torch.Size([3, 3, 8, 4])
+    >>> t4d = torch.empty(3, 3, 4, 2)
+    >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
+    >>> out = F.pad(t4d, p3d, "constant", 0)
+    >>> print(out.size())
+    torch.Size([3, 9, 7, 3])
 
-        elif len(pad) == 4 and (input.dim() == 3 or input.dim() == 4):
-            if mode == "reflect":
-                return torch._C._nn.reflection_pad2d(input, pad)
-            elif mode == "replicate":
-                return torch._C._nn.replication_pad2d(input, pad)
-            elif mode == "circular":
-                return _pad_circular(input, pad)
-            else:
-                raise NotImplementedError
-
-        elif len(pad) == 6 and (input.dim() == 4 or input.dim() == 5):
-            if mode == "reflect":
-                return torch._C._nn.reflection_pad3d(input, pad)
-            elif mode == "replicate":
-                return torch._C._nn.replication_pad3d(input, pad)
-            elif mode == "circular":
-                return _pad_circular(input, pad)
-            else:
-                raise NotImplementedError
-        else:
-            raise NotImplementedError("Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now")
-
-
-# We define this function as _pad because it takes an argument
-# named pad, which clobbers the recursive reference to the pad
-# function needed for __torch_function__ support
-pad = _pad
+""")
+# TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
+pad.__module__ = "torch.nn.functional"
 
 # distance
 
@@ -4392,11 +4418,11 @@ if the rows are contiguous.
 If input has shape :math:`N \times M` then the output will have shape
 :math:`\frac{1}{2} N (N - 1)`.
 
-This function is equivalent to `scipy.spatial.distance.pdist(input,
-'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
-equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+This function is equivalent to ``scipy.spatial.distance.pdist(input,
+'minkowski', p=p)`` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to ``scipy.spatial.distance.pdist(input, 'hamming') * M``.
 When :math:`p = \infty`, the closest scipy function is
-`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
+``scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())``.
 
 Args:
     input: input tensor of shape :math:`N \times M`.
@@ -4682,172 +4708,6 @@ def fold(
         raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
                                   f"are supported (got {input.dim()}D)")
 
-
-def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
-    """Circularly pads tensor.
-
-    Tensor values at the beginning are used to pad the end, and values at the
-    end are used to pad the beginning. For example, consider a single dimension
-    with values [0, 1, 2, 3]. With circular padding of (1, 1) it would be
-    padded to [3, 0, 1, 2, 3, 0], and with padding (1, 2) it would be padded to
-    [3, 0, 1, 2, 3, 0, 1]. If negative padding is applied then the ends of the
-    tensor get removed. With circular padding of (-1, -1) the previous example
-    would become [1, 2]. Circular padding of (-1, 1) would produce
-    [1, 2, 3, 1].
-
-    The first and second dimensions of the tensor are not padded.
-
-    Args:
-        input: Tensor with shape :math:`(N, C, D[, H, W])`.
-        padding: Tuple containing the number of elements to pad each side of
-            the tensor. The length of padding must be twice the number of
-            paddable dimensions. For example, the length of padding should be 4
-            for a tensor of shape :math:`(N, C, H, W)`, and the length should
-            be 6 for a tensor of shape :math:`(N, C, D, H, W)`.
-
-    Examples::
-
-        >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
-        >>> # Example 1
-        >>> padding = (1, 1, 1, 1)
-        >>> y = F.pad(x, padding, mode='circular')
-        >>> print(y)
-        tensor([[[[5, 3, 4, 5, 3],
-                  [2, 0, 1, 2, 0],
-                  [5, 3, 4, 5, 3],
-                  [2, 0, 1, 2, 0]]]])
-        >>> print(y.shape)
-        torch.Size([1, 1, 4, 5])
-        >>> # Example 2
-        >>> padding = (1, 1, 2, 2)
-        >>> z = F.pad(x, padding, mode='circular')
-        >>> print(z)
-        tensor([[[[2, 0, 1, 2, 0],
-                  [5, 3, 4, 5, 3],
-                  [2, 0, 1, 2, 0],
-                  [5, 3, 4, 5, 3],
-                  [2, 0, 1, 2, 0],
-                  [5, 3, 4, 5, 3]]]])
-        >>> print(z.shape)
-        torch.Size([1, 1, 6, 5])
-    """
-    in_shape = input.shape
-    paddable_shape = in_shape[2:]
-    ndim = len(paddable_shape)
-
-    for idx, size in enumerate(paddable_shape):
-        # Only supports wrapping around once
-        assert padding[-(idx * 2 + 1)] <= size, "Padding value causes wrapping around more than once."
-        assert padding[-(idx * 2 + 2)] <= size, "Padding value causes wrapping around more than once."
-        # Negative padding should not result in negative sizes
-        assert (
-            padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size >= 0
-        ), "Negative padding value is resulting in an empty dimension."
-
-    # Get shape of padded tensor
-    out_shape = in_shape[:2]
-    for idx, size in enumerate(paddable_shape):
-        out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
-
-    out = input.new_empty(out_shape)
-
-    # Put original array in padded array
-    if ndim == 1:
-        out_d0 = max(padding[-2], 0)
-        out_d1 = out_shape[2] - max(padding[-1], 0)
-
-        in_d0 = max(-padding[-2], 0)
-        in_d1 = in_shape[2] - max(-padding[-1], 0)
-
-        out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
-    elif ndim == 2:
-        out_d0 = max(padding[-2], 0)
-        out_d1 = out_shape[2] - max(padding[-1], 0)
-
-        out_h0 = max(padding[-4], 0)
-        out_h1 = out_shape[3] - max(padding[-3], 0)
-
-        in_d0 = max(-padding[-2], 0)
-        in_d1 = in_shape[2] - max(-padding[-1], 0)
-
-        in_h0 = max(-padding[-4], 0)
-        in_h1 = in_shape[3] - max(-padding[-3], 0)
-
-        out[..., out_d0:out_d1, out_h0:out_h1] = input[..., in_d0:in_d1, in_h0:in_h1]
-    elif ndim == 3:
-        out_d0 = max(padding[-2], 0)
-        out_d1 = out_shape[2] - max(padding[-1], 0)
-
-        out_h0 = max(padding[-4], 0)
-        out_h1 = out_shape[3] - max(padding[-3], 0)
-
-        out_w0 = max(padding[-6], 0)
-        out_w1 = out_shape[4] - max(padding[-5], 0)
-
-        in_d0 = max(-padding[-2], 0)
-        in_d1 = in_shape[2] - max(-padding[-1], 0)
-
-        in_h0 = max(-padding[-4], 0)
-        in_h1 = in_shape[3] - max(-padding[-3], 0)
-
-        in_w0 = max(-padding[-6], 0)
-        in_w1 = in_shape[4] - max(-padding[-5], 0)
-
-        out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
-
-    # The following steps first pad the beginning of the tensor (left side),
-    # and then pad the end of the tensor (right side).
-    # Note: Corners will be written more than once when ndim > 1.
-
-    # Only in cases where padding values are > 0 are when additional copying
-    # is required.
-
-    # Pad first dimension (depth)
-    if padding[-2] > 0:
-        i0 = out_shape[2] - padding[-2] - max(padding[-1], 0)
-        i1 = out_shape[2] - max(padding[-1], 0)
-        o0 = 0
-        o1 = padding[-2]
-        out[:, :, o0:o1] = out[:, :, i0:i1]
-    if padding[-1] > 0:
-        i0 = max(padding[-2], 0)
-        i1 = max(padding[-2], 0) + padding[-1]
-        o0 = out_shape[2] - padding[-1]
-        o1 = out_shape[2]
-        out[:, :, o0:o1] = out[:, :, i0:i1]
-
-    # Pad second dimension (height)
-    if len(padding) > 2:
-        if padding[-4] > 0:
-            i0 = out_shape[3] - padding[-4] - max(padding[-3], 0)
-            i1 = out_shape[3] - max(padding[-3], 0)
-            o0 = 0
-            o1 = padding[-4]
-            out[:, :, :, o0:o1] = out[:, :, :, i0:i1]
-        if padding[-3] > 0:
-            i0 = max(padding[-4], 0)
-            i1 = max(padding[-4], 0) + padding[-3]
-            o0 = out_shape[3] - padding[-3]
-            o1 = out_shape[3]
-            out[:, :, :, o0:o1] = out[:, :, :, i0:i1]
-
-    # Pad third dimension (width)
-    if len(padding) > 4:
-        if padding[-6] > 0:
-            i0 = out_shape[4] - padding[-6] - max(padding[-5], 0)
-            i1 = out_shape[4] - max(padding[-5], 0)
-            o0 = 0
-            o1 = padding[-6]
-            out[:, :, :, :, o0:o1] = out[:, :, :, :, i0:i1]
-        if padding[-5] > 0:
-            i0 = max(padding[-6], 0)
-            i1 = max(padding[-6], 0) + padding[-5]
-            o0 = out_shape[4] - padding[-5]
-            o1 = out_shape[4]
-            out[:, :, :, :, o0:o1] = out[:, :, :, :, i0:i1]
-
-    return out
-
 #
 # multihead attention
 #
@@ -4996,9 +4856,11 @@ def _scaled_dot_product_attention(
     B, Nt, E = q.shape
     q = q / math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    attn = torch.bmm(q, k.transpose(-2, -1))
     if attn_mask is not None:
-        attn += attn_mask
+        attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+    else:
+        attn = torch.bmm(q, k.transpose(-2, -1))
+
     attn = softmax(attn, dim=-1)
     if dropout_p > 0.0:
         attn = dropout(attn, p=dropout_p)
@@ -5060,7 +4922,7 @@ def multi_head_attention_forward(
     value: Tensor,
     embed_dim_to_check: int,
     num_heads: int,
-    in_proj_weight: Tensor,
+    in_proj_weight: Optional[Tensor],
     in_proj_bias: Optional[Tensor],
     bias_k: Optional[Tensor],
     bias_v: Optional[Tensor],
@@ -5139,7 +5001,7 @@ def multi_head_attention_forward(
         - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
           attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
@@ -5170,6 +5032,7 @@ def multi_head_attention_forward(
             v_proj_weight=v_proj_weight,
             static_k=static_k,
             static_v=static_v,
+            average_attn_weights=average_attn_weights,
         )
 
     is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
@@ -5207,6 +5070,7 @@ def multi_head_attention_forward(
     # compute in-projection
     #
     if not use_separate_proj_weight:
+        assert in_proj_weight is not None, "use_separate_proj_weight is False but in_proj_weight is None"
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
         assert q_proj_weight is not None, "use_separate_proj_weight is True but q_proj_weight is None"

@@ -91,7 +91,7 @@ inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
   return (uint64_t)value;
 }
 
-inline bool THPUtils_checkIndex(PyObject *obj) {
+inline bool THPUtils_checkIndex(PyObject* obj) {
   if (PyBool_Check(obj)) {
     return false;
   }
@@ -159,7 +159,7 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   return value;
 }
 
-inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
+inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject* obj) {
   Py_complex value = PyComplex_AsCComplex(obj);
   if (value.real == -1.0 && PyErr_Occurred()) {
     throw python_error();

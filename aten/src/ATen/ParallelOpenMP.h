@@ -15,14 +15,19 @@ namespace at {
 #ifdef _OPENMP
 namespace internal {
 template <typename F>
-inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, const F& f) {
+inline void invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    const F& f) {
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
 
 #pragma omp parallel
   {
     // choose number of tasks based on grain size and number of threads
-    // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
+    // can't use num_threads clause due to bugs in GOMP's thread pool (See
+    // #32008)
     int64_t num_threads = omp_get_num_threads();
     if (grain_size > 0) {
       num_threads = std::min(num_threads, divup((end - begin), grain_size));

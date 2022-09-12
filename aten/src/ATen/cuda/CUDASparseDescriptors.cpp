@@ -9,7 +9,7 @@ namespace at {
 namespace cuda {
 namespace sparse {
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 namespace {
 
@@ -53,12 +53,13 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
-CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
+CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim >= 2);
   auto rows = input_sizes[ndim - 2];
   auto cols = input_sizes[ndim - 1];
 
@@ -79,7 +80,9 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
   auto order = CUSPARSE_ORDER_COL;
 #endif
 
-  void* values_ptr = input.data_ptr();
+  auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
+  void* values_ptr = static_cast<char*>(input.data_ptr()) +
+      batch_offset * batch_stride * input.itemsize();
 
   cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
   check_supported_cuda_type(value_type);
@@ -94,7 +97,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
       value_type,
       order));
 
-  if (ndim == 3) {
+  if (ndim >= 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
     TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
@@ -103,6 +106,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
 
   descriptor_.reset(raw_descriptor);
 }
+#endif // AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 
 CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   // cuSPARSE doesn't support batched vectors
@@ -121,9 +125,9 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   descriptor_.reset(raw_descriptor);
 }
 
-CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
+CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2 || input.dim() == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
 
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
@@ -144,24 +148,37 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
   check_supported_cuda_type(value_type);
 
+  auto crow_indices_batch_stride = crow_indices.dim() >= 2 && batch_offset >= 0
+      ? crow_indices.stride(-2)
+      : 0;
+  auto col_indices_batch_stride =
+      col_indices.dim() >= 2 && batch_offset >= 0 ? col_indices.stride(-2) : 0;
+  auto values_batch_stride =
+      values.dim() >= 2 && batch_offset >= 0 ? values.stride(-2) : 0;
+
   cusparseSpMatDescr_t raw_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
       &raw_descriptor, // output descriptor
       rows,
       cols,
       nnz,
-      crow_indices
-          .data_ptr(), // row offsets of the sparse matrix, size = rows + 1
-      col_indices.data_ptr(), // column indices of the sparse matrix, size = nnz
-      values.data_ptr(), // values of the sparse matrix, size = nnz
+      // row offsets of the sparse matrix, size = rows + 1
+      static_cast<char*>(crow_indices.data_ptr()) +
+          batch_offset * crow_indices_batch_stride * crow_indices.itemsize(),
+      // column indices of the sparse matrix, size = nnz
+      static_cast<char*>(col_indices.data_ptr()) +
+          batch_offset * col_indices_batch_stride * col_indices.itemsize(),
+      // values of the sparse matrix, size = nnz
+      static_cast<char*>(values.data_ptr()) +
+          batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices
       CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
       value_type // data type of values
       ));
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  if (ndim == 3) {
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+  if (ndim == 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
     if (crow_indices.dim() >= 2 || values.dim() >= 2 ||
@@ -189,7 +206,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   descriptor_.reset(raw_descriptor);
 }
 
-#endif // AT_USE_CUSPARSE_GENERIC_API()
+#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace sparse
 } // namespace cuda

@@ -55,7 +55,7 @@ enum class OpType : std::uint8_t {
 TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -149,6 +149,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
     OpType retrieveOpType();
 
+    static c10::intrusive_ptr<Work> create_from_future(
+        c10::intrusive_ptr<c10::ivalue::Future>);
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -203,15 +206,29 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   // Subclasses must override this method to return the backend name
-  virtual const std::string getBackendName() const = 0;
+  virtual const std::string getBackendName() const {
+    TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
+  };
 
+  virtual void startCoalescing() {
+    // no-op for backends that have not implemented startCoalescing
+  }
+
+  virtual void endCoalescing(
+      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& /* reqs */) {
+    // no-op for backends that have not implemented endCoalescing
+  }
+
+  // Consider using ops in Ops.hpp instead of the below, which route things
+  // to the dispatcher.
+  // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support broadcast"));
+            "ProcessGroup ", getBackendName(), " does not support broadcast"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
@@ -220,18 +237,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support allreduce"));
+            "ProcessGroup ", getBackendName(), " does not support allreduce"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
+      const AllreduceCoalescedOptions& /* opts */ =
+          AllreduceCoalescedOptions()) {
     TORCH_CHECK(
         false,
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support allreduce_coalesced"));
+            " does not support allreduce_coalesced"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
@@ -249,7 +267,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support allgather"));
+            "ProcessGroup ", getBackendName(), " does not support allgather"));
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
@@ -265,7 +283,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support _allgather_base"));
+            " does not support _allgather_base"));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -281,7 +299,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support allgather_coalesced"));
+            " does not support allgather_coalesced"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
@@ -290,7 +308,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const GatherOptions& /* opts */ = GatherOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("ProcessGroup ", getBackendName(), "does not support gather"));
+        c10::str(
+            "ProcessGroup ", getBackendName(), " does not support gather"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
@@ -300,7 +319,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support scatter"));
+            "ProcessGroup ", getBackendName(), " does not support scatter"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
@@ -312,7 +331,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support reduce_scatter"));
+            " does not support reduce_scatter"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
@@ -324,7 +343,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support _reduce_scatter_base"));
+            " does not support _reduce_scatter_base"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
@@ -338,7 +357,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support alltoall_base"));
+            " does not support alltoall_base"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
@@ -348,7 +367,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support alltoall"));
+            "ProcessGroup ", getBackendName(), " does not support alltoall"));
   }
 
   virtual void monitoredBarrier(
@@ -395,7 +414,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int /* tag */) {
     TORCH_CHECK(
         false,
-        c10::str("ProcessGroup ", getBackendName(), "does not support send"));
+        c10::str("ProcessGroup ", getBackendName(), " does not support send"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
@@ -404,7 +423,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int /* tag */) {
     TORCH_CHECK(
         false,
-        c10::str("ProcessGroup ", getBackendName(), "does not support recv"));
+        c10::str("ProcessGroup ", getBackendName(), " does not support recv"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
@@ -415,7 +434,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::str(
             "ProcessGroup ",
             getBackendName(),
-            "does not support recvAnysource"));
+            " does not support recvAnysource"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
@@ -423,7 +442,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "ProcessGroup ", getBackendName(), "does not support barrier"));
+            "ProcessGroup ", getBackendName(), " does not support barrier"));
   }
 
  protected:

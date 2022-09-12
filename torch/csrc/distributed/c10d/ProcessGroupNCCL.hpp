@@ -12,7 +12,9 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <c10d/UCCForNCCL.hpp>
 
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
@@ -41,6 +43,10 @@ constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
+
+// TearDown mode: tear down process upon error, see `WorkNCCL::handleNCCLGuard`
+// Soft mode: just clean up collectives and abort communicators without tearing down process
+enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -89,7 +95,8 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
+        bool desyncDebug = false);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -122,7 +129,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     // Helper function used in CUDA Stream callbacks to complete WorkNCCL
     // objects and throw exceptions when neeeded.
-    void handleNCCLGuard();
+    void handleNCCLGuard(ErrorHandlingMode asyncErrorHandling);
 
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
@@ -215,6 +222,28 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
+  class CoalescedWorkNCCL
+      : public ProcessGroup::Work,
+        public std::enable_shared_from_this<CoalescedWorkNCCL> {
+   public:
+    // Constructor takes a list of WorkNCCL works
+    CoalescedWorkNCCL(
+        std::vector<ProcessGroupNCCL::WorkNCCL> works,
+        int rank,
+        OpType opType);
+
+    ~CoalescedWorkNCCL() override;
+
+    // Same as calling synchronize() for NCCL work.
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
+
+   protected:
+    // The cached list of CUDA devices to operate on
+    std::vector<ProcessGroupNCCL::WorkNCCL> works_;
+
+    friend class ProcessGroupNCCL;
+  };
+
   struct Options : ProcessGroup::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -272,9 +301,19 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       return std::string(NCCL_BACKEND_NAME);
   }
 
+  void startCoalescing() override;
+
+  void endCoalescing(
+      std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& reqs) override;
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _broadcast_oop(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const BroadcastOptions& opts = BroadcastOptions());
 
   c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
@@ -288,6 +327,11 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _reduce_oop(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceOptions& opts = ReduceOptions());
 
   c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -367,11 +411,14 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Tests if the UCC fallback path is available
+  bool isUCCAvailable() const;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      OpType opType,
+      bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
 
@@ -394,6 +441,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       OpType opType,
       const char* profilingTitle=nullptr,
       const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+
+  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
+  initCoalescedWork(
+      const std::vector<c10::intrusive_ptr<ProcessGroup::Work>>& works,
+      int rank,
+      OpType opType);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -578,6 +631,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // Device Indexes used for all collectives in this group
   std::set<int> usedDeviceIdxs_;
 
+  // Flag to denote if a coalescing groupStart/groupEnd block is active
+  bool coalescing_active_ = false;
+
+  // Stores device indexes for all collectives run inside a coalescing block
+  std::vector<std::vector<at::Device>> coalescedDevices_;
+
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
   //
@@ -604,7 +663,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
-  bool asyncErrorHandling_ = false;
+  ErrorHandlingMode asyncErrorHandling_ = NoHandling;
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
@@ -622,6 +681,12 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
+
+#ifdef USE_NCCL_WITH_UCC
+  // ProcessGroupUCC shared library handle and ProcessGroup pointer
+  static std::shared_ptr<at::DynamicLibrary> uccLib_;
+  c10::intrusive_ptr<ProcessGroup> uccPG_;
+#endif
 };
 
 } // namespace c10d

@@ -54,6 +54,8 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *-jammy* ]]; then
+  UBUNTU_VERSION=22.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 elif [[ "$image" == *centos* ]]; then
@@ -70,13 +72,20 @@ else
 fi
 
 DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *cuda* ]]; then
+# When using ubuntu - 22.04, start from Ubuntu docker image, instead of nvidia/cuda docker image.
+if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
+if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
+  CMAKE_VERSION=3.13.5
+fi
+
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
+_UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
+_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -84,28 +93,16 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 case "$image" in
   pytorch-linux-xenial-py3.8)
     ANACONDA_PYTHON_VERSION=3.8
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
-  pytorch-linux-xenial-py3.7-gcc5.4)
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
-    GCC_VERSION=5
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-xenial-py3.7-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -115,7 +112,6 @@ case "$image" in
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -127,28 +123,50 @@ case "$image" in
     CUDNN_VERSION=8
     TENSORRT_VERSION=8.0.1.6
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.5.0
+  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
+    TENSORRT_VERSION=8.0.1.6
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.6.2
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    ;;
+  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.7.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.13.5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -156,7 +174,13 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
-    CMAKE_VERSION=3.10.3
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-focal-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -164,7 +188,13 @@ case "$image" in
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=7
-    CMAKE_VERSION=3.10.3
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-focal-py3-clang10-onnx)
+    ANACONDA_PYTHON_VERSION=3.7
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -172,7 +202,6 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.7
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.13.5
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
@@ -182,7 +211,6 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-clang7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
     CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -222,21 +250,48 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm4.3.1-py3.7)
+  pytorch-linux-focal-rocm5.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=4.3.1
+    ROCM_VERSION=5.1.1
     ;;
-  pytorch-linux-bionic-rocm4.5-py3.7)
+  pytorch-linux-focal-rocm5.2-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=4.5.2
+    ROCM_VERSION=5.2
+    ;;
+  pytorch-linux-focal-py3.7-gcc7)
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.16.9  # Required for precompiled header support
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.7
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -244,9 +299,6 @@ case "$image" in
     DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
-    if [[ "$image" == *xenial* ]]; then
-      CMAKE_VERSION=3.10.3
-    fi
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
     fi
@@ -283,6 +335,13 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
+#when using cudnn version 8 install it separately from cuda
+if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
+  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  if [[ ${CUDNN_VERSION} == 8 ]]; then
+    IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  fi
+fi
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -321,6 +380,9 @@ docker build \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
+       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

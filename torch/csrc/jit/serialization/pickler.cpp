@@ -3,11 +3,12 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <aten/src/ATen/quantized/Quantizer.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
+#include <type_traits>
 
 namespace torch {
 namespace jit {
@@ -568,6 +569,14 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 void Pickler::startTypeTag() {
   pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
+namespace {
+c10::optional<std::string> type_printer(const c10::Type& type) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(type_printer);
+  }
+  return c10::nullopt;
+}
+} // namespace
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
@@ -575,11 +584,10 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
+
   auto type = ivalue.type();
-  if (auto dyn = type->castRaw<c10::DynamicType>()) {
-    type = dyn->fallback();
-  }
-  pushString(type->annotation_str());
+  auto annot_str = type->annotation_str(type_printer);
+  pushString(annot_str);
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);
@@ -595,17 +603,18 @@ void Pickler::pushDict(const IValue& ivalue) {
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  if (dict.size() >= 0) {
-    push<PickleOpCode>(PickleOpCode::MARK);
+  static_assert(
+      std::is_unsigned<decltype(dict.size())>::value,
+      "Expected size to be non-negative.");
+  push<PickleOpCode>(PickleOpCode::MARK);
 
-    // Sort the dict for deterministic keys
-    for (const auto& entry : dict) {
-      pushIValue(entry.key());
-      pushIValue(entry.value());
-    }
-
-    push<PickleOpCode>(PickleOpCode::SETITEMS);
+  // Sort the dict for deterministic keys
+  for (const auto& entry : dict) {
+    pushIValue(entry.key());
+    pushIValue(entry.value());
   }
+
+  push<PickleOpCode>(PickleOpCode::SETITEMS);
 
   endTypeTag(ivalue);
 }

@@ -17,37 +17,33 @@ static inline void trim(std::string& s) {
           [](unsigned char ch) { return !std::isspace(ch); })
           .base(),
       s.end());
-  for (int64_t i = 0; i < s.size(); ++i) {
-    if (s[i] == '\n') {
+  for (size_t i = 0; i < s.size(); ++i) {
+    while (i < s.size() && s[i] == '\n') {
       s.erase(i, 1);
-      i--;
     }
   }
-  for (int64_t i = 0; i < s.size(); ++i) {
+  for (size_t i = 0; i < s.size(); ++i) {
     if (s[i] == ' ') {
-      for (int64_t j = i + 1; j < s.size(); j++) {
-        if (s[j] == ' ') {
-          s.erase(j, 1);
-          j--;
-        } else {
-          break;
-        }
+      while (i + 1 < s.size() && s[i + 1] == ' ') {
+        s.erase(i + 1, 1);
       }
     }
   }
 }
 } // namespace
 
-#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)              \
-  try {                                                               \
-    (void)statement;                                                  \
-    FAIL();                                                           \
-  } catch (const std::exception& e) {                                 \
-    std::string substring_s(substring);                               \
-    trim(substring_s);                                                \
-    auto exception_string = std::string(e.what());                    \
-    trim(exception_string);                                           \
-    ASSERT_NE(exception_string.find(substring_s), std::string::npos); \
+#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)             \
+  try {                                                              \
+    (void)statement;                                                 \
+    FAIL();                                                          \
+  } catch (const std::exception& e) {                                \
+    std::string substring_s(substring);                              \
+    trim(substring_s);                                               \
+    auto exception_string = std::string(e.what());                   \
+    trim(exception_string);                                          \
+    ASSERT_NE(exception_string.find(substring_s), std::string::npos) \
+        << " Error was: \n"                                          \
+        << exception_string;                                         \
   }
 
 namespace torch {

@@ -10,7 +10,6 @@
 namespace torch {
 namespace jit {
 
-#if ENABLE_UPGRADERS
 // Basic tests to check if C++ torch::jit::load
 // can load the upgraders fine
 // TODO (tugsuu) add more tests
@@ -39,7 +38,6 @@ TEST(UpgraderLoad, CanPopulateUpgradersGraph) {
   // should have saved with version 4, so it is still up to date
   testing::FileCheck().check_count("aten::div", 1, true)->run(*test_graph);
 }
-#endif
 
 } // namespace jit
 } // namespace torch

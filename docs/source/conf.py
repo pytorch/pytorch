@@ -18,6 +18,7 @@
 #
 import os
 from os import path
+import re
 # import sys
 import pkgutil
 
@@ -95,6 +96,10 @@ coverage_ignore_functions = [
     "check_error",
     "cudart",
     "is_bf16_supported",
+    # torch.cuda._sanitizer
+    "format_log_message",
+    "zip_arguments",
+    "zip_by_key",
     # torch.distributed.autograd
     "is_available",
     # torch.distributed.elastic.events
@@ -133,8 +138,6 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.fx.backend_config
-    "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
@@ -166,6 +169,81 @@ coverage_ignore_classes = [
     "finfo",
     "iinfo",
     "qscheme",
+    "AggregationType",
+    "AliasDb",
+    "AnyType",
+    "Argument",
+    "ArgumentSpec",
+    "BenchmarkConfig",
+    "BenchmarkExecutionStats",
+    "Block",
+    "BoolType",
+    "BufferDict",
+    "CallStack",
+    "Capsule",
+    "ClassType",
+    "Code",
+    "CompleteArgumentSpec",
+    "ComplexType",
+    "ConcreteModuleType",
+    "ConcreteModuleTypeBuilder",
+    "DeepCopyMemoTable",
+    "DeserializationStorageContext",
+    "DeviceObjType",
+    "DictType",
+    "DispatchKey",
+    "DispatchKeySet",
+    "EnumType",
+    "ExcludeDispatchKeyGuard",
+    "ExecutionPlan",
+    "FileCheck",
+    "FloatType",
+    "FunctionSchema",
+    "Gradient",
+    "Graph",
+    "GraphExecutorState",
+    "IODescriptor",
+    "InferredType",
+    "IntType",
+    "InterfaceType",
+    "ListType",
+    "LockingLogger",
+    "MobileOptimizerType",
+    "ModuleDict",
+    "Node",
+    "NoneType",
+    "NoopLogger",
+    "NumberType",
+    "OperatorInfo",
+    "OptionalType",
+    "ParameterDict",
+    "PyObjectType",
+    "PyTorchFileReader",
+    "PyTorchFileWriter",
+    "RRefType",
+    "ScriptClass",
+    "ScriptClassFunction",
+    "ScriptDict",
+    "ScriptDictIterator",
+    "ScriptDictKeyIterator",
+    "ScriptList",
+    "ScriptListIterator",
+    "ScriptMethod",
+    "ScriptModule",
+    "ScriptModuleSerializer",
+    "ScriptObject",
+    "ScriptObjectProperty",
+    "SerializationStorageContext",
+    "StaticModule",
+    "StringType",
+    "SymIntType",
+    "ThroughputBenchmark",
+    "TracingState",
+    "TupleType",
+    "Type",
+    "UnionType",
+    "Use",
+    "Value",
     # torch.cuda
     "BFloat16Storage",
     "BFloat16Tensor",
@@ -192,6 +270,15 @@ coverage_ignore_classes = [
     "ShortStorage",
     "ShortTensor",
     "cudaStatus",
+    # torch.cuda._sanitizer
+    "Access",
+    "AccessType",
+    "CUDASanitizer",
+    "CUDASanitizerDispatchMode",
+    "CUDASanitizerErrors",
+    "EventHandler",
+    "SynchronizationError",
+    "UnsynchronizedAccessError",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -243,11 +330,13 @@ coverage_ignore_classes = [
     "DDPCommHookType",
     # torch.jit.mobile
     "LiteScriptModule",
-    # torch.nn.quantized.modules
+    # torch.ao.nn.quantized.modules
     "DeQuantize",
     "Quantize",
     # torch.utils.backcompat
     "Warning",
+    "SymIntNode",
+    "SymFloatNode",
 ]
 
 # The suffix(es) of source filenames.
@@ -261,8 +350,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2019, Torch Contributors'
-author = 'Torch Contributors'
+copyright = '2022, PyTorch Contributors'
+author = 'PyTorch Contributors'
 torch_version = str(torch.__version__)
 
 # The version info for the project you're documenting, acts as replacement for
@@ -291,7 +380,7 @@ if RELEASE:
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -418,6 +507,51 @@ def coverage_post_process(app, exception):
             for o in output:
                 f.write(o)
 
+
+def process_docstring(app, what_, name, obj, options, lines):
+    """
+    Custom process to transform docstring lines Remove "Ignore" blocks
+
+    Args:
+        app (sphinx.application.Sphinx): the Sphinx application object
+
+        what (str):
+            the type of the object which the docstring belongs to (one of
+            "module", "class", "exception", "function", "method", "attribute")
+
+        name (str): the fully qualified name of the object
+
+        obj: the object itself
+
+        options: the options given to the directive: an object with
+            attributes inherited_members, undoc_members, show_inheritance
+            and noindex that are true if the flag option of same name was
+            given to the auto directive
+
+        lines (List[str]): the lines of the docstring, see above
+
+    References:
+        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
+        https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
+    """
+    import re
+    remove_directives = [
+        # Remove all xdoctest directives
+        re.compile(r'\s*>>>\s*#\s*x?doctest:\s*.*'),
+        re.compile(r'\s*>>>\s*#\s*x?doc:\s*.*'),
+    ]
+    filtered_lines = [
+        line for line in lines
+        if not any(pat.match(line) for pat in remove_directives)
+    ]
+    # Modify the lines inplace
+    lines[:] = filtered_lines
+
+    # make sure there is a blank line at the end
+    if lines and lines[-1].strip():
+        lines.append('')
+
+
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 def setup(app):
     # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
@@ -434,6 +568,7 @@ def setup(app):
         add_css(css_file)
 
     app.connect("build-finished", coverage_post_process)
+    app.connect('autodoc-process-docstring', process_docstring)
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and
 # functions. This breaks older references since
@@ -569,12 +704,12 @@ def patched_make_field(self, types, domain, items, **kw):
             # inconsistencies later when references are resolved
             fieldtype = types.pop(fieldarg)
             if len(fieldtype) == 1 and isinstance(fieldtype[0], nodes.Text):
-                typename = u''.join(n.astext() for n in fieldtype)
-                typename = typename.replace('int', 'python:int')
-                typename = typename.replace('long', 'python:long')
-                typename = typename.replace('float', 'python:float')
-                typename = typename.replace('bool', 'python:bool')
-                typename = typename.replace('type', 'python:type')
+                typename = fieldtype[0].astext()
+                builtin_types = ['int', 'long', 'float', 'bool', 'type']
+                for builtin_type in builtin_types:
+                    pattern = fr'(?<![\w.]){builtin_type}(?![\w.])'
+                    repl = f'python:{builtin_type}'
+                    typename = re.sub(pattern, repl, typename)
                 par.extend(self.make_xrefs(self.typerolename, domain, typename,
                                            addnodes.literal_emphasis, **kw))
             else:
