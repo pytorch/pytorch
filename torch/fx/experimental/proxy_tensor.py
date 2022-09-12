@@ -529,44 +529,29 @@ a bug if you need this)""")
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
+        fake_tensor_mode = {"real": nullcontext(),
+                            "fake": FakeTensorMode(allow_fallback_kernels=True),
+                            "symbolic": FakeTensorMode(allow_fallback_kernels=False)}[tracing_mode]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode: Any = nullcontext()
-        if tracing_mode == "real":
-            fake_tensor_mode = nullcontext()
-        elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
-        elif tracing_mode == "symbolic":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-        else:
-            raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
-
         proxy_mode = ProxyTorchDispatchMode(fx_tracer, trace_factory_functions=trace_factory_functions)
 
         def wrap_fake_concrete(x):
-            if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
-
-            return x
-
-        shape_env = ShapeEnv()
+            return fake_tensor_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x  # type: ignore[attr-defined]
 
         # todo: Figure out a more informative name for symints
         def wrap_fake_symbolic(x, sym_shape):
-            if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device)
-                return val
-            return x
+            return FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta"), x.device) if isinstance(x, torch.Tensor) else x
 
-        wrap_fn_map = {
-            "real": lambda x: x,
-            "fake": wrap_fake_concrete,
-        }
+        shape_env = ShapeEnv()
         if tracing_mode == "symbolic":
             flat_shapes = shape_env.create_shapes_for_args(args)
             flat_args, spec = pytree.tree_flatten(args)
             args = pytree.tree_unflatten(list(map(lambda a: wrap_fake_symbolic(a[0], a[1]), zip(flat_args, flat_shapes))), spec)
         else:
-            args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
+            args = pytree.tree_map({
+                "real": lambda x: x,
+                "fake": wrap_fake_concrete,
+            }[tracing_mode], args)
 
         with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(f, args, proxy_mode), tracer=fx_tracer, concrete_args=tuple(phs))
