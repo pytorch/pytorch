@@ -115,7 +115,7 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
 
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
