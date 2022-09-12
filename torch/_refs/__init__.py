@@ -268,7 +268,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-DispatchKey = torch._C.DispatchKey # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _broadcast_shapes(*_shapes):

@@ -344,7 +344,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(py::init<>());
   py::class_<EnablePythonDispatcher>(_C_m, "_EnablePythonDispatcher")
       .def(py::init<>());
-  py::class_<c10::impl::DisablePythonDispatcher>(_C_m, "_DisablePythonDispatcher")
+  py::class_<c10::impl::DisablePythonDispatcher>(
+      _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
   _C_m.def("_set_python_dispatcher", [](py::object dispatcher) {
     TORCH_CHECK(

@@ -136,8 +136,8 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
-    "to",           
-    "_to_copy",     
+    "to",
+    "_to_copy",
     "copy_",
 ]
 
