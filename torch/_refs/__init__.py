@@ -2384,6 +2384,7 @@ def expand(a: Tensor, *shape) -> Tensor:
     )
 
 
+# CompositeImplicitAutograd - don't register decomp
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
@@ -2565,6 +2566,45 @@ def native_layer_norm(
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+# Get the new shape and stride after applying unfold to an input tensor
+def _get_unfold_copy_shape_stride(
+    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
+):
+    a_ndim = len(a_shape)
+    dimension = utils.canonicalize_dim(a_ndim, dimension)
+    max_size = 1 if a_ndim == 0 else a_shape[dimension]
+    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
+
+    utils.check(
+        size <= max_size,
+        lambda: "Maximum size for tensor at dimension "
+        + str(dimension)
+        + " is "
+        + str(max_size)
+        + " but size is "
+        + str(size),
+    )
+
+    utils.check(
+        step > 0,
+        lambda: "Step is " + str(step) + " but must be > 0",
+    )
+
+    new_size = []
+    new_stride = []
+
+    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
+        if d == dimension:
+            new_size.append((dim_size - size) // step + 1)
+            new_stride.append(step * dim_stride)
+        else:
+            new_size.append(dim_size)
+            new_stride.append(dim_stride)
+    new_size.append(size)
+    new_stride.append(last_stride)
+    return new_size, new_stride
 
 
 @register_decomposition(torch.ops.aten.repeat)
@@ -3228,44 +3268,6 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 
 # Aliases for transpose
 swap_axes = transpose
-
-
-def _get_unfold_copy_shape_stride(
-    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
-):
-    a_ndim = len(a_shape)
-    dimension = utils.canonicalize_dim(a_ndim, dimension)
-    max_size = 1 if a_ndim == 0 else a_shape[dimension]
-    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
-
-    utils.check(
-        size <= max_size,
-        lambda: "Maximum size for tensor at dimension "
-        + str(dimension)
-        + " is "
-        + str(max_size)
-        + " but size is "
-        + str(size),
-    )
-
-    utils.check(
-        step > 0,
-        lambda: "Step is " + str(step) + " but must be > 0",
-    )
-
-    new_size = []
-    new_stride = []
-
-    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
-        if d == dimension:
-            new_size.append((dim_size - size) // step + 1)
-            new_stride.append(step * dim_stride)
-        else:
-            new_size.append(dim_size)
-            new_stride.append(dim_stride)
-    new_size.append(size)
-    new_stride.append(last_stride)
-    return new_size, new_stride
 
 
 @register_decomposition(torch.ops.aten.unfold_copy)
