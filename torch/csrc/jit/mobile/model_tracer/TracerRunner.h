@@ -28,7 +28,15 @@ struct TracerResult {
   std::set<std::string> enabled_backends;
 };
 
+
+/**
+ * Trace a single model and return the TracerResult.
+ */
 TracerResult trace_run(const std::string& input_module_path);
+
+/**
+ * Trace multiple models and return the TracerResult.
+ */
 TracerResult trace_run(const std::vector<std::string>& input_module_paths);
 
 } // namespace mobile

@@ -267,7 +267,7 @@ void run_model(
 }
 
 TracerResult trace_run(const std::string& input_module_path) {
-  return trace_run(std::vector<std::string>({input_module_path}));
+  return trace_run(std::vector<std::string>(1, input_module_path));
 }
 
 TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
