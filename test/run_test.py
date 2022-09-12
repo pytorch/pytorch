@@ -672,6 +672,7 @@ def run_doctests(test_module, test_directory, options):
         'qengine': 0,
         'autograd_profiler': 0,
         'cpp_ext': 0,
+        'monitor': 0,
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -714,6 +715,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['cpp_ext']:
         os.environ['TORCH_DOCTEST_CPP_EXT'] = '1'
 
+    if enabled['monitor']:
+        os.environ['TORCH_DOCTEST_MONITOR'] = '1'
+
     if 0:
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
         os.environ['TORCH_DOCTEST_ANOMOLY'] = '1'
@@ -738,8 +742,8 @@ def run_doctests(test_module, test_directory, options):
     # pkgpath = os.path.join(pkgpath, 'cuda')
     # pkgpath = os.path.join(pkgpath, 'distributed')
     # pkgpath = os.path.join(pkgpath, 'fx')
-    pkgpath = os.path.join(pkgpath, 'monitor')
-    # pkgpath = os.path.join(pkgpath, 'futures')
+    # pkgpath = os.path.join(pkgpath, 'monitor')
+    pkgpath = os.path.join(pkgpath, 'futures')
     # pkgpath = pkgpath
 
     xdoctest_config = {
