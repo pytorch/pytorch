@@ -508,7 +508,7 @@ def _device_count_nvml() -> int:
     except AttributeError:
         return -1
 
-@_lru_cache
+@_lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if not _is_compiled():
