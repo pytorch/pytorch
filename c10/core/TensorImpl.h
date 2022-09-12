@@ -769,7 +769,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     // TODO: handle symbolic shapes correctly
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
     if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
     } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
