@@ -308,7 +308,7 @@ at::Tensor LazyNativeFunctions::empty_strided(
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t = empty_symint(
-      c10::SymIntArrayRef::fromIntArrayRef(size),
+      c10::fromIntArrayRef(size),
       dtype,
       layout,
       device,
@@ -410,7 +410,7 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   return LazyNativeFunctions::view_copy_symint(
-      self, c10::SymIntArrayRef::fromIntArrayRef(size));
+      self, c10::fromIntArrayRef(size));
 }
 
 // This is needed by the torch.tensor constructor.
