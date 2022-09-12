@@ -461,7 +461,7 @@ def set_stream(stream: Stream):
         return
     torch._C._cuda_setStream(stream._cdata)
 
-@_lru_cache
+@_lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if not _is_compiled():
