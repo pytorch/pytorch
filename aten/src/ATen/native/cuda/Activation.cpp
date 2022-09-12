@@ -90,7 +90,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, T
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
   auto result = at::empty_like(input);
-  auto buffer = at::empty({0}, input.options());
+  auto buffer = at::empty_like(input);
   log_sigmoid_forward_out_cuda(input, result, buffer);
   return std::forward_as_tuple(result, buffer);
 }
