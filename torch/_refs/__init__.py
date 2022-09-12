@@ -1678,7 +1678,7 @@ def _to_will_alias(
 
 def _to_dispatch(
     a: TensorLikeType,
-    *args,
+    args,
     *,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
@@ -1688,55 +1688,55 @@ def _to_dispatch(
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
 ):
-    arg0, *arg = arg if arg else [None, ]
-    if isinstance(arg0, TensorLike):
+    args0, *args = args if args else [None, ]
+    if isinstance(args0, TensorLike):
         # overload to `to.other`
-        device = arg0.device
-        dtype = arg0.dtype
-        layout = arg0.layout
-        pin_memory = arg0.pin_memory
-        # load positional arguments:
-        if arg:
+        device = args0.device
+        dtype = args0.dtype
+        layout = args0.layout
+        pin_memory = args0.pin_memory
+        # load positional argsuments:
+        if args:
             assert non_blocking is None
-            non_blocking, *arg = arg
-        if arg:
+            non_blocking, *args = args
+        if args:
             assert copy is None
-            copy, *arg = arg
-        if arg:
+            copy, *args = args
+        if args:
             assert memory_format is None
-            memory_format, *arg = arg
-    elif isinstance(arg0, torch.dtype):
+            memory_format, *args = args
+    elif isinstance(args0, torch.dtype):
         # overload to `to.dtype`
-        dtype = arg0
-        if arg:
+        dtype = args0
+        if args:
             assert non_blocking is None
-            non_blocking, *arg = arg
-        if arg:
+            non_blocking, *args = args
+        if args:
             assert copy is None
-            copy, *arg = arg
-        if arg:
+            copy, *args = args
+        if args:
             assert memory_format is None
-            memory_format, *arg = arg
-    elif isinstance(arg0, torch.device):
+            memory_format, *args = args
+    elif isinstance(args0, torch.device):
         # overload to `to.device`
-        device = arg0
-        if arg:
+        device = args0
+        if args:
             assert dtype is None
-            dtype, *arg = arg
-        if arg:
+            dtype, *args = args
+        if args:
             assert non_blocking is None
-            non_blocking, *arg = arg
-        if arg:
+            non_blocking, *args = args
+        if args:
             assert copy is None
-            copy, *arg = arg
-        if arg:
+            copy, *args = args
+        if args:
             assert memory_format is None
-            memory_format, *arg = arg
+            memory_format, *args = args
     else:
-        # overload to `to.dtype_layout` takes no positional args
-        assert arg0 is None
-    # assert that we have processed all positional argument
-    assert not arg
+        # overload to `to.dtype_layout` takes no positional argss
+        assert args0 is None
+    # assert that we have processed all positional argsument
+    assert not args
     return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
 
 
@@ -1746,7 +1746,7 @@ def to(
     **kwargs
 ) -> TensorLikeType:
     device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(
-        a, *args, **kwargs
+        a, args, **kwargs
     )
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
