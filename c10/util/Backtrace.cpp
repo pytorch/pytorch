@@ -230,12 +230,13 @@ class SymbolHelper {
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
-// converts a function's address in memory to its VMA address in the executable file. VMA is what addr2line expects
+// converts a function's address in memory to its VMA address in the executable
+// file. VMA is what addr2line expects
 size_t ConvertToVMA(size_t addr) {
   Dl_info info;
   link_map* link_map;
   dladdr1((void*)addr, &info, (void**)&link_map, RTLD_DL_LINKMAP);
-  return addr-link_map->l_addr;
+  return addr - link_map->l_addr;
 }
 
 std::string exec(const char* cmd) {
@@ -251,8 +252,7 @@ std::string exec(const char* cmd) {
   return result;
 }
 
-std::string rstrip(const std::string &s)
-{
+std::string rstrip(const std::string& s) {
   const std::string WHITESPACE = " \n\r\t\f\v";
   size_t end = s.find_last_not_of(WHITESPACE);
   return (end == std::string::npos) ? "" : s.substr(0, end + 1);
@@ -336,8 +336,15 @@ std::string get_backtrace(
       if (dladdr(callstack[frame_number], &info)) {
         char command[256];
         size_t VMA_addr = ConvertToVMA((size_t)callstack[frame_number]);
-        VMA_addr-=1;    // https://stackoverflow.com/questions/11579509/wrong-line-numbers-from-addr2line/63841497#63841497
-        snprintf(command, sizeof(command), "addr2line -e %s -C %zx", info.dli_fname, VMA_addr);
+        // Need to decrease the VMA address by 1 to get the correct line number
+        // https://stackoverflow.com/questions/11579509/wrong-line-numbers-from-addr2line/63841497#63841497
+        VMA_addr -= 1;
+        snprintf(
+            command,
+            sizeof(command),
+            "addr2line -e %s -C %zx",
+            info.dli_fname,
+            VMA_addr);
 
         filename_lineno = exec(command);
         filename_lineno = rstrip(filename_lineno);
@@ -351,14 +358,13 @@ std::string get_backtrace(
       if (filename_lineno.empty()) {
         // <function_name> + <offset> (<return-address> in <object-file>)
         stream << frame->function_name << " + " << frame->offset_into_function
-              << " (" << callstack[frame_number] << " in " << frame->object_file
-              << ")\n";
+               << " (" << callstack[frame_number] << " in "
+               << frame->object_file << ")\n";
 
       } else {
         // <function_name> (<return-address> in <filename>:<line-number>)
-        stream << frame->function_name
-              << " (" << callstack[frame_number] << " in " << filename_lineno
-              << ")\n";
+        stream << frame->function_name << " (" << callstack[frame_number]
+               << " in " << filename_lineno << ")\n";
       }
     } else {
       // In the edge-case where we couldn't parse the frame string, we can
