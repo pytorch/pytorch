@@ -1771,7 +1771,7 @@ def to(
         layout=layout,
         device=device,
         requires_grad=a.requires_grad,
-        pin_memory=pin_memory
+        pin_memory=pin_memory,
         memory_format=memory_format,
     )
     # TODO: copy_to should support non_blocking
