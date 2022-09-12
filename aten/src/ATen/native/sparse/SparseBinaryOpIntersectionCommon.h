@@ -504,7 +504,7 @@ void _sparse_binary_op_intersection_kernel_out(
   const auto is_max_offset_32bits = (x._nnz() * y._nnz()) <= std::numeric_limits<int>::max();
 
   BOOL_TO_INDEX_TYPE3(is_32bit_indexing, is_max_hash_32bits, is_max_offset_32bits, [&]() {
-      // Given 3 booleans b1, b2, b3, index_t<i> is defined as
+      // Given 3 booleans b0, b1, b2, index_t<i> is defined as
       // index_t<i> = int32_t if b<2 - i> is true else int64_t.
       // The goal is to use int32_t whenever possible for better
       // performance.
