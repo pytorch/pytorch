@@ -862,6 +862,9 @@ void initJITBindings(PyObject* module) {
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#else
+      .def("_jit_set_llga_enabled", [](bool flag) { return false; })
+      .def("_jit_llga_enabled", []() { return false; })
 #endif
       .def(
           "_jit_set_tracer_state_warn",
