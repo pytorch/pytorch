@@ -723,7 +723,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         functions_with_cpp_meta_impl_that_support_symint = [
             aten.empty_strided.default,
-            aten.empty.memory_format,
             aten.as_strided.default,
             aten.zeros.default,
             aten.clone.default,
