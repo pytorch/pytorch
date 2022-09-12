@@ -661,7 +661,7 @@ def run_doctests(test_module, test_directory, options):
 
     enabled = {
         # TODO: expose these options to the user
-        # Temporary disable all feature-conditional tests
+        # For now disable all feature-conditional tests
         # 'lapack': 'auto',
         # 'cuda': 'auto',
         # 'cuda1': 'auto',
@@ -719,6 +719,7 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_MONITOR'] = '1'
 
     if 0:
+        # TODO: could try to enable some of these
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
         os.environ['TORCH_DOCTEST_ANOMOLY'] = '1'
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
@@ -728,23 +729,6 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
-
-    # Hack: Only do a small subset of the doctests to try to avoid CI errors.
-    # pkgpath = os.path.join(pkgpath, 'utils')
-    # pkgpath = os.path.join(pkgpath, 'nn')
-    # pkgpath = os.path.join(pkgpath, 'ao')
-    # pkgpath = os.path.join(pkgpath, 'autograd')
-    # pkgpath = os.path.join(pkgpath, 'jit')
-    # pkgpath = os.path.join(pkgpath, 'distributions')
-    # pkgpath = os.path.join(pkgpath, 'masked')  # might have issues, unclear
-
-    # pkgpath = os.path.join(pkgpath, 'optim')
-    # pkgpath = os.path.join(pkgpath, 'cuda')
-    # pkgpath = os.path.join(pkgpath, 'distributed')
-    # pkgpath = os.path.join(pkgpath, 'fx')
-    # pkgpath = os.path.join(pkgpath, 'monitor')
-    # pkgpath = os.path.join(pkgpath, 'futures')
-    pkgpath = pkgpath
 
     xdoctest_config = {
         'global_exec': r'\n'.join([
