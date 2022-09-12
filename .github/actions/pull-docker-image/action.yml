@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Pull Docker image
+    - name: Pull Docker image test
       shell: bash
       env:
         DOCKER_IMAGE: ${{ inputs.docker-image }}
