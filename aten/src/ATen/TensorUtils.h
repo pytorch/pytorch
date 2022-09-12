@@ -162,5 +162,10 @@ TORCH_API c10::optional<DimVector> computeStride(
     IntArrayRef oldstride,
     const DimVector& newshape);
 
+TORCH_API c10::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape);
+
 } // namespace detail
 } // namespace at
