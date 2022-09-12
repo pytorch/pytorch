@@ -223,6 +223,8 @@ class _OpNamespace(types.ModuleType):
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
+        elif op_name == "__origin__":
+            raise AttributeError()
 
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
