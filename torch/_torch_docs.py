@@ -8081,7 +8081,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (int): the starting offset
     length (int): the distance to the ending dimension
 
 Example::
@@ -8104,14 +8104,12 @@ narrow_copy(input, dim, start, length, *, out=None) -> Tensor
 
 Same as :meth:`Tensor.narrow` except returning a copy rather
 than shared storage.  This is primarily for sparse tensors, which
-do not have a shared-storage narrow method.  Calling ``narrow_copy``
-with ``dimemsion > self.sparse_dim()`` will return a copy with the
-relevant dimension narrowed, and ``self.shape`` updated accordingly.
+do not have a shared-storage narrow method.
 
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (int): the starting offset
     length (int): the distance to the ending dimension
 
 Keyword args:
