@@ -526,7 +526,6 @@ class TestOperators(TestCase):
         xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("cumprod"),  # calls item
         xfail("double"),  # rank 4 tensor for channels_last
-        xfail("eig"),  # calls item
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
         # It looks like you're either (1) calling .item() on a Tensor or
@@ -688,11 +687,11 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
         xfail('_masked.prod'),  # calls aten::item
-        xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
+        xfail('narrow'),  # .item() call
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
@@ -923,9 +922,9 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('eig'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
@@ -1047,6 +1046,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
@@ -1142,7 +1142,6 @@ class TestOperators(TestCase):
         xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
-        xfail('eig', ''),  # NYI: forward-AD for eig
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
