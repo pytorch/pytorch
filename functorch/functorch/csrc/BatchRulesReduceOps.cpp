@@ -70,14 +70,14 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
 
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
   if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }
@@ -168,7 +168,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 #define REDUCTION_BOXED_ARGS(op, dim_pos) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_reduction_batch_rule<dim_pos>>());
 
-// Skipping all/any since they don't have opinfo tests right now :P
+// Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
 Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
   return at::norm((self - other), p);
@@ -368,7 +368,7 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(searchsorted, Tensor, searchsorted_batch_rule);
   REDUCTION_BOXED(_fft_r2c);
   REDUCTION_BOXED(_fft_c2r);
@@ -387,7 +387,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2);
-  REDUCTION_BOXED_ARGS(linalg_matrix_norm, 2);
   REDUCTION_BOXED(log_softmax.int);
   REDUCTION_BOXED(logcumsumexp);
   REDUCTION_BOXED(logsumexp);
