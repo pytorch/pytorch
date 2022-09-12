@@ -41,6 +41,12 @@ provide a programmatic means of determining the best one for your
 particular application. Of course you are always welcome to ask for
 help in our Discussion forum https://dev-discuss.pytorch.org/.
 
+Further, when talking about storing only non-zero elements of a sparse
+array, the usage of adjective "non-zero" is not strict: one is
+allowed to store also zeros in the sparse array data
+structure. Hence, in the following, we use "specified elements" for
+those array elements that are actually stored.
+
 Overview
 ++++++++
 
@@ -64,17 +70,38 @@ given dense Tensor by providing conversion routines for each layout.
 PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
 :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
 
-Note that we provide slight generalizations of these formats with support. Devices such as
-GPUs require batching for optimal performance and thus we support batch dimensions.
-Some data such as Graph embeddings might be better viewed as sparse collections of vectors
-instead of scalars and thus we provide dense dimensions. Please see the documentation
-for each storage format for details.
+Note that we provide slight generalizations of these formats with support.
 
-Further, when talking about storing only non-zero elements of a sparse
-array, the usage of adjective "non-zero" is not strict: one is
-allowed to store also zeros in the sparse array data
-structure. Hence, in the following, we use "specified elements" for
-those array elements that are actually stored.
+Devices such as GPUs require batching for optimal performance and thus we support
+batch dimensions.
+
+    >>> t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]])
+    >>> t.dim()
+    3
+    >>> t.to_sparse_csr()
+    tensor(crow_indices=tensor([[0, 1, 3],
+                                [0, 1, 3]]),
+           col_indices=tensor([[0, 0, 1],
+                               [0, 0, 1]]),
+           values=tensor([[1., 2., 3.],
+                          [4., 5., 6.]]), size=(2, 2, 2), nnz=3,
+           layout=torch.sparse_csr)
+
+We currently offer a very simple version of batching, where each component of a sparse format
+itself is batched. This also requires the same number of specified elements per batch entry.
+Please see the references for more details.
+
+On the other hand, some data such as Graph embeddings might be better viewed as sparse
+collections of vectors instead of scalars and thus we provide dense dimensions.
+
+    >>> t = torch.tensor([[[0., 0], [1., 2.]], [[0., 0], [3., 4.]]])
+    >>> t.to_sparse(sparse_dim=2)
+    tensor(indices=tensor([[0, 1],
+                           [1, 1]]),
+           values=tensor([[1., 2.],
+                          [3., 4.]]),
+           size=(2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
 
 Fundamentally, operations on Tensor with sparse storage formats behave the same as
 operations on Tensor with strided (or other) storage formats. The particularities of
