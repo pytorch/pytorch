@@ -25,6 +25,8 @@
 #endif
 #endif
 
+#include <link.h>
+
 #ifdef FBCODE_CAFFE2
 #include <common/process/StackTrace.h>
 #endif
@@ -228,6 +230,34 @@ class SymbolHelper {
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
+// converts a function's address in memory to its VMA address in the executable file. VMA is what addr2line expects
+size_t ConvertToVMA(size_t addr) {
+  Dl_info info;
+  link_map* link_map;
+  dladdr1((void*)addr, &info, (void**)&link_map, RTLD_DL_LINKMAP);
+  return addr-link_map->l_addr;
+}
+
+std::string exec(const char* cmd) {
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+  while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    result += buffer.data();
+  }
+  return result;
+}
+
+std::string rstrip(const std::string &s)
+{
+  const std::string WHITESPACE = " \n\r\t\f\v";
+  size_t end = s.find_last_not_of(WHITESPACE);
+  return (end == std::string::npos) ? "" : s.substr(0, end + 1);
+}
+
 std::string get_backtrace(
     size_t frames_to_skip,
     size_t maximum_number_of_frames,
@@ -282,10 +312,17 @@ std::string get_backtrace(
   // Toggles to true after the first skipped python frame.
   bool has_skipped_python_frames = false;
 
+  bool has_addr2line = true;
+  if (system("which addr2line > /dev/null 2>&1")) {
+    // addr2line command doesn't exist
+    has_addr2line = false;
+  }
+
   for (const auto frame_number : c10::irange(callstack.size())) {
     const auto frame = parse_frame_information(symbols[frame_number]);
 
-    if (skip_python_frames && frame && is_python_frame(*frame)) {
+    bool _is_python_frame = is_python_frame(*frame);
+    if (skip_python_frames && frame && _is_python_frame) {
       if (!has_skipped_python_frames) {
         stream << "<omitting python frames>\n";
         has_skipped_python_frames = true;
@@ -293,14 +330,36 @@ std::string get_backtrace(
       continue;
     }
 
+    std::string filename_lineno;
+    if (has_addr2line && !_is_python_frame) {
+      Dl_info info;
+      if (dladdr(callstack[frame_number], &info)) {
+        char command[256];
+        size_t VMA_addr = ConvertToVMA((size_t)callstack[frame_number]);
+        VMA_addr-=1;    // https://stackoverflow.com/questions/11579509/wrong-line-numbers-from-addr2line/63841497#63841497
+        snprintf(command, sizeof(command), "addr2line -e %s -C %zx", info.dli_fname, VMA_addr);
+
+        filename_lineno = exec(command);
+        filename_lineno = rstrip(filename_lineno);
+      }
+    }
+
     // frame #<number>:
     stream << "frame #" << frame_number << ": ";
 
     if (frame) {
-      // <function_name> + <offset> (<return-address> in <object-file>)
-      stream << frame->function_name << " + " << frame->offset_into_function
-             << " (" << callstack[frame_number] << " in " << frame->object_file
-             << ")\n";
+      if (filename_lineno.empty()) {
+        // <function_name> + <offset> (<return-address> in <object-file>)
+        stream << frame->function_name << " + " << frame->offset_into_function
+              << " (" << callstack[frame_number] << " in " << frame->object_file
+              << ")\n";
+
+      } else {
+        // <function_name> (<return-address> in <filename>:<line-number>)
+        stream << frame->function_name
+              << " (" << callstack[frame_number] << " in " << filename_lineno
+              << ")\n";
+      }
     } else {
       // In the edge-case where we couldn't parse the frame string, we can
       // just use it directly (it may have a different format).
