@@ -1745,7 +1745,7 @@ def to(
     **kwargs
 ) -> TensorLikeType:
     device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(
-        a, args, **kwargs
+        a, *args, **kwargs
     )
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
