@@ -31,8 +31,8 @@
 #include <cmath>
 #include <ATen/native/transformers/cuda/flash_attn/philox.cuh>
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
-#include <third_party/cutlass/include/cutlass/array.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/array.h>
 
 namespace fmha {
 
