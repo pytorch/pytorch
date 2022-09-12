@@ -168,14 +168,14 @@ class TestPrims(TestCase):
 
         # like func5 but a1_sin is not returned
         # and second copy_ is ignored for some reason
-        def func6(a, b):
+        def func(a, b):
             b_sin = b.sin()
             a1 = a.copy_(b_sin)
             a1_sin = a1.sin()
             a2 = a1.copy_(a1_sin)
             return (a2, b_sin)
 
-        for func in (func6,):
+        for func in (func,):
             a = torch.empty(3, 3, device=device, dtype=dtype)
             b = torch.randn(3, 3, device=device, dtype=dtype)
 
