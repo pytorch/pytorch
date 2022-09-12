@@ -6,6 +6,7 @@ import sys
 from typing import Any, List
 
 import torch
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -599,6 +600,7 @@ class TestWith(JitTestCase):
 
         self.assertFalse(w.requires_grad)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     def test_with_record_function(self):
         """
         Check that torch.autograd.profiler.record_function context manager is

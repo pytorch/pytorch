@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 import torch
 import torch.nn as nn
@@ -16,9 +16,12 @@ from torch.ao.quantization.fake_quantize import (
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
     default_embedding_fake_quant_4bit,
+    fused_wt_fake_quant_range_neg_127_to_127,
+    fused_per_channel_wt_fake_quant_range_neg_127_to_127,
 )
 
 from .observer import (
+    _PartialWrapper,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -32,10 +35,51 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    weight_observer_range_neg_127_to_127,
+    per_channel_weight_observer_range_neg_127_to_127,
     default_reuse_input_observer,
+    ObserverBase,
 )
 import warnings
+import copy
 
+__all__ = [
+    "QConfig",
+    # TODO: deprecated, remove
+    "QConfigDynamic",
+    "default_qconfig",
+    "default_debug_qconfig",
+    "default_per_channel_qconfig",
+    "default_dynamic_qconfig",
+    "float16_dynamic_qconfig",
+    "float16_static_qconfig",
+    "per_channel_dynamic_qconfig",
+    "float_qparams_weight_only_qconfig",
+    "float_qparams_weight_only_qconfig_4bit",
+    "default_qat_qconfig",
+    "default_dynamic_qat_qconfig",
+    "default_weight_only_qconfig",
+    "default_activation_only_qconfig",
+    "default_qat_qconfig_v2",
+    "default_reuse_input_qconfig",
+    "default_symmetric_qnnpack_qconfig",
+    "default_per_channel_symmetric_qnnpack_qconfig",
+    "default_symmetric_qnnpack_qat_qconfig",
+    "default_per_channel_symmetric_qnnpack_qat_qconfig",
+    "default_embedding_qat_qconfig",
+    "default_embedding_qat_qconfig_4bit",
+    "get_default_qconfig",
+    "get_default_qat_qconfig",
+    "get_default_qconfig_dict",
+    "get_default_qat_qconfig_dict",
+    "assert_valid_qconfig",
+    "add_module_to_qconfig_obs_ctr",
+    "QConfigAny",
+    "obs_or_fq_ctr_equals",
+    "qconfig_equals",
+    "activation_is_memoryless",
+    "is_reuse_input_qconfig",
+]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -113,7 +157,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32, compute_dtype=torch.float16),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -184,8 +228,8 @@ def get_default_qconfig(backend='fbgemm', version=0):
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`
-        and `qnnpack`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack` and `onednn`.
 
     Return:
         qconfig
@@ -197,6 +241,9 @@ def get_default_qconfig(backend='fbgemm', version=0):
         elif backend == 'qnnpack':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
+                              weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
     else:
@@ -204,6 +251,42 @@ def get_default_qconfig(backend='fbgemm', version=0):
                              " in get_default_qconfig is not supported. Version number must be 0")
 
     return qconfig
+
+"""
+Default, symmetric PTQ qconfig for the specified backend. And a per_channel
+variant of the same.
+
+Symmetric here applies to signed weights with zero point = 0, and additional
+value restrictions. The activations are also signed 8-bit integers with this
+qconfig.
+
+    * Once this change is merged [as of 3/17/22], with backend or qengine =
+    'qnnpack', some quantized operators with this symmetric qconfig may use
+    operators from xnnpack library.
+
+        ** Support to use xnnpack ops with `qnnpack` backed for asymmetric
+        qconfig (returned by get_default_qconfig()) is not available yet.
+
+    * This qconfig uses signed activations and weights. Weights have added
+    restrictions such as zero point is forced to be 0, making the weights
+    symmetric, hence the name. And the 8-bit quantized values are
+    restricting to to [-127, +127], excluding -128.
+
+    * xnnpack has a requantization scale value restriction, 0x1p-32 <=
+    requantization_scale < 256.0 where, `requantization_scale = (input_scale
+    * kernel_scale) / (output_scale)`. Using this eps (w/ assumed max value
+    of 256) is to prevent requantization_scale to go below xnnpack lower
+    threshold.
+"""
+default_symmetric_qnnpack_qconfig = QConfig(activation=HistogramObserver.with_args(dtype=torch.qint8,
+                                                                                   reduce_range=False,
+                                                                                   eps=2 ** -12),
+                                            weight=weight_observer_range_neg_127_to_127)
+
+default_per_channel_symmetric_qnnpack_qconfig = QConfig(activation=HistogramObserver.with_args(dtype=torch.qint8,
+                                                                                               reduce_range=False,
+                                                                                               eps=2 ** -12),
+                                                        weight=per_channel_weight_observer_range_neg_127_to_127)
 
 default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)
@@ -216,8 +299,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`
-        and `qnnpack`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
@@ -237,6 +320,11 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_max=255,
                                                                 reduce_range=False),
                               weight=default_weight_fake_quant)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255),
+                              weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
     # Use the fused observe + fake_quant modules for doing QAT.
@@ -253,6 +341,11 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                                  quant_max=255,
                                                                                  reduce_range=False),
                               weight=default_fused_wt_fake_quant)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255),
+                              weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
     else:
@@ -261,46 +354,38 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
 
     return qconfig
 
-def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
-    return {
-        "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig),
-                        (torch.nn.Conv1d, qconfig),
-                        (torch.nn.Conv2d, qconfig),
-                        (torch.nn.Conv3d, qconfig),
-                        (torch.nn.ConvTranspose1d, qconfig_transpose),
-                        (torch.nn.ConvTranspose2d, qconfig_transpose),
-                        (torch.nn.ConvTranspose3d, qconfig_transpose),
-                        (torch.nn.Linear, qconfig),
-                        (torch.nn.functional.conv1d, qconfig),
-                        (torch.nn.functional.conv2d, qconfig),
-                        (torch.nn.functional.conv3d, qconfig),
-                        (torch.nn.functional.conv_transpose1d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose2d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose3d, qconfig_transpose),
-                        (torch.nn.functional.linear, qconfig)]}
+"""
+Default symmetric QAT qconfig for qnnpack. And its per channel weight variant.
+"""
+default_symmetric_qnnpack_qat_qconfig = QConfig(
+    activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                       quant_min=-128,
+                                                       quant_max=127,
+                                                       dtype=torch.qint8,
+                                                       reduce_range=False,
+                                                       eps=2 ** -12),
+    weight=fused_wt_fake_quant_range_neg_127_to_127)
+
+default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
+    activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                       quant_min=-128,
+                                                       quant_max=127,
+                                                       dtype=torch.qint8,
+                                                       reduce_range=False,
+                                                       eps=2 ** -12),
+    weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
 def get_default_qconfig_dict(backend='fbgemm', version=0):
-    qconfig = get_default_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer.
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
-    qconfig = get_default_qat_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_fake_quant)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
@@ -370,16 +455,33 @@ def add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+
+def obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
+    if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):
+        return _partial_wrapper_equals(obs_or_fq1, obs_or_fq2)
+    return obs_or_fq1 == obs_or_fq2
+
+def _partial_wrapper_equals(obs_or_fq1: _PartialWrapper, obs_or_fq2: _PartialWrapper):
+    """
+    Return whether the two partial wrappers are equal,
+    """
+    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
+    obs_or_fq1_keywords = copy.copy(obs_or_fq1.p.keywords)
+    obs_or_fq2_keywords = copy.copy(obs_or_fq2.p.keywords)
+    keywords_equal = True
+    # compare observer constructor with obs_or_fq_ctr_equals since direct compare would fail
+    if "observer" in obs_or_fq1_keywords and "observer" in obs_or_fq2_keywords:
+        keywords_equal = keywords_equal and obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
+        obs_or_fq1_keywords.pop("observer")
+        obs_or_fq2_keywords.pop("observer")
+    keywords_equal = keywords_equal and obs_or_fq1_keywords == obs_or_fq2_keywords
+    return obs_or_fq1.p.func == obs_or_fq2.p.func and obs_or_fq1.p.args == obs_or_fq2.p.args and keywords_equal
+
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     """
     Returns `True` if `q1` equals `q2`, and `False` otherwise.
     """
-    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
-    def partial_equals(p1, p2):
-        same = p1.func == p2.func
-        same = same and p1.args == p2.args
-        return same and p1.keywords == p2.keywords
-
     if q1 is None or q2 is None:
         return q1 == q2
     else:
@@ -388,15 +490,8 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
             # comparing partial wrappers.
-            if(isinstance(q1.activation, torch.ao.quantization.observer._PartialWrapper)):
-                activation_same = partial_equals(q1.activation.p, q2.activation.p)
-            else:
-                activation_same = q1.activation == q2.activation
-            if(isinstance(q1.weight, torch.ao.quantization.observer._PartialWrapper)):
-                weight_same = partial_equals(q1.weight.p, q2.weight.p)
-            else:
-                weight_same = q1.weight == q2.weight
-
+            activation_same = obs_or_fq_ctr_equals(q1.activation, q2.activation)
+            weight_same = obs_or_fq_ctr_equals(q1.weight, q2.weight)
             return activation_same and weight_same
         except AttributeError:
             return q1 == q2

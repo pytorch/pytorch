@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/modules/_functions.h>
 #include <torch/nn/functional/normalization.h>
+#include <torch/nn/modules/_functions.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -25,7 +25,8 @@ namespace nn {
 ///
 /// Example:
 /// ```
-/// LayerNorm model(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5));
+/// LayerNorm model(LayerNormOptions({2,
+/// 2}).elementwise_affine(false).eps(2e-5));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
@@ -55,38 +56,43 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   LayerNormOptions options;
 
   /// The learned weight.
-  /// Initialized to ones if the `elementwise_affine` option is set to `true` upon construction.
+  /// Initialized to ones if the `elementwise_affine` option is set to `true`
+  /// upon construction.
   Tensor weight;
 
   /// The learned bias.
-  /// Initialized to zeros `elementwise_affine` option is set to `true` upon construction.
+  /// Initialized to zeros `elementwise_affine` option is set to `true` upon
+  /// construction.
   Tensor bias;
 };
 
 /// A `ModuleHolder` subclass for `LayerNormImpl`.
 /// See the documentation for `LayerNormImpl` class to learn what methods it
-/// provides, and examples of how to use `LayerNorm` with `torch::nn::LayerNormOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `LayerNorm` with
+/// `torch::nn::LayerNormOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LayerNorm);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LocalResponseNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LocalResponseNorm
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies local response normalization over an input signal composed
 /// of several input planes, where channels occupy the second dimension.
 /// Applies normalization across channels.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LocalResponseNorm to learn
-/// about the exact behavior of this module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LocalResponseNorm to
+/// learn about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::LocalResponseNormOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::LocalResponseNormOptions` class to
+/// learn what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
-/// LocalResponseNorm model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
+/// LocalResponseNorm
+/// model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> {
+class TORCH_API LocalResponseNormImpl
+    : public Cloneable<LocalResponseNormImpl> {
  public:
   LocalResponseNormImpl(int64_t size)
       : LocalResponseNormImpl(LocalResponseNormOptions(size)) {}
@@ -104,23 +110,24 @@ class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> 
 };
 
 /// A `ModuleHolder` subclass for `LocalResponseNormImpl`.
-/// See the documentation for `LocalResponseNormImpl` class to learn what methods it
-/// provides, and examples of how to use `LocalResponseNorm` with `torch::nn::LocalResponseNormOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// See the documentation for `LocalResponseNormImpl` class to learn what
+/// methods it provides, and examples of how to use `LocalResponseNorm` with
+/// `torch::nn::LocalResponseNormOptions`. See the documentation for
+/// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(LocalResponseNorm);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossMapLRN2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// See the documentation for `torch::nn::CrossMapLRN2dOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::CrossMapLRN2dOptions` class to learn
+/// what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
 /// CrossMapLRN2d model(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
+class TORCH_API CrossMapLRN2dImpl
+    : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
  public:
   CrossMapLRN2dImpl(int64_t size)
       : CrossMapLRN2dImpl(CrossMapLRN2dOptions(size)) {}
@@ -139,9 +146,9 @@ class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImp
 
 /// A `ModuleHolder` subclass for `CrossMapLRN2dImpl`.
 /// See the documentation for `CrossMapLRN2dImpl` class to learn what methods it
-/// provides, and examples of how to use `CrossMapLRN2d` with `torch::nn::CrossMapLRN2dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `CrossMapLRN2d` with
+/// `torch::nn::CrossMapLRN2dOptions`. See the documentation for `ModuleHolder`
+/// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(CrossMapLRN2d);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GroupNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -186,9 +193,9 @@ class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
 
 /// A `ModuleHolder` subclass for `GroupNormImpl`.
 /// See the documentation for `GroupNormImpl` class to learn what methods it
-/// provides, and examples of how to use `GroupNorm` with `torch::nn::GroupNormOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `GroupNorm` with
+/// `torch::nn::GroupNormOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(GroupNorm);
 
 } // namespace nn

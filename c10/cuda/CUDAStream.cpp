@@ -1,6 +1,8 @@
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -16,7 +18,7 @@ namespace cuda {
 namespace {
 
 // Global stream state and constants
-static std::once_flag init_flag;
+static c10::once_flag init_flag;
 static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -40,7 +42,7 @@ static constexpr int kLowPriority = 0;
 // already been destroyed and thus invoking cudaStreamDestroy could lead to a
 // crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
 // the destruction.
-static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
+static c10::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static cudaStream_t low_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
@@ -164,6 +166,14 @@ static void initDeviceStreamState(DeviceIndex device_index) {
         &lowpri_stream, kDefaultFlags, kLowPriority));
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream, kDefaultFlags, kHighPriority));
+
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(lowpri_stream));
+      (*interp)->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(hipri_stream));
+    }
   }
 
   low_priority_counters[device_index] = 0;
@@ -173,7 +183,7 @@ static void initDeviceStreamState(DeviceIndex device_index) {
 // Init front-end to ensure initialization only occurs once
 static void initCUDAStreamsOnce() {
   // Inits default streams (once, globally)
-  std::call_once(init_flag, initGlobalStreamState);
+  c10::call_once(init_flag, initGlobalStreamState);
 
   if (current_streams) {
     return;
@@ -256,7 +266,7 @@ CUDAStream getStreamFromPool(
   check_gpu(device_index);
 
   // Initializes the stream pools (once)
-  std::call_once(
+  c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
 
   if (isHighPriority) {

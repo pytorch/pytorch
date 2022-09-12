@@ -5,8 +5,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-PixelShuffleImpl::PixelShuffleImpl(
-    const PixelShuffleOptions& options_)
+PixelShuffleImpl::PixelShuffleImpl(const PixelShuffleOptions& options_)
     : options(options_) {}
 
 void PixelShuffleImpl::pretty_print(std::ostream& stream) const {
@@ -16,8 +15,7 @@ void PixelShuffleImpl::pretty_print(std::ostream& stream) const {
 
 void PixelShuffleImpl::reset() {}
 
-Tensor PixelShuffleImpl::forward(
-    const Tensor& input) {
+Tensor PixelShuffleImpl::forward(const Tensor& input) {
   return F::detail::pixel_shuffle(input, options.upscale_factor());
 }
 

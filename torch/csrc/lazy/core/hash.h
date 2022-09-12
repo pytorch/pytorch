@@ -4,15 +4,14 @@
  */
 #pragma once
 
-#include <cstring>
-#include <set>
-#include <string>
-#include <vector>
-
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/int128.h>
 #include <torch/csrc/Export.h>
+#include <cstring>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace lazy {
@@ -68,23 +67,43 @@ hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
 
+// added because on macos builds the vector<bool> specialization
+// breaks falling through to the templated arithmetic types above
+hash_t TORCH_API Hash(const std::vector<bool>& value);
+
 // Specialiazed implementations for proprietary types
 static inline hash_t Hash(const c10::ScalarType& value) {
   return DataHash(&value, sizeof(value));
 }
 
+static inline hash_t Hash(const c10::MemoryFormat& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::DeviceType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::Device& value) {
+  return HashCombine(Hash(value.type()), Hash(value.index()));
+}
+
+static inline hash_t Hash(const c10::Layout& value) {
+  return DataHash(&value, sizeof(value));
+}
+
 static inline hash_t Hash(const c10::Scalar& value) {
-  switch(value.type()){
-  case c10::ScalarType::ComplexDouble:
-    return Hash(value.toComplexDouble());
-  case c10::ScalarType::Double:
-    return Hash(value.toDouble());
-  case c10::ScalarType::Long:
-    return Hash(value.toLong());
-  case c10::ScalarType::Bool:
-    return Hash(value.toBool());
-  default:
-    TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.", value.type());
+  switch (value.type()) {
+    case c10::ScalarType::ComplexDouble:
+      return Hash(value.toComplexDouble());
+    case c10::ScalarType::Double:
+      return Hash(value.toDouble());
+    case c10::ScalarType::Long:
+      return Hash(value.toLong());
+    case c10::ScalarType::Bool:
+      return Hash(value.toBool());
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.", value.type());
   }
 }
 

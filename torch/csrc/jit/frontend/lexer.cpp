@@ -65,18 +65,18 @@ bool SharedParserData::isBinary(int kind, int* prec) {
 }
 
 C10_EXPORT int stringToKind(const std::string& str) {
-  static std::once_flag init_flag;
-  static std::unordered_map<std::string, int> str_to_kind;
-  std::call_once(init_flag, []() {
+  static std::unordered_map<std::string, int> str_to_kind = []() {
+    std::unordered_map<std::string, int> ret_str_to_kind;
     for (char tok : std::string(valid_single_char_tokens))
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-      str_to_kind[std::string(1, tok)] = tok;
+      ret_str_to_kind[std::string(1, tok)] = tok;
 #define DEFINE_CASE(tok, _, str) \
   if (std::string(str) != "")    \
-    str_to_kind[str] = tok;
+    ret_str_to_kind[str] = tok;
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
-  });
+    return ret_str_to_kind;
+  }();
   try {
     return str_to_kind.at(str);
   } catch (std::out_of_range& err) {

@@ -2,23 +2,23 @@
 import torch
 import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
     A BNReLU2d module is a fused module of BatchNorm2d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.BatchNorm2d`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.BatchNorm2d`.
 
     Attributes:
-        Same as torch.nn.quantized.BatchNorm2d
+        Same as torch.ao.nn.quantized.BatchNorm2d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.BNReLU2d
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BNReLU2d, self).__init__(num_features, eps=eps, momentum=momentum)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
+        super(BNReLU2d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -37,21 +37,24 @@ class BNReLU2d(nnq.BatchNorm2d):
         # TODO: Add qat support for BNReLU2d
         return super(BNReLU2d, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, bn_relu, output_scale, output_zero_point):
+        return super().from_reference(bn_relu[0], output_scale, output_zero_point)
 
 class BNReLU3d(nnq.BatchNorm3d):
     r"""
     A BNReLU3d module is a fused module of BatchNorm3d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.BatchNorm3d`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.BatchNorm3d`.
 
     Attributes:
-        Same as torch.nn.quantized.BatchNorm3d
+        Same as torch.ao.nn.quantized.BatchNorm3d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.BNReLU3d
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BNReLU3d, self).__init__(num_features, eps=eps, momentum=momentum)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
+        super(BNReLU3d, self).__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -69,3 +72,7 @@ class BNReLU3d(nnq.BatchNorm3d):
     def from_float(cls, mod):
         # TODO: Add qat support for BNReLU3d
         return super(BNReLU3d, cls).from_float(mod)
+
+    @classmethod
+    def from_reference(cls, bn_relu, output_scale, output_zero_point):
+        return super().from_reference(bn_relu[0], output_scale, output_zero_point)

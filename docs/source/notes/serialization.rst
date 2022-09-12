@@ -282,6 +282,7 @@ given two integer inputs:
 ::
 
     # PyTorch 1.5 (and earlier)
+    >>> a = torch.tensor(5)
     >>> b = torch.tensor(3)
     >>> a / b
     tensor(1)

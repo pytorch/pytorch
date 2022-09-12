@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
@@ -13,17 +14,18 @@
 #include <stdexcept>
 #include <utility>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
   auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
   variable_list grad_inputs(2);
   if (grad->defined()) {
-    if (should_compute_output(0)) {
+    if (task_should_compute_output(0)) {
       grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    if (should_compute_output(1)) {
+    if (task_should_compute_output(1)) {
       // Handle R->C copies without raising a warning
       const auto src_type = src_options.dtype().toScalarType();
       if (!c10::isComplexType(src_type) && grad->is_complex()) {
@@ -84,14 +86,26 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
   }
 
+  // Adding the missing nodes to the current graph's `exec_info`.
+  // This is a workaround because the current `GraphTask::init_to_execute`
+  // does not traverse into CopySlices node.
+  const auto exec_info = get_current_graph_task_exec_info();
+  if (exec_info && !exec_info->empty()) {
+    for (const auto& next : fn->next_edges()) {
+      if (next.is_valid()) {
+        add_node_to_current_graph_task_exec_info(next.function.get());
+      }
+    }
+  }
+
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
   // double-backprop is disabled.
-  auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
+  auto res = (*fn)({grad_slice.clone(at::MemoryFormat::Contiguous)});
 
   variable_list grad_inputs(num_outputs());
-  for(const auto i : c10::irange(res.size())) {
-    if (should_compute_output(i)) {
+  for (const auto i : c10::irange(res.size())) {
+    if (task_should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
@@ -112,4 +126,5 @@ void CopySlices::release_variables() {
   fn = nullptr;
 }
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

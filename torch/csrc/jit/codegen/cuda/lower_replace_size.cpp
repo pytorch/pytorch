@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -147,61 +148,6 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
   return extent_to_min_input_id_extent;
 }
 
-std::vector<Val*> allLeafOuts(Fusion* fusion) {
-  auto exprs = StmtSort::getExprs(fusion, true);
-  std::unordered_set<Val*> inputs;
-  std::unordered_set<Val*> outputs;
-  std::vector<Val*> ordered_outputs;
-  for (auto expr : exprs) {
-    inputs.insert(expr->inputs().begin(), expr->inputs().end());
-    outputs.insert(expr->outputs().begin(), expr->outputs().end());
-    ordered_outputs.insert(
-        ordered_outputs.end(), expr->outputs().begin(), expr->outputs().end());
-  }
-  for (auto input : inputs) {
-    outputs.erase(input);
-  }
-
-  std::vector<Val*> ordered_leaf_outs;
-  for (auto out : ordered_outputs) {
-    if (outputs.find(out) != outputs.end()) {
-      ordered_leaf_outs.push_back(out);
-    }
-  }
-  return ordered_leaf_outs;
-}
-
-class ValReplacementMutator : private OptOutMutator {
- public:
-  ValReplacementMutator(
-      Fusion* fusion,
-      const std::unordered_map<Val*, Val*>& replacement_map)
-      : replacement_map_(replacement_map) {
-    FusionGuard fg(fusion);
-
-    // Welford makes this a little annoying since it holds a count which is
-    // typically not used by anything else. If we don't grab that count, then it
-    // would be a tensorview that doesn't get updated extents. Therefore, first
-    // grab all leaves towards outputs and grab stmts from there.
-    auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
-    for (auto stmt : stmts) {
-      mutate(stmt);
-    }
-  }
-
- private:
-  using OptOutMutator::mutate;
-  void mutate(Val* val) final {
-    if (replacement_map_.find(val) == replacement_map_.end()) {
-      return OptOutMutator::mutate(val);
-    }
-    auto replaced_val = replacement_map_.at(val);
-    registerMutation(val, replaced_val);
-  }
-
-  const std::unordered_map<Val*, Val*>& replacement_map_;
-};
-
 } // namespace
 
 void replaceSymbolicSizes(Fusion* fusion) {
@@ -235,17 +181,11 @@ void replaceSymbolicSizes(Fusion* fusion) {
     size_t dim = 0;
     for (auto id : root_td) {
       Val* orig_size = id->extent();
-
       // Output sizes could have reduction axes, which isn't what gets output.
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (id->isReduction() ||
-          (id->getIterType() == IterType::BroadcastWithoutStride)) {
+      if (id->isReduction()) {
         continue;
-      } else if (
-          id->isRFactorProduct() ||
-          // NOLINTNEXTLINE(bugprone-branch-clone)
-          (id->getIterType() == IterType::BroadcastWithStride) ||
-          orig_size->isConstScalar()) {
+      } else if (orig_size->isConstScalar()) {
         dim++;
         continue;
       }
@@ -279,7 +219,7 @@ void replaceSymbolicSizes(Fusion* fusion) {
   }
 
   // Run mutation on the fusion with the tensor_dim_map
-  ValReplacementMutator(fusion, tensor_dim_map);
+  ir_utils::replaceValue(fusion, tensor_dim_map);
 }
 
 } // namespace cuda

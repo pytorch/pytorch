@@ -1,6 +1,8 @@
-from torch.utils.data import MapDataPipe, functional_datapipe, DataChunk
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe, DataChunk
 from typing import List, Optional, Sized, TypeVar
 
+__all__ = ["BatcherMapDataPipe", ]
 
 T = TypeVar('T')
 
@@ -18,6 +20,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         drop_last: Option to drop the last batch if it's not full
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
         >>> batch_dp = dp.batch(batch_size=2)

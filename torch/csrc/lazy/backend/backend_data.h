@@ -1,8 +1,8 @@
 #pragma once
 
-#include <cstring>
-#include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/shape.h>
+#include <cstring>
 
 namespace torch {
 namespace lazy {

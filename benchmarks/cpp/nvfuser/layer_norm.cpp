@@ -11,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -46,8 +46,8 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
 
   auto output = layer_norm_results.output;
 
-  if (dtype == DataType::Half) {
-    output = castOp(DataType::Half, output);
+  if (dtype != DataType::Float) {
+    output = castOp(dtype, output);
   }
 
   fusion->addOutput(output);
@@ -90,9 +90,9 @@ static void Baseline_LayerNorm(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const int kReductionAxis = 1;
+  const size_t kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
-  for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
+  for (auto idx = kReductionAxis; idx < input_shape.size(); ++idx) {
     norm_shape.push_back(input_shape[idx]);
   }
 
@@ -105,14 +105,14 @@ static void Baseline_LayerNorm(
   at::Tensor bias = at::randn({input_shape[1]}, options);
 
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = at::layer_norm(input, norm_shape, weight, bias);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   benchmark_state.SetBytesProcessed(

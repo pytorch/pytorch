@@ -23,8 +23,7 @@ def _to_device_map(
 ) -> Dict[torch.device, torch.device]:
     full_device_map: Dict[torch.device, torch.device] = {}
     reverse_map: Dict[torch.device, torch.device] = {}
-    for k in device_map:
-        v = device_map[k]
+    for k, v in device_map.items():
         k, v = torch.device(k), torch.device(v)
         if v in reverse_map:
             raise ValueError(
@@ -114,6 +113,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                 invertible.
 
         Example::
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')

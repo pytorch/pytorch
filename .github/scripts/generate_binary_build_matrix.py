@@ -13,10 +13,10 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["10.2", "11.3", "11.5"]
+CUDA_ARCHES = ["10.2", "11.3", "11.6", "11.7"]
 
 
-ROCM_ARCHES = ["4.5.2", "5.0"]
+ROCM_ARCHES = ["5.1.1", "5.2"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -58,6 +58,14 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
         (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
         for gpu_arch in CUDA_ARCHES
+    },
+    **{
+        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        for gpu_arch in ROCM_ARCHES
+    },
+    **{
+        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}"
+        for gpu_arch in ROCM_ARCHES
     },
     ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
@@ -119,6 +127,7 @@ def generate_libtorch_matrix(os: str, abi_version: str,
         arches = ["cpu"]
         if os == "linux":
             arches += CUDA_ARCHES
+            arches += ROCM_ARCHES
         elif os == "windows":
             # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
             arches += list_without(CUDA_ARCHES, ["10.2"])
@@ -134,12 +143,14 @@ def generate_libtorch_matrix(os: str, abi_version: str,
     ret: List[Dict[str, str]] = []
     for arch_version in arches:
         for libtorch_variant in libtorch_variants:
-            # We don't currently build libtorch for rocm
             # one of the values in the following list must be exactly
             # CXX11_ABI, but the precise value of the other one doesn't
             # matter
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            # ROCm builds without-deps failed even in ROCm runners; skip for now
+            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+                continue
             ret.append(
                 {
                     "gpu_arch_type": gpu_arch_type,
@@ -172,9 +183,14 @@ def generate_wheels_matrix(os: str,
 
     if python_versions is None:
         # Define default python version
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = list(FULL_PYTHON_VERSIONS)
         if os == "macos-arm64":
             python_versions = list_without(python_versions, ["3.7"])
+
+        if os == "linux":
+            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
+            # available on conda right now
+            python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures
@@ -190,6 +206,9 @@ def generate_wheels_matrix(os: str,
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
+            # Skip rocm 3.11 binaries for now as the docker image are not correct
+            if python_version == "3.11" and gpu_arch_type == "rocm":
+                continue
             ret.append(
                 {
                     "python_version": python_version,

@@ -6,9 +6,11 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from datetime import timedelta
 from itertools import product
 from sys import platform
+from typing import Callable
 
 import torch
 import torch.distributed as dist
@@ -22,16 +24,23 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch.distributed._spmd.comm_tensor import _wait_comm, CommTensor
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    instantiate_parametrized_tests,
+    parametrize
 )
+from torch.utils.checkpoint import checkpoint
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
@@ -238,7 +247,7 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class AbstractDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest(object):
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -306,6 +315,363 @@ class AbstractDistributedDataParallelTest(object):
         target = torch.randn(global_batch_size, 4)
 
         return model, ddp_model, input, target
+
+    def _get_store(self):
+        return dist.FileStore(self.file_name, self.world_size)
+
+    def _get_process_group(self):
+        raise NotImplementedError("To be implemented by child class")
+
+    def _train_model(self, model, input_var, target, loss, run_checkpoint=False, use_reentrant=True):
+        model.train()
+        if run_checkpoint:
+            output = checkpoint(model, input_var, use_reentrant=use_reentrant)
+        else:
+            output = model(input_var)
+        l = loss(output, target)
+        l.backward()
+
+    def _test_ddp_checkpointing(
+        self,
+        input_model,
+        process_group,
+        use_bucket_view,
+        find_unused_parameters=False,
+        static_graph=False,
+        run_checkpoint=False,
+        use_reentrant=True,
+        allow_none_grads=False,
+    ):
+        # to reproduce the same training results
+        torch.cuda.set_device(self.rank)
+        torch.manual_seed(31415)
+        model = copy.deepcopy(input_model).cuda()
+        ddp_model = copy.deepcopy(input_model).cuda()
+        ddp_model = nn.parallel.DistributedDataParallel(
+            ddp_model,
+            bucket_cap_mb=1,
+            gradient_as_bucket_view=use_bucket_view,
+            device_ids=[self.rank],
+            process_group=process_group,
+            find_unused_parameters=find_unused_parameters,
+            static_graph=static_graph,
+        )
+        self.assertEqual(
+            ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph
+        )
+        input, ddp_input, target, ddp_target = self._prepare_dummy_data()
+        loss = nn.MSELoss()
+        n_iters = 5
+        for i in range(n_iters):
+            model.zero_grad(set_to_none=False)
+            ddp_model.zero_grad(set_to_none=False)
+            self._train_model(model, input, target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant)
+            self._train_model(
+                ddp_model, ddp_input, ddp_target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant
+            )
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                if not allow_none_grads:
+                    self.assertTrue(i.grad is not None)
+                    self.assertTrue(j.grad is not None)
+                self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
+
+    # A list of tests for ddp with activation checkpointing
+    # when gradient_as_bucket_view=True, False.
+    # Most of the tests are referred to
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
+    class CheckpointOnceModule(nn.Module):
+        """
+        Runs checkpoint for a single layer in the model.
+        """
+        def __init__(self, use_reentrant=True):
+            super().__init__()
+            self.l1 = nn.Linear(20, 20)
+            self.l2 = nn.Linear(20, 20)
+            self.use_reentrant = use_reentrant
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            return x
+
+    class CheckpointTwiceModule(CheckpointOnceModule):
+        """
+        Runs checkpoint for the same layer twice in a model. This simulates use
+        cases such as pipeline parallel where the same layer can be checkpointed
+        more than one time.
+        """
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            return x
+
+    class CheckpointTwiceModuleWeightSharing(CheckpointTwiceModule):
+        """
+        Similar to CheckpointTwiceModule but the weights are shared.
+        """
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+            # Share weights
+            self.l1.weight = self.l2.weight
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            return x
+
+
+    class DynamicCheckpointTwiceModule(CheckpointTwiceModule):
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+            self.count = 0
+
+        def forward(self, inp):
+            if self.count % 2:
+                x = checkpoint(self.l1, inp, use_reentrant=self.use_reentrant)
+            else:
+                x = checkpoint(self.l2, inp, use_reentrant=self.use_reentrant)
+
+            self.count += 1
+            return x
+
+    class DynamicCheckpointTwiceModuleWeightSharing(DynamicCheckpointTwiceModule):
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+            # Share weights
+            self.l1.weight = self.l2.weight
+
+
+    def _prepare_dummy_data(self):
+        ddp_bs = 16
+        bs = ddp_bs * self.world_size
+        input = torch.rand((bs, 20), device="cuda", requires_grad=True)
+        target = torch.randn((bs, 20), device="cuda")
+        offset = self.rank * ddp_bs
+        ddp_input = input[offset : offset + ddp_bs]
+        ddp_target = target[offset : offset + ddp_bs]
+        return input, ddp_input, target, ddp_target
+
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_once(self, use_reentrant):
+        """
+        DDP works as expected when layer is checkpointed only once.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view, static_graph in product((False, True), (False, True)):
+            self._test_ddp_checkpointing(
+                self.CheckpointOnceModule(use_reentrant=use_reentrant),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=static_graph,
+            )
+            if static_graph:
+                # find_unused_parameters does not make a difference, since it is
+                # ignored for static graph.
+                self._test_ddp_checkpointing(
+                    self.CheckpointOnceModule(),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    find_unused_parameters=True,
+                )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_unused_params(self, use_reentrant):
+        """
+        With reentrant autograd checkpointing impl, DDP will fail when there are
+        unused params in the model and no static graph training. With
+        non-reentrant checkpointing implementation, this works as expected.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view in (True, False):
+            err_ctx = (
+                suppress() if not use_reentrant else
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to mark a variable ready only once."
+                )
+            )
+            with err_ctx:
+                model = self._test_ddp_checkpointing(
+                    self.CheckpointOnceModule(use_reentrant=use_reentrant),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    find_unused_parameters=True,
+                )
+            # test passes when static_graph is true
+            model = self._test_ddp_checkpointing(
+                self.CheckpointOnceModule(use_reentrant=use_reentrant),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                find_unused_parameters=True,
+                static_graph=True,
+            )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_twice(self, use_reentrant):
+        """
+        Checkpoitning twice fails for non-static graph with reentrant checkpoint
+        implementation, succeeds with non-reentrant checkpoint implementation.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view in (True, False):
+            err_ctx = (
+                suppress() if not use_reentrant else
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to mark a variable ready only once."
+                )
+            )
+            with err_ctx:
+                model = self._test_ddp_checkpointing(
+                    self.CheckpointTwiceModule(use_reentrant=use_reentrant),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=False,
+                )
+
+            with err_ctx:
+                model = self._test_ddp_checkpointing(
+                    self.CheckpointTwiceModule(use_reentrant=use_reentrant),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=False,
+                    find_unused_parameters=True,
+                )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_twice_static_graph(self, use_reentrant):
+        """
+        Regardless of reentrant or non-reentrant checkpointing impl,
+        checkpointing twice works with static graph enabled.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view in (True, False):
+            # Test passes when static_graph=True.
+            model = self._test_ddp_checkpointing(
+                self.CheckpointTwiceModule(use_reentrant=use_reentrant),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=True,
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpointing_dynamic_module(self):
+        """
+        Dynamic module can be checkpointed, multiple times, with non-reentrant
+        checkpointing implementation.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.DynamicCheckpointTwiceModule(use_reentrant=False),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=False,
+                find_unused_parameters=True,
+                # Grads can be none sometimes due to dynamic module not using
+                # all params.
+                allow_none_grads=True
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpointing_dynamic_weight_sharing(self):
+        """
+        Dynamic module can be checkpointed multiple times with weight sharing
+        using non-reentrant checkpointing implementation.
+        """
+        process_group = self._get_process_group()
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.DynamicCheckpointTwiceModuleWeightSharing(use_reentrant=False),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=False,
+                find_unused_parameters=True,
+                # Grads can be none sometimes due to dynamic module not using
+                # all params.
+                allow_none_grads=True
+            )
+
+    # DDP works as expected if there is weight sharing among layers
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_weight_sharing(self, use_reentrant):
+        """
+        Test that checkpointing with weight sharing works.
+        """
+        process_group = self._get_process_group()
+        torch.cuda.set_device(self.rank)
+        for use_bucket_view, static_graph in product((False, True), (False, True)):
+            torch.manual_seed(31415)
+            l1 = nn.Linear(20, 20)
+            l2 = nn.Linear(20, 20)
+            l1.weight = l2.weight
+            model = nn.Sequential(l1, l2)
+            # TODO: non-reentrant based checkpointing of DDP module with
+            # static_graph runs into the below issue, see
+            # https://github.com/pytorch/pytorch/issues/70865 and
+            # https://github.com/pytorch/pytorch/issues/58111 for details.
+            err_ctx = (
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Your training graph has changed in this iteration"
+                ) if static_graph and not use_reentrant else suppress()
+            )
+            with err_ctx:
+                self._test_ddp_checkpointing(
+                    model,
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    run_checkpoint=True,
+                    use_reentrant=use_reentrant,
+                )
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpointing_twice_weight_sharing(self):
+        """
+        Checkpointing should work with static graph in the case of checkpointing
+        same layer twice and having weights shared acrosss layers.
+        """
+        process_group = self._get_process_group()
+        torch.cuda.set_device(self.rank)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.CheckpointTwiceModuleWeightSharing(),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=True,
+            )
+
+    def test_invalid_powerSGD_state(self):
+        for start_powerSGD_iter, use_error_feedback, warm_start in product(
+            [0, 1], [True, False], [True, False]
+        ):
+            if not use_error_feedback and not warm_start:
+                continue
+            with self.assertRaisesRegex(
+                ValueError,
+                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                "because PowerSGD can only be applied after the first two iterations in DDP.",
+            ):
+                state = powerSGD.PowerSGDState(
+                    process_group=None,
+                    matrix_approximation_rank=1,
+                    start_powerSGD_iter=start_powerSGD_iter,
+                    use_error_feedback=use_error_feedback,
+                    warm_start=warm_start,
+                )
 
     def _test_ddp_with_process_group(
         self,
@@ -443,33 +809,101 @@ class AbstractDistributedDataParallelTest(object):
 
         return fut.then(fut_then)
 
+    def _test_not_nan(self, model, x):
+        y = model(x)
+        self.assertFalse(y.isnan().any().item())
+        y.sum().backward()
+        for p in model.parameters():
+            self.assertFalse(p.grad.isnan().any().item())
 
-class DistributedDataParallelTest(
-    AbstractDistributedDataParallelTest, MultiProcessTestCase
-):
-    def setUp(self):
-        super(DistributedDataParallelTest, self).setUp()
-        self._spawn_processes()
+    @skip_if_lt_x_gpu(2)
+    def test_sync_batch_norm_only_empty_input(self):
+        pg = self._get_process_group()
 
-    def test_invalid_powerSGD_state(self):
-        for start_powerSGD_iter, use_error_feedback, warm_start in product(
-            [0, 1], [True, False], [True, False]
-        ):
-            if not use_error_feedback and not warm_start:
-                continue
-            with self.assertRaisesRegex(
-                ValueError,
-                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                "because PowerSGD can only be applied after the first two iterations in DDP.",
-            ):
-                state = powerSGD.PowerSGDState(
-                    process_group=None,
-                    matrix_approximation_rank=1,
-                    start_powerSGD_iter=start_powerSGD_iter,
-                    use_error_feedback=use_error_feedback,
-                    warm_start=warm_start,
-                )
+        model = torch.nn.Sequential(
+            nn.BatchNorm2d(2),
+        ).to(device=self.rank)
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+        )
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(
+            model,
+            process_group=pg,
+        )
 
+        model.train()
+
+        # only rank 0 receives empty inputs
+        x = torch.zeros(
+            (1 if self.rank != 0 else 0, 2, 11, 13),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        # input requires grad, this will trigger the collective communication
+        # in the backward pass
+        x.requires_grad = True
+        self._test_not_nan(model, x)
+
+        # input does not requires grad
+        x.requires_grad = False
+        self._test_not_nan(model, x)
+
+        # all ranks receive empty inputs
+        x = torch.zeros(
+            (0, 2, 11, 13),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        # input requires grad, this will trigger the collective communication
+        # in the backward pass
+        x.requires_grad = True
+        self._test_not_nan(model, x)
+
+        # input does not requires grad
+        x.requires_grad = False
+        self._test_not_nan(model, x)
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_batch_norm_empty_input(self):
+        pg = self._get_process_group()
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(2, 2, 3),
+            nn.BatchNorm2d(2),
+            nn.Linear(28, 2),
+        ).to(device=self.rank)
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+        )
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(
+            model,
+            process_group=pg,
+        )
+
+        model.train()
+        # only rank 0 receives empty inputs
+        x = torch.zeros(
+            (3 if self.rank != 0 else 0, 2, 30, 30),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        self._test_not_nan(model, x)
+
+        # all ranks receive empty inputs
+        x = torch.zeros(
+            (0, 2, 30, 30),
+            dtype=torch.float32,
+            device=self.rank
+        )
+
+        self._test_not_nan(model, x)
 
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
@@ -685,6 +1119,32 @@ class AbstractCommTest(object):
             dist.barrier(group=group)
             dist.broadcast(x, src=0, group=group)
 
+    def _test_rank_membership(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self.assertTrue(self.world_size > 1)
+
+        group = dist.new_group(ranks=[1])
+        self.assertEqual(dist.get_group_rank(group, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_group_rank(group, 0)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_group_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_global_rank(group, 0), 1)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_global_rank(group, 1)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -891,6 +1351,126 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
 
+
+instantiate_parametrized_tests(CommonDistributedDataParallelTest)
+
+
+class CompilerTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CompilerTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(CompilerTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _get_process_group(self):
+        raise NotImplementedError("To be implemented by subclass")
+
+    def _test_work_wait(self, x: torch.Tensor, comm_fn: Callable):
+        pg = self._get_default_group()
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            # N.B.: explicitly wrapping with CommTensor instead of updating
+            # all_reduce Python implementation, as the later will need more
+            # discussion.
+            y = CommTensor(x + x)
+            work, z = comm_fn(y, group=pg)
+            # this wait() will be ignored in tracing mode as
+            # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
+            # and torch.nn.Parameter objects
+            work.wait()
+            return z * 2
+
+        xx = x.clone()
+
+        # trace fn into a GraphModule
+        traced_fn = make_fx(fn)(xx)
+        traced_fn.graph.lint()
+        traced_fn.graph.eliminate_dead_code()
+
+        # make sure the mul op indeed waits for comm
+        for node in traced_fn.graph.nodes:
+            if node.op == "call_function" and "mul.Tensor" in node.target.__name__:
+                prev = node.args[0]
+                curr = None
+                waited = False
+                commed = False
+                while prev is not None and not commed:
+                    curr = prev
+                    waited |= all([
+                        curr.op == "call_function",
+                        curr.target == _wait_comm,
+                    ])
+                    commed |= all([
+                        curr.op == "call_function",
+                        CommTensor._is_supported(curr.target.__name__),
+                    ])
+
+                    prev = curr.args[0]
+
+                self.assertTrue(waited)
+                self.assertTrue(commed)
+
+        # Update input to make sure we are not recording it as constant during
+        # tracing.
+        x += 1
+        xx += 1
+
+        y = fn(x)
+        yy = traced_fn(xx)
+
+        # check correctness
+        self.assertEqual(y, yy)
+
+        xx += 1
+        yy = traced_fn(xx)
+        self.assertFalse(y.allclose(yy))
+
+    def _test_allreduce_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(tensor, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_allgather_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            work = dist.all_gather(out_tensors, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, sum(out_tensors)
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor.clone() + i for i in range(group.size())]
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_broadcast_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.broadcast(tensor, src=0, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor + i for i in range(group.size())] if self.rank == 0 else None
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
 if __name__ == "__main__":

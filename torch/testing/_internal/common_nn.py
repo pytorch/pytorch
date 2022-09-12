@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from copy import deepcopy
-from functools import reduce
+from functools import reduce, partial, wraps
 from itertools import product
 from operator import mul
 from math import pi
@@ -499,22 +499,22 @@ def bce_with_logistic_no_reduce_scalar_test():
 
 
 def kldivloss_with_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_with_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none')),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none')),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10)
     return dict(
         fullname='KLDivLoss_no_reduce',
         constructor=wrap_functional(
@@ -530,7 +530,7 @@ def kldivloss_no_reduce_test():
 
 
 def kldivloss_no_reduce_scalar_test():
-    t = torch.randn(())
+    t = torch.rand(())
     return dict(
         fullname='KLDivLoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -545,22 +545,22 @@ def kldivloss_no_reduce_scalar_test():
 
 
 def kldivloss_with_log_target_no_reduce_test():
-    i = torch.rand(10, 10).log()
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_with_log_target_no_reduce',
         constructor=wrap_functional(
-            lambda t: F.kl_div(i.type_as(t), t, reduction='none', log_target=True)),
-        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
-        input_fn=lambda: torch.rand(10, 10),
-        cpp_var_map={'i': i, 't': '_get_input()'},
-        reference_fn=lambda t, *_:
-            loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
         supports_forward_ad=True,
         pickle=False)
 
 
 def kldivloss_no_reduce_log_target_test():
-    t = torch.randn(10, 10)
+    t = torch.rand(10, 10).log()
     return dict(
         fullname='KLDivLoss_no_reduce_log_target',
         constructor=wrap_functional(
@@ -576,7 +576,7 @@ def kldivloss_no_reduce_log_target_test():
 
 
 def kldivloss_no_reduce_scalar_log_target_test():
-    t = torch.randn(())
+    t = torch.rand(()).log()
     return dict(
         fullname='KLDivLoss_no_reduce_scalar_log_target',
         constructor=wrap_functional(
@@ -4243,7 +4243,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.02,
     ),
     dict(
         module_name='Linear',
@@ -4340,9 +4340,7 @@ for non_linear_activation in non_linear_activations_no_batch:
 
 
 def kldivloss_reference(input, target, reduction='mean'):
-    safe_target = target * (target > 0).type_as(target)
-    safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
-    result = safe_target * (safe_target_log - input)
+    result = target * (target.log() - input)
     if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':
@@ -4854,10 +4852,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(10, 10).log(),
-        target_fn=lambda: torch.rand(10, 10),
+        target_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='log_target',
     ),
@@ -5451,10 +5451,12 @@ criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
+        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
+        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
         input_fn=lambda: torch.rand(()).log(),
-        target_fn=lambda: torch.rand(()),
+        target_fn=lambda: torch.rand(()).log(),
         reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+            kldivloss_log_target_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='scalar_log_target',
     ),
@@ -5651,7 +5653,7 @@ def single_batch_reference_criterion_fn(*args):
 
 # Check that regression criterion work with no batch dimensions
 regression_criterion_no_batch = [
-    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
@@ -5660,6 +5662,18 @@ for name, reduction in product(regression_criterion_no_batch, reductions):
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
         target_size=(3, ),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
+
+
+for reduction in reductions:
+    regression_test_info = dict(
+        fullname=f"KLDivLoss_no_batch_dim_{reduction}",
+        constructor=lambda: nn.KLDivLoss(reduction=reduction),
+        input_fn=lambda: torch.rand((3,)).log(),
+        target_fn=lambda: torch.rand((3,)),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5937,8 +5951,7 @@ class ModuleTest(TestBase):
             ref_input = deepcopy(input)
             ref_module = deepcopy(module)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0], ref_module)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(out, expected_out)
+            test_case.assertEqual(out, expected_out, exact_dtype=False)
         if self.check_forward_only:
             return
         self.test_noncontig(test_case, module, input)
@@ -6037,8 +6050,7 @@ class ModuleTest(TestBase):
         if getattr(cpu_module, "return_indices", False):
             cpu_output = cpu_output[0]
             gpu_output = gpu_output[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output, atol=self.precision, rtol=0, exact_dtype=False)
 
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
@@ -6046,8 +6058,7 @@ class ModuleTest(TestBase):
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
                 test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
@@ -6075,8 +6086,7 @@ class ModuleTest(TestBase):
                 create_graph=True)
 
             for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0, exact_dtype=False)
 
             # We mix output into the second backwards computation so that
             # torch.autograd.grad doesn't complain that some inputs
@@ -6090,11 +6100,9 @@ class ModuleTest(TestBase):
                 gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
             for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0, exact_dtype=False)
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
@@ -6407,18 +6415,16 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_output, gpu_output,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_output, gpu_output,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
         cpu_gradInput = test_case._backward_criterion(
             cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
         gpu_gradInput = test_case._backward_criterion(
             gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
-                                        atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
+        test_case.assertEqual(cpu_gradInput, gpu_gradInput,
+                              atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0, exact_dtype=False)
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -6430,3 +6436,38 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
     @property
     def extra_args(self):
         return self._get_arg('extra_args', False)
+
+
+def _test_bfloat16_ops(test_case, op, device, inp_dims=(), prec=1e-2, scale_factor=None):
+    # fp32 compute
+    input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+    if scale_factor is not None:
+        input1 = (torch.rand(inp_dims, dtype=torch.bfloat16, device=device) * scale_factor).float().requires_grad_()
+    out1 = op(input1)
+    grad_input1 = torch.randn_like(out1, device=device)
+    out1.backward(grad_input1)
+
+    # bfloat16 compute
+    op_bfp16 = op.bfloat16()
+    input2 = input1.detach().bfloat16().requires_grad_()
+    grad_input2 = grad_input1.bfloat16()
+    out2 = op_bfp16(input2)
+    out2.backward(grad_input2)
+
+    test_case.assertEqual(out1, out2, atol=prec, rtol=prec, exact_dtype=False)
+    test_case.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=prec, exact_dtype=False)
+
+def _test_module_empty_input(test_case, module, inp, check_size=True, inference=False):
+    if not inference:
+        inp.requires_grad_(True)
+    out = module(inp)
+    if not inference:
+        gO = torch.rand_like(out)
+        out.backward(gO)
+    if check_size:
+        test_case.assertEqual(out.size(), inp.size())
+    if not inference:
+        for p in module.parameters():
+            if p.requires_grad:
+                test_case.assertEqual(p.grad, torch.zeros_like(p.grad))
+        test_case.assertEqual(inp.grad, torch.zeros_like(inp))

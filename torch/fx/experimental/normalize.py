@@ -34,7 +34,7 @@ class NormalizeArgs(Transformer):
     """
 
     def __init__(
-        self, module: torch.nn.Module, normalize_to_only_use_kwargs: bool = True
+        self, module: torch.fx.GraphModule, normalize_to_only_use_kwargs: bool = True
     ):
         super().__init__(module)
         self.node_map: Dict[Proxy, Node] = {}

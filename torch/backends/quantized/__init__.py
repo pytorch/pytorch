@@ -11,6 +11,8 @@ def _get_qengine_id(qengine: str) -> int:
         ret = 1
     elif qengine == 'qnnpack':
         ret = 2
+    elif qengine == 'onednn':
+        ret = 3
     else:
         ret = -1
         raise RuntimeError("{} is not a valid value for quantized engine".format(qengine))
@@ -18,7 +20,7 @@ def _get_qengine_id(qengine: str) -> int:
 
 # This function should correspond to the enums present in c10/core/QEngine.h
 def _get_qengine_str(qengine: int) -> str:
-    all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack'}
+    all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack', 3 : 'onednn'}
     return all_engines.get(qengine, '*undefined')
 
 class _QEngineProp(object):
