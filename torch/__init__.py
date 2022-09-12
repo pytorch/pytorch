@@ -929,7 +929,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from . import _masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import solve
+from ._linalg_utils import eig, solve
 
 
 def _register_device_module(device_type, module):
@@ -955,3 +955,9 @@ if sys.executable != 'torch_deploy':
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
+
+# Enable CUDA Sanitizer
+if 'TORCH_CUDA_SANITIZER' in os.environ:
+    import torch.cuda._sanitizer as csan
+
+    csan.enable_cuda_sanitizer()
