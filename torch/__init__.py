@@ -593,10 +593,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...

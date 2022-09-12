@@ -267,18 +267,18 @@ def einsum(*args: Any) -> Tensor:
 
     Examples::
 
-        >>> # trace
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # trace
         >>> torch.einsum('ii', torch.randn(4, 4))
         tensor(-1.2104)
 
-        >>> # diagonal
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # diagonal
         >>> torch.einsum('ii->i', torch.randn(4, 4))
         tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
-        >>> # outer product
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # outer product
         >>> x = torch.randn(5)
         >>> y = torch.randn(4)
         >>> torch.einsum('i,j->ij', x, y)
@@ -288,8 +288,8 @@ def einsum(*args: Any) -> Tensor:
                 [ 0.1713, -0.4291, -0.5802,  0.7350],
                 [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-        >>> # batch matrix multiplication
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # batch matrix multiplication
         >>> As = torch.randn(3, 2, 5)
         >>> Bs = torch.randn(3, 5, 4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
@@ -302,8 +302,8 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        >>> # with sublist format and ellipsis
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # with sublist format and ellipsis
         >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],

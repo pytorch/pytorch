@@ -743,8 +743,8 @@ def run_doctests(test_module, test_directory, options):
     # pkgpath = os.path.join(pkgpath, 'distributed')
     # pkgpath = os.path.join(pkgpath, 'fx')
     # pkgpath = os.path.join(pkgpath, 'monitor')
-    pkgpath = os.path.join(pkgpath, 'futures')
-    # pkgpath = pkgpath
+    # pkgpath = os.path.join(pkgpath, 'futures')
+    pkgpath = pkgpath
 
     xdoctest_config = {
         'global_exec': r'\n'.join([
