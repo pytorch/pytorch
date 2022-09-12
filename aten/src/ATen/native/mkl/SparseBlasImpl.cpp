@@ -367,6 +367,15 @@ void addmm_out_sparse_csr(
         alpha,
         result.transpose(0, 1));
   }
+  if (mat1.layout() == kStrided &&
+      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseBsc)) {
+    return addmm_dense_result(
+        mat2.transpose(0, 1),
+        mat1.transpose(0, 1),
+        beta,
+        alpha,
+        result.transpose(0, 1));
+  }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
     return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
   }

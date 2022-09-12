@@ -835,8 +835,16 @@ void addmm_out_sparse_csr(
   if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
     return block_sparse_mm(mat1, mat2, beta, alpha, result);
   }
+  if (mat1.layout() == kStrided && mat2.layout() == kSparseBsc &&
+      result.layout() == kStrided) {
+    return block_sparse_mm(mat2.t(), mat1.t(), beta, alpha, result.t());
+  }
   if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
     return spmm(mat1, mat2, beta, alpha, result);
+  }
+  if (mat1.layout() == kStrided && mat2.layout() == kSparseCsc &&
+      result.layout() == kStrided) {
+    return spmm(mat2.t(), mat1.t(), beta, alpha, result.t());
   }
   if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
     // TODO: Add native CSC support via cuSPARSE if supported.

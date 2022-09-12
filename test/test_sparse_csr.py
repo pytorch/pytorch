@@ -1511,6 +1511,43 @@ class TestSparseCSR(TestCase):
                 x = torch.randn(di, dk, dtype=dtype, device=device)
                 y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                 _test(t, x, y)
+                
+                # TODO: support csc directly for full capibility
+                # t = torch.randn(di, dj, dtype=dtype, device=device)
+                # x = self.genSparseCSCTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                # y = torch.randn(dk, dj, dtype=dtype, device=device)
+                # _test(t, x, y)
+
+                t = torch.randn(di, dj, dtype=dtype, device=device)
+                x = torch.randn(di, dk, dtype=dtype, device=device)
+                y = self.genSparseCSCTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
+                _test(t, x, y)
+
+                # for block sparse formats expand dims by 2x and generate with 2x2 block
+                b_dj = dj * 2
+                b_dk = dk * 2
+                b_di = di * 2
+
+                t = torch.randn(b_di, b_dj, dtype=dtype, device=device)
+                x = self.genSparseBSRTensor((b_di, b_dk), (2, 2), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = torch.randn(b_dk, b_dj, dtype=dtype, device=device)
+                _test(t, x, y)
+
+                # lacking support
+                # t = torch.randn(b_di, b_dj, dtype=dtype, device=device)
+                # x = torch.randn(b_di, b_dk, dtype=dtype, device=device)
+                # y = self.genSparseBSRTensor((b_dk, b_dj), (2, 2), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
+                # _test(t, x, y)
+
+                # t = torch.randn(b_di, b_dj, dtype=dtype, device=device)
+                # x = self.genSparseBSCTensor((b_di, b_dk), (2, 2), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                # y = torch.randn(b_dk, b_dj, dtype=dtype, device=device)
+                # _test(t, x, y)
+
+                t = torch.randn(b_di, b_dj, dtype=dtype, device=device)
+                x = torch.randn(b_di, b_dk, dtype=dtype, device=device)
+                y = self.genSparseBSCTensor((b_dk, b_dj), (2, 2), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
+                _test(t, x, y)
 
                 x_shape, y_shape = x.shape, y.shape
 
@@ -1538,11 +1575,32 @@ class TestSparseCSR(TestCase):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
             if transposed:
                 D = torch.randn(d3, d2, dtype=dtype, device=device).t_()
+                D_b = torch.randn(d3, d2 * 2, dtype=dtype, device=device).t_()
             else:
                 D = torch.randn(d2, d3, dtype=dtype, device=device)
+                D_b = torch.randn(d2 * 2, d3, dtype=dtype, device=device)
+
             S = self.genSparseCSRTensor((d1, d2), nnz, device=device, dtype=dtype, index_dtype=index_dtype)
             S_dense = S.to_dense()
             self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
+            S_bsr = self.genSparseBSRTensor((d1 * 2, d2 * 2), (2, 2), nnz, device=device, dtype=dtype, index_dtype=index_dtype)
+            S_bsr_dense = S_bsr.to_dense()
+            self.assertEqual(torch.sparse.mm(S_bsr, D_b), torch.mm(S_bsr_dense, D_b))
+
+            if transposed:
+                Dl = torch.randn(d2, d1, dtype=dtype, device=device).t_()
+                Dl_b = torch.randn(d2 * 2, d1, dtype=dtype, device=device).t_()
+            else:
+                Dl = torch.randn(d1, d2, dtype=dtype, device=device)
+                Dl_b = torch.randn(d1, d2 * 2, dtype=dtype, device=device)
+
+            Sr = self.genSparseCSCTensor((d2, d3), nnz, device=device, dtype=dtype, index_dtype=index_dtype)
+            Sr_dense = Sr.to_dense()
+            self.assertEqual(torch.sparse.mm(Dl, Sr), torch.mm(Dl, Sr_dense))
+            Sr_bsc = self.genSparseBSCTensor((d2 * 2, d3 * 2), (2, 2), nnz, device=device, dtype=dtype, index_dtype=index_dtype)
+            Sr_bsc_dense = Sr_bsc.to_dense()
+            self.assertEqual(torch.sparse.mm(Dl_b, Sr_bsc), torch.mm(Dl_b, Sr_bsc_dense))
+
 
         for index_dtype in [torch.int32, torch.int64]:
             test_shape(7, 8, 9, 20, False, index_dtype)
