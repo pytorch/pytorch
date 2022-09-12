@@ -71,9 +71,9 @@ class PyOperator(PyOperatorABC):
 
             dispatch_key = dispatch_key_or_mode
             assert (
-                dispatch_key != torch._C.DispatchKey.Python
+                dispatch_key != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
-            assert isinstance(dispatch_key, torch._C.DispatchKey)
+            assert isinstance(dispatch_key, torch._C.DispatchKey)  # type: ignore[attr-defined]
             assert dispatch_key not in self.table
             self.table[dispatch_key] = fn
             return fn
@@ -81,7 +81,7 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        if dispatch_key == torch._C.DispatchKey.Python:
+        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
             curr_mode = type(torch._C._get_torch_dispatch_mode())
             assert (
@@ -197,7 +197,7 @@ class OpOverload(PyOperatorABC):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
     def decompose(self, *args, **kwargs):
-        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd  # type: ignore[attr-defined]
         if (
             torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk)
             or dk in self.py_kernels
@@ -215,9 +215,9 @@ class OpOverload(PyOperatorABC):
                 self.python_key_mode_table[mode] = fn
                 return fn
 
-            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)
+            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)  # type: ignore[attr-defined]
             assert (
-                dispatch_key_or_mode != torch._C.DispatchKey.Python
+                dispatch_key_or_mode != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
 
             self.py_kernels[dispatch_key_or_mode] = fn
@@ -226,15 +226,13 @@ class OpOverload(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        if dispatch_key == torch._C.DispatchKey.Python:
+        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
             curr_mode = type(torch._C._get_torch_dispatch_mode())
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
-            if (
-                curr_mode not in self.python_key_mode_table
-            ):
+            if curr_mode not in self.python_key_mode_table:
                 return self._op_dk(dispatch_key, *args, **kwargs)
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
             return self.python_key_mode_table[curr_mode](*args, **kwargs)
