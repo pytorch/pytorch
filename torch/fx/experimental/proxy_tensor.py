@@ -568,24 +568,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
+        fake_tensor_mode = {"real": nullcontext(),
+                            "fake": FakeTensorMode(allow_fallback_kernels=True),
+                            "symbolic": FakeTensorMode(allow_fallback_kernels=False)}[tracing_mode]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode: Any = nullcontext()
-        if tracing_mode == "real":
-            fake_tensor_mode = nullcontext()
-        elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
-        elif tracing_mode == "symbolic":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
-        else:
-            raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
-
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
         def wrap_fake_concrete(x):
-            if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
-
-            return x
+            return fake_tensor_mode.from_tensor(x)if isinstance(x, torch.Tensor) else x  # type: ignore[attr-defined]
 
         shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
