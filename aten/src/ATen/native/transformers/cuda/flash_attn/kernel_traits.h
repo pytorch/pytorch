@@ -27,13 +27,13 @@
 
 #pragma once
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
+#include <cutlass/cutlass.h>
 
-#include <third_party/cutlass/include/cutlass/gemm/gemm.h>
+#include <cutlass/gemm/gemm.h>
 
-#include <third_party/cutlass/include/cutlass/layout/layout.h>
-#include <third_party/cutlass/include/cutlass/numeric_types.h>
-#include <third_party/cutlass/include/cutlass/transform/threadblock/predicated_tile_iterator.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/transform/threadblock/predicated_tile_iterator.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/gemm.h>
 #include <ATen/native/transformers/cuda/flash_attn/gmem_tile.h>
