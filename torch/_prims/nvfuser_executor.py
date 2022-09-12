@@ -10,7 +10,7 @@ from torch._prims_common import getnvFuserDtype, Number, number_type
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import (  # type: ignore[import]
