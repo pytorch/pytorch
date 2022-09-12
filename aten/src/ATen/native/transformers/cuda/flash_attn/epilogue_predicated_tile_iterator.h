@@ -36,18 +36,18 @@
 
 #pragma once
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
-#include <third_party/cutlass/include/cutlass/arch/arch.h>
-#include <third_party/cutlass/include/cutlass/arch/memory.h>
-#include <third_party/cutlass/include/cutlass/array.h>
-#include <third_party/cutlass/include/cutlass/epilogue/threadblock/output_tile_thread_map.h>
-#include <third_party/cutlass/include/cutlass/epilogue/threadblock/predicated_tile_iterator_params.h>
-#include <third_party/cutlass/include/cutlass/layout/matrix.h>
-#include <third_party/cutlass/include/cutlass/layout/tensor.h>
-#include <third_party/cutlass/include/cutlass/matrix_shape.h>
-#include <third_party/cutlass/include/cutlass/numeric_types.h>
-#include <third_party/cutlass/include/cutlass/tensor_ref.h>
-#include <third_party/cutlass/include/cutlass/transform/pitch_linear_thread_map.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/arch/arch.h>
+#include <cutlass/arch/memory.h>
+#include <cutlass/array.h>
+#include <cutlass/epilogue/threadblock/output_tile_thread_map.h>
+#include <cutlass/epilogue/threadblock/predicated_tile_iterator_params.h>
+#include <cutlass/layout/matrix.h>
+#include <cutlass/layout/tensor.h>
+#include <cutlass/matrix_shape.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/tensor_ref.h>
+#include <cutlass/transform/pitch_linear_thread_map.h>
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
