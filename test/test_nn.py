@@ -5370,7 +5370,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mask[i, end:] = False
 
         nt = torch._nested_tensor_from_mask(input, mask)
-        input_convert = nt.to_padded_tensor(0.)
+        input_convert = torch.nested.to_padded_tensor(nt, 0.)
         input.masked_fill_(mask.reshape(N, L, 1).logical_not(), 0.)
 
         self.assertEqual(input, input_convert)
@@ -18750,7 +18750,7 @@ class TestNNDeviceType(NNTestCase):
                     ],
                     device=device, dtype=dtype
                 )
-                result = result.to_padded_tensor(0)
+                result = torch.nested.to_padded_tensor(result, 0)
                 ref_output[0][-1] = torch.zeros_like(
                     ref_output[0][-1], device=device, dtype=dtype
                 )

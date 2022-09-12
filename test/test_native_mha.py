@@ -213,7 +213,7 @@ class TestMHADeviceType(TestCase):
             q, k, v, key_padding_mask=mask if use_padding and not use_nt else None
         )
         if use_nt:
-            ynpt = ynpt.to_padded_tensor(0)
+            ynpt = torch.nested.to_padded_tensor(ynpt, 0)
             if pad_all:
                 ynpt_final = torch.zeros_like(ypt)
                 ynpt_final[:, :ynpt.shape[1], :] = ynpt

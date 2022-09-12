@@ -986,6 +986,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/autograd/generated/python_functions_2.cpp",
         "torch/csrc/autograd/generated/python_functions_3.cpp",
         "torch/csrc/autograd/generated/python_functions_4.cpp",
+        "torch/csrc/autograd/generated/python_nested_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",

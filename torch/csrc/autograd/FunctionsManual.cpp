@@ -357,12 +357,12 @@ Tensor _nested_from_padded_backward(
   if (do_transform_0213) {
     auto new_sizes = {
         input.size(0), input.size(2), (input.size(1) * input.size(3))};
-    auto out = grad.to_padded_tensor(0, new_sizes);
+    auto out = nested_to_padded_tensor(grad, 0, new_sizes);
     auto expand_last_dim_size = {
         input.size(0), input.size(2), input.size(1), input.size(3)};
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
-  return grad.to_padded_tensor(0, input.sizes());
+  return nested_to_padded_tensor(grad, 0, input.sizes());
 }
 
 Tensor linalg_vector_norm_jvp(
