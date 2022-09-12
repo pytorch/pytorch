@@ -14701,6 +14701,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         assert_autodiffed=True),
     UnaryUfuncInfo('special.logit',
+                   aten_name='logit',
                    aten_backward_name='logit_backward',
                    ref=scipy.special.logit if TEST_SCIPY else None,
                    domain=(0, 1),
