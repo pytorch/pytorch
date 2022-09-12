@@ -460,10 +460,11 @@ struct CopyToOpRecord : RecordFunctor {
     auto dest = fd.getFusionState(args.at(0))->as<NvfTensorView>();
     auto source = fd.getFusionState(args.at(1))->as<NvfTensorView>();
 
+    auto tmp = torch::jit::fuser::cuda::set(source);
     if (dest->isFusionInput()) {
-      fd.fusionPtr()->aliasOutputToInput(source, dest);
+      fd.fusionPtr()->aliasOutputToInput(tmp, dest);
     } else {
-      dest = torch::jit::fuser::cuda::set(source);
+      dest = torch::jit::fuser::cuda::set(tmp);
       // aliasOutputToInput implicitly adds the output to the fusion
       // adding it in this path simplifies the logic upstream
       fd.addOutput(source);

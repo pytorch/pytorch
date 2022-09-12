@@ -62,23 +62,10 @@ def to_nvfuser_template_args(args):
     return tree_map(to_nvfuser, args)
 
 
-def _is_node_in_output(gm, candidate_node):
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            return tree_any(lambda x: x == candidate_node, node.args[0])
-
-
-def _is_node_in_input(gm, candidate_node):
-    return tree_any(
-        lambda x: x == candidate_node,
-        [node for node in gm.graph.nodes if node.op == "placeholder"],
-    )
-
-
 # Current implementation of in-place copy_to in nvFuser implicitly adds a new
 # output to the fusion. We don't want to expose this tensor to the outer world,
-# so we count the number of outputs to be dropped. We don't need to drop the
-# outputs that are actually included in the output of the graph.
+# so we count the number of outputs to be dropped. Each call to copy_to adds
+# one output to the fusion that we need to drop.
 def _count_outputs_to_drop(gm):
     return sum(
         1
@@ -86,10 +73,6 @@ def _count_outputs_to_drop(gm):
         if node.op == "call_function"
         and node.target
         in [torch.ops.nvprims.copy_to, torch.ops.nvprims.copy_to.default]
-        and (
-            not _is_node_in_output(gm, node.args[1])
-            or _is_node_in_input(gm, node.args[1])
-        )
     )
 
 
@@ -162,30 +145,6 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     args = [args[0], original_shape, args[1]]
                     return self.call_function(node.target, args, kwargs)
-
-                # copy_to requires special handling of the output tensors
-                elif node.target in [
-                    torch.ops.nvprims.copy_to,
-                    torch.ops.nvprims.copy_to.default,
-                ]:
-                    assert len(node.args) == 2
-                    source_node = node.args[1]
-                    args, kwargs = self.fetch_args_kwargs_from_env(node)
-                    source = args[1]
-                    # If source is a fusion input, we need to place an operation
-                    # before the copy_to so that the copy is actually performed
-                    if _is_node_in_input(gm, source_node):
-                        source = fd.ops.set(source)
-                    result = self.call_function(node.target, [args[0], source], kwargs)
-                    # Check whether the source tensor is an output tensor
-                    # If it is, we need to drop it now from the fusion output
-                    # (it was implicitly added by the copy_to op)
-                    # it will be added back later using correct expected order
-                    if _is_node_in_output(gm, source_node) and not _is_node_in_input(
-                        gm, source_node
-                    ):
-                        fd.remove_output(source)
-                    return result
 
                 return super().run_node(node)
 
