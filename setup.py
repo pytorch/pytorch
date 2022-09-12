@@ -322,7 +322,7 @@ def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
     default_modules_path = [os.path.join(third_party_path, name) for name in [
                             "gloo", "cpuinfo", "tbb", "onnx",
-                            "foxi", "QNNPACK", "fbgemm"
+                            "foxi", "QNNPACK", "fbgemm", "cutlass"
                             ]]
     if not os.path.exists(git_modules_path):
         return default_modules_path
@@ -996,6 +996,7 @@ def main():
         'include/ATen/cuda/detail/*.cuh',
         'include/ATen/cuda/detail/*.h',
         'include/ATen/cudnn/*.h',
+        'include/ATen/functorch/*.h',
         'include/ATen/ops/*.h',
         'include/ATen/hip/*.cuh',
         'include/ATen/hip/*.h',
