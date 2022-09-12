@@ -445,15 +445,18 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   if (at::areAnyTensorSubclassLike(
           {log_probs, targets, input_lengths, target_lengths})) {
-    // Slow composite compliant path for TensorSubclasses
+    // Composite Compliant path for TensorSubclasses
     auto is_batched = log_probs.dim() == 3;
     Tensor log_probs_ = is_batched ? log_probs : log_probs.unsqueeze(1);
+    // TODO : Add cuDNN path!
     // if the targets are on CPU (which you need for CuDNN, let's move them to
     // GPU as a service for the user)
-    auto targs = targets.to(log_probs.device(), kLong);
+
+    // NOTE: Calling data-ptr is not Composite Compliant!,
+    // so we call the _ctc_loss.Tensor overload.
     auto res = std::get<0>(at::_ctc_loss(
         log_probs_,
-        targets,
+        targets.to(log_probs.device(), kLong),
         input_lengths,
         target_lengths,
         BLANK,
