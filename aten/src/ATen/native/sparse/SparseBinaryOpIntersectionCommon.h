@@ -34,12 +34,12 @@
     using index_t ## n = int64_t; \
     __VA_ARGS__                   \
   }
-#define BOOL_TO_INDEX_TYPE1(b1, ...) \
-  EXPAND(b1, 1, CALL(__VA_ARGS__))
-#define BOOL_TO_INDEX_TYPE2(b2, b1, ...) \
-  EXPAND(b2, 2, BOOL_TO_INDEX_TYPE1(b1, __VA_ARGS__))
-#define BOOL_TO_INDEX_TYPE3(b3, b2, b1, ...) \
-  EXPAND(b3, 3, BOOL_TO_INDEX_TYPE2(b2, b1, __VA_ARGS__))
+#define BOOL_TO_INDEX_TYPE1(b0, ...) \
+  EXPAND(b0, 0, CALL(__VA_ARGS__))
+#define BOOL_TO_INDEX_TYPE2(b1, b0, ...) \
+  EXPAND(b1, 1, BOOL_TO_INDEX_TYPE1(b0, __VA_ARGS__))
+#define BOOL_TO_INDEX_TYPE3(b2, b1, b0, ...) \
+  EXPAND(b2, 2, BOOL_TO_INDEX_TYPE2(b1, b0, __VA_ARGS__))
 
 namespace at {
 namespace native {
@@ -509,9 +509,9 @@ void _sparse_binary_op_intersection_kernel_out(
       // The goal is to use int32_t whenever possible for better
       // performance.
       // NOTE: order of types given booleans is reversed.
-      using index_t = index_t3;
-      using hash_t = index_t2;
-      using offset_t = index_t1;
+      using index_t = index_t2;
+      using hash_t = index_t1;
+      using offset_t = index_t0;
       _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t, offset_t>(
           res, x, y, broadcasted_shape, is_commutative);
   });
