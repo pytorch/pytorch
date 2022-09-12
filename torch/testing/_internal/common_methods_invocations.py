@@ -16967,7 +16967,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.ravel",
@@ -17030,12 +17029,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
