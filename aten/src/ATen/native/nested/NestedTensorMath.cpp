@@ -1194,22 +1194,6 @@ Tensor _nested_view_from_buffer(
     std::vector<int64_t>(offsets.begin(), offsets.end()));
 }
 
-Tensor _nested_from_buffer(
-    const Tensor& buffer,
-    const Tensor& nested_size_tensor,
-    const Tensor& nested_stride_tensor,
-    IntArrayRef offsets) {
-  TORCH_INTERNAL_ASSERT(
-      !buffer.is_nested(),
-      "Can only a create Nested Tensor from a normal tensor buffer");
-  TORCH_CHECK(buffer.dim() == 1, "The input buffer must be flat");
-  // Because of broadcasting ops we need to call contiguous on the buffer
-  // Current invariant is that buffer is contiguous
-  auto contiguous_buffer = buffer.contiguous();
-  return contiguous_buffer._nested_view_from_buffer(
-      nested_size_tensor, nested_stride_tensor, offsets);
-}
-
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(

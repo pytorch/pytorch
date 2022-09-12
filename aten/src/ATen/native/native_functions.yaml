@@ -5314,10 +5314,6 @@
 
 # The input arguments' types to this functions are temporary. When nested tensors switch to using SymInts for their metadata representation
 # this will need to be updated
-- func: _nested_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
-  device_check: NoCheck
-  variants: method, function
-
 - func: _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
   variants: method, function
   device_check: NoCheck
@@ -6357,7 +6353,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    AutogradNestedTensor, NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
+    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
