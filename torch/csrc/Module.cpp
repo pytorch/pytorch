@@ -708,8 +708,10 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
       "_get_should_execute_nodes should only be used with .grad() or .backward() "
       "if the `inputs` is passed.");
   torch::autograd::Node* node;
+  std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node = ((THPFunction*)arg)->cdata.lock().get();
+    node_sp = ((THPFunction*)arg)->cdata.lock();
+    node = node_sp.get();
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
