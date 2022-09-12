@@ -687,37 +687,16 @@ inline Variable make_variable_differentiable_view(
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    // If we already did a TensorImpl allocation for data, just reuse it.
-    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as
-    // input), we have to use shallow_copy_and_detach to create a new TensorImpl
-    // to avoid moving leaf node into graph interior. This guarantees only 1
-    // TensorImpl allocation happens in view ops.
-    if (data.getIntrusivePtr().unique() &&
-        data.getIntrusivePtr()->unique_version()) {
-      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
-      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-          data_impl,
-          std::move(backward_info),
-          std::move(forward_info),
-          shared_view_info,
-          creation_meta));
-      return data;
-    } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      c10::intrusive_ptr<at::TensorImpl> data_impl_copy =
-          data.getIntrusivePtr()->shallow_copy_and_detach(
-              /*version_counter=*/0,
-              /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(
-          std::make_unique<DifferentiableViewMeta>(
-              data_impl_copy.get(),
-              std::move(backward_info),
-              std::move(forward_info),
-              shared_view_info,
-              creation_meta));
-      return Variable(data_impl_copy);
-    }
+    TORCH_INTERNAL_ASSERT(data.getIntrusivePtr()->autograd_meta() == nullptr);
+    at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+        data_impl,
+        std::move(backward_info),
+        std::move(forward_info),
+        shared_view_info,
+        creation_meta));
+    return data;
   }
   return Variable();
 }
