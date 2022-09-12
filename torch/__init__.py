@@ -929,7 +929,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from . import _masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import eig, solve
+from ._linalg_utils import eig, solve, chain_matmul  # type: ignore[misc]
 
 
 def _register_device_module(device_type, module):

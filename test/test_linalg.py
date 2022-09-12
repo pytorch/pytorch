@@ -155,6 +155,11 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
             a.eig()
 
+    def test_chain_matmul_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.chain_matmul(a, a)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)

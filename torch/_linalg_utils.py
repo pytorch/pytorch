@@ -110,3 +110,10 @@ def eig(
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.eig` function instead.",
     )
+
+
+def chain_matmul(*matrices, out=None):
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed.",
+        "Please use the `torch.linalg.multi_dot` function instead.",
+    )
