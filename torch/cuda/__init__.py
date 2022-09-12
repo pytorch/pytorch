@@ -464,10 +464,10 @@ def set_stream(stream: Stream):
 def _parse_visible_devices() -> Set[int]:
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
-        return {x for x in range(64)}
-    rc:Set[int] = set()
-    def _strtoul(s:str) -> int:
-    # Return -1 or integer sequence string starts with
+        return set(x for x in range(64))
+
+    def _strtoul(s: str) -> int:
+        """ Return -1 or integer sequence string starts with """
         if len(s) == 0:
             return -1
         for idx, c in enumerate(s):
@@ -477,15 +477,17 @@ def _parse_visible_devices() -> Set[int]:
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
+    # CUDA_VISIBLE_DEVICES uses something like strtoul
+    # which makes `1gpu2,2ampere` is equivalent to `1,2`
+    rc: Set[int] = set()
     for elem in var.split(","):
         rc.add(_strtoul(elem.strip()))
     return rc
 
-
 def _raw_device_count_nvml() -> int:
     from ctypes import CDLL, c_int
     nvml_h = CDLL("libnvidia-ml.so.1")
-    rc=nvml_h.nvmlInit()
+    rc = nvml_h.nvmlInit()
     if rc != 0:
         warnings.warn("Can't initialize NVML")
         return -1
