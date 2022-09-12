@@ -16866,12 +16866,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
@@ -17007,7 +17005,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -17043,7 +17040,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.view",
@@ -17107,7 +17103,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
-        validate_view_consistency=False,
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
