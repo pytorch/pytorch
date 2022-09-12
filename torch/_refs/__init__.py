@@ -1694,7 +1694,8 @@ def _to_dispatch(
         device = args0.device
         dtype = args0.dtype
         layout = args0.layout
-        pin_memory = args0.is_pinned()
+        # TODO: is_pinned is not currently supported in refs or fake_tensor
+        # pin_memory = args0.is_pinned()
         # load positional argsuments:
         if args:
             assert non_blocking is None
@@ -1751,6 +1752,7 @@ def to(
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
+    assert (pin_memory is None)
     # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
         (copy or dtype != a.dtype)
@@ -1758,7 +1760,8 @@ def to(
         and (not non_blocking)
         and (device is None or device == a.device)
         and (layout is None or layout == a.layout)
-        and (pin_memory is None or pin_memory == a.is_pinned())
+        # TODO: is_pinned is not currently supported in refs or fake_tensor
+        # and (pin_memory is None or pin_memory == a.is_pinned())
     ):
         return prims.convert_element_type(a, dtype)
     memory_format = (
