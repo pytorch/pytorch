@@ -1687,7 +1687,13 @@ def _to_dispatch(
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
 ):
-    args0, *args = args if args else [None, ]
+    args0, *args = (
+        args
+        if args
+        else [
+            None,
+        ]
+    )
     args0 = torch.device(args0) if isinstance(args0, str) else args0
     if isinstance(args0, TensorLike):
         # overload to `to.other`
@@ -1741,18 +1747,14 @@ def _to_dispatch(
     return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
 
 
-def to(
-    a: TensorLikeType,
-    *args,
-    **kwargs
-) -> TensorLikeType:
+def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     device, dtype, non_blocking, copy, memory_format, layout, pin_memory = _to_dispatch(
         a, *args, **kwargs
     )
 
     if _to_will_alias(a, device, dtype, copy, memory_format, layout):
         return a
-    assert (pin_memory is None)
+    assert pin_memory is None
     # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
         (copy or dtype != a.dtype)
