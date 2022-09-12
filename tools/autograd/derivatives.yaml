@@ -582,9 +582,6 @@
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
   mask: 'not_implemented("native_dropout_backward: mask")'
 
-- name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
-
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
   result: self_t.zero_()
@@ -1356,10 +1353,6 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_nested(Tensor self, int[] shape) -> Tensor
-  self: _reshape_nested_backward(self, grad)
-  result: auto_linear
-
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
@@ -1394,8 +1387,12 @@
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  self: select_backward(grad, self.sizes(), dim, index)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: select_backward(grad, self.sizes(), dim, index)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_select_backward(grad, self, dim, index)
 
 - name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
@@ -1732,10 +1729,14 @@
   # linear
   result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
-# TODO: this derivative is not SymInt safe, need reshape_symint
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
-  self: grad.reshape(self.sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.reshape(self.sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.reshape_as(self)
+      result: auto_linear
 
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
