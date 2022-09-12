@@ -271,8 +271,12 @@ class AOTConfig:
     decompositions: Dict[Callable, Callable]
 
 
+# TODO: switch AOTAutograd default to fake
+TRACING_MODE = "symbolic" if config.use_dynamic_shapes else "real"
+
+
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="symbolic")(*flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode=TRACING_MODE)(*flat_args)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
     fw_module.print_readable()
@@ -317,7 +321,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
-        fx_g = make_fx(joint_forward_backward, tracing_mode="symbolic")(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward, tracing_mode=TRACING_MODE)(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
 
@@ -330,11 +334,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # view and inplace ops that come from primtorch.
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
-        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions, tracing_mode="symbolic")(*joint_inputs)
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions, tracing_mode=TRACING_MODE)(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode="symbolic")(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode=TRACING_MODE)(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")
