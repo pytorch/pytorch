@@ -12,7 +12,6 @@
 #else
 // needed for the meta tensor calls to get stride info in functionalization
 #include <ATen/ops/empty_strided_native.h>
-// #include <ATen/Functions.h>
 // needed for special handling of copy_().
 // See Note [functionalizating copy_() and not preserving strides]
 #include <ATen/ops/to_ops.h>
