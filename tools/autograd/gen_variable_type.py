@@ -1428,7 +1428,7 @@ def emit_body(
                     arg_names=arg_names,
                 )
             else:
-                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                     base_type_call=base_type_call,
                     tmp_var=TMP_VAR,
                     guard=guard,
