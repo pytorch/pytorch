@@ -12100,7 +12100,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
                DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_meta', device_type='cuda'),
                DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
-               # argument 'start' (position 3) must be SymInt, not FakeTensor, 
+               # argument 'start' (position 3) must be SymInt, not FakeTensor,
                # `sample_inputs_narrow`` return a tensor instead of an int
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
