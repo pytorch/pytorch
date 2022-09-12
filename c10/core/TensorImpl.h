@@ -603,7 +603,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return sym_sizes_custom();
     }
     // Sizes guaranteed to be non-negative, so unchecked cast is OK
-    return c10::fromIntArrayRefKnownNonNegative(
+    return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
         sizes_and_strides_.sizes_arrayref());
   }
 
@@ -620,7 +620,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return extra_meta_->sizes_;
     } else {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
-      return c10::fromIntArrayRefKnownNonNegative(sizes_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          sizes_default());
     }
   }
 
@@ -732,7 +733,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
-    return c10::fromIntArrayRefKnownNonNegative(strides_default());
+    // strides guaranteed to be non-negative, so unchecked cast is OK
+    return c10::SymIntArrayRef::fromIntArrayRefUnchecked(strides_default());
   }
 
   IntArrayRef strides_default() const {
@@ -746,7 +748,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->strides_;
     } else {
-      return c10::fromIntArrayRefKnownNonNegative(strides_default());
+      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+          strides_default());
     }
   }
 
