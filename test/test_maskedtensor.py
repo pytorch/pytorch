@@ -440,7 +440,7 @@ class TestReductions(TestCase):
         The following block of tests "test_mean_grad_case_1[a through e] are used to test the functionality of
         the two different ways of constructing MaskedTensors:
             masked_tensor(data, mask, requires_grad=True/False) -- NO differentiable constructor and always a leaf
-            masked_tensor(data, mask) -- differentiable constructor
+            as_masked_tensor(data, mask) -- differentiable constructor
 
         Like torch.tensor(data), masked_tensor(data, mask) will provide a UserWarning if data.requires_grad=True
         as_masked_tensor does not take in requires_grad -- it just takes on the requires_grad from data

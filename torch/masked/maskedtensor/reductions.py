@@ -103,7 +103,7 @@ def _torch_reduce_dim(fn):
             result_data = masked_fn(
                 self, dim=dim, keepdim=keepdim, dtype=dtype, mask=self.get_mask()
             )
-        return MaskedTensor.from_values(result_data, _multidim_any(mask, dim, keepdim))
+        return as_masked_tensor(result_data, _multidim_any(mask, dim, keepdim))
 
     return reduce_dim
 
