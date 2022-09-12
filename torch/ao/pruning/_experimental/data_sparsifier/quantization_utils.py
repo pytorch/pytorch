@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.ao.sparsity.sparsifier.utils import module_to_fqn, fqn_to_module
+from torch.ao.pruning.sparsifier.utils import module_to_fqn, fqn_to_module
 from typing import Dict, List
 
 SUPPORTED_MODULES = {
