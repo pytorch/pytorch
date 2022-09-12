@@ -6272,7 +6272,7 @@ class TestFallbackWarning(TestCase):
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
 
-        with self.assertRaisesRegex(NotImplementedError, "not current implemented for the MPS device"):
+        with self.assertRaisesRegex(NotImplementedError, "not currently implemented for the MPS device"):
             fn(*args, **kwargs)
 
     def test_warn_on_not_implemented_with_fallback(self):
