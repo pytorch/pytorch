@@ -1693,15 +1693,6 @@ See :func:`torch.dot`
 )
 
 add_docstr_all(
-    "eig",
-    r"""
-eig(eigenvectors=False) -> (Tensor, Tensor)
-
-See :func:`torch.eig`
-""",
-)
-
-add_docstr_all(
     "element_size",
     r"""
 element_size() -> int
