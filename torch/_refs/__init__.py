@@ -1678,8 +1678,7 @@ def _to_will_alias(
 
 def _to_dispatch(
     a: TensorLikeType,
-    args,
-    *,
+    *args,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
     non_blocking: Optional[bool] = None,
