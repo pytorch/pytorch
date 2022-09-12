@@ -691,6 +691,7 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
+        xfail('narrow'),  # .item() call
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
@@ -923,6 +924,7 @@ class TestOperators(TestCase):
         xfail('cumprod'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
@@ -1044,6 +1046,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda

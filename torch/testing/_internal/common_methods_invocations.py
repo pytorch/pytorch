@@ -4274,6 +4274,8 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
+        # narrow accepts `start` argument to be a Tensor.
+        yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
@@ -11998,7 +12000,15 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_narrow),
+           sample_inputs_func=sample_inputs_narrow,
+           skips=(
+               # Use of .item()
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -16963,6 +16973,10 @@ python_ref_db = [
         "_refs.narrow",
         torch_opinfo_name="narrow",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",

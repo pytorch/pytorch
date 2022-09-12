@@ -884,6 +884,7 @@ make_fx_failures = {
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
+    xfail('narrow'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
