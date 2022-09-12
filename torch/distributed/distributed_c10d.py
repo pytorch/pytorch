@@ -409,7 +409,7 @@ def _check_tensor_list(param, param_name):
             "to be of type List[torch.Tensor].".format(param_name)
         )
 
-def _as_iterable(obj) -> collections.Iterable:
+def _as_iterable(obj) -> collections.abc.Iterable:
     return obj if isinstance(obj, list) else (obj,)
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
