@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     verify_ddp_error_logged,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -538,7 +537,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_allreduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -979,7 +977,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 futures.append(pg.gather([], input, opts).get_future())
 
         # Wait for work to complete
-        expected = [torch.tensor([rank]) for rank in range(self.world_size)]
+        expected = [fn(torch.tensor([rank])) for rank in range(self.world_size)]
         for i in range(self.world_size):
             futures[i].wait()
             result = futures[i].value()
@@ -994,6 +992,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_gather_basics_cuda(self):
         self._test_gather_basics(lambda t: t.clone().cuda())
+
+    @requires_gloo()
+    def test_gather_noncontiguous_input(self):
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_gather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1037,7 +1040,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1103,7 +1105,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 for _ in range(n)
             ]
             expected_output = [
-                [torch.tensor([i]) for i in range(n * self.world_size)]
+                [fn(torch.tensor([i])) for i in range(n * self.world_size)]
                 for _ in range(n)
             ]
             fut = pg.allgather(output, input).get_future()
@@ -1121,6 +1123,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_allgather_basics_cuda(self):
         self._test_allgather_basics(lambda t: t.clone().cuda())
+
+    @requires_gloo()
+    def test_allgather_noncontiguous_input(self):
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1161,7 +1168,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_allgather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1342,7 +1348,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @requires_gloo()
     def test_reduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -2332,6 +2337,64 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_rank_membership(self):
+        self._test_rank_membership(backend="gloo")
+
+
+class CompilerTest(test_c10d_common.CompilerTest):
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _get_default_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
+
+    def test_allreduce_work_wait_cpu(self):
+        self._test_allreduce_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_work_wait_gpu(self):
+        self._test_allreduce_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_allgather_work_wait_cpu(self):
+        self._test_allgather_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_work_wait_gpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_broadcast_work_wait_cpu(self):
+        self._test_broadcast_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_work_wait_gpu(self):
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_scatter_work_wait_cpu(self):
+        self._test_scatter_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_scatter_work_wait_gpu(self):
+        self._test_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
 
 if __name__ == "__main__":

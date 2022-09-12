@@ -1,25 +1,25 @@
 # Owner(s): ["oncall: distributed"]
 
-from collections import OrderedDict
 import random
 import sys
+from typing import List
 import unittest
+from collections import OrderedDict
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp.utils import (
-    _apply_to_tensors,
-    _replace_by_prefix,
-)
+from torch.distributed.fsdp._utils import _apply_to_tensors
+from torch.distributed.utils import _replace_by_prefix
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
-    TestCase,
 )
-
+from dataclasses import dataclass
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -54,11 +54,20 @@ class TestUtils(TestCase):
             expected += t.numel()
             return t
 
+        @dataclass
+        class SomeDataClass:
+            some_key: str
+            some_float: float
+            some_tensor: List[torch.Tensor]
+
+
+
         # create a mixed bag of data.
         data = [1, "str"]
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
         data.insert(0, set(["x", get_a_tensor(), get_a_tensor()]))
         data.append(([1], get_a_tensor(), (1), [get_a_tensor()], set((1, 2))))
+        data.append({"abc": SomeDataClass("some_key", 1.0, [get_a_tensor()])})
         od = OrderedDict()
         od["k"] = "value"
         data.append(od)
@@ -90,6 +99,23 @@ class TestUtils(TestCase):
         }
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
         assert state_dict == original_state_dict
+
+
+    def test_packed_sequence(self):
+        """Test to ensure RNN packed sequences are modified correctly."""
+        rnn = nn.RNN(5, 5)
+
+        x = torch.rand((5, 1, 5), dtype=torch.float)
+        seq_length = torch.tensor([4], dtype=torch.int)
+
+        def fill_fn(x):
+            x.fill_(0)
+
+        x = nn.utils.rnn.pack_padded_sequence(x, seq_length)
+        x, h = rnn(x)
+        x = _apply_to_tensors(fill_fn, x)
+        x, _ = nn.utils.rnn.pad_packed_sequence(x)
+        self.assertEqual(torch.sum(x), 0)
 
 
 instantiate_parametrized_tests(TestUtils)

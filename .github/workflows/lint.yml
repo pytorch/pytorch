@@ -1,28 +1,36 @@
 name: Lint
 
 on:
+  pull_request:
   push:
     branches:
       - master
-  pull_request:
+      - main
+      - release/*
+      - landchecks/*
+  workflow_dispatch:
 
 jobs:
   lintrunner:
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.16x
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: 1
+
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
           architecture: x64
-
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.5.*
+        run: pip install lintrunner==0.9.2
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -33,73 +41,64 @@ jobs:
           python3 -m tools.generate_torch_version --is_debug=false
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
+            --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        if: github.event_name == 'push'
-        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
-
-      - name: Run lintrunner on PR files
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
-          lintrunner -vv --force-color --revision "${MERGE_BASE}"
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          set +e
+          if ! lintrunner --force-color --all-files --tee-json=lint.json; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+              echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+              exit 1
+          fi
 
       - name: Store annotations
-        # Don't run on forked pull requests
-        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
+        if: always() && github.event_name == 'pull_request'
+        # Don't show this as an error; the above step will have already failed.
+        continue-on-error: true
         run: |
-          lintrunner --json \
-            | python .github/scripts/convert_lintrunner_annotations_to_github.py \
-            > annotations.json
-
-          cat annotations.json
-
-      - name: Add annotations
-        # Don't run on forked pull requests
-        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
-        uses: pytorch/add-annotations-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          check_name: 'lintrunner'
-          linter_output_path: annotations.json
-          commit_sha: ${{ github.event.pull_request.head.sha }}
-          mode: json
+          # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+          jq --raw-output \
+            '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+            lint.json
 
   quick-checks:
     name: quick-checks
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
       - name: Install requirements
         id: requirements
-        run: pip3 install -r requirements.txt --user
+        run: pip install -r requirements.txt --user
       - name: Ensure no non-breaking spaces
         if: always()
         run: |
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -113,34 +112,78 @@ jobs:
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
-          python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
-      - name: Ensure all test files have header containing ownership information
-        if: always()
-        run: |
-          python3 -m pip install boto3==1.19.12
-          .github/scripts/lint_test_ownership.py
+          python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
-  shellcheck:
-    name: shellcheck
-    runs-on: ubuntu-18.04
+  pr-sanity-checks:
+    name: pr-sanity-checks
+    runs-on: linux.20_04.4x
+    # Only run this on pull requests
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          python-version: 3.x
-          architecture: x64
+          submodules: false
+          fetch-depth: -1
+      - name: PR size check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -x
+
+          ancestor=$(git merge-base "${BASE}" "${HEAD}")
+          details=$(git diff --shortstat "$ancestor" "${HEAD}")
+          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
+          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
+
+          pr_size=0
+          if [ "$add" ]; then
+              pr_size=$(("$pr_size" + "$add"))
+          fi
+          if [ "$remove" ]; then
+              pr_size=$(("$pr_size" + "$remove"))
+          fi
+
+          if ((pr_size > 2000)); then
+            echo
+            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
+            echo 'allowed within PyTorch infra. PLease make sure to split up'
+            echo 'your PR into smaller pieces that can be reviewed.'
+            echo 'If you think that this rule should not apply to your PR,'
+            echo 'please contact @albanD or @seemethere.'
+            echo
+            false
+          fi
+
+
+
+  workflow-checks:
+    name: workflow-checks
+    runs-on: linux.20_04.4x
+    steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install requirements
         id: requirements
         run: |
-          pip3 install -r requirements.txt --user
+          pip install -r requirements.txt --user
       - name: Install Jinja2
         run: |
-          pip3 install Jinja2==3.0.1 --user
+          pip install Jinja2==3.0.1 --user
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -158,66 +201,27 @@ jobs:
             echo 'onto a more recent commit from the PyTorch master branch.'
             false
           fi
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          mkdir -p ~/.local/bin
-          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
-          rm -r "shellcheck-${scversion}"
-          ~/.local/bin/shellcheck --version
-      - name: Extract scripts from GitHub Actions workflows
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Run ShellCheck
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
-            echo
-            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
-            echo 'listed above. Note that if a path in one of the above warning'
-            echo 'messages starts with .extracted_scripts/ then that means it'
-            echo 'is referring to a shell script embedded within another file,'
-            echo 'whose path is given by the path components immediately'
-            echo 'following the .extracted_scripts/ prefix.'
-            false
-          fi
       - name: Check that jobs will be cancelled
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Run actionlint
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          command: |
-            set -eux
-            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-            ./actionlint --color
-            rm actionlint
 
   toc:
     name: toc
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
     steps:
-      - name: Setup Node
-        uses: actions/setup-node@v2
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
+      # This is not a node project so there is no package-lock.json to cache
+      - name: Setup Node
+        uses: actions/setup-node@v2
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -247,30 +251,37 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/requirements-flake8.txt
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
         run: |
           set -eux
-          python3 -mpip install -r requirements.txt
-          python3 -mpip install boto3==1.16.34
-          pip3 install typing-extensions==3.10 --user
-          pip3 install -r requirements-flake8.txt --user
-          python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.812 --user
+          pip install -r requirements.txt
+          pip install boto3==1.19.12
+          pip install typing-extensions==3.10 --user
+          pip install -r requirements-flake8.txt --user
+          pip install rockset==0.8.10 --user
+          pip install -r requirements.txt --user
+          pip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
@@ -280,24 +291,38 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: ubuntu-18.04
+    runs-on: linux.20_04.4x
     strategy:
       matrix:
-        with_torch: [with_torch, without_torch]
+        test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.5
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
       - name: Install torch
-        if: matrix.with_torch == 'with_torch'
+        if: matrix.test_type == 'with_torch'
         run: |
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'

@@ -11,7 +11,7 @@ from functools import reduce
 import numpy as np
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes)
@@ -649,6 +649,16 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[[0, 123, 44488, 68807, 123343], ],
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
+    def test_set_item_to_scalar_tensor(self, device):
+        m = random.randint(1, 10)
+        n = random.randint(1, 10)
+        z = torch.randn([m, n], device=device)
+        a = 1.0
+        w = torch.tensor(a, requires_grad=True, device=device)
+        z[:, 0] = w
+        z.sum().backward()
+        self.assertEqual(w.grad, m * a)
+
     def test_single_int(self, device):
         v = torch.randn(5, 7, 3, device=device)
         self.assertEqual(v[4].shape, (7, 3))
@@ -818,6 +828,9 @@ class TestIndexing(TestCase):
         value = torch.randn(2, 2)
         out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
+        self.assertTrue(not t1.is_contiguous())
+        self.assertTrue(not t2.is_contiguous())
+
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
@@ -1479,6 +1492,7 @@ class NumpyTests(TestCase):
         self.assertEqual(torch.ones(1, 2, device=device), a[true, [0, 1], true, true, [1], [[2]]])
         self.assertRaises(IndexError, lambda: a[false, [0, 1], ...])
 
+    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_boolean_indexing_alldims(self, device):
         true = torch.tensor(True, device=device)
         a = torch.ones((2, 3), device=device)

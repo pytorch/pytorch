@@ -9,6 +9,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
@@ -40,7 +41,148 @@
 
 namespace at { namespace cuda { namespace jit {
 
+// hiprtc already includes some traits, so this removes duplicate definitions of
+// integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
+// Copied from aten/src/ATen/cuda/llvm_basic.cpp, then modified as above.
+// If not compiling for ROCm, return the original get_traits_string().
+std::string get_traits_string_but_hiprtc_safe() {
+#ifdef USE_ROCM
+    return R"ESCAPE(
+namespace std {
+
+template <class _Tp>
+_Tp&& __declval(int);
+template <class _Tp>
+_Tp __declval(long);
+template <class _Tp>
+decltype(__declval<_Tp>(0)) declval() noexcept;
+
+template <class _Tp> struct remove_const            {typedef _Tp type;};
+template <class _Tp> struct remove_const<const _Tp> {typedef _Tp type;};
+template <class _Tp> using remove_const_t = typename remove_const<_Tp>::type;
+
+template <class _Tp> struct remove_volatile               {typedef _Tp type;};
+template <class _Tp> struct remove_volatile<volatile _Tp> {typedef _Tp type;};
+template <class _Tp> using remove_volatile_t = typename remove_volatile<_Tp>::type;
+
+template <class _Tp> struct remove_cv
+{typedef typename remove_volatile<typename remove_const<_Tp>::type>::type type;};
+template <class _Tp> using remove_cv_t = typename remove_cv<_Tp>::type;
+
+template <class _Tp> struct __libcpp_is_floating_point              : public false_type {};
+template <>          struct __libcpp_is_floating_point<float>       : public true_type {};
+template <>          struct __libcpp_is_floating_point<double>      : public true_type {};
+template <>          struct __libcpp_is_floating_point<long double> : public true_type {};
+
+template <class _Tp>
+inline constexpr bool is_arithmetic_v = is_arithmetic<_Tp>::value;
+
+template <class _Tp>
+struct __numeric_type
+{
+   static void __test(...);
+   static float __test(float);
+   static double __test(char);
+   static double __test(int);
+   static double __test(unsigned);
+   static double __test(long);
+   static double __test(unsigned long);
+   static double __test(long long);
+   static double __test(unsigned long long);
+   static double __test(double);
+   static long double __test(long double);
+
+   typedef decltype(__test(declval<_Tp>())) type;
+   static const bool value = !is_same<type, void>::value;
+};
+
+template <>
+struct __numeric_type<void>
+{
+   static const bool value = true;
+};
+
+// __promote
+
+template <class _A1, class _A2 = void, class _A3 = void,
+          bool = __numeric_type<_A1>::value &&
+                 __numeric_type<_A2>::value &&
+                 __numeric_type<_A3>::value>
+class __promote_imp
+{
+public:
+    static const bool value = false;
+};
+
+template <class _A1, class _A2, class _A3>
+class __promote_imp<_A1, _A2, _A3, true>
+{
+private:
+    typedef typename __promote_imp<_A1>::type __type1;
+    typedef typename __promote_imp<_A2>::type __type2;
+    typedef typename __promote_imp<_A3>::type __type3;
+public:
+    typedef decltype(__type1() + __type2() + __type3()) type;
+    static const bool value = true;
+};
+
+template <class _A1, class _A2>
+class __promote_imp<_A1, _A2, void, true>
+{
+private:
+    typedef typename __promote_imp<_A1>::type __type1;
+    typedef typename __promote_imp<_A2>::type __type2;
+public:
+    typedef decltype(__type1() + __type2()) type;
+    static const bool value = true;
+};
+
+template <class _A1>
+class __promote_imp<_A1, void, void, true>
+{
+public:
+    typedef typename __numeric_type<_A1>::type type;
+    static const bool value = true;
+};
+
+template <class _A1, class _A2 = void, class _A3 = void>
+class __promote : public __promote_imp<_A1, _A2, _A3> {};
+
+} // namespace std
+)ESCAPE";
+#else
+    return get_traits_string();
+#endif
+}
+
+#ifdef USE_ROCM
+const std::string jit_preamble = R"ESCAPE(
+#pragma clang force_cuda_host_device begin
+)ESCAPE";
+const std::string jit_epilogue = R"ESCAPE(
+#pragma clang force_cuda_host_device end
+)ESCAPE";
+#else
+const std::string jit_preamble;
+const std::string jit_epilogue;
+#endif
+
 const std::string jit_common_types = R"ESCAPE(
+  #ifdef __HIPCC__
+  #define ERROR_UNSUPPORTED_CAST ;
+  // corresponds to aten/src/ATen/native/cuda/thread_constants.h
+  #define CUDA_OR_ROCM_NUM_THREADS 256
+  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+  #define MAX_DIMS 16
+  #ifndef __forceinline__
+  #define __forceinline__ inline __attribute__((always_inline))
+  #endif
+  #else
+  //TODO use _assert_fail, because assert is disabled in non-debug builds
+  #define ERROR_UNSUPPORTED_CAST assert(false);
+  #define CUDA_OR_ROCM_NUM_THREADS 128
+  #define MAX_DIMS 25
+  #endif
   #define POS_INFINITY __int_as_float(0x7f800000)
   #define INFINITY POS_INFINITY
   #define NEG_INFINITY __int_as_float(0xff800000)
@@ -54,11 +196,9 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  constexpr int num_threads = 128;
+  constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
-  //TODO use _assert_fail, because assert is disabled in non-debug builds
-  #define ERROR_UNSUPPORTED_CAST assert(false);
 
   ${traits_string}
   ${cmath_string}
@@ -84,7 +224,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -93,6 +233,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
+  _(std::complex<at::Half>, ComplexHalf)                           \
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
@@ -130,6 +271,7 @@ const std::string jit_common_types = R"ESCAPE(
   ${half_string}
   ${bfloat16_string}
   ${complex_body_string}
+  ${complex_half_body_string}
   ${complex_math_string}
 
 
@@ -144,15 +286,22 @@ struct alignas(2) Half {
 
   Half() = default;
   inline __host__ __device__ Half(float value){
+#ifdef __HIPCC__
+    x = __half_as_short(__float2half(value));
+#else
     asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+#endif
   }
   inline __host__ __device__ operator float() const{
+#ifdef __HIPCC__
+      return __half2float(*reinterpret_cast<const __half*>(&x));
+#else
       float val;
       asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
       //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
       return val;
+#endif
   }
-
 };
 }
 )ESCAPE";
@@ -199,16 +348,57 @@ struct alignas(2) BFloat16 {
   }
 
   inline __host__ __device__ operator float() const{
+#ifdef __HIPCC__
+    union
+    {
+        uint32_t int32;
+        float    fp32;
+    } u = {uint32_t(x) << 16};
+    return u.fp32;
+#else
     float val;
     asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x)); //do we need const cast here?
     return val;
+#endif
   }
 
 };
 }
 )ESCAPE";
 
-// copy-pasted from c10/util/TypeCast.h
+// From c10/util/Load.h
+const std::string load_support_literal = R"ESCAPE(
+
+  namespace c10 {
+    template <typename T>
+    struct LoadImpl {
+      __device__ static T apply(const void *src) {
+        return *reinterpret_cast<const T*>(src);
+      }
+    };
+
+    template <>
+    struct LoadImpl<bool> {
+      __device__ static bool apply(const void *src) {
+        static_assert(sizeof(bool) == sizeof(char), "");
+        return LoadImpl<char>::apply(src);
+      }
+    };
+
+    template <typename T>
+    __device__ T load(const void *src) {
+      return LoadImpl<T>::apply(src);
+    }
+
+    template <typename scalar_t>
+    __device__ scalar_t load(const scalar_t *src) {
+      return LoadImpl<scalar_t>::apply(src);
+    }
+  }  // namespace c10
+
+)ESCAPE";
+
+// copy-pasted from c10/util/TypeCast.h and c10/core/DynamicCast.h
 const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <typename T>
@@ -256,14 +446,37 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::BFloat16> {
+    static inline std::complex<at::Half> apply(at::BFloat16 src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
+    static inline std::complex<at::Half> apply(at::Half src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<
+      std::complex<at::Half>,
+      std::complex<double>> {
+    static inline std::complex<at::Half> apply(std::complex<double> src) {
+      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+    }
+  };
+
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
-      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
+      return static_cast_with_inter_type<dest_t, type>::apply(c10::load<type>(ptr));
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -278,7 +491,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
@@ -286,27 +499,31 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
 
   template <int N>
   struct LoadWithCast {
-  using array_t = Array<ScalarType, N==0? 1 : N>;
-  using size_array_t = Array<uint32_t, N==0? 1: N>;
+    using array_t = Array<ScalarType, N==0? 1 : N>;
+    using size_array_t = Array<uint32_t, N==0? 1: N>;
 
-  array_t dtypes;
-  size_array_t element_sizes;
-  template <typename scalar_t>
-  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg) {
-      void* ptr = base_ptr + element_sizes[arg] * offset;
-      return fetch_and_cast<scalar_t>(dtypes[arg], ptr);
-  }
+    array_t dtypes;
+    size_array_t element_sizes;
+    template <typename scalar_t>
+    __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg) {
+        void* ptr = base_ptr + element_sizes[arg] * offset;
+        return fetch_and_cast<scalar_t>(dtypes[arg], ptr);
+    }
   };
 
+  template <int N = 1>
   struct StoreWithCast {
-  ScalarType dtype;
-  uint32_t element_size;
-  //StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
-  template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-      void *ptr = base_ptr + element_size * offset;
-      cast_and_store<scalar_t>(dtype, ptr, value);
-  }
+    using array_t = Array<ScalarType, N==0? 1 : N>;
+    using size_array_t = Array<uint32_t, N==0? 1: N>;
+
+    array_t dtypes;
+    size_array_t element_sizes;
+
+    template<typename scalar_t>
+    __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+        void *ptr = base_ptr + element_sizes[arg] * offset;
+        cast_and_store<scalar_t>(dtypes[arg], ptr, value);
+    }
   };
 
 )ESCAPE";
@@ -316,13 +533,13 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
   struct LoadWithoutCast {
   template <typename scalar_t>
   __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+    return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
   };
 
   struct StoreWithoutCast {
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg=0) {
     *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
   }
   };
@@ -389,7 +606,7 @@ const std::string offset_calc_template = R"ESCAPE(
       }
 
       #pragma unroll
-      for (int dim = 0; dim < 25; ++dim) {
+      for (int dim = 0; dim < MAX_DIMS; ++dim) {
       if (dim == dims) {
           break;
       }
@@ -408,9 +625,9 @@ const std::string offset_calc_template = R"ESCAPE(
   }
 
     int dims;
-    IntDivider sizes_[25];
+    IntDivider sizes_[MAX_DIMS];
     // NOTE: this approach will not support nInputs == 0
-    ${index_type} strides_[25][NARGS];
+    ${index_type} strides_[MAX_DIMS][NARGS];
   };
 
 
@@ -418,6 +635,7 @@ const std::string offset_calc_template = R"ESCAPE(
 
 const std::string jit_code_template = R"ESCAPE(
 
+  ${load_support}
   ${dynamic_casting_string}
 
 
@@ -427,9 +645,9 @@ const std::string jit_code_template = R"ESCAPE(
   extern "C" __global__
   void ${name}_kernel(
       const int numel,
-      Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
+      Array<char*, ${nInputs}+${nOutputs}> data, //[${nInputs}+${nOutputs}],
       ${offset_calculator}<${nInputs}> input_calculator,
-      ${offset_calculator}<1> output_calculator,
+      ${offset_calculator}<${nOutputs}> output_calculator,
       ${loader} l,
       ${storer} s,
       ${compute_type} scalar_val${extra_params}) {
@@ -439,7 +657,7 @@ const std::string jit_code_template = R"ESCAPE(
     int idx = blockIdx.x;
 
     int remaining = numel - block_work_size * idx;
-    auto thread_idx = threadIdx.x;
+    int thread_idx = threadIdx.x;
 
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++){
@@ -458,7 +676,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args}${extra_args});
+        ${call_functor}
       }
     }
 
@@ -473,7 +691,6 @@ const std::string jit_code_template = R"ESCAPE(
         int linear_idx = thread_idx + block_work_size * idx;
         auto output_offsets = output_calculator.get(linear_idx);
         //printf("output thread %d offset %d\n", threadIdx.x, output_offsets[0]);
-        //TODO handle multi-return functors
         ${store_outputs}
         thread_idx += num_threads;
     }
@@ -482,9 +699,11 @@ const std::string jit_code_template = R"ESCAPE(
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
 
+  ${load_support}
+
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+      return c10::load(reinterpret_cast<scalar_t*>(base_ptr) + offset);
   }
 
   template<typename scalar_t>
@@ -498,6 +717,24 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
     scalar_t val[vec_size];
   };
 
+  template <int vec_size, typename scalar_t>
+  __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
+    using vec_t = aligned_vector<scalar_t, vec_size>;
+    auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+    return from[offset];
+  }
+
+  template <int vec_size>
+  __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint32_t offset) {
+    // See NOTE [Loading boolean values]
+    auto tmp = load_vector<vec_size>(reinterpret_cast<const uint8_t*>(base_ptr), offset);
+    aligned_vector<bool, vec_size> ret;
+    for (int i = 0; i < vec_size; ++i) {
+      ret.val[i] = bool(tmp.val[i]);
+    }
+    return ret;
+  }
+
   ${functor}
 
   // TODO: setup grid-stride loop
@@ -505,12 +742,13 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   extern "C" __global__
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
-      Array<char*, ${nInputs}+1> data,
-      ${compute_type} scalar_val${extra_params}) //[${nInputs}+1],
+      Array<char*, ${nInputs}+${nOutputs}> data,
+      ${compute_type} scalar_val${extra_params}) //[${nInputs}+${nOutputs}],
       {
       constexpr int vec_size = ${vec_size};
+      using scalar_t = ${scalar_type};
       int remaining = N - block_work_size * blockIdx.x;
-      auto thread_idx = threadIdx.x;
+      int thread_idx = threadIdx.x;
       int idx = blockIdx.x;
       ${declare_load_arrays}
       ${declare_store_arrays}
@@ -528,7 +766,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
-            out[j] = ${name}<${compute_type}>(${args} ${extra_args});
+            ${call_functor}
           }
         }
         thread_idx = threadIdx.x;
@@ -538,42 +776,79 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
               break;
           }
           int linear_idx = thread_idx + block_work_size * idx;
-          store<${result_type}>(out[j], data[0], linear_idx);
+          ${store_unrolled_outputs}
           thread_idx += num_threads;
         }
       } else {
         static constexpr int loop_size = thread_work_size / vec_size;
   //actual loading
-        using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
-        ${vector_pointers}
+        ${vector_inputs}
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
-          vec_t_input v;
           ${load_vectorized_inputs}
           thread_idx += num_threads;
         }
 
-
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args}${extra_args});
+          ${call_functor}
         }
+
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
-        vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
+        ${vector_outputs}
         int thread_idx = threadIdx.x;
         #pragma unroll
         for (int i = 0; i<loop_size; i++){
           vec_t_output v;
-          #pragma unroll
-          for (int j=0; j<vec_size; j++){
-            v.val[j] = out[vec_size * i + j];
-          }
-          to_[thread_idx] = v;
+          ${store_vectorized_outputs}
           thread_idx += num_threads;
         }
       }
   }
 )ESCAPE";
+
+static void replace_all(std::string& s, const std::string& to_replace, const std::string& replace_with) {
+  std::ostringstream oss;
+  std::size_t pos = 0;
+  std::size_t prev_pos = pos;
+
+  while (true) {
+    prev_pos = pos;
+    pos = s.find(to_replace, pos);
+    if (pos == std::string::npos)
+      break;
+    oss << s.substr(prev_pos, pos - prev_pos);
+    oss << replace_with;
+    pos += to_replace.size();
+  }
+
+  oss << s.substr(prev_pos);
+  s = oss.str();
+}
+
+// hipify replaces certain device math functions, e.g., std::max -> ::max
+// See torch/utils/hipify/cuda_to_hip_mappings.py.
+// Replace them back. Search for " ::<name>" to avoid duplicate replacements.
+static std::string unhipify_math_functions(const std::string &original) {
+  static std::vector<std::pair<std::string,std::string>> mappings = {
+    {" std::max", " ::max"},
+    {" std::min", " ::min"},
+    {" std::ceil", " ::ceil"},
+    {" std::floor", " ::floor"},
+    {" std::exp", " ::exp"},
+    {" std::log", " ::log"},
+    {" std::pow", " ::pow"},
+    {" std::fabs", " ::fabs"},
+    {" std::fmod", " ::fmod"},
+    {" std::remainder", " ::remainder"},
+    {" std::frexp", " ::frexp"}
+  };
+  std::string ret = original;
+  for (const auto& mapping : mappings) {
+    replace_all(ret, mapping.second, mapping.first);
+  }
+  return ret;
+}
 
 // The following is copied from fused_kernel.cpp
 // TODO: refactor codegenOutputQuery into its own file
@@ -592,7 +867,12 @@ void codegenOutputQuery(
     int& nvrtc_major,
     int& nvrtc_minor,
     bool& compile_to_sass) {
-
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  cuda_major = prop->major;
+  cuda_minor = prop->minor;
+  compile_to_sass = false;
+#else
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
   TORCH_CHECK(
       nvrtc_major >= 6, "NVRTC versions less than 6 are not supported. Is: ", nvrtc_major);
@@ -635,6 +915,7 @@ void codegenOutputQuery(
     // compile to sass is not allowed prior to CUDA 11.1
     compile_to_sass = false;
   #endif
+#endif
 }
 
 // TODO: another copy paste from jit, refactor so it's usable from both
@@ -651,13 +932,44 @@ void __inline__ initializeCudaContext() {
   }
 }
 
+std::string generate_code(
+    const KernelDescriptor &desc,
+    bool contiguous,
+    bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
+    bool vectorized,
+    int vec_size,
+    bool return_by_ref) {
+  c10::SmallVector<std::string> extra_args_typenames(desc.extra_args_types.size());
+  for (auto i : c10::irange(extra_args_typenames.size())) {
+    extra_args_typenames[i] = typeName(desc.extra_args_types[i]);
+  }
+
+  return generate_code(
+      desc.nInputs,
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      dynamic_casting,
+      scalar_pos,
+      extra_args_typenames,
+      vectorized,
+      vec_size,
+      return_by_ref);
+}
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(
-    int nTensors,
-    const std::string& func,
+    int nInputs,
+    int nOutputs,
+    const std::string& func_,
     const std::string& name,
     const std::string& f_inputs_type,
     const std::string& compute_type,
@@ -667,12 +979,14 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
-    int vec_size) {
+    int vec_size,
+    bool return_by_ref) {
+  std::string func = func_;
   at::jit::TemplateEnv env;
 
   env.s("index_type", "unsigned int");
-  const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
+  env.s("nOutputs", std::to_string(nOutputs));
   env.s("scalar_type", f_inputs_type);
   env.s("compute_type", compute_type);
   env.s("functor", func);
@@ -702,11 +1016,14 @@ std::string generate_code(
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
+
   std::stringstream declare_store_arrays;
-  declare_store_arrays << result_type << " out"
-                       << "[" << std::to_string(thread_work_size) << "];\n";
+  for (int i = 0; i < nOutputs; i++) {
+    declare_store_arrays << result_type << " out" << std::to_string(i)
+                        << "[" << std::to_string(thread_work_size) << "];\n";
+  }
   env.s("declare_store_arrays", declare_store_arrays.str());
-  const int nOutputs = 1; // FIXME
+
   std::stringstream functor_args;
   if (scalar_pos == BinaryFuncVariant::NoScalar) {
     for (int i = 0; i < nInputs - 1; i++) {
@@ -721,7 +1038,46 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
-  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+
+  std::string call_functor_template;
+  if (return_by_ref) {  // return one or more outputs by reference
+    bool need_temp_out = (compute_type != result_type);
+    std::stringstream functor_outs;
+    if (need_temp_out) {
+      for (int i = 0; i < nOutputs - 1; i++) {
+        functor_outs << "temp_out" << std::to_string(i) << ", ";
+      }
+      functor_outs << "temp_out" << std::to_string(nOutputs - 1);
+    } else {
+      for (int i = 0; i < nOutputs - 1; i++) {
+        functor_outs << "out" << std::to_string(i) << "[j], ";
+      }
+      functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
+    }
+    env.s("functor_outs", functor_outs.str());
+
+    if (need_temp_out) {
+      call_functor_template += "${compute_type} ${functor_outs};\n";
+    }
+
+    call_functor_template += "${name}<${compute_type}>(${args} ${extra_args}, ${functor_outs});\n";
+
+    if (need_temp_out) {
+      for (int i = 0; i < nOutputs; i++) {
+        auto i_string = std::to_string(i);
+        call_functor_template += "out" +i_string + "[j] = temp_out" + i_string + ";\n";
+      }
+    }
+
+  } else {  // return by value for single output functor
+    call_functor_template = "out0[j] = ${name}<${compute_type}>(${args} ${extra_args});";
+  }
+  env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
+
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
+      f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
@@ -734,12 +1090,19 @@ std::string generate_code(
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
-    env.s("traits_string", get_traits_string());
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
+      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+    // complex<Half> depends on complex<T> and Half dtypes.
+    env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
+#ifdef USE_ROCM
+    // unhipify math functions, but only if std::complex is used.
+    func = unhipify_math_functions(func);
+    env.s("functor", func);
+#endif
   } else if (dynamic_casting) {
-    env.s("traits_string", get_traits_string());
+    env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", "");
   } else {
@@ -747,6 +1110,17 @@ std::string generate_code(
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
+  if (f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // dynamic_casting requires the definition of all types
+    // include complex<at::Half>
+    // Look at the definition of `StoreWithCast` and `LoadWithCast`.
+    env.s("complex_half_body_string", get_complex_half_body_string());
+  } else {
+    env.s("complex_half_body_string", "");
+  }
+
+  env.s("load_support", load_support_literal);
 
   if (!vectorized) {
     if (!dynamic_casting) {
@@ -754,9 +1128,8 @@ std::string generate_code(
       env.s("storer", "StoreWithoutCast");
       env.s("dynamic_casting_string", no_dynamic_cast_support_literal);
     } else {
-      env.s(
-          "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
-      env.s("storer", "StoreWithCast");
+      env.s("loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
+      env.s("storer", std::string("StoreWithCast<" + std::to_string(nOutputs) + ">"));
       env.s("dynamic_casting_string", dynamic_cast_support_literal);
     }
 
@@ -774,14 +1147,20 @@ std::string generate_code(
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
     }
-
     env.s("load_inputs", load_inputs.str());
+
     std::stringstream store_outputs;
-    store_outputs << "s.store<" << result_type
-                  << ">(out[j], data[0], output_offsets[0]);\n";
+    for (int i = 0; i < nOutputs; i++) {
+      auto i_string = std::to_string(i);
+      store_outputs << "s.store<" << result_type
+                    << ">(out" << i_string << "[j], data[" << i_string
+                    << "], output_offsets[" << i_string << "], " << i_string
+                    << ");\n";
+    }
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(
+      jit_preamble + jit_common_types + offset_calc_template + jit_code_template + jit_epilogue);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -789,24 +1168,48 @@ std::string generate_code(
   // vectorized case
   env.s("vec_size", std::to_string(vec_size));
   env.s("result_type", result_type);
-  std::stringstream vector_pointers;
+
+  std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    vector_pointers << "vec_t_input * vec" << i_string <<
-    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+1])" <<
+    vector_inputs << "auto * input" << i_string <<
+        " = reinterpret_cast<const scalar_t*>(data[" << i_string << "+" << nOutputs << "])" <<
+        " + block_work_size * idx;\n";
+  }
+  env.s("vector_inputs", vector_inputs.str());
+
+  std::stringstream vector_outputs;
+  for (const auto i : c10::irange(nOutputs)){
+    auto i_string = std::to_string(i);
+    vector_outputs << "vec_t_output* to_" << i_string <<
+    " = reinterpret_cast<vec_t_output*>(data[" << i_string << "])" <<
     " + block_work_size / vec_size * idx;\n";
   }
-  env.s("vector_pointers", vector_pointers.str());
+  env.s("vector_outputs", vector_outputs.str());
+
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
     auto i_string = std::to_string(i);
-    load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
+    load_vectorized_inputs << "const auto vec" << i_string << " = load_vector<vec_size>("
+                           << "input" << i_string << ", thread_idx);\n";
     load_vectorized_inputs << "#pragma unroll\n";
     load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
-    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
+    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = vec" << i_string << ".val[j];\n";
     load_vectorized_inputs << "}\n";
   }
   env.s("load_vectorized_inputs", load_vectorized_inputs.str());
+
+  std::stringstream store_vectorized_outputs;
+  for (const auto i : c10::irange(nOutputs)) {
+    auto i_string = std::to_string(i);
+    store_vectorized_outputs << "#pragma unroll\n";
+    store_vectorized_outputs << "for (int j=0; j<vec_size; j++){\n";
+    store_vectorized_outputs <<   "v.val[j] = out" << i_string << "[vec_size * i + j];\n";
+    store_vectorized_outputs << "}\n";
+    store_vectorized_outputs << "to_"<< i_string << "[thread_idx] = v;\n";
+  }
+  env.s("store_vectorized_outputs", store_vectorized_outputs.str());
+
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
@@ -815,7 +1218,16 @@ std::string generate_code(
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
-  static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
+  std::stringstream store_unrolled_outputs;
+  for (const auto i : c10::irange(nOutputs)) {
+    auto i_string = std::to_string(i);
+    store_unrolled_outputs << "store<" << result_type << ">(out" << i_string
+      << "[j], data[" << i_string << "], linear_idx);\n";
+  }
+  env.s("store_unrolled_outputs", store_unrolled_outputs.str());
+
+  static auto cuda_template = at::jit::CodeTemplate(
+    jit_preamble + jit_common_types + jit_vectorized_code_template + jit_epilogue);
   const auto code = cuda_template.format(env);
   return code;
 }
@@ -889,8 +1301,33 @@ std::string load_code_template(const std::string& path) {
 }
 
 std::string generate_reduction_code(
+    const KernelDescriptor &desc,
+    int vt0,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen) {
+  TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
+  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
+
+  return generate_reduction_code(
+      desc.nOutputs,
+      desc.f,
+      desc.name,
+      vt0,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
+      contiguous,
+      vectorized,
+      vec_size,
+      max_threads_codegen
+    );
+}
+
+std::string generate_reduction_code(
     int nOutputs,
-    const std::string& func,
+    const std::string& func_,
     const std::string& name,
     const int vt0,
     const std::string& f_inputs_type,
@@ -900,6 +1337,7 @@ std::string generate_reduction_code(
     bool vectorized,
     int vec_size,
     int max_threads_codegen) {
+      std::string func = func_;
       at::jit::TemplateEnv env;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
@@ -910,7 +1348,8 @@ std::string generate_reduction_code(
       env.s("max_threads_lb", std::to_string(max_threads_codegen));
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
-      if (f_inputs_type == "at::Half") {
+      if (f_inputs_type == "at::Half" || f_inputs_type == "std::complex<at::Half>") {
+        // complex<Half> depends on complex<T> and Half dtypes.
         env.s("half_string", jiterator_half_support_literal);
       } else {
         env.s("half_string", "");
@@ -921,22 +1360,33 @@ std::string generate_reduction_code(
         env.s("bfloat16_string", "");
       }
       if (f_inputs_type == "std::complex<float>" ||
-          f_inputs_type == "std::complex<double>" ) {
-        env.s("traits_string", get_traits_string());
+          f_inputs_type == "std::complex<double>" ||
+          f_inputs_type == "std::complex<at::Half>" ) {
+        // complex<Half> depends on complex<T> and Half dtypes.
+        env.s("traits_string", get_traits_string_but_hiprtc_safe());
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
         env.s("complex", std::to_string(1));
+#ifdef USE_ROCM
+        // unhipify math functions, but only if std::complex is used.
+        func = unhipify_math_functions(func);
+#endif
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");
         env.s("complex_math_string", "");
         env.s("complex", std::to_string(0));
       }
+      if (f_inputs_type == "std::complex<at::Half>") {
+        env.s("complex_half_body_string", get_complex_half_body_string());
+      } else {
+        env.s("complex_half_body_string", "");
+      }
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
       static auto cuda_template = at::jit::CodeTemplate(
-        jit_common_types + offset_calc_template + get_reduction_template());
+        jit_preamble + jit_common_types + offset_calc_template + get_reduction_template() + jit_epilogue);
       const auto code = cuda_template.format(env);
       return code;
 }
@@ -1080,6 +1530,9 @@ NvrtcFunction jit_pwise_function(
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
+#ifdef USE_ROCM
+  std::vector<const char*> args = {"--std=c++14"};
+#else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
@@ -1094,6 +1547,7 @@ NvrtcFunction jit_pwise_function(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
 
   #ifndef NDEBUG
     // Add line info to generated kernels

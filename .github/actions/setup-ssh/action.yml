@@ -14,3 +14,4 @@ runs:
       uses: seemethere/add-github-ssh-key@v1
       with:
         GITHUB_TOKEN: ${{ inputs.github-secret }}
+        activate-with-label: false

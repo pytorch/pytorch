@@ -18,14 +18,14 @@ at::Device CUDADevice(DeviceIndex index) {
 }
 
 // A macro so we don't lose location information when an assertion fails.
-#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
+#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                  \
   ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
-  ASSERT_TRUE(                                                                \
-      options.device().index() == Device((device_), (index_)).index());       \
-  ASSERT_EQ(typeMetaToScalarType(options.dtype()), (type_));                  \
+  ASSERT_TRUE(                                                            \
+      options.device().index() == Device((device_), (index_)).index());   \
+  ASSERT_EQ(typeMetaToScalarType(options.dtype()), (type_));              \
   ASSERT_TRUE(options.layout() == (layout_))
 
-#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
   ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
   ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
   ASSERT_EQ(tensor.scalar_type(), (type_));                                \
@@ -50,7 +50,8 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
 
   options =
       // NOLINTNEXTLINE(bugprone-argument-comment,cppcoreguidelines-avoid-magic-numbers)
-      getDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options(/*device=*/5);
+      getDeprecatedTypeProperties(Backend::SparseCUDA, kFloat)
+          .options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
@@ -58,7 +59,8 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCUDA, kByte)).options();
+  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCUDA, kByte))
+                .options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (torch::cuda::device_count() > 1) {

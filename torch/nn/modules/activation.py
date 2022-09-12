@@ -9,6 +9,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 
+__all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsigmoid', 'Tanh',
+           'SiLU', 'Mish', 'Hardswish', 'ELU', 'CELU', 'SELU', 'GLU', 'GELU', 'Hardshrink', 'LeakyReLU',
+           'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
+           'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
@@ -174,13 +178,10 @@ class Hardtanh(Module):
 
     .. math::
         \text{HardTanh}(x) = \begin{cases}
-            1 & \text{ if } x > 1 \\
-            -1 & \text{ if } x < -1 \\
+            \text{max\_val} & \text{ if } x > \text{ max\_val } \\
+            \text{min\_val} & \text{ if } x < \text{ min\_val } \\
             x & \text{ otherwise } \\
         \end{cases}
-
-    The range of the linear region :math:`[-1, 1]` can be adjusted using
-    :attr:`min_val` and :attr:`max_val`.
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -434,9 +435,10 @@ class Mish(Module):
         return inplace_str
 
 class Hardswish(Module):
-    r"""Applies the hardswish function, element-wise, as described in the paper:
+    r"""Applies the Hardswish function, element-wise, as described in the paper:
+    `Searching for MobileNetV3 <https://arxiv.org/abs/1905.02244>`_.
 
-    `Searching for MobileNetV3`_.
+    Hardswish is defined as:
 
     .. math::
         \text{Hardswish}(x) = \begin{cases}
@@ -459,9 +461,6 @@ class Hardswish(Module):
         >>> m = nn.Hardswish()
         >>> input = torch.randn(2)
         >>> output = m(input)
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
     """
     __constants__ = ['inplace']
 
@@ -658,7 +657,7 @@ class GELU(Module):
         :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
@@ -739,7 +738,7 @@ class LeakyReLU(Module):
     or
 
     .. math::
-        \text{LeakyRELU}(x) =
+        \text{LeakyReLU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
         \text{negative\_slope} \times x, & \text{ otherwise }
@@ -896,6 +895,29 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
+    ``forward()`` will use a special optimized implementation if all of the following
+    conditions are met:
+
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
+      restriction will be loosened in the future.)
+    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
+    - training is disabled (using ``.eval()``)
+    - dropout is 0
+    - ``add_bias_kv`` is ``False``
+    - ``add_zero_attn`` is ``False``
+    - ``batch_first`` is ``True`` and the input is batched
+    - ``kdim`` and ``vdim`` are equal to ``embed_dim``
+    - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
+    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
+      nor ``attn_mask`` is passed
+
+    If the optimized implementation is in use, a
+    `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
+    ``query``/``key``/``value`` to represent padding more efficiently than using a
+    padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
+    will be returned, and an additional speedup proportional to the fraction of the input
+    that is padding can be expected.
+
     Args:
         embed_dim: Total dimension of the model.
         num_heads: Number of parallel attention heads. Note that ``embed_dim`` will be split
@@ -912,8 +934,10 @@ class MultiheadAttention(Module):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
     """
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
@@ -934,7 +958,7 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
-        if self._qkv_same_embed_dim is False:
+        if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(torch.empty((embed_dim, embed_dim), **factory_kwargs))
             self.k_proj_weight = Parameter(torch.empty((embed_dim, self.kdim), **factory_kwargs))
             self.v_proj_weight = Parameter(torch.empty((embed_dim, self.vdim), **factory_kwargs))
@@ -1030,13 +1054,104 @@ class MultiheadAttention(Module):
         - **attn_output_weights** - Only returned when ``need_weights=True``. If ``average_attn_weights=True``,
           returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        why_not_fast_path = ''
+        if not is_batched:
+            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+        elif query is not key or key is not value:
+            # When lifting this restriction, don't forget to either
+            # enforce that the dtypes all match or test cases where
+            # they don't!
+            why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
+        elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
+        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
+            # this case will fail anyway, but at least they'll get a useful error message.
+            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
+        elif self.training:
+            why_not_fast_path = "training is enabled"
+        elif not self.batch_first:
+            why_not_fast_path = "batch_first was not True"
+        elif self.bias_k is not None:
+            why_not_fast_path = "self.bias_k was not None"
+        elif self.bias_v is not None:
+            why_not_fast_path = "self.bias_v was not None"
+        elif self.dropout:
+            why_not_fast_path = f"dropout was {self.dropout}, required zero"
+        elif self.add_zero_attn:
+            why_not_fast_path = "add_zero_attn was enabled"
+        elif not self._qkv_same_embed_dim:
+            why_not_fast_path = "_qkv_same_embed_dim was not True"
+        elif attn_mask is not None:
+            why_not_fast_path = "attn_mask was not None"
+        elif query.is_nested and key_padding_mask is not None:
+            why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
+        elif self.num_heads % 2 == 1:
+            why_not_fast_path = "num_heads is odd"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
+
+        if not why_not_fast_path:
+            tensor_args = (
+                query,
+                key,
+                value,
+                self.in_proj_weight,
+                self.in_proj_bias,
+                self.out_proj.weight,
+                self.out_proj.bias,
+            )
+            # We have to use list comprehensions below because TorchScript does not support
+            # generator expressions.
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_fast_path = "some Tensor argument has_torch_function"
+            elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+                why_not_fast_path = ("grad is enabled and at least one of query or the "
+                                     "input/output projection weights or biases requires_grad")
+            if not why_not_fast_path:
+                if not torch.jit.is_scripting():
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        key_padding_mask if key_padding_mask is not None else attn_mask,
+                        need_weights,
+                        average_attn_weights,
+                        1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+                elif attn_mask is None:
+                    # hack until 9/26/2022 for TS jit compatibility window
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        key_padding_mask if key_padding_mask is not None else attn_mask,
+                        need_weights,
+                        average_attn_weights)
+
+        any_nested = query.is_nested or key.is_nested or value.is_nested
+        assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
+                                f"The fast path was not hit because {why_not_fast_path}")
+
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
             if key is value:
@@ -1210,7 +1325,7 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1222,7 +1337,7 @@ class Softmin(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 
@@ -1278,7 +1393,7 @@ class Softmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 
@@ -1337,7 +1452,7 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1349,7 +1464,7 @@ class LogSoftmax(Module):
         self.dim = dim
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        super().__setstate__(state)
         if not hasattr(self, 'dim'):
             self.dim = None
 

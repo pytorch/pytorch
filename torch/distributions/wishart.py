@@ -4,11 +4,14 @@ from numbers import Number
 from typing import Union
 
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
+
+__all__ = ['Wishart']
 
 _log_2 = math.log(2)
 
@@ -30,9 +33,10 @@ class Wishart(ExponentialFamily):
     or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
 
     Example:
+        >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-                        # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
@@ -178,6 +182,13 @@ class Wishart(ExponentialFamily):
     @property
     def mean(self):
         return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
+
+    @property
+    def mode(self):
+        factor = self.df - self.covariance_matrix.shape[-1] - 1
+        factor[factor <= 0] = nan
+        return factor.view(self._batch_shape + (1, 1)) * self.covariance_matrix
+
 
     @property
     def variance(self):

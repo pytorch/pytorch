@@ -3,8 +3,10 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
-from torch.utils._pytree import _broadcast_to_and_flatten
-from collections import namedtuple
+from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
+from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
+from collections import namedtuple, OrderedDict
+from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -62,6 +64,28 @@ class TestPytree(TestCase):
         run_test((1., 2))
         run_test((torch.tensor([1., 2]), 2, 10, 9, 11))
 
+    def test_flatten_unflatten_odict(self):
+        def run_test(odict):
+            expected_spec = TreeSpec(
+                OrderedDict,
+                list(odict.keys()),
+                [LeafSpec() for _ in odict.values()])
+            values, treespec = tree_flatten(odict)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, list(odict.values()))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, odict)
+            self.assertTrue(isinstance(unflattened, OrderedDict))
+
+        od = OrderedDict()
+        run_test(od)
+
+        od['b'] = 1
+        od['a'] = torch.tensor(3.14)
+        run_test(od)
+
     def test_flatten_unflatten_namedtuple(self):
         Point = namedtuple('Point', ['x', 'y'])
 
@@ -79,11 +103,18 @@ class TestPytree(TestCase):
         run_test(Point(1., 2))
         run_test(Point(torch.tensor(1.), 2))
 
-    def test_flatten_unflatten_torch_namedtuple_return_type(self):
+    @parametrize("op", [
+        subtest(torch.max, name='max'),
+        subtest(torch.min, name='min'),
+    ])
+    def test_flatten_unflatten_return_type(self, op):
         x = torch.randn(3, 3)
-        expected = torch.max(x, dim=0)
+        expected = op(x, dim=0)
 
         values, spec = tree_flatten(expected)
+        # Check that values is actually List[Tensor] and not (ReturnType(...),)
+        for value in values:
+            self.assertTrue(isinstance(value, torch.Tensor))
         result = tree_unflatten(values, spec)
 
         self.assertEqual(type(result), type(expected))
@@ -152,6 +183,21 @@ class TestPytree(TestCase):
                 run_test(case)
 
 
+    def test_tree_only(self):
+        self.assertEqual(tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"])
+
+
+    def test_tree_all_any(self):
+        self.assertTrue(tree_all(lambda x: x % 2, [1, 3]))
+        self.assertFalse(tree_all(lambda x: x % 2, [0, 1]))
+        self.assertTrue(tree_any(lambda x: x % 2, [0, 1]))
+        self.assertFalse(tree_any(lambda x: x % 2, [0, 2]))
+        self.assertTrue(tree_all_only(int, lambda x: x % 2, [1, 3, "a"]))
+        self.assertFalse(tree_all_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertTrue(tree_any_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertFalse(tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
+
+
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, 0])
@@ -203,6 +249,8 @@ class TestPytree(TestCase):
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
+
+instantiate_parametrized_tests(TestPytree)
 
 if __name__ == '__main__':
     run_tests()

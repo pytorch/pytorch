@@ -12,7 +12,9 @@
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
@@ -21,18 +23,43 @@
 namespace at {
 namespace native {
 namespace {
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
+constexpr uint8_t max_num_input_dim = 5;
+struct AddParams {
+  c10::DeviceIndex device_id;
+  int input_a_size[max_num_input_dim];
+  int input_b_size[max_num_input_dim];
+  uint8_t input_dim; // we currently assume both inputs are given as the same size (i.e., no broadcasting)
+  at::MemoryFormat memory_format;
+  bool deterministic;
+  bool allow_tf32;
+};
 struct CacheKey {
+  AddParams params;
   uint8_t input_a_alignment;
   uint8_t input_b_alignment;
   uint8_t output_alignment;
   bool kReluFused;
 };
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
+void setAddParams(
+    AddParams* params, const at::Tensor& input_a, const at::Tensor& input_b,
+    bool deterministic, bool allow_tf32) {
+  memset(params, 0, sizeof(AddParams));
+  params->device_id = at::cuda::current_device();
+  params->input_dim = input_a.dim();
+  params->memory_format = input_a.suggest_memory_format();
+  for (int i = 0; i < params->input_dim; ++i) {
+    params->input_a_size[i] = input_a.sizes()[i];
+    params->input_b_size[i] = input_b.sizes()[i];
+  }
+  params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
 }
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+// we currently set the maximum number of input dimensions to 5
+// this can be increased, if necessary
+std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 
-// TODO: this is also in qadd.cpp and some other cpp files in quantized/cpu/. I think we should
+// TODO: this is also in BinaryOps.cpp and some other cpp files in quantized/cpu/. I think we should
 // move everything into a utilities file in quantized/ directory later.
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
@@ -73,24 +100,30 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     }
     qa = qa.view(new_sizes);
     qb = qb.view(new_sizes);
+  } else if (qa.dim() == 4) {
+    qa = qa.contiguous(c10::MemoryFormat::ChannelsLast);
+    qb = qb.contiguous(c10::MemoryFormat::ChannelsLast);
   }
 
-  at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  at::Tensor quantized_output = at::_empty_affine_quantized(
-      qa.sizes(),
-      at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
-      output_scale,
-      output_zero_point);
-  // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
-  at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
+  auto memory_format = qa.dim() == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
+  at::Tensor quantized_output = at::_empty_affine_quantized(qa.sizes(), at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
+                                                            output_scale, output_zero_point, memory_format);
+  double requantize_multiplier = qa.q_scale() / output_scale;
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
+  at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
+  setAddParams(&key.params, qa, qb, deterministic, allow_tf32);
   key.kReluFused = kReluFused;
   key.input_a_alignment = cudnn_utils::getAlignment(qa);
   key.input_b_alignment = cudnn_utils::getAlignment(qb);
@@ -103,9 +136,9 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> uids;
     data_ptrs.reserve(8);
     uids.reserve(8);
-    data_ptrs = {reinterpret_cast<int8_t*>(qb.data_ptr()), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
-                 reinterpret_cast<int8_t*>(qa.data_ptr()), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {qb.data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
+                 qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 quantized_output.data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
@@ -207,7 +240,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {

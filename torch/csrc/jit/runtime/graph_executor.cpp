@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -376,7 +375,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
  private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
-    if (should_compute_output(i)) {
+    if (task_should_compute_output(i)) {
       const auto& edge = next_edge(i);
       if (output.defined()) {
         outputs.emplace_back(std::move(output));
@@ -1015,10 +1014,7 @@ void runOptimization(
 
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before HoistCommonExpression\n",
-      *graph);
-  HoistCommonExpression(graph);
-  GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
+      "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
   GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }

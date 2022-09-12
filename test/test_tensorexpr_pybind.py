@@ -348,7 +348,7 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
         """
         graph = torch._C.parse_ir(graph_str)
 
-        def my_custom_lowering(inputs, out_shape, out_type, device):
+        def my_custom_lowering(inputs, out_shape, out_stride, out_type, device):
             def compute(idxs):
                 load = inputs[0].as_buf().load(idxs)
                 return te.ifThenElse(

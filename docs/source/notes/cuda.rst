@@ -9,7 +9,7 @@ created on that device. The selected device can be changed with a
 :any:`torch.cuda.device` context manager.
 
 However, once a tensor is allocated, you can do operations on it irrespective
-of the selected device, and the results will be always placed in on the same
+of the selected device, and the results will be always placed on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the exception of
@@ -59,7 +59,8 @@ Below you can find a small example showcasing this::
 TensorFloat-32(TF32) on Ampere devices
 --------------------------------------
 
-Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
+Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
+defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
 available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
 and batched matrix multiplies) and convolutions.
@@ -72,7 +73,8 @@ matmuls and convolutions are controlled separately, and their corresponding flag
 
 .. code:: python
 
-  # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+  # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+  # in PyTorch 1.12 and later.
   torch.backends.cuda.matmul.allow_tf32 = True
 
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
@@ -95,6 +97,7 @@ To get an idea of the precision and speed, see the example code below:
   b = b_full.float()
 
   # Do matmul at TF32 mode.
+  torch.backends.cuda.matmul.allow_tf32 = True
   ab_tf32 = a @ b  # takes 0.016s on GA100
   error = (ab_tf32 - ab_full).abs().max()  # 0.1747
   relative_error = error / mean  # 0.0022
@@ -106,7 +109,7 @@ To get an idea of the precision and speed, see the example code below:
   relative_error = error / mean  # 0.000039
 
 From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
-compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
+compared to double precision is approximately 2 orders of magnitude larger.  If full FP32 precision
 is needed, users can disable TF32 by:
 
 .. code:: python
@@ -352,7 +355,7 @@ Use of a caching allocator can interfere with memory checking tools such as
 
 The behavior of caching allocator can be controlled via environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``max_split_size_mb`` prevents the allocator from splitting blocks larger

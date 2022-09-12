@@ -11,9 +11,10 @@ from torch.distributed._shard.sharding_spec import (
     EnumerableShardingSpec,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.fsdp.shard_utils import (
+from torch.distributed.fsdp._shard_utils import (
+    _create_chunk_sharded_tensor,
     _offsets_to_split_sizes,
-    reshard_flatten_tensor,
+    _reshard_flatten_tensor,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -138,10 +139,10 @@ class TestShardUtilsDistributed(FSDPTest):
     def _create_chunk_spec(self):
         return ChunkShardingSpec(dim=0, placements=["rank0/cuda:0"])
 
-    def _create_tensor(self):
+    def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(1001).cuda()
+        return torch.rand(*size).cuda()
 
     @skip_if_lt_x_gpu(2)
     def test_reshard_flatten_tensor(self):
@@ -151,9 +152,9 @@ class TestShardUtilsDistributed(FSDPTest):
             else:
                 return [tensor.shape[0] - shard.shape[0]]
 
-        tensor = self._create_tensor()
+        tensor = self._create_tensor(1001)
 
-        shard = reshard_flatten_tensor(
+        shard = _reshard_flatten_tensor(
             self._create_local_chunk(tensor),
             self._create_enumerate_spec(tensor),
             self.world_size,
@@ -165,7 +166,7 @@ class TestShardUtilsDistributed(FSDPTest):
         shard = Shard.from_tensor_and_offsets(shard, offsets, self.rank)
         uneven_sharded_tensor = init_from_local_shards([shard], tensor.numel())
 
-        shard = reshard_flatten_tensor(
+        shard = _reshard_flatten_tensor(
             uneven_sharded_tensor,
             self._create_chunk_spec(),
             self.world_size,
@@ -185,3 +186,20 @@ class TestShardUtilsDistributed(FSDPTest):
         uneven_sharded_tensor.gather(0, output)
         if self.rank == 0:
             self.assertEqual(tensor, output)
+
+    @skip_if_lt_x_gpu(2)
+    def test_create_chunk_sharded_tensor(self):
+        for size in ((1,), (1, 6), (12,), (12, 6), (25,), (25, 6)):
+            tensor = self._create_tensor(*size)
+
+            sharded_tensor = _create_chunk_sharded_tensor(
+                tensor,
+                self.rank,
+                self.world_size,
+                torch.cuda.device_count(),
+                _get_default_group(),
+            )
+            output = torch.empty(*size).cuda() if self.rank == 0 else None
+            sharded_tensor.gather(0, output)
+            if self.rank == 0:
+                self.assertEqual(tensor, output)

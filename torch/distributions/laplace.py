@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Laplace']
 
 class Laplace(Distribution):
     r"""
@@ -11,6 +12,7 @@ class Laplace(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # Laplace distributed with loc=0, scale=1
         tensor([ 0.1046])
@@ -25,6 +27,10 @@ class Laplace(Distribution):
 
     @property
     def mean(self):
+        return self.loc
+
+    @property
+    def mode(self):
         return self.loc
 
     @property

@@ -59,7 +59,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Utilitity to generate Caffe2 benchmark models.")
+        description="Utility to generate Caffe2 benchmark models.")
     parser.add_argument("operator", help="Caffe2 operator to benchmark.")
     parser.add_argument("-b", "--blob",
                         help="Instantiate a blob --blob name=dim1,dim2,dim3",

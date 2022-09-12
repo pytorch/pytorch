@@ -1,10 +1,12 @@
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all, euler_constant
 
+__all__ = ['Kumaraswamy']
 
 def _moments(a, b, n):
     """
@@ -21,6 +23,7 @@ class Kumaraswamy(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Kumaraswamy(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Kumaraswamy distribution with concentration alpha=1 and beta=1
         tensor([ 0.1729])
@@ -55,6 +58,14 @@ class Kumaraswamy(TransformedDistribution):
     @property
     def mean(self):
         return _moments(self.concentration1, self.concentration0, 1)
+
+    @property
+    def mode(self):
+        # Evaluate in log-space for numerical stability.
+        log_mode = self.concentration0.reciprocal() * \
+            (-self.concentration0).log1p() - (-self.concentration0 * self.concentration1).log1p()
+        log_mode[(self.concentration0 < 1) | (self.concentration1 < 1)] = nan
+        return log_mode.exp()
 
     @property
     def variance(self):

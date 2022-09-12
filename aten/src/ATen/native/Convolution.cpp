@@ -19,6 +19,10 @@
 #include <nnpack.h>
 #endif
 
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
+
 constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
@@ -190,8 +194,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16)  {
-    return at::native::cudnnv8_enabled_check_debug();
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
+    if (!(detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug())) {
+      return false;
+    }
   }
   if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
     // bypass dilation checks for channels_last convolution
@@ -204,6 +210,22 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
     }
   }
   return !is_output_padding_big();
+#else
+  return false;
+#endif
+}
+
+auto ConvParams::use_mps( const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  // These checks need to be expanded. Currently we have very limited set of
+  // checks for MPS.
+#ifdef USE_MPS
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
+  if (!input.is_mps()) {
+    return false;
+  }
+  return true;
 #else
   return false;
 #endif
@@ -227,6 +249,9 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
+  }
+  if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
+    return true;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
@@ -629,6 +654,25 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
+static void check_input_same_type_as_parameters(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const ConvBackend backend) {
+  if (backend == ConvBackend::Mkldnn) {
+    TORCH_CHECK(input.options().type_equal(weight.options())
+        || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
+        "Input type (", input.toString(), ") and weight type (", weight.toString(),
+        ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
+        || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
+        "Input type (", input.toString(), ") and bias type (", bias.toString(),
+        ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
+  } else {
+    check_input_same_type_as_parameters(input, weight, bias);
+  }
+}
+
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
   TORCH_CHECK(tensor.ndimension() == 3,
            "expected 3D tensor, got tensor with ", tensor.ndimension(),
@@ -643,13 +687,13 @@ static auto view3d(const at::Tensor& tensor) -> at::Tensor {
   return tensor.squeeze(2);
 }
 
-
 static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
     return at::Tensor();
   }
+  const auto memory_format = tensor.suggest_memory_format();
   int64_t n = tensor.sizes()[dim] / groups;
-  return tensor.narrow(dim, n * g, n).contiguous();
+  return tensor.narrow(dim, n * g, n).contiguous(memory_format);
 }
 
 namespace {
@@ -669,6 +713,7 @@ at::Tensor complex_convolution(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
+    bool transposed,
     IntArrayRef output_padding,
     int64_t groups) {
   check_input_same_type_as_parameters(input, weight, bias);
@@ -686,15 +731,15 @@ at::Tensor complex_convolution(
   // conv(W, x, b) = a - b + i(c - a - b)
   Tensor a, b, c;
   if (!bias.defined()) {
-    a = at::convolution(i_r, w_r, bias, stride, padding, dilation, false, output_padding, groups);
-    b = at::convolution(i_i, w_i, bias, stride, padding, dilation, false, output_padding, groups);
-    c = at::convolution(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, false, output_padding, groups);
+    a = at::convolution(i_r, w_r, bias, stride, padding, dilation, transposed, output_padding, groups);
+    b = at::convolution(i_i, w_i, bias, stride, padding, dilation, transposed, output_padding, groups);
+    c = at::convolution(i_r + i_i, w_r + w_i, bias, stride, padding, dilation, transposed, output_padding, groups);
   } else {
     Tensor b_r, b_i;
     std::tie(b_r, b_i) = complex_to_real(bias.resolve_conj());
-    a = at::convolution(i_r, w_r, b_r, stride, padding, dilation, false, output_padding, groups);
-    b = at::convolution(i_i, w_i, Tensor(), stride, padding, dilation, false, output_padding, groups);
-    c = at::convolution(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, false, output_padding, groups);
+    a = at::convolution(i_r, w_r, b_r, stride, padding, dilation, transposed, output_padding, groups);
+    b = at::convolution(i_i, w_i, Tensor(), stride, padding, dilation, transposed, output_padding, groups);
+    c = at::convolution(i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, dilation, transposed, output_padding, groups);
   }
 
   auto i = c10::Scalar(c10::complex<double>(0, 1));
@@ -747,7 +792,7 @@ at::Tensor conv1d(
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
   Tensor output;
   if (at::isComplexType(input_.scalar_type())) {
-    output = complex_convolution(input, weight, bias, stride, padding, dilation, {0}, groups);
+    output = complex_convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
   }
@@ -761,12 +806,20 @@ at::Tensor conv2d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
   Tensor output;
   if (at::isComplexType(input_.scalar_type())) {
-    output = complex_convolution(input, weight, bias, stride, padding, dilation, {{0, 0}}, groups);
+    output = complex_convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   }
@@ -785,7 +838,7 @@ at::Tensor conv3d(
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
   Tensor output;
   if (at::isComplexType(input_.scalar_type())) {
-    output = complex_convolution(input, weight, bias, stride, padding, dilation, {{0, 0, 0}}, groups);
+    output = complex_convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
   }
@@ -833,7 +886,7 @@ static Tensor convolution_same(
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
     DimVector output_padding(static_cast<size_t>(dim));
-    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+    return at::convolution(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
@@ -871,7 +924,7 @@ Tensor _convolution_mode(
   } else if (padding == "valid") {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
-    return at::native::convolution(
+    return at::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
@@ -935,8 +988,14 @@ at::Tensor conv_transpose1d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv_transpose1d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -1025,7 +1084,7 @@ ConvBackend select_conv_backend(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1127,6 +1186,12 @@ ConvBackend select_conv_backend(
         // unsupported
       }
     }
+  } else if (params.use_mps(input, weight)) {
+    if (params.transposed) {
+      return ConvBackend::MpsTranspose;
+    } else {
+      return ConvBackend::Mps;
+    }
   } else {
     // Only reach here when input is backend with out-of-source implementation.
     return ConvBackend::Overrideable;
@@ -1187,18 +1252,41 @@ static inline std::vector<int64_t> calc_output_size(
 
 static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& input,
-    const Tensor& weight) {
+    const Tensor& weight,
+    const ConvBackend backend) {
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
   // See Note [Mobile check segfaults]
-  if (detail::getCUDAHooks().compiledWithCuDNN()) {
-    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
-  }
-  if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-    TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
-        "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-    backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+  switch(backend) {
+    case ConvBackend::Cudnn:
+    case ConvBackend::CudnnTranspose:
+      if (detail::getCUDAHooks().compiledWithCuDNN()) {
+        backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
+      }
+      break;
+    case ConvBackend::Miopen:
+    case ConvBackend::MiopenDepthwise:
+    case ConvBackend::MiopenTranspose:
+      if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
+        TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
+            "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
+        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Mkldnn:
+      if (mkldnn_conv_use_channels_last(input, weight)) {
+        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Slow2d:
+    case ConvBackend::SlowDilated2d:
+      if (thnn_conv_use_channels_last(input, weight)) {
+        backend_memory_format = at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    default:
+      backend_memory_format = at::MemoryFormat::Contiguous;
   }
 #endif
   return backend_memory_format;
@@ -1238,7 +1326,7 @@ at::Tensor _convolution(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1251,7 +1339,7 @@ at::Tensor _convolution(
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
-  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
   Tensor output;
@@ -1312,18 +1400,11 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Mkldnn:
 #if AT_MKLDNN_ENABLED()
-      TORCH_CHECK(input.options().type_equal(weight.options())
-          || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
-          "Input type (", input.toString(), ") and weight type (", weight.toString(),
-          ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-          || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
-          "Input type (", input.toString(), ") and bias type (", bias.toString(),
-          ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
+      check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
-        input = input.contiguous();
-        weight = weight.contiguous();
+        input = input.contiguous(backend_memory_format);
+        weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
       }
       output = at::mkldnn_convolution(
@@ -1364,11 +1445,12 @@ at::Tensor _convolution(
     case ConvBackend::SlowDilated3d:
     case ConvBackend::SlowTranspose2d:
     case ConvBackend::SlowTranspose3d:
+      input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
       if (params.groups == 1) {
-        output = _convolution_nogroup_backend(input.contiguous(), weight, bias, backend, params);
+        output = _convolution_nogroup_backend(input, weight, bias, backend, params);
       } else {
         std::vector<Tensor> outputs(params.groups);
-        input = input.contiguous();
         for (const auto g : c10::irange(params.groups)) {
           auto input_g = subtensor(input, 1, params.groups, g);
           auto weight_g = subtensor(weight, 0, params.groups, g);
@@ -1378,9 +1460,44 @@ at::Tensor _convolution(
         output = at::cat(outputs, 1);
       }
       break;
+    case ConvBackend::Mps:
+#ifdef USE_MPS
+      TORCH_CHECK(input.options().type_equal(weight.options()),
+               "Input type (", input.toString(), ") and weight type (", weight.toString(),
+               ") should be the same");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+               "Input type (", input.toString(), ") and bias type (", bias.toString(),
+               ") should be the same");
+
+      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+                                     params.padding, params.stride, params.dilation,
+                                     params.groups);
+#else
+      TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
+#endif
+      break;
+    case ConvBackend::MpsTranspose:
+#ifdef USE_MPS
+      TORCH_CHECK(input.options().type_equal(weight.options()),
+               "Input type (", input.toString(), ") and weight type (", weight.toString(),
+               ") should be the same");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+               "Input type (", input.toString(), ") and bias type (", bias.toString(),
+               ") should be the same");
+      output = at::_mps_convolution_transpose(
+          input.contiguous(backend_memory_format), weight,
+          params.padding, params.output_padding,
+          params.stride, params.dilation, params.groups);
+      if (bias.defined()) {
+        output.add_(reshape_bias(input.dim(), bias));
+      }
+#else
+      TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
+#endif
+      break;
   }
 
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     output = view3d(output);
   }
 
@@ -1404,7 +1521,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
@@ -1715,7 +1832,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1726,7 +1843,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Select appropriate backend to use.
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params);
-  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
   Tensor backend_grad_input, backend_grad_weight, backend_grad_bias;
@@ -1758,6 +1875,33 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           grad_output, weight, params.padding, params.stride,
           params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
           input_weight_output_mask);
+      break;
+    }
+    case ConvBackend::Mps:
+    {
+#ifdef USE_MPS
+      check_input_same_type_as_parameters(input, weight);
+      std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
+        at::mps_convolution_backward(input, grad_output, weight, params.padding,
+          params.stride, params.dilation, params.groups, output_mask);
+#else
+      TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
+#endif
+      break;
+    }
+    case ConvBackend::MpsTranspose:
+    {
+#ifdef USE_MPS
+      check_input_same_type_as_parameters(input, weight);
+      std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
+      std::tie(backend_grad_input, backend_grad_weight) = at::mps_convolution_transpose_backward(
+        // Only make input contiguous when it is necessary for the backwards computation
+        output_mask[1] ? input.contiguous(backend_memory_format) : input,
+        grad_output, weight, params.padding, params.output_padding,
+        params.stride, params.dilation, params.groups, input_weight_output_mask);
+#else
+      TORCH_INTERNAL_ASSERT(false, "MPS backend was selected in PyTorch without support");
+#endif
       break;
     }
     case ConvBackend::CudnnTranspose:
@@ -1834,8 +1978,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       TORCH_CHECK(!weight.is_mkldnn(),
           "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
       if (!input.is_mkldnn()) {
-        input = input.contiguous();
-        weight = weight.contiguous();
+        input = input.contiguous(backend_memory_format);
+        weight = weight.contiguous(backend_memory_format);
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         mkldnn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
@@ -1862,7 +2006,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     case ConvBackend::SlowTranspose2d:
     case ConvBackend::SlowTranspose3d:
     {
-      input = input.contiguous();
+      input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
       if (params.groups == 1) {
         std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
           _convolution_backward_nogroup_backend(
@@ -1903,12 +2048,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
   // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }

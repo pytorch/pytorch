@@ -13,18 +13,18 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
   if (t->is_non_overlapping_and_dense()) {
-    return MemOverlap::NO;
+    return MemOverlap::No;
   }
 
   auto strides = t->strides();
   auto sizes = t->sizes();
   for (const auto i : c10::irange(strides.size())) {
     if (strides[i] == 0 && sizes[i] > 1) {
-      return MemOverlap::YES;
+      return MemOverlap::Yes;
     }
   }
 
-  return MemOverlap::TOO_HARD;
+  return MemOverlap::TooHard;
 }
 
 void assert_no_internal_overlap(const TensorBase& t) {
@@ -32,7 +32,7 @@ void assert_no_internal_overlap(const TensorBase& t) {
 }
 
 void assert_no_internal_overlap(TensorImpl* t) {
-  TORCH_CHECK(has_internal_overlap(t) != MemOverlap::YES,
+  TORCH_CHECK(has_internal_overlap(t) != MemOverlap::Yes,
     "unsupported operation: more than one element of the written-to tensor "
     "refers to a single memory location. Please clone() the tensor before "
     "performing the operation.");
@@ -43,12 +43,12 @@ MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
 }
 
 MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
-  if (a == b) return MemOverlapStatus::FULL;
+  if (a == b) return MemOverlapStatus::Full;
   if (a->numel() == 0 || b->numel() == 0) {
-    return MemOverlapStatus::NO;
+    return MemOverlapStatus::No;
   }
   if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
-    return MemOverlapStatus::TOO_HARD;
+    return MemOverlapStatus::TooHard;
   }
   // Test for storage equality, rather than pointer equality.
   // This reduces precision, but if people are aliasing the
@@ -64,13 +64,13 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
 
     if (a_begin == b_begin && a_end == b_end) {
       return (a->strides() == b->strides()) ?
-          MemOverlapStatus::FULL : MemOverlapStatus::PARTIAL;
+          MemOverlapStatus::Full : MemOverlapStatus::Partial;
     }
     if (a_begin < b_end && b_begin < a_end) {
-      return MemOverlapStatus::PARTIAL;
+      return MemOverlapStatus::Partial;
     }
   }
-  return MemOverlapStatus::NO;
+  return MemOverlapStatus::No;
 }
 
 void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {
@@ -78,7 +78,7 @@ void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {
 }
 
 void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b) {
-  TORCH_CHECK(get_overlap_status(a, b) != MemOverlapStatus::PARTIAL,
+  TORCH_CHECK(get_overlap_status(a, b) != MemOverlapStatus::Partial,
     "unsupported operation: some elements of the input tensor and "
     "the written-to tensor refer to a single memory location. "
     "Please clone() the tensor before performing the operation.");
@@ -90,7 +90,7 @@ void assert_no_overlap(const TensorBase& a, const TensorBase& b) {
 
 void assert_no_overlap(TensorImpl* a, TensorImpl* b) {
   const auto lap = get_overlap_status(a, b);
-  TORCH_CHECK(lap != MemOverlapStatus::PARTIAL && lap != MemOverlapStatus::FULL,
+  TORCH_CHECK(lap != MemOverlapStatus::Partial && lap != MemOverlapStatus::Full,
     "unsupported operation: some elements of the input tensor and "
     "the written-to tensor refer to a single memory location. "
     "Please clone() the tensor before performing the operation.");

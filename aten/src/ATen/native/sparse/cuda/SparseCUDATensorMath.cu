@@ -319,8 +319,9 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
+        commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernelScalar<<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
               V_INFO(r), I_INFO(indices), V_INFO(values),
@@ -333,8 +334,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -458,16 +459,28 @@ struct TensorMulOp {
   }
 };
 
-SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
-  if (src_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, t_, src_);
-  } else if (t_.dim() == 0) {
-    return mul_out_sparse_zerodim(r_, src_, t_);
+SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
+  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+
+  // case mul(sparse, dense)
+  if (!src_.is_sparse()) {
+    return _mul_dense_sparse_out(src_, t_, r_);
+  }
+  // case mul(dense, sparse)
+  if (!t_.is_sparse()) {
+    return _mul_dense_sparse_out(t_, src_, r_);
+  }
+
+  // case mul(sparse, sparse) with a 0-dim input.
+  if (!src_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(src_, t_, r_);
+  }
+  if (!t_.dim()) {
+    return _mul_sparse_sparse_zero_dim_out(t_, src_, r_);
   }
 
   TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
@@ -494,7 +507,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 
   Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
-  int64_t valueSize = t_values_.stride(0);
+  int64_t valueSize = std::max<int64_t>(1, t_values_.stride(0));
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
   dim3 grid;
   int curDevice = -1;
@@ -703,7 +716,7 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-#if !(defined(USE_ROCM) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
+#if defined(USE_ROCM) || !(defined(_MSC_VER) && CUSPARSE_VERSION < 11000)
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -784,11 +797,9 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 #endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
-#if defined(USE_ROCM)
-  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
-#elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
+#if defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
   TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
-#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)  // linux cuda >= 10.1 or windows cuda >= 11.0
+#elif defined(USE_ROCM) || (defined(CUDART_VERSION) && (CUDART_VERSION >= 10010))  // linux cuda >= 10.1 or windows cuda >= 11.0
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());

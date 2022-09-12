@@ -1,11 +1,13 @@
 from numbers import Number
 
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+__all__ = ['Bernoulli']
 
 class Bernoulli(ExponentialFamily):
     r"""
@@ -17,6 +19,7 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
         tensor([ 0.])
@@ -66,6 +69,12 @@ class Bernoulli(ExponentialFamily):
     @property
     def mean(self):
         return self.probs
+
+    @property
+    def mode(self):
+        mode = (self.probs >= 0.5).to(self.probs)
+        mode[self.probs == 0.5] = nan
+        return mode
 
     @property
     def variance(self):

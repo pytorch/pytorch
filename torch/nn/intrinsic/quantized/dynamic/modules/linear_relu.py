@@ -1,5 +1,5 @@
 import torch
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 
 class LinearReLU(nnqd.Linear):
@@ -8,15 +8,16 @@ class LinearReLU(nnqd.Linear):
     for dynamic quantization.
     Supports both, FP16 and INT8 quantization.
 
-    We adopt the same interface as :class:`torch.nn.quantized.dynamic.Linear`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.dynamic.Linear`.
 
     Attributes:
-        Same as torch.nn.quantized.dynamic.Linear
+        Same as torch.ao.nn.quantized.dynamic.Linear
 
     Examples::
 
         >>> m = nn.intrinsic.quantized.dynamic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> # xdoctest: +SKIP
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])

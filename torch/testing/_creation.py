@@ -75,6 +75,7 @@ def make_tensor(
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
         >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
+        >>> # xdoctest: +SKIP
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
@@ -153,7 +154,7 @@ def make_tensor(
         elif dtype in _floating_types:
             replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
         else:  # dtype in _complex_types:
-            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            float_dtype = complex_to_corresponding_float_type_map[dtype]
             float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with

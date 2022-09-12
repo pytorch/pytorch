@@ -31,6 +31,7 @@ namespace deploy {
 
 const std::initializer_list<ExeSection> pythonInterpreterSection = {
     {".torch_deploy_payload.interpreter_all", true},
+    {".torch_deploy_payload.interpreter_hip", false},
     {".torch_deploy_payload.interpreter_cuda", false},
     {".torch_deploy_payload.interpreter_cpu", false},
 };
@@ -39,6 +40,9 @@ const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
     {"_binary_libtorch_deployinterpreter_all_so_start",
      "_binary_libtorch_deployinterpreter_all_so_end",
      true},
+    {"_binary_libtorch_deployinterpreter_hip_so_start",
+     "_binary_libtorch_deployinterpreter_hip_so_end",
+     false},
     {"_binary_libtorch_deployinterpreter_cuda_so_start",
      "_binary_libtorch_deployinterpreter_cuda_so_end",
      false},
@@ -94,6 +98,8 @@ InterpreterManager::InterpreterManager(
     size_t nInterp,
     std::shared_ptr<Environment> env)
     : resources_(nInterp) {
+  C10_LOG_API_USAGE_ONCE("torch.deploy.InterpreterManager");
+
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
     instances_.emplace_back(this, env);

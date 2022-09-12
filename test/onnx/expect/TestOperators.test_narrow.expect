@@ -3,33 +3,57 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    output: "onnx::Slice_14"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_15"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_16"
+    name: "Constant_2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "onnx::Slice_0"
     input: "onnx::Slice_14"
     input: "onnx::Slice_15"
     input: "onnx::Slice_16"
     output: "12"
-    name: "Slice_0"
+    name: "Slice_3"
     op_type: "Slice"
   }
   name: "torch_jit"
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "onnx::Slice_14"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "onnx::Slice_15"
-    raw_data: "\002\000\000\000\000\000\000\000"
-  }
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "onnx::Slice_16"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
   input {
     name: "onnx::Slice_0"
     type {
@@ -64,5 +88,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

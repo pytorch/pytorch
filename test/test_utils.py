@@ -2,8 +2,6 @@
 
 import sys
 import os
-import contextlib
-import io
 import re
 import shutil
 import random
@@ -11,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from typing import List
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -20,7 +19,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import has_breakpad, load_tests, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -261,6 +260,19 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
+        inp = torch.randn(2, device='cuda').requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+        # This should run without error
+
+
     def test_checkpoint_non_tensor(self):
 
         def run_fn(tensor1, tensor2):
@@ -350,6 +362,64 @@ class TestCheckpoint(TestCase):
         ):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpointing_without_reentrant_early_free(self):
+        # I don't know how to check if the temporary saved variable buffer
+        # get de-allocated directly. So using cuda memory usage as a proxy
+
+        def _do_test(fn, should_free):
+            stats: List[int] = []
+
+            def track(x, idx):
+                # Track that at each step of the backward, some Tensor were
+                # de-allocated (which correspond to the checkpoint storage being
+                # emptied at each step)
+                def hook(_unused):
+                    self.assertEqual(len(stats), idx)
+                    torch.cuda.synchronize()
+                    stats.append(torch.cuda.memory_allocated())
+                    if idx > 0:
+                        if should_free:
+                            self.assertLess(stats[idx], stats[idx - 1])
+                        else:
+                            self.assertEqual(stats[idx], stats[idx - 1])
+
+                x.register_hook(hook)
+
+            def test_fn(x):
+                # The main property of this function is that it contains multiple
+                # operations that save gradients in a chain.
+                x = x ** 2
+                track(x, 2)
+                x = x ** 2
+                track(x, 1)
+                x = x ** 2
+                track(x, 0)
+                x = x ** 2
+                return x.sum()
+
+            fn(test_fn)
+
+            return stats
+
+        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x.grad = torch.zeros_like(x)
+
+        # In a regular backward, buffers get eagerly freed
+        non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
+
+        # In a retain_grad backward, buffers get preserved
+        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+
+        # In a regular backward with checkpoint, buffers get eagerly freed
+        checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
+
+        # In a retain_grad backward with checkpoint, buffers get preserved
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+
+        self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
+        self.assertEqual(retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
     def setUp(self):
@@ -608,32 +678,6 @@ class TestAssert(TestCase):
         ms(x)
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
-
-
-class TestCrashHandler(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
-    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
-    def test_python_exception_writing(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidumps(temp_dir)
-            torch.utils._crash_handler.enable_minidumps_on_exceptions()
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 0)
-
-            f = io.StringIO()
-            with contextlib.redirect_stderr(f):
-                try:
-                    @torch.jit.script
-                    def x(i: int):
-                        return i + "2"  # type: ignore[operator]
-                except RuntimeError as e:
-                    pass
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 1)
-            self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")

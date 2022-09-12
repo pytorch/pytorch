@@ -13,10 +13,12 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/quantized/cudnn/utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -31,17 +33,50 @@ cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
     .build();
 }
 
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
+// we currently set the maximum number of input dimensions to 5
+// this can be increased, if necessary
+constexpr uint8_t max_num_input_dim = 5;
+struct LinearParams {
+  c10::DeviceIndex device_id;
+  cudnnDataType_t dataType;
+  int input_size[max_num_input_dim];
+  uint8_t input_dim;
+  at::MemoryFormat memory_format;
+  int64_t weight_size[2];
+  bool deterministic;
+  bool allow_tf32;
+};
 struct CacheKey {
+  LinearParams params;
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
+  bool kReluFused;
 };
-
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
+void setLinearParams(
+    LinearParams* params, const at::Tensor& input, const at::Tensor& weight,
+    bool deterministic, bool allow_tf32) {
+  // operator datatype needs to be int32 for int8 matmul, but we can
+  // set the datatype for output tensor to int32 or fp32
+  memset(params, 0, sizeof(LinearParams));
+  params->device_id = at::cuda::current_device();
+  params->dataType = CUDNN_DATA_INT32;
+  params->input_dim = input.dim();
+  params->memory_format = input.suggest_memory_format();
+  for (int i = 0; i < params->input_dim; ++i) {
+    params->input_size[i] = input.sizes()[i];
+  }
+  for (int i = 0; i < 2; ++i) {
+    params->weight_size[i] = weight.sizes()[i];
+  }
+  params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
+}
+std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
@@ -60,22 +95,20 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   if (quantized_output.numel() == 0) {
     return;
   }
-  at::Tensor linear_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  at::Tensor requantize_multiplier_tensor = at::full(quantized_output.sizes(), requantize_multiplier, at::device(at::kCUDA).dtype(at::kFloat));
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
+  at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
-    // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
+    // the input bias is a 1-D tensor whose size is the same as the size of the last dimension of quantized_output
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
     // the number of trailling dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
     std::vector<int64_t> new_size(quantized_output.dim(), 1);
-    new_size[1] = bias_.value().size(0);
-    broadcasted_bias = bias_.value().reshape(new_size);
-    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
+    new_size.back() = bias_.value().size(0);
+    broadcasted_bias = bias_.value().clone().reshape(new_size);
+    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes()).contiguous();
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
@@ -83,17 +116,24 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
+  setLinearParams(&key.params, input, orig_weight, deterministic, allow_tf32);
 
   key.input_alignment = cudnn_utils::getAlignment(input);
-  key.output_alignment = cudnn_utils::getAlignment(linear_output);
+  key.output_alignment = cudnn_utils::getAlignment(quantized_output);
   key.weight_alignment = cudnn_utils::getAlignment(orig_weight);
   if (bias_.has_value()) {
     key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
   } else {
     key.bias_alignment = -1;
   }
+  key.kReluFused = kReluFused;
   // the matmul operation is input * transpose(weight), so we will work with the transposed weight
   auto weight_transposed = transpose(orig_weight, 0, 1);
   // cudnn expects tensors to be at least 3D. weight_transposed is currently 2D. we will create a 3D view
@@ -102,48 +142,32 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   new_sizes.back() = weight_transposed.size(1);
   new_sizes[1] = weight_transposed.size(0);
   weight_transposed = weight_transposed.view(new_sizes);
-  // TODO: remove this with int8 matmul is supported
-  auto input_fp = input.int_repr().to(at::kFloat);
-  auto weight_fp = weight_transposed.int_repr().to(at::kFloat);
 
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
-    auto workspace_size = 0;
-    auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
-    std::vector<void *> data_ptrs;
-    std::vector<int64_t> uids;
-    data_ptrs.reserve(10);
-    uids.reserve(10);
-    data_ptrs = {input_fp.data_ptr(), linear_output.data_ptr(),
-                                           weight_fp.data_ptr(),
-                                           requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
-    uids = {'x', 'y', 'w', 's', 'r'};
+  auto run = [&](const cudnn_frontend::ExecutionPlan& plan_desc) {
+    auto workspace_size = plan_desc.getWorkspaceSize();
+    auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+    at::SmallVector<void *, 8> data_ptrs;
+    at::SmallVector<int64_t, 8> uids;
+    data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
+    uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         broadcasted_bias.value().data_ptr(), linear_output.data_ptr()});
-      uids.insert(uids.end(), {'b', 'c', 'd', 'e'});
-      if (kReluFused) {
-        data_ptrs.emplace_back(linear_output.data_ptr()),
-        uids.emplace_back('f');
-      }
-    } else {
-      if (kReluFused) {
-        data_ptrs.emplace_back(linear_output.data_ptr());
-        uids.emplace_back('f');
-      }
+                                         broadcasted_bias.value().data_ptr(), broadcasted_bias.value().data_ptr()});
+      uids.insert(uids.end(), {'b', 'c', 'd', 'n'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(uids.size(), data_ptrs.data())
       .setUids(uids.size(), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc->get_backend_descriptor(), variant_pack_desc));
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
   };
 
   auto search = execution_plan_cache.find(key);
   if (search != execution_plan_cache.end()) {
-    cudnn_frontend::ManagedOpaqueDescriptor plan_desc = search->second;
+    cudnn_frontend::ExecutionPlan plan_desc = search->second;
     run(plan_desc);
     return;
   }
@@ -152,13 +176,11 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // where act_int8 and w_int8 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
-      // TODO: make these 2 CUDNN_DATA_INT8 when cudnn enables int8 matmul
-      // .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
-      .setaMatDesc(cudnn_utils::getTensorDescriptor(input_fp.sizes(), input_fp.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
-      // .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
-      .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_fp.sizes(), weight_fp.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
-      .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment))
-      .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_FLOAT)) // is this right? should it be float?
+      .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
+      .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_transposed.sizes(), weight_transposed.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setcMatDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'y', key.output_alignment, true))
+      .setmatmulDesc(getLinearDescriptor(key.params.dataType))
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
 
@@ -176,18 +198,24 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'b', cudnn_utils::getAlignment(broadcasted_bias.value())))
       .setbDesc(cudnn_utils::getTensorDescriptor(bias_multiplier_tensor.value(), 'c', cudnn_utils::getAlignment(bias_multiplier_tensor.value())))
+      // TODO: I think we should be able to make this a virtual tensor, but we would need cudnn to support
+      // setbdesc(ManagedOpaqueDescriptor const &raw_tensor) first
       .setyDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
       .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
 
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
-    // where the 1st and 2nd summands is linear_output and broadcasted_bias, resp.
+    // where the 1st and 2nd summands is output of linear op and broadcasted_bias, resp.
     // output is a fp32 tensor
     // we use inplace operation here where the output is assigned to the input
     sum_linear_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(linear_op.getOutputTensor())
-      .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
-      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'e', key.output_alignment))
+      // TODO: An additional entry for broadcasted_bias in the uid-data_ptr pairing
+      // appears to be needed in the current version of cudnn (8.4.0). Without it, some
+      // test cases are failing. NVIDIA is currently investigating this issue.
+      // When this issue is fixed, we can change 'n' back to 'd' and remove the additional entry in uid and data_ptrs in variant pack above
+      .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'n', cudnn_utils::getAlignment(broadcasted_bias.value())))
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'e', key.output_alignment, true))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
       .build());
   }
@@ -201,8 +229,9 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'f', key.output_alignment))
-      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(at::native::getCudnnDataType(linear_output)))
+      // for virtual tensors, the alignment is not used, so we can just put an arbitrary value here, e.g., key.output_alignment
+      .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_FLOAT, 'f', key.output_alignment, true))
+      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(CUDNN_DATA_FLOAT))
       .build());
   }
 
@@ -212,7 +241,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : tensor2requant_ptr)
     .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', cudnn_utils::getAlignment(quantized_output)))
+    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', key.output_alignment))
     .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // // std::cout << "operator:" << requant_op.describe() << std::endl;
@@ -255,14 +284,13 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
         .setHandle(handle)
         .setEngineConfig(cfg)
         .build();
-      auto plan_desc = plan.get_desc();
-      run(plan_desc);
-      execution_plan_cache[key] = plan_desc;
+      run(plan);
+      execution_plan_cache.emplace(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation Quantized Linear Cudnn");
 }
 
 // output Tensor will be a clampped int8 Tensor
@@ -320,7 +348,6 @@ class QLinearInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    // TODO: if act is more than 2D, I think we should flatten the first n-1 dimensions?
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);

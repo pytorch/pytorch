@@ -7,7 +7,7 @@ bool IndexingPatternFinder::IsSameSource(const Node* n, const Node* m) {
   const auto source_n = n->sourceRange().source();
   const auto source_m = m->sourceRange().source();
   return (
-      (source_n->text() == source_m->text()) &&
+      (source_n->text_str() == source_m->text_str()) &&
       (source_n->starting_line_no() == source_m->starting_line_no()));
 }
 

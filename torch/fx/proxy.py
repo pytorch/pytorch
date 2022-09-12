@@ -9,6 +9,9 @@ from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
+import torch.fx.traceback as fx_traceback
+
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
@@ -21,6 +24,10 @@ class TracerBase:
     trace_asserts : bool = False
     # Feature flag for proxying accesses to buffer values
     proxy_buffer_attributes : bool = False
+
+    # Name of the function to be traced. It will only be used when
+    # ``root`` is an instance of ``nn.Module``
+    traced_func_name: str = "forward"
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
@@ -69,7 +76,10 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if self.record_stack_traces:
+        if fx_traceback.is_stack_trace_overridden():
+            stacks = fx_traceback.format_stack()
+            proxy.node.stack_trace = '\n'.join(reversed(stacks))
+        elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
@@ -85,14 +95,23 @@ class TracerBase:
         symbolic tracing.
         """
         # We have to do a little dance here. Basically, walk up the callstack and
-        # record the first frame not in the FX source. This is the frame executing
+        # record the first frame not in the pytorch source. This is the frame executing
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
+        pt_files = ['torch/fx/proxy.py',
+                    'torch/fx/_symbolic_trace.py',
+                    'torch/fx/experimental/proxy_tensor.py',
+                    'torch/_ops.py',
+                    'torch/_tensor.py',
+                    'torch/utils/_python_dispatch.py',
+                    'torch/_prims_common/wrappers.py',
+                    'torch/_refs/__init__.py',
+                    'torch/_refs/nn/functional/__init__.py'
+                    ]
         while frame:
             frame = frame.f_back
-            if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
+            if frame and all(not frame.f_code.co_filename.endswith(file) for file in pt_files):
                 break
 
         if not frame:

@@ -662,12 +662,10 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
-#if ENABLE_UPGRADERS
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
     // Therefore, we replace such ops with its' valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
-#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -3547,6 +3545,7 @@ struct to_ir {
         }
         auto createNode =
             graph->insertNode(graph->createObject(class_arg->type_));
+        createNode->setSourceRange(apply.range());
         return std::make_shared<SimpleValue>(createNode->output());
       }
       // We construct the iterable tree here using the IterableTree
@@ -3564,7 +3563,9 @@ struct to_ir {
       case prim::enumerate: {
         const SourceRange& loc = apply.range();
         auto inputs = apply.inputs();
-        auto input_size = apply.inputs().size();
+        auto input_size = inputs.size();
+        auto attributes = apply.attributes();
+        auto attribute_size = attributes.size();
         // enumerate(x) can be rewrite as subtrees:
         // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
         Value* start_index = nullptr;
@@ -3576,11 +3577,22 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-
-        if (input_size > 2) {
+        auto arg_size = input_size + attribute_size;
+        if (arg_size > 2) {
           throw ErrorReport(loc)
-              << "enumerate expected at most 2 arguments, got " << input_size;
+              << "enumerate expected at most 2 arguments, got " << arg_size;
         }
+
+        if (attribute_size == 1) {
+          if (attributes[0].name().name() != "start") {
+            throw ErrorReport(loc)
+                << "enumerate expected kwarg name 'start', got '"
+                << attributes[0].name().name() << "'";
+          }
+          start_index =
+              emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
+        }
+
         std::vector<Value*> range_inputs;
         if (start_index != nullptr) {
           range_inputs.emplace_back(start_index);
@@ -3638,7 +3650,10 @@ struct to_ir {
         }
         auto input =
             emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
-
+        if (input->type()->kind() == TypeKind::TupleType) {
+          return std::make_shared<SimpleValue>(
+              emitIndex(loc, self, createTupleUnpack(input)));
+        }
         return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
       }
       default:
@@ -4692,7 +4707,7 @@ struct to_ir {
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
       // since we are only dealing with tuple slicing, we try to keep
-      // tuple args seperate for now
+      // tuple args separate for now
       tuple_args.reserve(3);
 
       start ? tuple_args.emplace_back(start)
@@ -5543,7 +5558,6 @@ std::vector<Function*> CompilationUnit::define(
 
 void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
-  Node* n = nullptr;
 
   for (auto next_node = it.next(); next_node != nullptr;) {
     Node* node = next_node;

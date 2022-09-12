@@ -21,8 +21,8 @@ Data type                               dtype                                   
 64-bit floating point                   ``torch.float64`` or ``torch.double``       :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
 16-bit floating point [1]_              ``torch.float16`` or ``torch.half``         :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
 16-bit floating point [2]_              ``torch.bfloat16``                          :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
-32-bit complex                          ``torch.complex32``
-64-bit complex                          ``torch.complex64``
+32-bit complex                          ``torch.complex32`` or ``torch.chalf``
+64-bit complex                          ``torch.complex64`` or ``torch.cfloat``
 128-bit complex                         ``torch.complex128`` or ``torch.cdouble``
 8-bit integer (unsigned)                ``torch.uint8``                             :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
 8-bit integer (signed)                  ``torch.int8``                              :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
@@ -315,6 +315,9 @@ Tensor class reference
     Tensor.cumprod_
     Tensor.cumsum
     Tensor.cumsum_
+    Tensor.chalf
+    Tensor.cfloat
+    Tensor.cdouble
     Tensor.data_ptr
     Tensor.deg2rad
     Tensor.dequantize
@@ -342,7 +345,6 @@ Tensor class reference
     Tensor.dot
     Tensor.double
     Tensor.dsplit
-    Tensor.eig
     Tensor.element_size
     Tensor.eq
     Tensor.eq_
@@ -416,6 +418,8 @@ Tensor class reference
     Tensor.index_fill
     Tensor.index_put_
     Tensor.index_put
+    Tensor.index_reduce_
+    Tensor.index_reduce
     Tensor.index_select
     Tensor.indices
     Tensor.inner
@@ -620,7 +624,6 @@ Tensor class reference
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
-    Tensor.solve
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
@@ -665,7 +668,12 @@ Tensor class reference
     Tensor.arctanh_
     Tensor.tolist
     Tensor.topk
+    Tensor.to_dense
     Tensor.to_sparse
+    Tensor.to_sparse_csr
+    Tensor.to_sparse_csc
+    Tensor.to_sparse_bsr
+    Tensor.to_sparse_bsc
     Tensor.trace
     Tensor.transpose
     Tensor.transpose_
@@ -681,6 +689,7 @@ Tensor class reference
     Tensor.type
     Tensor.type_as
     Tensor.unbind
+    Tensor.unflatten
     Tensor.unfold
     Tensor.uniform_
     Tensor.unique

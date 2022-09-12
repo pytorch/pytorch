@@ -3,6 +3,7 @@
 #include <ATen/native/TensorProperties.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 
 #include <ATen/Config.h>
 #include <c10/util/irange.h>
@@ -13,6 +14,18 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
 
+bool nested_is_same_size(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.is_nested() && other.is_nested(),
+      "Expected both self and other to be nested tensors. ",
+      "Self ", self.is_nested()? "is " : "is not ",
+      "nested. While Other ",
+      other.is_nested()? "is " : "is not ",
+      "nested.")
+  const auto self_nt_size = _nested_tensor_size(self);
+  const auto other_nt_size = _nested_tensor_size(other);
+  return at::equal(self_nt_size, other_nt_size);
+}
 int64_t size(const Tensor& self, int64_t dim) {
   return self.size(dim);
 }

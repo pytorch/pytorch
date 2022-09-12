@@ -108,7 +108,15 @@ void IrCloner::handle(const ReductionOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const GroupedReductionOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const WelfordOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
+void IrCloner::handle(const LoadStoreOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
@@ -120,6 +128,10 @@ void IrCloner::handle(const TransposeOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const ExpandOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const ShiftOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
@@ -128,7 +140,7 @@ void IrCloner::handle(const GatherOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
-void IrCloner::handle(const ViewDtypeOp* op) {
+void IrCloner::handle(const ViewAsScalar* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
@@ -142,6 +154,10 @@ void IrCloner::handle(const Split* split) {
 
 void IrCloner::handle(const Merge* merge) {
   clone_ = IrBuilder::clone(merge, this);
+}
+
+void IrCloner::handle(const Swizzle2D* swizzle) {
+  clone_ = IrBuilder::clone(swizzle, this);
 }
 
 TensorView* RecomputeTv::recompute(TensorView* tv) {

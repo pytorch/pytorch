@@ -139,6 +139,14 @@ bool CUDAHooks::hasCuSOLVER() const {
 #endif
 }
 
+bool CUDAHooks::hasROCM() const {
+  // Currently, this is same as `compiledWithMIOpen`.
+  // But in future if there are ROCm builds without MIOpen,
+  // then `hasROCM` should return true while `compiledWithMIOpen`
+  // should return false
+  return AT_ROCM_ENABLED();
+}
+
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
@@ -249,6 +257,20 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
+#if AT_CUDNN_ENABLED()
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
     return true;
   } else {
     return false;

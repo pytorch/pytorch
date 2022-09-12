@@ -21,10 +21,12 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -45,48 +47,6 @@ using namespace at::indexing;
 
 namespace {
 
-// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder()
-      .ndims(ndims)
-      .dtype(dtype)
-      .contiguity(std::vector<bool>(ndims, true))
-      .build();
-}
-
-// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
-}
-
-// Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder().shape(shape).dtype(dtype).build();
-}
-
-void checkIntValue(
-    ExpressionEvaluator& evaluator,
-    Val* val,
-    Int::ScalarType expected_value) {
-  TORCH_CHECK(val->isAnInt());
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
-
-void checkIntValue(
-    kir::ExpressionEvaluator& evaluator,
-    const Val* val,
-    Int::ScalarType expected_value) {
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
-
 // Used to signify invalid ranges, i.e., values at offset 0 to
 // start_offset, and values at offset stop_offset to the end of the
 // domain.
@@ -97,7 +57,8 @@ auto shift(
     at::Tensor tensor,
     const std::vector<int>& offsets,
     std::vector<int> padding = {}) {
-  TORCH_INTERNAL_ASSERT(tensor.ndimension() == offsets.size());
+  TORCH_INTERNAL_ASSERT(
+      tensor.ndimension() == static_cast<int64_t>(offsets.size()));
   if (padding.empty()) {
     padding = offsets;
     for (auto& p : padding) {
@@ -144,12 +105,12 @@ auto gather(
     const std::vector<std::vector<int>>& pad_width,
     std::vector<int> strides = {}) {
   TORCH_CHECK(
-      tensor.ndimension() == window_shape.size(),
+      tensor.ndimension() == static_cast<int64_t>(window_shape.size()),
       "Invalid window shape: ",
       window_shape,
       ". Size of the window shape is different from the tensor dimension.");
   TORCH_CHECK(
-      tensor.ndimension() == pad_width.size(),
+      tensor.ndimension() == static_cast<int64_t>(pad_width.size()),
       "Invalid pad width: ",
       pad_width,
       ". Size of the pad width is different from the tensor dimension.");
@@ -157,7 +118,7 @@ auto gather(
     strides = std::vector<int>(tensor.ndimension(), 1);
   } else {
     TORCH_CHECK(
-        tensor.ndimension() == strides.size(),
+        tensor.ndimension() == static_cast<int64_t>(strides.size()),
         "Invalid strides: ",
         strides,
         ". Size of strides is different from the tensor dimension.");
@@ -407,6 +368,7 @@ TEST_F(NVFuserTest, FusionShiftLeftOfCA_CUDA) {
 
   // Lowering should trigger an assertion failure as a shifted axis is
   // found inside an allocation position.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -619,7 +581,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencil_CUDA) {
   // This seems fine but not verified yet
   // tv_out->axis(-1)->parallelize(ParallelType::Unswitch);
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 1);
 
@@ -690,7 +652,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencil_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -775,7 +737,7 @@ TEST_F(NVFuserTest, FusionShift9ptStencil_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto cache = tv0->cache_after();
+  auto cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -908,7 +870,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencilParallel_CUDA) {
   tv_out->split(0, smem_block_factor);
   // tv_out->axis(-1)->parallelize(ParallelType::Unswitch);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 1);
 
@@ -968,7 +930,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel_CUDA) {
 
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0->computeAt(tv_out, 2);
 
@@ -1261,7 +1223,8 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge2_CUDA) {
   out->merge(2, 3);
   out->merge(0, 1);
 
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 1);
 
@@ -1337,7 +1300,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel1DThreadBlock_CUDA) {
   tv_out->split(0, split_factor[0]);
   tv_out->reorder({{1, 2}, {2, 1}});
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   // Merge the inner-most two axes and create
   // a 1D thread block of split_factor1*split_factor2 threads
@@ -1628,7 +1591,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilChain_CUDA) {
 
   fusion.addOutput(tv_out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   std::vector<int> split_factor({16, 16});
 
@@ -2171,7 +2134,7 @@ TEST_F(NVFuserTest, FusionHdiff_CUDA) {
   out->axis(3)->parallelize(ParallelType::TIDy);
   out->axis(4)->parallelize(ParallelType::TIDx);
   // Apply the same parallelization to all other tensors
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   // Store intermediate stencil results on smem so that they can be
   // accessed by threads
@@ -2321,7 +2284,8 @@ TEST_F(NVFuserTest, FusionHdiffPartialSplitUnswitch_CUDA) {
   out->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
   // out: [NZ/tz, NY/by, NX/bx, tz, by, bx]
 
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   inp->computeAt(out, 4);
 
@@ -2460,7 +2424,7 @@ TEST_F(NVFuserTest, FusionMaxPooling_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Tiling the spatial domain
   const int tile_x = 32;
@@ -2709,15 +2673,16 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -2727,7 +2692,7 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2768,15 +2733,16 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -2786,7 +2752,7 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2868,15 +2834,16 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   const int block_x = 16;
   const int block_y = 8;
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cache_before();
+  auto out_cache = out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -2886,7 +2853,7 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2945,7 +2912,7 @@ TEST_F(NVFuserTest, FusionConv2D_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3037,7 +3004,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3131,7 +3098,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPaddingStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3254,7 +3221,7 @@ TEST_F(NVFuserTest, FusionConv2DChain_CUDA) {
 
   ////////////////////////////////////
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3345,7 +3312,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3447,7 +3414,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3541,7 +3508,7 @@ TEST_F(NVFuserTest, FusionConv4x5Pad1x2_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3634,7 +3601,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1Stride4_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3719,7 +3686,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   auto inp_tile = gather(inp, {1, 1, 3, 3}, {{0, 0}, {0, 0}, {1, 1}, {1, 1}});
   // inp_tile: [N, C, H, W, 1, 1, 3, 3]
 
-  auto inp_col = transpose(inp_tile, {{1, 3}, {2, 1}, {3, 2}});
+  auto inp_col = permute(inp_tile, {0, 2, 3, 1, 4, 5, 6, 7});
   // inp_col: [N, H, W, C, 1, 1, 3, 3]
 
   fusion.addOutput(inp_col);
@@ -3727,7 +3694,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   ////////////////////////////////////
 
   // Cache the input tensor
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -3801,14 +3768,15 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator::from(tv5);
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3857,13 +3825,14 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv5->reorder({{1, 2}});
   tv5->merge(-2, -1);
 
-  TransformPropagator::from(tv5);
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3917,13 +3886,14 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv_avg->reorder({{1, 2}});
   tv_avg->merge(-2, -1);
 
-  TransformPropagator::from(tv_avg);
+  TransformPropagator propagator(tv_avg);
+  MaxRootDomainInfoSpanningTree(tv_avg).traverse(&propagator);
 
   tv2->computeAt(tv_avg, -1);
   tv3->computeAt(tv_avg, -1);
 
   tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv_avg, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv_avg);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -4078,6 +4048,7 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingRfactor_CUDA) {
   tv3->split(-1, 8);
   tv3->reorder({{1, 2}});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv3->rFactor({-2}));
 }
 
@@ -4102,14 +4073,15 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator::from(tv5);
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -4233,6 +4205,7 @@ TEST_F(NVFuserTest, FusionPartialSplit2_CUDA) {
   tv1->computeAt(tv4, 1);
 
   // Validation should throw an error due to tv5 and tv6.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
@@ -4331,7 +4304,7 @@ TEST_F(NVFuserTest, FusionPartialSplit4_CUDA) {
 
   fusion.addOutput(tv_out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   std::vector<int> split_factor({16, 16});
 
@@ -4578,7 +4551,7 @@ TEST_F(NVFuserTest, FusionGatherUnswitch1_CUDA) {
   auto tv4 = gather(tv0, {5}, {{2, 2}});
   fusion.addOutput(tv4);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
   tv0_cache->setMemoryType(MemoryType::Shared);
 
   tv4->split(0, 32);
@@ -4646,7 +4619,7 @@ TEST_F(NVFuserTest, FusionGatherStrided1_CUDA) {
   // tensor.
   auto fuser_out = outputs[0];
   TORCH_CHECK(
-      fuser_out.ndimension() == tv0->nDims() * 2,
+      fuser_out.ndimension() == static_cast<int64_t>(tv0->nDims()) * 2,
       "Invalid dimensionality of output tensor: ",
       fuser_out.ndimension());
 
@@ -4928,6 +4901,7 @@ TEST_F(NVFuserTest, FusionGatherStrided7_CUDA) {
   tv4->split(0, 2);
 
   // Since tv3 has a different stride factor, this should fail.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(tv0->computeAt(tv4, 1));
 }
 
@@ -5014,6 +4988,7 @@ TEST_F(NVFuserTest, FusionGatherStridedChain_CUDA) {
   fusion.addOutput(out);
 
   // This should throw an error at HaloInfo::build.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(GpuLower gpulw(&fusion));
 }
 
@@ -5044,7 +5019,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Tiling the spatial domain
   const int tile_x = 32;
@@ -5064,7 +5039,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   max_tensor->axis(4)->parallelize(ParallelType::TIDy);
   max_tensor->axis(5)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(max_tensor, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(max_tensor);
 
   inp_cache->setMemoryType(MemoryType::Shared);
 
@@ -5124,7 +5099,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
   ////////////////////////////////////
 
   // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
+  auto inp_cache = inp->cacheAfter();
 
   // Blocking the spatial dimensions
   const int block_w = 16;
@@ -5243,7 +5218,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleHalo2_CUDA) {
   const int by = 8;
   const int bx = 16;
 
-  auto tv5 = tv0->cache_after();
+  auto tv5 = tv0->cacheAfter();
 
   // [I, J]
   tv4->split(0, gy);
@@ -5300,14 +5275,15 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
 
   fusion.addOutput(out);
 
-  auto tv0_cache = tv0->cache_after();
+  auto tv0_cache = tv0->cacheAfter();
 
   tv0_cache->setMemoryType(MemoryType::Shared);
 
   out->split(-2, 4);
   out->split(-1, 32);
   out->reorder({{1, 2}, {2, 1}});
-  TransformPropagator::from(out);
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -5315,7 +5291,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(0)->parallelize(ParallelType::BIDx);
 
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   tv0_cache->doubleBuffer();
 
@@ -5356,13 +5332,14 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   tv5->split(-1, 1024);
   tv5->split(-1, 2);
-  TransformPropagator::from(tv5);
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv0->computeAt(tv5, 1);
 
   tv5->axis(1)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({1024 * 32}, options);
@@ -5373,6 +5350,46 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
   auto outputs = fe.runFusion(inputs);
 
   auto ref = t0 + shift(t0, {1}) + shift(t0, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+// Test IterType promotion with gather
+TEST_F(NVFuserTest, FusionGatherIterTypePromotion_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int s1 = 11;
+  const int s2 = 3;
+
+  auto tv0 = makeConcreteTensor({s1});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({s1, s2});
+  fusion.addInput(tv1);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+
+  auto tv2 = gather(tv0, window_shape, padding_width);
+  auto tv3 = add(tv2, tv1);
+
+  fusion.addOutput(tv3);
+
+  TORCH_CHECK(
+      tv3->axis(1)->getIterType() == IterType::Iteration,
+      "Invalid IterType promotion: ",
+      tv3->axis(1)->toString());
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  at::Tensor t1 = at::randn({s1, s2}, options);
+  std::vector<IValue> inputs = {t0, t1};
+
+  auto ref = gather(t0, window_shape, padding_width) + t1;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto outputs = fe.runFusion(inputs);
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }

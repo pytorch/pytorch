@@ -50,8 +50,7 @@ Tensor NestedTensor_from_padded_tensor_cpu(
     const Tensor& padded,
     const NestedTensorImpl& nt);
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim);
-
+Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length);
 
 template <typename T>
 void remove_padding_kernelLauncher(
@@ -72,5 +71,31 @@ void remove_padding_transform0213_kernelLauncher(
     const int* output_sizes,
     int output_dim,
     const int batch_size);
+
+template <typename T>
+void add_padding_kernelLauncher(
+    T* input,
+    T* output,
+    T padding_value,
+    const int* offsets,
+    const int* input_sizes,
+    int input_dim,
+    const std::vector<int64_t>& output_sizes,
+    const int batch_size,
+    const int output_batch_size);
+
+Tensor flash_attention_helper_dense(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool causal);
+
+Tensor flash_attention_helper(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool causal);
 } // namespace native
 } // namespace at

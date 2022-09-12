@@ -12,13 +12,11 @@
 #include <vector>
 
 #include <c10/core/ScalarType.h>
+#include <c10/util/Flags.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
-#include <c10/util/Flags.h>
-
-C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
 namespace torch {
 namespace lazy {
@@ -43,53 +41,18 @@ namespace lazy {
  * burned into the Graph.
  */
 
-class TORCH_API DimensionNode : public lazy::TsNode {
+class TORCH_API DimensionNode {
  public:
-  DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
-
-  // N.B. Node doesn't have sizes() so we don't need to override it to
-  // throw an error
-
-  // TODO: Fix this when John lands input shape API. Change
-  // DimensionNode's `isDynamic` to a virtual method and implement the
-  // actual `isDynamic` in all DimensionNode subclasses
-  bool isDynamic() {
-      return false;
-  }
-
-  std::string ToString() const override;
-
-  virtual int64_t getStaticValue() const = 0;
-};
-
-// Represents the result of calling `size` on a Tensor
-class TORCH_API SizeNode : public DimensionNode {
- public:
-  SizeNode(Value input, size_t dim);
-  int64_t getStaticValue() const override;
-  std::string ToString() const override;
-  size_t dim_ = 0;
-};
-
-class TORCH_API SizeAdd: public DimensionNode {
- public:
-  SizeAdd(Value a, Value b);
-  int64_t getStaticValue() const override;
-  std::string ToString() const override;
-};
-
-class TORCH_API SizeMul: public DimensionNode {
- public:
-  SizeMul(Value a, Value b);
-  int64_t getStaticValue() const override;
-  std::string ToString() const override;
-};
-
-class TORCH_API SizeDiv: public DimensionNode {
- public:
-  SizeDiv(Value a, Value b);
-  int64_t getStaticValue() const override;
-  std::string ToString() const override;
+  virtual bool isSymbolic() const {
+    return false;
+  };
+  virtual int64_t getDynamicValue() const {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual int64_t getStaticValue() const {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual ~DimensionNode() = default;
 };
 
 } // namespace lazy

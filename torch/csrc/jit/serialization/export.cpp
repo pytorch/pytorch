@@ -57,25 +57,30 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
+const static int kMainOpsetVersion = 17;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
-    kInvalidOpsetVersion,
-    3,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    3,
-    3,
-    3,
-    3,
-    4,
-    5,
-    6,
-    7,
-    7,
-    7,
-    8};
+constexpr static std::array<int64_t, kMainOpsetVersion + 1>
+    kOpsetVersionToIRVersion = {
+        kInvalidOpsetVersion,
+        3, // opset 1
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        3, // opset 5
+        3, // opset 6
+        3, // opset 7
+        3, // opset 8
+        4, // opset 9
+        5, // opset 10
+        6, // opset 11
+        7, // opset 12
+        7, // opset 13
+        7, // opset 14
+        8, // opset 15
+        8, // opset 16
+        8, // opset 17
+};
 
 std::string getNodeStackTraceString(const Node* n) {
   return n->sourceRange().str();
@@ -113,7 +118,7 @@ void validateBlock(
           WithInsertPoint guard(node);
           auto* new_node =
               b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::onnx::ATen),
+                  Symbol(::c10::aten::ATen),
                   node->inputs(),
                   node->outputs().size()));
           for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -296,6 +301,11 @@ class GraphEncoder {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void EncodeTypeProto(
+      onnx::TypeProto* type_proto,
+      const TypePtr& node_type,
+      const std::string& name);
+
   void EncodeLocalFunctionOpsetImport(
       onnx::FunctionProto* func_proto,
       const Node* n,
@@ -352,6 +362,16 @@ class GraphEncoder {
       const std::string& onnx_file_path = std::string());
 
   void AddAttribute(onnx::FunctionProto* func_proto, const std::string& name);
+
+  void TensorTypeToONNXType(
+      const TensorTypePtr& tensor_type,
+      const std::string& dim_name_prefix,
+      const std::string& name,
+      const std::unordered_map<
+          std::string,
+          std::unordered_map<int64_t, std::string>>& dynamic_axes,
+      onnx::TypeProto_Tensor* onnx_tensor_type,
+      bool assign_dim_param = true);
 
   SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
@@ -430,6 +450,10 @@ onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       return onnx::AttributeProto_AttributeType_TENSOR;
     case AttributeKind::ts:
       return onnx::AttributeProto_AttributeType_TENSORS;
+    case AttributeKind::ty:
+      return onnx::AttributeProto_AttributeType_TYPE_PROTO;
+    case AttributeKind::tys:
+      return onnx::AttributeProto_AttributeType_TYPE_PROTOS;
     case AttributeKind::g:
       return onnx::AttributeProto_AttributeType_GRAPH;
     case AttributeKind::gs:
@@ -540,6 +564,43 @@ GraphEncoder::GraphEncoder(
   }
 }
 
+void GraphEncoder::TensorTypeToONNXType(
+    const TensorTypePtr& tensor_type,
+    const std::string& dim_name_prefix,
+    const std::string& name,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes,
+    onnx::TypeProto_Tensor* onnx_tensor_type,
+    bool assign_dim_param) {
+  if (tensor_type->dim()) {
+    onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
+    auto sizes = tensor_type->symbolic_sizes().sizes().value();
+    for (const auto i : c10::irange(sizes.size())) {
+      shape->add_dim();
+      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+        if (!sizes[i].is_static()) {
+          symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
+        }
+      } else if (sizes[i].is_static()) {
+        shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+      } else if (assign_dim_param) {
+        if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+          symbol_dim_map_[sizes[i]] =
+              dim_name_prefix + name + "_dim_" + std::to_string(i);
+        }
+        shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
+      }
+    }
+  }
+  if (tensor_type->scalarType()) {
+    onnx_tensor_type->set_elem_type(
+        ATenTypeToOnnxType(tensor_type->scalarType().value()));
+  }
+}
+
 void GraphEncoder::EncodeValueInfoType(
     onnx::TypeProto* onnx_type,
     const TypePtr node_type,
@@ -547,44 +608,10 @@ void GraphEncoder::EncodeValueInfoType(
     const std::unordered_map<
         std::string,
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  auto tensorTypeToONNXType = [&dynamic_axes, n, this](
-                                  const TensorTypePtr& t,
-                                  onnx::TypeProto_Tensor* onnx_tensor_type,
-                                  bool assign_dim_param) {
-    std::string name = n->debugName();
-    if (t->dim()) {
-      onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
-      auto sizes = t->symbolic_sizes().sizes().value();
-      for (const auto i : c10::irange(sizes.size())) {
-        shape->add_dim();
-        if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-            (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
-          shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
-          if (!sizes[i].is_static()) {
-            symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
-          }
-        } else if (sizes[i].is_static()) {
-          shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
-        } else if (assign_dim_param) {
-          if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            if (n->node()->kind() == prim::Param) {
-              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
-            } else {
-              std::string op_type = n->node()->kind().toUnqualString();
-              symbol_dim_map_[sizes[i]] =
-                  op_type + name + "_dim_" + std::to_string(i);
-            }
-          }
-          shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
-        }
-      }
-    }
-    if (t->scalarType()) {
-      onnx_tensor_type->set_elem_type(
-          ATenTypeToOnnxType(t->scalarType().value()));
-    }
-  };
-
+  std::string dim_name_prefix;
+  if (n->node()->kind() != prim::Param) {
+    dim_name_prefix = n->node()->kind().toUnqualString();
+  }
   if (TensorTypePtr tensor_type = node_type->cast<TensorType>()) {
     if (tensor_type->dim() || tensor_type->scalarType()) {
       // Encode type if either shape or dtype exists.
@@ -596,7 +623,13 @@ void GraphEncoder::EncodeValueInfoType(
       // to denote an unknown dimension.
       // Create and assign dim_param for normal tensor type.
       auto is_sequence_tensor = static_cast<bool>(n->type()->cast<ListType>());
-      tensorTypeToONNXType(tensor_type, onnx_tensor_type, !is_sequence_tensor);
+      TensorTypeToONNXType(
+          tensor_type,
+          dim_name_prefix,
+          n->debugName(),
+          dynamic_axes,
+          onnx_tensor_type,
+          !is_sequence_tensor);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
     onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
@@ -613,6 +646,37 @@ void GraphEncoder::EncodeValueInfoType(
         onnx_type->mutable_sequence_type();
     onnx::TypeProto* onnx_tensor_type = sequence_type->mutable_elem_type();
     EncodeValueInfoType(onnx_tensor_type, list_elem_type, n, dynamic_axes);
+  } else if (OptionalTypePtr optional_type = node_type->cast<OptionalType>()) {
+    auto elem_type = optional_type->getElementType();
+    if (TensorTypePtr tensor_type = elem_type->cast<TensorType>()) {
+      onnx::TypeProto_Optional* onnx_optional_type =
+          onnx_type->mutable_optional_type();
+      onnx::TypeProto_Tensor* onnx_tensor_type =
+          onnx_optional_type->mutable_elem_type()->mutable_tensor_type();
+      TensorTypeToONNXType(
+          tensor_type,
+          dim_name_prefix,
+          n->debugName(),
+          dynamic_axes,
+          onnx_tensor_type);
+    } else if (ListTypePtr inner_node_type = elem_type->cast<ListType>()) {
+      auto list_elem_type = inner_node_type->getElementType();
+      if (TensorTypePtr tensor_type = list_elem_type->cast<TensorType>()) {
+        onnx::TypeProto_Optional* onnx_optional_type =
+            onnx_type->mutable_optional_type();
+        onnx::TypeProto_Sequence* onnx_optional_sequence_type =
+            onnx_optional_type->mutable_elem_type()->mutable_sequence_type();
+        onnx::TypeProto_Tensor* onnx_tensor_type =
+            onnx_optional_sequence_type->mutable_elem_type()
+                ->mutable_tensor_type();
+        TensorTypeToONNXType(
+            tensor_type,
+            dim_name_prefix,
+            n->debugName(),
+            dynamic_axes,
+            onnx_tensor_type);
+      }
+    }
   }
 }
 
@@ -825,15 +889,24 @@ void GraphEncoder::EncodeNode(
         !node->kind().is_attr());
   }
   node_proto->set_op_type(node->kind().toUnqualString());
+  const auto node_name_attribute_symbol =
+      Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute);
   if (add_node_names) {
-    auto node_name =
+    std::string node_name =
         node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+    if (node->hasAttribute(node_name_attribute_symbol)) {
+      node_name = node->s(node_name_attribute_symbol);
+    }
     node_proto->set_name(node_name);
     onnx_node_name_map_[node] = node_name;
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
+    if (attr_name == node_name_attribute_symbol) {
+      // Skip the node name attribute.
+      continue;
+    }
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {
@@ -978,6 +1051,26 @@ void GraphEncoder::AddAttribute(
         EncodeTensor(t, v, {}, use_external_data_format, onnx_file_path);
       }
       break;
+    case AttributeKind::ty: {
+      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTO);
+      auto tp = attr->mutable_tp();
+      const TypePtr& node_type = node->ty(name);
+      EncodeTypeProto(
+          tp, node_type, node_proto->op_type() + "_" + name.toDisplayString());
+    } break;
+    case AttributeKind::tys: {
+      attr->set_type(onnx::AttributeProto_AttributeType_TYPE_PROTOS);
+      size_t index = 0;
+      for (auto& v : node->tys(name)) {
+        auto tp = attr->add_type_protos();
+        EncodeTypeProto(
+            tp,
+            v,
+            node_proto->op_type() + "_" + name.toDisplayString() + "_" +
+                std::to_string(index));
+        index++;
+      }
+    } break;
     case AttributeKind::g: {
       auto g = attr->mutable_g();
       EncodeGraph(
@@ -1100,6 +1193,21 @@ void GraphEncoder::EncodeLocalFunction(
   }
 }
 
+void GraphEncoder::EncodeTypeProto(
+    onnx::TypeProto* type_proto,
+    const TypePtr& node_type,
+    const std::string& name) {
+  if (TensorTypePtr tensor_type = node_type->cast<TensorType>()) {
+    onnx::TypeProto_Tensor* onnx_tensor_type =
+        type_proto->mutable_tensor_type();
+    TensorTypeToONNXType(tensor_type, "", name, {}, onnx_tensor_type);
+  } else if (ListTypePtr list_type = node_type->cast<ListType>()) {
+    onnx::TypeProto_Sequence* seq_type = type_proto->mutable_sequence_type();
+    auto elem_type = list_type->getElementType();
+    EncodeTypeProto(seq_type->mutable_elem_type(), elem_type, name);
+  }
+}
+
 void GraphEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
@@ -1163,8 +1271,8 @@ void GraphEncoder::EncodeIntermediateValueInfo(
     const Value* v) {
   // Motivation is to encode ValueInfo for onnx local function nodes.
   auto n = v->node();
-  if (n->kind().is_onnx()) {
-    // Encode value info only for non-onnx nodes.
+  if (n->kind().is_onnx() || n->kind().is_aten()) {
+    // Encode value info only for non-onnx or non-ATen nodes.
     return;
   }
   if (n->owningGraph() != graph_.get()) {

@@ -4,12 +4,14 @@ on:
 
 env:
   PYTHON_VERSION: "3.8"
-  CUDA_VERSION: "11.3"
-  MAGMA_VERSION: "magma-cuda113"
+  # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
+  NUMPY_VERSION: "1.21.2"
   PR_NUM: ${{ github.event.number }}
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
 jobs:
   run-torchbench:
@@ -38,13 +40,9 @@ jobs:
           conda activate pr-ci
           # pin cmake version to 3.22 since 3.23 breaks pytorch build
           # see details at: https://github.com/pytorch/pytorch/issues/74985
-          conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake=3.22 cffi typing_extensions \
+          conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
+                           setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
-          # install magma
-          conda install -y -c pytorch "${MAGMA_VERSION}"
-          # install ffmpeg-4.4.1
-          # torchvision doesn't compile on ffmpeg-5: https://github.com/pytorch/vision/issues/5616
-          conda install -y ffmpeg=4.4.1
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
@@ -60,8 +58,12 @@ jobs:
           path: benchmark
           lfs: false
           ref: ${{ env.TORCHBENCH_BRANCH }}
+      - name: GPU Info
+        run: |
+          nvidia-smi
       - name: Run TorchBench
         run: |
+          set -x
           pushd "${HOME}"/pytorch
           PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
           popd
@@ -78,6 +80,13 @@ jobs:
                   --pr-num "$PR_NUM" \
                   --pr-base-sha "$PR_MERGE_BASE" \
                   --pr-head-sha "$PR_HEAD_SHA"
+      - name: Upload result to S3
+        run: |
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          python3 pytorch/.github/scripts/run_torchbench.py \
+                  upload-s3 \
+                  --result-dir "${HOME}/.torchbench/bisection/pr${{ github.event.number }}"
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci

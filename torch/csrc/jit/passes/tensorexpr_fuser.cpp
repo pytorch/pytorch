@@ -5,6 +5,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -93,7 +94,7 @@ bool isSupported(Node* node) {
 
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
@@ -464,6 +465,23 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(*TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -492,23 +510,6 @@ class TensorExprFuser {
         continue;
       }
 
-      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(*TensorType::get());
-      });
-      GRAPH_DEBUG("Building sizes for ", getHeader(n));
-      bool all_inputs_have_sizes = true;
-      auto shapes = fmap(tensor_inputs, [&](Value* v) {
-        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
-        all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
-      });
-
-      if (!all_inputs_have_sizes) {
-        GRAPH_DEBUG(
-            "Not all tensor arguments have sizes available to compute the broadcasted size",
-            getHeader(n));
-        continue;
-      }
       shape_of.emplace(
           n->output(),
           shapes.size() == 1 ? shapes[0]
@@ -853,6 +854,11 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
+#ifndef C10_MOBILE
+      if (fuser::cuda::isEnabled()) {
+        return false;
+      }
+#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
@@ -1040,7 +1046,8 @@ class TensorExprFuser {
     }
 
     if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupportedJit(node)) {
+      if (!tensorexpr::conv2dIsSupportedJit(node) &&
+          !tensorexpr::mkldnnPrepackedConvIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
         return false;
       }

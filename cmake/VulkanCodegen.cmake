@@ -7,10 +7,10 @@ set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 set(VULKAN_GEN_ARG_ENV "")
 
 if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+  list(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
 endif()
 if(USE_VULKAN_FP16_INFERENCE)
-  string(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
+  list(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
@@ -62,7 +62,7 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen_vulkan_spv.py
+    ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_vulkan_spv.py
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
     --output-path ${VULKAN_GEN_OUTPUT_PATH}
     --glslc-path=${GLSLC_PATH}

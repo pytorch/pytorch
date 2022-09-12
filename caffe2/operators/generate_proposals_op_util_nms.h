@@ -6,7 +6,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/macros.h"
 #include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math.h"
 
 #include <c10/util/irange.h>
 

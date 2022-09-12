@@ -8,19 +8,22 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
-import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
+# Because `torch.ao.nn` uses lazy imports, we need to make
+# sure we import the contents explicitly here.
+import torch.ao.nn.sparse
 import torch.ao.nn as ao_nn
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
-    default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
+    default_fixed_qparams_range_neg1to1_fake_quant,
 )
 from torch.ao.quantization.utils import get_combined_dict
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -71,6 +74,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     nn.Dropout: nnq.Dropout,
+    nn.PReLU: nnq.PReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -156,9 +160,10 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
 
 # mapping from module to output activation post process class
 DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
-    nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
-    nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
-    nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
+    nn.Hardsigmoid: default_fixed_qparams_range_0to1_fake_quant,
+    nn.Sigmoid: default_fixed_qparams_range_0to1_fake_quant,
+    nn.Softmax: default_fixed_qparams_range_0to1_fake_quant,
+    nn.Tanh: default_fixed_qparams_range_neg1to1_fake_quant,
 }
 
 # Default map for swapping float module to static sparse quantized ones
