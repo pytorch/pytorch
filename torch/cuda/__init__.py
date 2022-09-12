@@ -15,6 +15,7 @@ from torch.types import Device
 import traceback
 import warnings
 import threading
+from functools import lru_cache as _lru_cache
 from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
@@ -460,6 +461,7 @@ def set_stream(stream: Stream):
         return
     torch._C._cuda_setStream(stream._cdata)
 
+@_lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if not _is_compiled():
