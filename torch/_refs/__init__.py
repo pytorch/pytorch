@@ -1688,12 +1688,13 @@ def _to_dispatch(
     pin_memory: Optional[bool] = None,
 ):
     args0, *args = args if args else [None, ]
+    args0 = torch.device(args0) if isinstance(args0, str) else args0
     if isinstance(args0, TensorLike):
         # overload to `to.other`
         device = args0.device
         dtype = args0.dtype
         layout = args0.layout
-        pin_memory = args0.pin_memory
+        pin_memory = args0.is_pinned()
         # load positional argsuments:
         if args:
             assert non_blocking is None
@@ -1757,7 +1758,7 @@ def to(
         and (not non_blocking)
         and (device is None or device == a.device)
         and (layout is None or layout == a.layout)
-        and (pin_memory is None or pin_memory == a.pin_memory)
+        and (pin_memory is None or pin_memory == a.is_pinned())
     ):
         return prims.convert_element_type(a, dtype)
     memory_format = (
