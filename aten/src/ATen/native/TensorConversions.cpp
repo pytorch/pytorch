@@ -797,7 +797,6 @@ Tensor dense_to_batched_sparse_compressed_nonblock(const Tensor& self, const Lay
   Device index_device = self.device();
   auto n_batch_dim = self.dim() - 2;
   TORCH_INTERNAL_ASSERT(n_batch_dim > 0);
-  auto nvalues = self.numel();
   int compressed_dim_size, plain_dim_size;
   std::tie(compressed_dim_size, plain_dim_size) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(target_layout, "dense_to_batched_sparse_compressed_nonblock",
                                                                                             [&] { return std::make_tuple(self.size(-2), self.size(-1)); },
@@ -831,17 +830,21 @@ Tensor dense_to_batched_sparse_compressed_nonblock(const Tensor& self, const Lay
   Tensor compressed_indices = batch_compressed_indices.reshape(compressed_indices_size);
 
   Tensor batch_flat_indices = at::zeros({nbatches, max_nse}, flat_compressed_indices.options());
-  at::parallel_for(0, nbatches, 0, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
-        Tensor tmp = non_zero_mask[i].nonzero().flatten();
-        batch_flat_indices.select(0, i).narrow(0, 0, tmp.numel()).copy_(tmp);
-      }
-  });
-  if (nvalues > 0) {
-    batch_flat_indices.add_(at::native::arange(0, nvalues, compressed_dim_size * plain_dim_size, index_dtype, kStrided, index_device)
-                            .reshape({nbatches, 1}));
-  }
-
+  Tensor non_zero_indices = non_zero_mask.flatten().nonzero().flatten();
+  Tensor nse_cpu = nse.cpu();
+  AT_DISPATCH_INTEGRAL_TYPES(nse_cpu.scalar_type(), "dense_to_batched_sparse_compressed_nonblock",
+                             [&]() {
+                               scalar_t cnse_im1 = 0, cnse_i = 0;
+                               scalar_t* nse_ptr = nse_cpu.data_ptr<scalar_t>();
+                               for (const auto i : c10::irange(0, nbatches)) {
+                                 const auto nse_i = nse_ptr[i];
+                                 cnse_i += nse_i;
+                                 batch_flat_indices.select(0, i)
+                                   .narrow(0, 0, nse_i)
+                                   .copy_(non_zero_indices.slice(0, cnse_im1, cnse_i, 1));
+                                 cnse_im1 = cnse_i;
+                               }
+                             });
   Tensor flat_ordering = batch_flat_indices.flatten();
 
   // plain_indices and values have the same size because dense
