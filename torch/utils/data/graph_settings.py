@@ -58,11 +58,11 @@ def _is_shuffle_datapipe(datapipe: DataPipe) -> bool:
 def apply_shuffle_settings(datapipe: DataPipe, shuffle: Optional[bool] = None) -> DataPipe:
     r"""
     Traverse the graph of ``DataPipes`` to find and set shuffle attribute
-    to each `DataPipe` that has an API of ``set_shuffle``.
+    to each `DataPipe` that has APIs of ``set_shuffle`` and ``set_seed``.
 
     Args:
         datapipe: DataPipe that needs to set shuffle attribute
-        shuffle: (default: ``None`` and no-op to the graph)
+        shuffle: Shuffle option (default: ``None`` and no-op to the graph)
     """
     if shuffle is None:
         return datapipe
@@ -98,14 +98,14 @@ def _is_random_datapipe(datapipe: DataPipe) -> bool:
     return False
 
 
-def apply_random_seed(datapipe: DataPipe, rng: Any) -> DataPipe:
+def apply_random_seed(datapipe: DataPipe, rng: torch.Generator) -> DataPipe:
     r"""
-    Traverse the graph of ``DataPipes`` to find ``Shuffler`` and set random seed
-    based on the provided RNG.
+    Traverse the graph of ``DataPipes`` to find random ``DataPipe`` with an API of
+    ``set_seed`` then set the random seed based on the provided RNG.
 
     Args:
         datapipe: DataPipe that needs to set randomness
-        rng: the random number generator to generate random seeds
+        rng: Random number generator to generate random seeds
     """
     graph = traverse(datapipe, only_datapipe=True)
     all_pipes = get_all_graph_pipes(graph)
