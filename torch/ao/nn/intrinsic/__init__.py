@@ -1,7 +1,7 @@
 from .modules import *  # noqa: F403
+from .modules.fused import _FusedModule  # noqa: F403
 
 __all__ = [
-    '_FusedModule',
     'ConvBn1d',
     'ConvBn2d',
     'ConvBn3d',

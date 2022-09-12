@@ -1,4 +1,4 @@
-from .fused import _FusedModule
+from .fused import _FusedModule  # noqa: F401
 from .fused import ConvBn1d
 from .fused import ConvBn2d
 from .fused import ConvBn3d
@@ -15,7 +15,6 @@ from .fused import LinearBn1d
 
 
 __all__ = [
-    '_FusedModule',
     'ConvBn1d',
     'ConvBn2d',
     'ConvBn3d',

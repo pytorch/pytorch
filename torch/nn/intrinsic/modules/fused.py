@@ -1,4 +1,3 @@
-from torch.ao.nn.intrinsic import _FusedModule  # noqa: F401
 from torch.ao.nn.intrinsic import BNReLU2d
 from torch.ao.nn.intrinsic import BNReLU3d
 from torch.ao.nn.intrinsic import ConvBn1d
@@ -12,6 +11,7 @@ from torch.ao.nn.intrinsic import ConvReLU2d
 from torch.ao.nn.intrinsic import ConvReLU3d
 from torch.ao.nn.intrinsic import LinearBn1d
 from torch.ao.nn.intrinsic import LinearReLU
+from torch.ao.nn.intrinsic.modules.fused import _FusedModule
 
 __all__ = [
     '_FusedModule',
