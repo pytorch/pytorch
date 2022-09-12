@@ -1031,6 +1031,7 @@ if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
     ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
     ${CMAKE_BINARY_DIR}/model_tracer
   )
+  string(APPEND CMAKE_CXX_FLAGS " -DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
 endif()
 
 message(STATUS "Tracing Based Flag: ${TRACING_BASED}")
