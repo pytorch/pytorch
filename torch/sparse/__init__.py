@@ -389,12 +389,12 @@ def _transpose_copy(input: Tensor, dim0: int, dim1: int):
         crow_indices = torch.zeros((*batchsize, ncols + 1), dtype=index_dtype, device=device)
         col_indices = torch.zeros((*batchsize, max_nse), dtype=index_dtype, device=device)
         values = torch.zeros((*batchsize, max_nse), dtype=dtype, device=device)
-        for batch_index in itertools.product(*(map(list, map(range, batchsize)))):
+        for batch_index in itertools.product(*[list(r) for r in map(range, batchsize)]):
             b = input[batch_index].transpose(dim0, dim1).to_sparse_csr()
             crow_indices[batch_index] = b.crow_indices()
-            batch_nse = crow_indices[batch_index][-1]
-            col_indices[batch_index, :batch_nse] = b.col_indices()
-            values[batch_index, :batch_nse] = b.values()
+            batch_nse = int(crow_indices[batch_index][-1])
+            col_indices[batch_index][:batch_nse] = b.col_indices()
+            values[batch_index][:batch_nse] = b.values()
         return torch.sparse_csr_tensor(crow_indices, col_indices, values, shape)
     elif input.layout == torch.sparse_csc:
         max_nse = input.values().shape[len(batchsize)]
@@ -402,15 +402,15 @@ def _transpose_copy(input: Tensor, dim0: int, dim1: int):
         ccol_indices = torch.zeros((*batchsize, nrows + 1), dtype=index_dtype, device=device)
         row_indices = torch.zeros((*batchsize, max_nse), dtype=index_dtype, device=device)
         values = torch.zeros((*batchsize, max_nse), dtype=dtype, device=device)
-        for batch_index in itertools.product(*(map(list, map(range, batchsize)))):
+        for batch_index in itertools.product(*[list(r) for r in map(range, batchsize)]):
             # workaround RuntimeError: Conversion from SparseCsr to SparseCsc is currently not supported:
             csr = input[batch_index].transpose(dim0, dim1)
             csr = torch.sparse_csc_tensor(csr.crow_indices(), csr.col_indices(), csr.values(), (nrows, ncols)).to_sparse_csr()
             b = torch.sparse_csc_tensor(csr.crow_indices(), csr.col_indices(), csr.values(), (ncols, nrows))
             ccol_indices[batch_index] = b.ccol_indices()
-            batch_nse = ccol_indices[batch_index][-1]
-            row_indices[batch_index, :batch_nse] = b.row_indices()
-            values[batch_index, :batch_nse] = b.values()
+            batch_nse = int(ccol_indices[batch_index][-1])
+            row_indices[batch_index][:batch_nse] = b.row_indices()
+            values[batch_index][:batch_nse] = b.values()
         return torch.sparse_csc_tensor(ccol_indices, row_indices, values, shape)
     else:
         raise NotImplementedError(f'_transpose_copy for input {input.layout} layout')
