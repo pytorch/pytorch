@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import inspect
 import sys
 import types
 from abc import ABC
@@ -62,7 +63,9 @@ class PyOperator(PyOperatorABC):
 
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
-            if isinstance(dispatch_key_or_mode, type(TorchDispatchMode)):
+            if inspect.isclass(dispatch_key_or_mode) and issubclass(
+                dispatch_key_or_mode, TorchDispatchMode
+            ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
@@ -208,7 +211,9 @@ class OpOverload(PyOperatorABC):
 
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
-            if isinstance(dispatch_key_or_mode, type(TorchDispatchMode)):
+            if inspect.isclass(dispatch_key_or_mode) and issubclass(
+                dispatch_key_or_mode, TorchDispatchMode
+            ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
