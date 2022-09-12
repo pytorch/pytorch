@@ -208,25 +208,26 @@ class TestPrims(TestCase):
 
         args = sample.args
         kwargs = sample.kwargs
-        all_args = [sample.input, args[2], args[3], args[0], args[1], kwargs['training'], kwargs['momentum'], kwargs['eps']]
-        with TorchRefsNvfuserCapabilityMode():
+        for train in (True, False):
+            all_args = [sample.input, args[2], args[3], args[0], args[1], train, kwargs['momentum'], kwargs['eps']]
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(*all_args)
+
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_batch_norm = any(
+                torch.ops.aten.native_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_batch_norm)
+
+            # But without context manager, it should include batch norm
             gm = make_fx(func)(*all_args)
-
-        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-        includes_batch_norm = any(
-            torch.ops.aten.native_batch_norm.default == node.target
-            for node in call_function_nodes
-        )
-        self.assertFalse(includes_batch_norm)
-
-        # But without context manager, it should include batch norm
-        gm = make_fx(func)(*all_args)
-        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-        includes_batch_norm = any(
-            torch.ops.aten.native_batch_norm.default == node.target
-            for node in call_function_nodes
-        )
-        self.assertTrue(includes_batch_norm)
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_batch_norm = any(
+                torch.ops.aten.native_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertTrue(includes_batch_norm)
 
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float64, torch.long)
