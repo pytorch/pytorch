@@ -253,6 +253,8 @@ class TestBasics(TestCase):
 
         now_contiguous_mt = not_contiguous_mt.contiguous()
 
+        _compare_mts(not_contiguous_mt, now_contiguous_mt)
+
         self.assertEqual(now_contiguous_mt.is_contiguous(), True)
         self.assertEqual(now_contiguous_mt.get_data().is_contiguous(), True)
         self.assertEqual(now_contiguous_mt.is_contiguous(), True)
