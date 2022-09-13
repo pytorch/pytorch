@@ -199,6 +199,13 @@ supported:
   - _trilinear
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
+symint:
+  - empty.memory_format
+  - expand
+  - expand_copy
+  - narrow_copy
+  - view
+  - view_copy
 autograd:
   - max_pool3d
   - native_group_norm
