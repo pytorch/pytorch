@@ -1492,7 +1492,6 @@ class NumpyTests(TestCase):
         self.assertEqual(torch.ones(1, 2, device=device), a[true, [0, 1], true, true, [1], [[2]]])
         self.assertRaises(IndexError, lambda: a[false, [0, 1], ...])
 
-    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_boolean_indexing_alldims(self, device):
         true = torch.tensor(True, device=device)
         a = torch.ones((2, 3), device=device)
