@@ -7,7 +7,6 @@ from functools import partial
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
-from torch.overrides import enable_reentrant_dispatch
 from typing import Callable
 import re
 
