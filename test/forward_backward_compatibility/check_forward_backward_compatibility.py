@@ -61,6 +61,8 @@ ALLOW_LIST = [
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
+    ("aten::eig", datetime.date(9999, 1, 1)),
+    ("aten::eig.e", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
@@ -120,7 +122,6 @@ ALLOW_LIST = [
     ("aten::segment_reduce", datetime.date(2022, 6, 30)),
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
-    ("c10d::broadcast", datetime.date(2022, 6, 25)),
     ("aten::.*functional", datetime.date(2022, 8, 1)),
     ("aten::_foreach.*", datetime.date(2022, 8, 1)),
     ("aten::unflatten", datetime.date(2022, 8, 10)),
@@ -128,6 +129,9 @@ ALLOW_LIST = [
     ("aten::nanmean.out", datetime.date(2022, 8, 30)),
     ("aten::nansum", datetime.date(2022, 8, 30)),
     ("aten::nansum.out", datetime.date(2022, 8, 30)),
+    # nested tensor temporary auxiliary ops
+    ("aten::_reshape_nested", datetime.date(9999, 1, 1)),
+    ("aten::_reshape_nested_backward", datetime.date(9999, 1, 1)),
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     ("aten::mps_linear", datetime.date(9999, 1, 1)),
     ("aten::_mps_linear", datetime.date(9999, 1, 1)),
@@ -271,6 +275,10 @@ ALLOW_LIST = [
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
+    # Distributed c10d ops are all going to be updated
+    ("c10d::.*", datetime.date(2022, 10, 31)),
+    ("c10d::allgather_", datetime.date(2022, 10, 1)),
+    ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

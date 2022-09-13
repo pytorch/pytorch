@@ -322,7 +322,7 @@ def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
     default_modules_path = [os.path.join(third_party_path, name) for name in [
                             "gloo", "cpuinfo", "tbb", "onnx",
-                            "foxi", "QNNPACK", "fbgemm"
+                            "foxi", "QNNPACK", "fbgemm", "cutlass"
                             ]]
     if not os.path.exists(git_modules_path):
         return default_modules_path
@@ -873,12 +873,6 @@ def configure_extension_build():
     extensions.append(C)
     extensions.append(C_flatbuffer)
 
-    if not IS_WINDOWS:
-        DL = Extension("torch._dl",
-                       sources=["torch/csrc/dl.c"],
-                       language='c')
-        extensions.append(DL)
-
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
     if cmake_cache_vars['BUILD_CAFFE2']:
@@ -969,7 +963,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 9) + 1
+    version_range_max = max(sys.version_info[1], 10) + 1
     torch_package_data = [
         'py.typed',
         'bin/*',
@@ -1002,6 +996,7 @@ def main():
         'include/ATen/cuda/detail/*.cuh',
         'include/ATen/cuda/detail/*.h',
         'include/ATen/cudnn/*.h',
+        'include/ATen/functorch/*.h',
         'include/ATen/ops/*.h',
         'include/ATen/hip/*.cuh',
         'include/ATen/hip/*.h',

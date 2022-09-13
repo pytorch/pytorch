@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
 from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
@@ -7,7 +7,12 @@ from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
 
 
-def execute(gm: GraphModule, *args, executor: str = "aten"):
+def execute(
+    gm: GraphModule,
+    *args,
+    executor: str = "aten",
+    executor_parameters: Optional[dict] = None,
+):
     """
     Prototype ATen executor.
 
@@ -17,9 +22,11 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     if executor == "aten":
         return gm.forward(*args)
     elif executor == "nvfuser":
-        return nvfuser_execute_partitioned(gm, *args)
+        return nvfuser_execute_partitioned(
+            gm, *args, executor_parameters=executor_parameters
+        )
     elif executor == "strictly_nvfuser":
-        return nvfuser_execute(gm, *args)
+        return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
