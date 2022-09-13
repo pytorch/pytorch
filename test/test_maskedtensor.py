@@ -775,8 +775,8 @@ class TestOperators(TestCase):
             _compare_mt_t(mt_result, t_result)
 
             # If the operation is binary, check that lhs = masked, rhs = regular tensor also works
-            if is_binary(op):
-                mt_result2 = op(mt, *mt_args, **sample_kwargs)
+            if is_binary(op) and layout == torch.strided:
+                mt_result2 = op(mt, *sample_args, **sample_kwargs)
                 _compare_mt_t(mt_result2, t_result)
 
     def _test_reduction_equality(self, device, dtype, op, layout=torch.strided):
