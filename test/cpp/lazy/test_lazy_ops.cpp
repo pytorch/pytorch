@@ -3819,27 +3819,6 @@ TEST_F(LazyOpsTest, TestBatchMatMul) {
   });
 }
 
-TEST_F(LazyOpsTest, TestChainMatMul) {
-  torch::Tensor a = torch::rand(
-      {5, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::rand(
-      {4, 6}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor c = torch::rand(
-      {6, 2}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor d = torch::rand(
-      {2, 7}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor result = torch::chain_matmul({a, b, c, d});
-  ForEachDevice([&](const torch::Device& device) {
-    torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = CopyToDevice(b, device);
-    torch::Tensor lazy_c = CopyToDevice(c, device);
-    torch::Tensor lazy_d = CopyToDevice(d, device);
-    torch::Tensor lazy_result =
-        torch::chain_matmul({lazy_a, lazy_b, lazy_c, lazy_d});
-    AllClose(result, lazy_result, /*rtol=*/1e-3, /*atol=*/1e-4);
-  });
-}
-
 TEST_F(LazyOpsTest, TestLinear) {
   torch::Tensor input = torch::rand(
       {2, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
