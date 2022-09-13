@@ -167,7 +167,8 @@ inline at::Tensor as_view(
   // be used for both of them.
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) &&
       is_bw_differentiable && is_fw_differentiable) {
-    TORCH_INTERNAL_ASSERT(base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl());
+    TORCH_INTERNAL_ASSERT(
+        base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl());
     if (diff_view_meta) {
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
@@ -221,7 +222,8 @@ inline at::Tensor as_view(
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
     }
-    TORCH_INTERNAL_ASSERT(base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl());
+    TORCH_INTERNAL_ASSERT(
+        base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl());
     return make_variable_differentiable_view(
         tensor,
         std::move(new_bw_info),
