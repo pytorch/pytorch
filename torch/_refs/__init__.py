@@ -3821,7 +3821,14 @@ def full(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    e = empty(shape, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory, requires_grad=requires_grad)
+    e = empty(
+        shape,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
     return fill(e, fill_value)
 
 
@@ -3837,8 +3844,6 @@ def full_like(
     return fill(e, fill_value)
 
 
-ones = partial(full, fill_value=True)
-
 ones_like = partial(full_like, fill_value=True)
 
 
@@ -3853,8 +3858,6 @@ def scalar_tensor(
     device = device if device is not None else torch.device("cpu")
     return prims.scalar_tensor(a, dtype=dtype, device=device)
 
-
-zeros = partial(full, fill_value=False)
 
 zeros_like = partial(full_like, fill_value=False)
 
