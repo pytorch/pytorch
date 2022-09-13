@@ -516,9 +516,9 @@ Tensor mul_tensor_backward(
   // Note, however, that mul(a, b) will handle broadcasting in dense dims.
   // Autograd, however, will have issues with that and will try running
   // either a.sum(d=...) or b.sum(d=...) to propagate sparse grads of the
-  // same shape as the inputs. However, sum(d=...) is not implemented
+  // same shape as the inputs'. However, sum(d=...) is not implemented
   // for sparse tensors. So, instead, we explicitly reduce over grads'
-  // dense dims and create new sparse gradient tensors that now much
+  // dense dims and create new sparse gradient tensors that now match
   // the shape of the inputs.
   const auto handle_sparse_sparse_case = [](Tensor& self_grad,
                                             const Tensor& self) -> void {
