@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import copy
 import functools
@@ -11,6 +12,7 @@ from enum import Enum, auto
 from typing import (
     Any,
     Callable,
+    Deque,
     Dict,
     Generator,
     Iterable,
@@ -677,6 +679,43 @@ class _ExecOrderData:
                 self.warn_status = _ExecOrderWarnStatus.WARNED
 
 
+class _FreeEventQueue:
+    """
+    This tracks all pending frees corresponding to inflight all-gathers. The
+    queueing pattern is iterative enqueues followed by a flush, and the current
+    heuristic for the flush is based on the number of inflight all-gathers.
+    """
+
+    def __init__(self) -> None:
+        self._queue: Deque[torch.cuda.Event] = collections.deque()
+        self._max_num_inflight_all_gathers = 2  # empirically chosen
+
+    def enqueue(self, free_event: torch.cuda.Event) -> None:
+        """Enqueues a free event."""
+        self._queue.append(free_event)
+
+    def flush_if_needed(self) -> List[torch.cuda.Event]:
+        """
+        If the queue should be flushed (based on an internal criteria), then
+        this returns a non-empty :class:`list` of free events. Otherwise, this
+        returns an empty :class:`list`.
+        """
+        events: List[torch.cuda.Event] = []
+        if len(self._queue) >= self._max_num_inflight_all_gathers:
+            while self._queue:
+                event = self._dequeue()
+                assert event is not None
+                events.append(event)
+        return events
+
+    def _dequeue(self) -> Optional[torch.cuda.Event]:
+        """Dequeues a free event if possible."""
+        if self._queue:
+            event = self._queue.popleft()
+            return event
+        return None
+
+
 # TODO (awgu): Refactor this later
 sharding_strategy_map = {
     ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
@@ -870,7 +909,6 @@ class FullyShardedDataParallel(nn.Module):
             will reside on this device, including moving ignored modules' parameters if
             needed. Note that if ``device_id`` is specified but ``module`` is already on a
             different CUDA device, an error will be thrown. (Default: ``None``)
-
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
             initialization. This helps ensure model parameters are the same across ranks
@@ -879,7 +917,12 @@ class FullyShardedDataParallel(nn.Module):
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
             ``load_state_dict`` in a memory efficient way. See documentation for
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
-
+        limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
+            thread to schedule all-gathers without any extra synchronization.
+            If ``True``, then FSDP explicitly synchronizes the CPU thread to
+            prevent too many in-flight all-gathers. This ``bool`` only affects
+            the sharded strategies that schedule all-gathers. Enabling this can
+            help lower the number of CUDA malloc retries.
     """
     def __init__(
         self,
@@ -895,6 +938,7 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
+        limit_all_gathers: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -910,6 +954,7 @@ class FullyShardedDataParallel(nn.Module):
                 device_id=device_id,
                 sync_module_states=sync_module_states,
                 forward_prefetch=forward_prefetch,
+                limit_all_gathers=limit_all_gathers,
             )
             return
 
@@ -940,6 +985,7 @@ class FullyShardedDataParallel(nn.Module):
                 "device_id": device_id,
                 "sync_module_states": sync_module_states,
                 "forward_prefetch": forward_prefetch,
+                "limit_all_gathers": limit_all_gathers,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -950,6 +996,7 @@ class FullyShardedDataParallel(nn.Module):
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
+        self.limit_all_gathers = limit_all_gathers
         # We clamp the strategy to `NO_SHARD` for world size of 1 since they
         # are currently functionally equivalent. This may change if/when we
         # integrate FSDP with MoE.
@@ -1011,6 +1058,7 @@ class FullyShardedDataParallel(nn.Module):
         # The following attributes are owned by the root FSDP instance and
         # shared with non-root FSDP instances
         self._streams: Dict[str, torch.cuda.Stream] = {}
+        self._free_event_queue = _FreeEventQueue()
         self._debug_level = dist.get_debug_level()
         self._exec_order_data = _ExecOrderData(self._debug_level)
         self._handles_prefetched: Dict[_HandlesKey, bool] = {}
@@ -1445,6 +1493,11 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
         """
+        if self.limit_all_gathers:
+            events = self._free_event_queue.flush_if_needed()
+            if events:
+                # As a minor optimization, only synchronize the latest event
+                events[-1].synchronize()
         any_ran_pre_unshard = False
         with torch.cuda.stream(self._streams["pre_all_gather"]):
             for handle in handles:
@@ -1479,6 +1532,10 @@ class FullyShardedDataParallel(nn.Module):
             free_unsharded_flat_params,
         ):
             handle.reshard(free_unsharded_flat_param)
+            if self.limit_all_gathers and free_unsharded_flat_param:
+                free_event = torch.cuda.Event()
+                free_event.record()
+                self._free_event_queue.enqueue(free_event)
             handle.post_reshard()
         # Since we prefetch entire handles keys at a time, conservatively mark
         # the entire key as no longer prefetched once we free at least one
@@ -1717,6 +1774,7 @@ class FullyShardedDataParallel(nn.Module):
         self._exec_order_data.init(self, self.process_group)
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
+        inconsistent_limit_all_gathers = False
         for fsdp_module in self.fsdp_modules(self):
             if fsdp_module is not self:
                 # Relax the assert for non-root FSDP instances in case the
@@ -1729,10 +1787,21 @@ class FullyShardedDataParallel(nn.Module):
                 fsdp_module._is_root = False
                 fsdp_module._streams = self._streams
                 fsdp_module._exec_order_data = self._exec_order_data
+                if fsdp_module.limit_all_gathers != self.limit_all_gathers:
+                    # Prefer the root's value
+                    inconsistent_limit_all_gathers = True
+                    fsdp_module.limit_all_gathers = self.limit_all_gathers
+                fsdp_module._free_event_queue = self._free_event_queue
                 fsdp_module._handles_prefetched = self._handles_prefetched
                 fsdp_module._needs_pre_backward_unshard = self._needs_pre_backward_unshard
                 for handle in fsdp_module._handles:
                     fsdp_module._init_param_attributes(handle)
+        if inconsistent_limit_all_gathers:
+            warnings.warn(
+                "Found inconsistent `limit_all_gathers` values across FSDP "
+                f"instances on rank {self.rank}. Using the root FSDP's value "
+                f"of {self.limit_all_gathers} for all instances."
+            )
 
     # TODO (awgu): Move this to the `FlatParamHandle` class later
     @torch.no_grad()
