@@ -567,8 +567,6 @@ public:
     }
   }
 
-  IValue(c10::SymIntArrayRef v);
-
   bool isSymInt() const {
     return Tag::SymInt == tag;
   }

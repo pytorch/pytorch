@@ -7,7 +7,7 @@
 #pragma once
 
 #include <functorch/csrc/Macros.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 
 namespace at {
 namespace functorch {
