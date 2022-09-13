@@ -761,6 +761,9 @@ public:
     } else if (s.isBoolean()) {
       tag = Tag::Bool;
       payload.u.as_bool = s.toBool();
+    } else if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
     } else {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
       tag  = Tag::Int;
@@ -769,7 +772,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt();
   }
 
   at::Scalar toScalar() const {
@@ -781,6 +784,8 @@ public:
       return toComplexDouble();
     else if (isBool())
       return toBool();
+    else if (isSymInt())
+      return toSymInt();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -1126,6 +1131,7 @@ public:
   }
 
   union Payload {
+    // [TriviallyCopyablePayload]
     // We use a nested union here so that we can make the copy easy
     // and efficient in the non-tensor (i.e., trivially copyable)
     // case. Specifically, we do not have to do a switch-on-tag to

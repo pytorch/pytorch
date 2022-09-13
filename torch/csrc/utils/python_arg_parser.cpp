@@ -1488,6 +1488,8 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
+  } else if (torch::is_symint_node(obj)) {
+    scalar = at::Scalar(py::cast<c10::SymInt>(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else if (torch::is_symint_node(py::handle(obj))) {
@@ -1552,6 +1554,11 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   if (PyComplex_Check(arg)) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
+
+  if (torch::is_symint_node(arg)) {
+    return at::Scalar(py::cast<c10::SymInt>(arg));
+  }
+
   return at::Scalar(THPUtils_unpackDouble(arg));
 }
 

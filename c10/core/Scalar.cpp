@@ -7,17 +7,17 @@ Scalar Scalar::operator-() const {
       !isBoolean(),
       "torch boolean negative, the `-` operator, is not supported.");
   if (isFloatingPoint()) {
-    return Scalar(-v.d);
+    return Scalar(-v.u.d);
   } else if (isComplex()) {
-    return Scalar(-v.z);
+    return Scalar(-v.u.z);
   } else {
-    return Scalar(-v.i);
+    return Scalar(-v.u.i);
   }
 }
 
 Scalar Scalar::conj() const {
   if (isComplex()) {
-    return Scalar(std::conj(v.z));
+    return Scalar(std::conj(v.u.z));
   } else {
     return *this;
   }
@@ -25,11 +25,11 @@ Scalar Scalar::conj() const {
 
 Scalar Scalar::log() const {
   if (isComplex()) {
-    return std::log(v.z);
+    return std::log(v.u.z);
   } else if (isFloatingPoint()) {
-    return std::log(v.d);
+    return std::log(v.u.d);
   } else {
-    return std::log(v.i);
+    return std::log(v.u.i);
   }
 }
 

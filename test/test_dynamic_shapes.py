@@ -11,6 +11,7 @@ import operator
 import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
+from torch.utils._python_dispatch import TorchDispatchMode
 
 aten = torch.ops.aten
 
@@ -327,6 +328,29 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
 
+    @skipIfNoSympy
+    def test_symint_as_scalar(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+        
+        sym_int_encountered = False
+
+        class TestSymInt(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                assert func == torch.ops.aten.add.Scalar
+                
+                nonlocal sym_int_encountered
+                import pdb; pdb.set_trace()
+                sym_int_encountered = isinstance(args[1], PySymInt) 
+                args[1] = 0
+                
+                return func(*args)
+
+        x = torch.rand([4, 4])
+        with TestSymInt():
+            y = torch.add(x, a0)
+        
+        self.assertTrue(sym_int_encountered)
 
 if __name__ == '__main__':
     run_tests()

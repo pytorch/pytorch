@@ -9,6 +9,20 @@
 #include <limits>
 #include <stdexcept>
 
+namespace torch {
+
+inline bool is_symint_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
+  if (py::isinstance(obj, tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+
+} // namespace torch
+
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
@@ -136,7 +150,8 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
     return true;
   }
 #endif
-  return PyFloat_Check(obj) || PyLong_Check(obj);
+  return PyFloat_Check(obj) ||
+      PyLong_Check(obj) | torch::is_symint_node(py::handle(obj));
 }
 
 inline bool THPUtils_checkScalar(PyObject* obj) {
@@ -145,7 +160,8 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
     return true;
   }
 #endif
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj);
+  return PyFloat_Check(obj) || PyLong_Check(obj) ||
+      PyComplex_Check(obj) | torch::is_symint_node(py::handle(obj));
 }
 
 inline double THPUtils_unpackDouble(PyObject* obj) {
