@@ -785,13 +785,21 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
          >>> assert torch.allclose(output, x + y)
 
     """
+
+    return _jvp_with_argnums(func, primals, argnums=None, strict=strict, has_aux=has_aux)
+
+
+# only to be used with jacrev to allow for all passed variables to be wrapped correctly, even if they don't participate
+# in autograd
+def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Optional[argnums_t], *,
+                      strict: bool = False, has_aux: bool):
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
             f'E.g. it should be valid to call f(*primals).')
     flat_primals, primals_spec = tree_flatten(primals)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
+    if argnums is None and primals_spec != tangents_spec:
         raise RuntimeError(
             f'{jvp_str}: Expected primals and tangents to have the same python '
             f'structure. For example, if primals is a tuple of 3 tensors, '
@@ -807,8 +815,26 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
         with enable_fwd_grad():
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx():
-                flat_duals = tuple(fwAD.make_dual(p, t)
-                                   for p, t in zip(flat_primals, flat_tangents))
+                if argnums is None:
+                    flat_duals = tuple(fwAD.make_dual(p, t)
+                                       for p, t in zip(flat_primals, flat_tangents))
+                else:
+                    # repeated from _slice_argnum since we aren't calling it here
+                    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
+                        raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
+                    argnums = _validate_and_wrap_argnums(argnums, len(flat_primals))
+                    _check_unique_non_empty(argnums)
+                    argnums = argnums if isinstance(argnums, tuple) else (argnums,)
+
+                    flat_duals = []
+                    tangent_ptr = 0
+                    for i in range(len(flat_primals)):
+                        if i in argnums:
+                            flat_duals.append(fwAD.make_dual(flat_primals[i], flat_tangents[tangent_ptr]))
+                            tangent_ptr += 1  # moves separately from i since len(flat_primals) != len(flat_tangents)
+                        else:
+                            flat_duals.append(_wrap_tensor_for_grad(flat_primals[i], level))
+
                 duals = tree_unflatten(flat_duals, primals_spec)
                 result_duals = func(*duals)
                 if has_aux:
@@ -956,14 +982,14 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
-        f_wrapper, primals = _argnums_partial(func, args, argnums)
+        primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis):
-            output = jvp(f_wrapper, primals, basis, has_aux=has_aux)
+            output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
             if has_aux:
                 _, jvp_out, aux = output
                 return jvp_out, aux
@@ -1081,7 +1107,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
             with torch.enable_grad():
                 args = _wrap_all_tensors(args, level)
                 kwargs = _wrap_all_tensors(kwargs, level)
-                diff_args = _slice_argnums(args, argnums, as_tuple=False)
+                diff_args, _ = _slice_argnums(args, argnums, as_tuple=False)
                 tree_map_(partial(_create_differentiable, level=level), diff_args)
 
                 output = func(*args, **kwargs)
