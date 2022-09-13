@@ -760,7 +760,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
     const char* prof_title) {
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, torch_ucc_config.enable_profiling ? prof_title : nullptr, inputTensors, logger);
+      opType, 
+      torch_ucc_config.enable_profiling ? prof_title : nullptr, 
+      inputTensors, 
+      logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
