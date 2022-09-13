@@ -1654,6 +1654,7 @@ def item(a: TensorLikeType) -> NumberType:
     number_type = utils.dtype_to_type(a.dtype)
     return number_type(prims.item(a))
 
+
 # fast path when `to` returns an alias to input. This mimics the same function in aten
 def _to_will_alias(
     a: TensorLikeType,
