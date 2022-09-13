@@ -38,31 +38,8 @@ class TorchDispatchModeInfo(_ModeInfo):
 # have the bulk of the logic for managing the stack in Python, which helped
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
-# more difficult to interact with TorchDispatchModeMeta.
-
-def _wrap_torch_dispatch(f):
-    # wrapper only checks if __torch_dispatch__ is a class method. This is harder to
-    # do by inspecting the instance of the class
-    @functools.wraps(f)
-    def wrapped(self, *args, **kwargs):
-        if isinstance(f, classmethod):
-            raise RuntimeError("TorchDispatchMode's torch_dispatch function " +
-                               "should be a normal method not a class method")
-        return f(self, *args, **kwargs)
-    return wrapped
-
-class TorchDispatchModeMeta(type):
-    """
-    A very thin metaclass that just wraps __torch_dispatch__ to make it easier to check
-    if it's a classmethod
-    """
-    def __new__(metacls, name, bases, dct):
-        if '__torch_dispatch__' in dct:
-            dct['__torch_dispatch__'] = _wrap_torch_dispatch(dct['__torch_dispatch__'])
-        return super().__new__(metacls, name, bases, dct)
-
-
-class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
+# more difficult to interact with it.
+class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
     ``__torch_dispatch__`` overrideable functions within a dynamic scope,
@@ -96,8 +73,6 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        if self in _cur_torch_dispatch_mode:
-            raise RuntimeError(f"{self} is already active in the mode stack")
         _push_mode(self)
         return self
 
@@ -119,7 +94,8 @@ def get_current_dispatch_mode():
 
 
 def _push_mode(mode):
-    _set_torch_dispatch_mode(_TorchDispatchStackMode())
+    if len(_cur_torch_dispatch_mode) == 0:
+        _set_torch_dispatch_mode(_TorchDispatchStackMode())
     _cur_torch_dispatch_mode.append(mode)
 
 
@@ -128,8 +104,6 @@ def _pop_mode():
     old = _cur_torch_dispatch_mode.pop()
     if len(_cur_torch_dispatch_mode) == 0:
         _set_torch_dispatch_mode(None)
-    else:
-        _set_torch_dispatch_mode(_TorchDispatchStackMode())
     return old
 
 
@@ -146,6 +120,12 @@ def _pop_mode_temporarily():
 class _TorchDispatchStackMode:
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
+            if len(_cur_torch_dispatch_mode) > 0:
+                _set_torch_dispatch_mode(self)
+            # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
+            if old.__torch_dispatch__.__self__ is type(old):
+                raise RuntimeError("TorchFunctionMode's torch_function function " +
+                                   "should be a normal method not a class method")
             return old.__torch_dispatch__(func, types, args, kwargs)
 
 class BaseTorchDispatchMode(TorchDispatchMode):

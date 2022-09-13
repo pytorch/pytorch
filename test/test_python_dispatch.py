@@ -746,12 +746,6 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
 
-    def test_nested_push_regular(self):
-        with LoggingTensorMode.push() as mode:
-            # This previously errored
-            with LoggingTensorMode():
-                pass
-
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
         y = torch.randn([])
@@ -1025,24 +1019,14 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
     def test_error_with_same_mode(self):
         # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
 
-        class A(TorchDispatchMode):
-            pass
+        with capture_logs(is_mode=True) as logs:
+            with LoggingTensorMode() as reenabled:
+                with reenabled:
+                    torch.empty([])
+            self.assertExpectedInline('\n'.join(logs), """\
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
-        with A() as a:
-            with self.assertRaisesRegex(RuntimeError, "already active in the mode stack"):
-                with a:
-                    pass
-
-    def test_error_on_same_mode(self):
-        # If the pushed mode isn't the outermost mode, we error
-        class A(TorchDispatchMode):
-            pass
-
-        with A() as reenabled:
-            with A():
-                with self.assertRaisesRegex(RuntimeError, "already active in the mode stack"):
-                    with reenabled:
-                        pass
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):

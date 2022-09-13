@@ -1221,15 +1221,24 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertEqual(out, ["layer2", "layer1"])
 
-    def test_error_with_same_mode(self):
-        class A(TorchFunctionMode):
-            pass
+    def test_nested_same_mode(self):
+        out = []
 
-        a = A()
-        with a:
-            with self.assertRaisesRegex(RuntimeError, "already active in the mode stack"):
-                with a:
-                    pass
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
+
+        with A("layer1") as a:
+            with a:
+                torch.empty([])
+
+        self.assertEqual(out, ["layer1", "layer1"])
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchFunctionMode):

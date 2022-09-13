@@ -1766,19 +1766,6 @@ def is_tensor_like(inp):
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
 
-_cur_torch_function_mode = []
-
-def _wrap_torch_function(f):
-    @functools.wraps(f)
-    def wrapped(self, *args, **kwargs):
-        if isinstance(f, classmethod):
-            raise RuntimeError("TorchFunctionMode's torch_function function " +
-                               "should be a normal method not a class method")
-
-        return f(self, *args, **kwargs)
-    return wrapped
-
-
 # Implementation note: I had a choice about how much of mode stacks
 # to implement in Python versus in C++.  At time of writing, I did not care
 # too much about implementation efficiency; however, I do care about making it
@@ -1789,19 +1776,8 @@ def _wrap_torch_function(f):
 # have the bulk of the logic for managing the stack in Python, which helped
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
-# more difficult to interact with TorchFunctionModeMeta.
-class TorchFunctionModeMeta(type):
-    """
-    A very thin metaclass that just wraps __torch_function__ to make it easier to check
-    if it's a classmethod
-    """
-    def __new__(metacls, name, bases, dct):
-        if '__torch_function__' in dct:
-            dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
-        return super().__new__(metacls, name, bases, dct)
-
-
-class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
+# more difficult to interact with it.
+class TorchFunctionMode():
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
     ``__torch_function__`` overrideable functions within a dynamic scope,
@@ -1841,9 +1817,6 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        old = _get_torch_function_mode()
-        if self in _cur_torch_function_mode or self is old:
-            raise RuntimeError(f"{self} is already active in the mode stack")
         _push_mode(self)
         return self
 
@@ -1857,12 +1830,16 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         return instance
 
 
+_cur_torch_function_mode: List[TorchFunctionMode] = []
+
+
 def _get_current_function_mode():
     return _cur_torch_function_mode[-1] if len(_cur_torch_function_mode) > 0 else None
 
 
 def _push_mode(mode):
-    _set_torch_function_mode(_TorchFunctionStackMode())
+    if len(_cur_torch_function_mode) == 0:
+        _set_torch_function_mode(_TorchFunctionStackMode())
     _cur_torch_function_mode.append(mode)
 
 
@@ -1871,8 +1848,6 @@ def _pop_mode():
     old = _cur_torch_function_mode.pop()
     if len(_cur_torch_function_mode) == 0:
         _set_torch_function_mode(None)
-    else:
-        _set_torch_function_mode(_TorchFunctionStackMode())
     return old
 
 
@@ -1889,6 +1864,12 @@ def _pop_mode_temporarily():
 class _TorchFunctionStackMode:
     def __torch_function__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
+            if len(_cur_torch_function_mode) > 0:
+                _set_torch_function_mode(self)
+            # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
+            if old.__torch_function__.__self__ is type(old):
+                raise RuntimeError("TorchFunctionMode's torch_function function " +
+                                   "should be a normal method not a class method")
             return old.__torch_function__(func, types, args, kwargs)
 
 class BaseTorchFunctionMode(TorchFunctionMode):
