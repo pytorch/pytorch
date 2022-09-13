@@ -2,6 +2,8 @@ import torch
 import torch.utils._pytree as pytree
 from typing import Dict, Any, List, Type
 import operator
+import functools
+from functools import lru_cache
 
 try:
     import sympy  # type: ignore[import]
@@ -9,7 +11,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten  # type: ignore[has-type]
+aten = torch.ops.aten
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
@@ -59,7 +61,11 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return any([isinstance(i, torch.SymIntNode) for i in elem.shape])
+    return (
+        any([isinstance(i, torch.SymIntNode) for i in elem.shape])
+        or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
+        or isinstance(elem.numel(), torch.SymIntNode)
+    )
 
 def create_contiguous(shape):
     strides = [1]
@@ -69,7 +75,7 @@ def create_contiguous(shape):
 
 def is_symbolic_op(func):
     return func in [aten.sym_size.default, aten.dim.default,
-                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default
+                    aten.is_contiguous.default, aten.sym_stride.default, aten.sym_numel.default,
                     ]
 
 def handle_symbolic_op(func, args, kwargs):
@@ -132,7 +138,8 @@ class PySymInt(object):
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     # In the future we'll probably need some explicit way of allowing this
     def __int__(self):
-        raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
+        return int(self.shape_env.evaluate_expr(self.expr))
+        # raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
     def __sym_float__(self):
         if SYM_FUNCTION_MODE:
@@ -157,14 +164,13 @@ class PySymFloat:
     def __str__(self):
         return f"{self.expr}"
 
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'floordiv': lambda a, b: sympy.floor(a / b),
+    'floordiv': lambda a, b: (a - (a % b)) / b
 }
 
 magic_methods = {
@@ -189,45 +195,55 @@ for method, _func in magic_methods.items():
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
-    # this should be wrapped transparently into torch.SymIntNode
+    # this should be wrapped transparently into torch._C.SymIntNode
     setattr(PySymInt, method, _create_magic_impl(_func))
     setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
     if method in reflectable_magic_methods:
         setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
 
+def _lru_cache(fn, maxsize=None):
+    fn_cache = lru_cache(maxsize)(fn)
+    prior_key = None
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        nonlocal prior_key
+        if prior_key != self._get_key():
+            prior_key = self._get_key()
+            fn_cache.cache_clear()
+        return fn_cache(self, *args, **kwargs)
+
+    return wrapper
+
+
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
-        self.shape_env = {}
+        self.var_to_val = {}
+        self.replacements = {}
+        self.divisible = {}
 
-    def create_symint(self, name, val, shape_env=None):
+    def _get_key(self):
+        """
+        Defines the current "state" of the guards we've accumulated in this ShapeEnv.
+        Determines when we need to invalidate our cache
+        """
+        return (len(self.replacements), len(self.divisible))
+
+    def create_symint(self, name, val):
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
-        if shape_env is None:
-            shape_env = self.shape_env
+
         # Currently we don't put 0/1 specialization in guards but perhaps we should
         if val == 0 or val == 1:
             return val
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
-        shape_env[sympy_expr] = val
+        cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        self.var_to_val[sympy_expr] = val
         return cpp_sym_int
 
-    def try_constantify(self, expr):
-        # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
-        new_shape_env = {
-            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
-            for idx, k in enumerate(self.shape_env.keys())
-        }
-        new_expr = expr.subs(new_shape_env)
-        new_expr = new_expr.simplify()
-        if len(list(new_expr.free_symbols)) == 0:
-            return new_expr
-        return None
-
-    def create_shapes_for_args(self, args, shape_env=None):
-        # Takes pytrees and returns a flat list
+    def create_shapes_for_args(self, args):
         arg_cnt = 0
 
         def create_shape(x):
@@ -235,30 +251,126 @@ class ShapeEnv(object):
             if not isinstance(x, torch.Tensor):
                 return x
 
-            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz, shape_env) for idx, sz in enumerate(x.shape)]
+            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz) for idx, sz in enumerate(x.shape)]
             arg_cnt += 1
             return out_shape
         return list(map(create_shape, pytree.tree_flatten(args)[0]))
 
     def evaluate_guards_for_args(self, *args):
-        env: Dict[Any, Any] = {}
-        _ = self.create_shapes_for_args(args, shape_env=env)
-        return all(guard.subs(env) == value for guard, value in self.guards)
+        new_env = ShapeEnv()
+        _ = new_env.create_shapes_for_args(args)
+        return all(guard.xreplace(new_env.var_to_val) == value for guard, value in self.guards)
+
+    @_lru_cache
+    def maybe_evaluate_static(self, expr):
+        """
+        Tries to evaluate expr without introducing guards
+        """
+        # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
+        symbols = list(expr.free_symbols)
+        new_shape_env = {
+            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
+            for idx, k in enumerate(symbols)
+        }
+        new_expr = expr.xreplace(new_shape_env)
+        new_expr = sympy.expand(new_expr)
+        if len(list(new_expr.free_symbols)) == 0:
+            return new_expr
+        return None
+
+    def replace(self, expr):
+        replacements = {s: self.find(s) for s in expr.free_symbols}
+        return sympy.expand(expr.xreplace(replacements))
+
+    def update_divisible(self):
+        new_divisible = {}
+        for k in self.divisible:
+            res = self.replace(k)
+            if len(res.free_symbols) > 0:
+                new_divisible[k] = 0
+
+        self.divisible = new_divisible
+
+    @_lru_cache
+    def simplify(self, expr):
+        expr = self.replace(expr)
+        if len(expr.atoms(sympy.Mod)) > 0:
+            self.update_divisible()
+            expr = expr.xreplace(self.divisible)
+            expr = sympy.expand(expr)
+        return expr
+
+    @lru_cache
+    def size_hint(self, expr: sympy.Expr):
+        result_expr = sympy.expand(expr).xreplace(self.var_to_val)
+        assert (not isinstance(result_expr, sympy.Expr)) or len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
+        return result_expr
+
+    def find(self, a):
+        acopy = a
+        while a in self.replacements:
+            a = self.replacements[a]
+        while acopy in self.replacements:
+            self.replacements[acopy], acopy = a, self.replacements[acopy]
+        return a
+
+    @_lru_cache
+    def evaluate_eq(self, expr: sympy.Eq):
+        concrete_val = self.size_hint(expr)
+        self.guards.append((expr, concrete_val))
+        if not concrete_val:
+            return concrete_val
+        free = list(expr.free_symbols)
+
+        assert len(free) > 0, "The expression should not be static by this point"
+        if len(free) in (1, 2, 3):
+            free = sorted(free, key=lambda x: (-self.size_hint(x), x.name))
+            try:
+                lhs = expr.lhs
+                rhs = expr.rhs
+                solutions = sympy.solve(lhs - rhs, free[0])
+                if len(solutions) == 1 and solutions[0] and "/" not in str(solutions[0]):
+                    new_var = solutions[0]
+                    new_var = self.find(solutions[0])
+                    self.replacements[free[0]] = new_var
+            except NotImplementedError as e:
+                if len(expr.atoms(sympy.Mod)) == 1:
+                    mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                    try:
+                        solutions = sympy.solve(lhs - rhs, mod_expr)
+                        if len(solutions) == 1 and solutions[0] == 0:
+                            self.divisible[mod_expr] = 0
+                    except NotImplementedError as e:
+                        pass
+                pass
+
+        return concrete_val
 
 
     def evaluate_expr(self, expr):
-        const_expr = self.try_constantify(expr)
-        if const_expr is not None:
-            return const_expr
+        try:
+            if len(list(expr.free_symbols)) == 0:
+                return expr
+            expr = self.simplify(expr)
 
-        expr = expr.simplify()
-        concrete_val = expr.subs(self.shape_env)
+            static_expr = self.maybe_evaluate_static(expr)
+            if static_expr is not None:
+                return static_expr
 
-        # Uncomment this to see what code triggered this guard.
-        # TODO: Save this to the guard representation so you can look
-        # at it later
-        # import traceback
-        # traceback.print_stack()
+            if isinstance(expr, sympy.Eq):
+                return self.evaluate_eq(expr)
+            concrete_val = self.size_hint(expr)
 
-        self.guards.append((expr, concrete_val))
-        return concrete_val
+            # Uncomment this to see what code triggered this guard.
+            # TODO: Save this to the guard representation so you can look
+            # at it later
+            # import traceback
+            # traceback.print_stack()
+
+            self.guards.append((expr, concrete_val))
+            return concrete_val
+        except Exception as e:
+            print(e)
+            breakpoint()
+            print()
+            raise e
