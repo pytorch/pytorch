@@ -10,10 +10,11 @@ import torch._C
 
 import torch.jit
 from torch import _utils_internal
-from torch._C import DispatchKey  # type: ignore[attr-defined]
-from torch.overrides import handle_torch_function, has_torch_function
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+
+# from torch._C import DispatchKey  # type: ignore[attr-defined]
+# from torch.overrides import handle_torch_function, has_torch_function
+# from torch.utils._python_dispatch import TorchDispatchMode
+# from torch.utils._pytree import tree_flatten
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -64,7 +65,7 @@ class PyOperator(PyOperatorABC):
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode) and issubclass(
-                dispatch_key_or_mode, TorchDispatchMode
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
             ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
@@ -101,8 +102,10 @@ class PyOperator(PyOperatorABC):
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
-        if has_torch_function(flat_args):
-            return handle_torch_function(self, flat_args, *args, **kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
+            )
 
         dispatch_key_set = _compute_keyset(args, kwargs)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -126,8 +129,8 @@ class PyOperator(PyOperatorABC):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args, _ = torch.utils._pytree.tree_flatten(args)
+    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
     flat_all = flat_args + flat_kwargs
     return flat_all
 
@@ -168,7 +171,7 @@ class OpOverload(PyOperatorABC):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.py_kernels: Dict[DispatchKey, Any] = {}
+        self.py_kernels: Dict[torch._C.DispatchKey, Any] = {}  # type: ignore[name-defined]
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
@@ -212,7 +215,7 @@ class OpOverload(PyOperatorABC):
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode) and issubclass(
-                dispatch_key_or_mode, TorchDispatchMode
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
             ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
