@@ -1,5 +1,4 @@
 import contextlib
-import functools
 
 import warnings
 from torch.utils._mode_utils import _ModeInfo
