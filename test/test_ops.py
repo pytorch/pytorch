@@ -199,7 +199,17 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False, skip_view_consistency=False):
+    def _ref_test_helper(
+        self,
+        ctx,
+        device,
+        dtype,
+        op,
+        skip_zero_numel=False,
+        skip_zero_dim=False,
+        skip_bfloat=False,
+        skip_view_consistency=False,
+    ):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
