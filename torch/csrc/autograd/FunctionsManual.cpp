@@ -357,12 +357,12 @@ Tensor _nested_from_padded_backward(
   if (do_transform_0213) {
     auto new_sizes = {
         input.size(0), input.size(2), (input.size(1) * input.size(3))};
-    auto out = grad.to_padded_tensor(0, new_sizes);
+    auto out = nested_to_padded_tensor(grad, 0, new_sizes);
     auto expand_last_dim_size = {
         input.size(0), input.size(2), input.size(1), input.size(3)};
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
-  return grad.to_padded_tensor(0, input.sizes());
+  return nested_to_padded_tensor(grad, 0, input.sizes());
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -3440,151 +3440,6 @@ Tensor svd_backward(
   return gA;
 }
 
-// The implementation follows:
-// "An extended collection of matrix derivative results for forward and reverse
-// mode algorithmic differentiation"
-// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
-// However, the reference does not cover the constraints on eigenvectors to have
-// 1-norm. See the details below.
-Tensor eig_backward(
-    const std::vector<torch::autograd::Variable>& grads,
-    const Tensor& self,
-    bool is_eigvec_tensor_nonempty,
-    const Tensor& eigenvalues,
-    const Tensor& eigenvectors) {
-  at::NoTF32Guard disable_tf32;
-  TORCH_CHECK(
-      is_eigvec_tensor_nonempty,
-      "eig_backward: torch.eig(eigenvalues=False) is not differentiable. ",
-      "Please use torch.linalg.eigvals");
-
-  // variable names correspond to the ones in the reference document
-  auto D = eigenvalues;
-  const auto& U = eigenvectors;
-  auto D_grad = grads[0];
-  auto U_grad = grads[1];
-
-  // The condition below is trying to marry torch.eig and torch.linalg.eig
-  // for real inputs.
-  //
-  // For real inputs torch.eig returns a real 2D tensor representing real and
-  // complex components of eigenvalues, while torch.linalg.eig will most likely
-  // always return complex eigenvalues.
-  if (!self.is_complex()) {
-    Tensor is_imag_eigvals_zero;
-    // path for torch.eig with always a "real" 2D tensor of eigenvalues
-    if (!D.is_complex()) {
-      // narrow extracts the column corresponding to the imaginary part
-      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min();
-    }
-    // path for torch.linalg.eig with always a complex tensor of eigenvalues
-    else {
-      is_imag_eigvals_zero = (at::imag(D) == 0.0).min();
-      // insert an additional dimension to be compatible with torch.eig.
-      // Recall that it produces 2D tensors.
-      // We extract only the real parts as there is no support for
-      // complex eigenvalues with real inputs yet.
-      D = at::real(D).unsqueeze(-1);
-      D_grad = at::real(D_grad).unsqueeze(-1);
-    }
-    // No support for complex eigenvalues for real inputs yet.
-    TORCH_CHECK(
-        at::equal(is_imag_eigvals_zero, is_imag_eigvals_zero.new_ones({})),
-        "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
-  } else {
-    // torch.eig returns 2d tensors for eigenvalues,
-    // while torch.linalg.eig returns 1d.
-    // Hence we insert additional dimension for complex input,
-    // such that the same code could be used for both methods.
-    // It will become unnecessary once torch.eig is deprecated.
-    D = D.unsqueeze(-1);
-    if (D_grad.defined()) {
-      D_grad = D_grad.unsqueeze(-1);
-    }
-  }
-
-  if (!D_grad.defined() && !U_grad.defined()) {
-    return at::zeros_like(self, at::MemoryFormat::Contiguous);
-  }
-
-  // Adapting the result from the reference above for the complex input, we get:
-  //
-  // A_grad = U^{-H} (D_grad + F.conj() * (U^H U_grad)) U^H,
-  // where M^H := (M.mT()).conj() and * is the Hadamard (element-wise) product.
-  //
-  // torch.eig/torch.linalg.eig produce eigenvectors which are
-  // normalized to 1 norm, and the reference does not take that into account.
-  // Hence, we have to modify the formula accordingly.
-  //
-  // Normalization to 1 norm imposes the following constraint on the
-  // eigenvectors, i.e. (U^H U) * I = I, where I is an identity matrix. Forward
-  // AD for this expression yields: (dU^H U + U^H dU) * I = 0 => U^H dU * I = 0
-  // <=> diag(U^H dU) = 0, which means that each i-th column of U is orthogonal
-  // to the i-th column of dU. Now, the value of dU which does not take this
-  // constraint into consideration comes straight from the reference: dU = U(F *
-  // U^{-1} dA U). To make sure that U^H dU * I = 0, and using U^H U * I = I
-  // (normalization), we propose a modifed forward AD for U: dU_new = dU - U(U^H
-  // dU * I) (think of Gram-Schmidt)
-  //
-  // The rest is very similar to what is done in the reference and we finally
-  // arrive at:
-  //
-  // A_grad = U^{-H} (D_grad + (U^H U_grad - U^H U (U^H U_grad * I)) * F.conj())
-  // U^H
-  //        = U^{-H} (eigenvalues_contribs + eigenvectors_contrib) U^H, where
-  // eigenvalues_contribs := D_grad,
-  // eigenvectors_contribs := (U^H U_grad - U^H U (U^H U_grad * I)) * F.conj().
-  // The contributions from the eigenvectors and the eigenvalues are computed
-  // below, and then we solve the system U^H A_grad = (eigenvalues_contribs +
-  // eigenvectors_contribs) U_H to produce A_grad.
-
-  // contribution from the eigenvectors
-  Tensor U_contrib;
-  if (U_grad.defined()) {
-    // narrow extracts the column corresponding to the real part
-    D = D.narrow(-1, 0, 1);
-    auto F = (D.mT() - D);
-    if (!F.is_complex()) {
-      F.diagonal(0, -2, -1).fill_(INFINITY);
-      F.pow_(-1);
-    } else {
-      // The F matrix construction for complex eigenvalues
-      // if different from its real counterpart.
-      // There is no complex INFINITY, and we cannot use
-      //
-      // F.pow_(-1);
-      // F.diagonal(0, -2, -1).fill_(0);
-      //
-      // as it breaks gradgradcheck by double backward
-      // propagating nans through F.pow_(-1) at zero,
-      // the point of discontinuity.
-      // Hence this hack below.
-      F.diagonal(0, -2, -1).fill_(1);
-      F.pow_(-1);
-      F.diagonal(0, -2, -1).fill_(0);
-    }
-    auto U_grad_proj_onto_U = at::matmul(U.mH(), U_grad);
-    auto Uh_U = at::matmul(U.mH(), U);
-    U_contrib = (U_grad_proj_onto_U -
-                 Uh_U * U_grad_proj_onto_U.diagonal(0, -2, -1).unsqueeze(-2)) *
-        F.conj();
-  } else {
-    U_contrib = at::zeros_like(self, at::MemoryFormat::Contiguous);
-  }
-
-  // contributions from the eigenvalues
-  Tensor D_contrib;
-  if (D_grad.defined()) {
-    // narrow extracts the column corresponding to the real part
-    D_contrib = D_grad.narrow(-1, 0, 1);
-  } else {
-    D_contrib = at::zeros_like(D, at::MemoryFormat::Contiguous);
-  }
-
-  return at::linalg_solve(
-      U.mH(), at::matmul(U_contrib, U.mH()) + D_contrib * U.mH());
-}
-
 Tensor linalg_eig_backward(
     const Tensor& gL,
     const Tensor& gV,
@@ -5115,10 +4970,6 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
-
-  auto input_grad = at::zeros_like(input_);
-  auto tau_grad = at::zeros_like(tau);
-
   auto m = input_.size(-2);
   auto k = tau.size(-1);
 
@@ -5167,7 +5018,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) -
         (t_unsqueezed * Kv).squeeze(-1);
     auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
-    return std::make_tuple(v_grad, tau_grad.squeeze(-1));
+    return std::make_tuple(v_grad.unsqueeze(-1), tau_grad.squeeze(-1));
   };
 
   auto apply_householder_reflector = [m, modify_K_in_place](
@@ -5191,23 +5042,70 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // K <- H_0^{-1} @ K
   K = apply_householder_reflector(
       0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K, /*left=*/true);
-  for (const auto i : c10::irange(k)) {
-    // NOTE: narrow will unsqueeze(-1)
-    auto v_i = input.narrow(-1, i, 1);
-    auto t_i = tau.narrow(-1, i, 1);
 
-    Tensor v_i_grad, tau_i_grad;
-    std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-    input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
-    tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+  Tensor input_grad, tau_grad;
+  // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
+  // so we use out-of-place ops with equivalent output.
+  // NOTE: We can't use `new_zeros` directly as `input`, 'tau' or `grad` can
+  // be Tensor Subclass and we don't want to make assumption about which
+  // one to choose for creating output buffer.
+  // eg. if both are BatchedTensor at different level.
+  if (areAnyTensorSubclassLike({input, tau, K})) {
+    std::vector<Tensor> input_grads = {};
+    std::vector<Tensor> tau_grads = {};
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
 
-    // K <- H_{i + 1}^{-1} @ K @ H_i
-    if (i < k - 1) {
-      auto v_i_next = input.narrow(-1, i + 1, 1);
-      auto s_i_next = sigma.narrow(-1, i + 1, 1);
-      K = apply_householder_reflector(
-          i + 1, v_i_next, s_i_next, K, /*left=*/true);
-      K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grads.push_back(v_i_grad);
+      tau_grads.push_back(tau_i_grad);
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
+    }
+
+    // Only first k columns are active in forward.
+    // zero gradients for the inactive input.
+    if (k < input.size(-1)) {
+      auto zero_grad_shape =
+          at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
+      zero_grad_shape.push_back(input.size(-1) - k);
+      auto zero_grad = at::zeros(zero_grad_shape, input_.options());
+      input_grads.push_back(zero_grad);
+    }
+
+    input_grad = at::cat(input_grads, -1);
+    tau_grad = at::cat(tau_grads, -1);
+  } else {
+    input_grad = at::zeros_like(input_);
+    tau_grad = at::zeros_like(tau);
+    for (const auto i : c10::irange(k)) {
+      // NOTE: narrow will unsqueeze(-1)
+      auto v_i = input.narrow(-1, i, 1);
+      auto t_i = tau.narrow(-1, i, 1);
+
+      Tensor v_i_grad, tau_i_grad;
+      std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
+      input_grad.select(-1, i).copy_(v_i_grad.squeeze(-1));
+      tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
+
+      // K <- H_{i + 1}^{-1} @ K @ H_i
+      if (i < k - 1) {
+        auto v_i_next = input.narrow(-1, i + 1, 1);
+        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+        K = apply_householder_reflector(
+            i + 1, v_i_next, s_i_next, K, /*left=*/true);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+      }
     }
   }
 
@@ -5299,10 +5197,18 @@ Tensor householder_product_jvp(
 
     H_plus = apply_householder_reflector(v_i, sigma_i, H_plus, /*left=*/true);
 
-    dprod.add_(H_minus.matmul(
+    // `H_minus_dH_i_H_plus` = H_1 * ... * H_{i-1} dH_i * H_{i+1} * ...
+    auto H_minus_dH_i_H_plus = H_minus.matmul(
         apply_simple_product(v_i, v_i, dtau_i, H_plus) +
         apply_simple_product(dv_i, v_i, tau_i, H_plus) +
-        apply_simple_product(v_i, dv_i, tau_i, H_plus)));
+        apply_simple_product(v_i, dv_i, tau_i, H_plus));
+    // For Composite Compliance, if `intermediate` is a Tensor-Subclass,
+    // we use out-of-place variant of add.
+    if (at::isTensorSubclassLike(H_minus_dH_i_H_plus)) {
+      dprod = dprod.add(H_minus_dH_i_H_plus);
+    } else {
+      dprod.add_(H_minus_dH_i_H_plus);
+    }
 
     H_minus = apply_householder_reflector(v_i, tau_i, H_minus, /*left=*/false);
   }
