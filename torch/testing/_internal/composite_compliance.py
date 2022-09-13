@@ -1,6 +1,5 @@
 import torch
 from torch import Tensor
-import contextlib
 import itertools
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
