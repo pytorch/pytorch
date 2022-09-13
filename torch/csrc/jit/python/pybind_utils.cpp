@@ -662,7 +662,7 @@ py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
+    c10::optional<c10::DispatchKey> dk) {
   auto opWithStack = getOpWithStack(operations, args, kwargs);
   std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
   Stack stack = std::get<1>(opWithStack);
@@ -684,7 +684,7 @@ py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt) {
+    c10::optional<c10::DispatchKey> dk) {
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
@@ -739,7 +739,6 @@ py::object _get_operation_for_overload_or_packet(
   }
   return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
-
 
 } // namespace jit
 } // namespace torch
