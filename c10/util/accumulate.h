@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 
 #include <iterator>
