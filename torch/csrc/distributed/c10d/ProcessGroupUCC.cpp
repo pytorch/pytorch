@@ -864,7 +864,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allgather(
         tensor.device(),
         inputTensors,
         outputTensors[0],
-        "ucc:allgatherv");
+        "ucc:all_gather");
   } else {
     WorkData* data = new WorkData();
     std::vector<at::Tensor> flat_output(outputTensors.size());
@@ -996,7 +996,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allreduce(
       tensor.device(),
       tensors,
       tensors,
-      "ucc:allreduce");
+      "ucc:all_reduce");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allreduce_coalesced(
