@@ -31,7 +31,7 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad, _slice_argnums, _replace_args
+from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
 from functorch.experimental import functionalize
 
 # NB: numpy is a testing dependency!
