@@ -882,7 +882,7 @@ def add(
 
 # TODO: add docstring
 atan2 = _make_elementwise_binary_reference(
-    prims.atan2,
+    prims.atan2,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -890,33 +890,33 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and,
+    prims.bitwise_and,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left,
+    prims.shift_left,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_or = _make_elementwise_binary_reference(
-    prims.bitwise_or,
+    prims.bitwise_or,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_right_shift = _make_elementwise_binary_reference(
-    prims.shift_right_arithmetic,
+    prims.shift_right_arithmetic,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_xor = _make_elementwise_binary_reference(
-    prims.bitwise_xor,
+    prims.bitwise_xor,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
@@ -973,7 +973,7 @@ def div(
 
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
-    prims.eq,
+    prims.eq,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1137,7 +1137,7 @@ floor_divide = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmax = _make_elementwise_binary_reference(
-    prims.fmax,
+    prims.fmax,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
     supports_lhs_python_scalar=False,
@@ -1146,7 +1146,7 @@ fmax = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmin = _make_elementwise_binary_reference(
-    prims.fmin,
+    prims.fmin,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
     supports_lhs_python_scalar=False,
@@ -1155,7 +1155,7 @@ fmin = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmod = _make_elementwise_binary_reference(
-    prims.fmod,
+    prims.fmod,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
     supports_lhs_python_scalar=False,
@@ -1164,7 +1164,7 @@ fmod = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gcd = _make_elementwise_binary_reference(
-    prims.gcd,
+    prims.gcd,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.gcd,
     supports_lhs_python_scalar=False,
@@ -1173,14 +1173,14 @@ gcd = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
-    prims.ge,
+    prims.ge,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt,
+    prims.gt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1203,21 +1203,21 @@ heaviside = _make_elementwise_binary_reference(
 )
 
 hypot = _make_elementwise_binary_reference(
-    prims.hypot,
+    prims.hypot,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(
-    prims.igamma,
+    prims.igamma,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igammac = _make_elementwise_binary_reference(
-    prims.igammac,
+    prims.igammac,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1322,7 +1322,7 @@ lcm = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.le,
+    prims.le,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1385,39 +1385,39 @@ logical_xor = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt,
+    prims.lt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.maximum,
+    prims.maximum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.minimum,
+    prims.minimum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul,
+    prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 ne = _make_elementwise_binary_reference(
-    prims.ne,
+    prims.ne,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
 # TODO: add docstring
 nextafter = _make_elementwise_binary_reference(
-    prims.nextafter,
+    prims.nextafter,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1425,7 +1425,7 @@ nextafter = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 remainder = _make_elementwise_binary_reference(
-    prims.remainder,
+    prims.remainder,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
@@ -1486,7 +1486,7 @@ def sub(
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div,
+    prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
 )
@@ -1661,6 +1661,31 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
+# TODO: extend to device and layout similar to
+# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
+def _to_will_alias(
+    a: TensorLikeType,
+    dtype: torch.dtype,
+    copy: bool,
+    memory_format: torch.memory_format,
+) -> bool:
+    return (
+        not copy
+        and a.dtype == dtype
+        and (
+            memory_format == torch.preserve_format
+            or a.is_contiguous(memory_format=memory_format)
+        )
+    )
+
+
+# TODO: there are multiple overloads of to, but we only support one here
+# aten/src/ATen/native/native_functions.yaml lists all overloads
+# Missing overloads:
+# to.dtype_layout
+# to.device
+# to.other
+# https://github.com/pytorch/pytorch/issues/84264
 def to(
     a: TensorLikeType,
     dtype: torch.dtype,
@@ -1668,6 +1693,8 @@ def to(
     copy: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
+    if _to_will_alias(a, dtype, copy, memory_format):
+        return a
     if (
         (copy is True or dtype != a.dtype)
         and memory_format == torch.preserve_format
@@ -2360,6 +2387,7 @@ def expand(a: Tensor, *shape) -> Tensor:
     )
 
 
+# CompositeImplicitAutograd - don't register decomp
 def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
@@ -2731,15 +2759,24 @@ def native_layer_norm(
         + ", but got input of size "
         + str(input.shape),
     )
+
+    input = input.contiguous()
+    if weight is not None:
+        weight = weight.contiguous()
+    if bias is not None:
+        bias = bias.contiguous()
+
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
     out, mean, rstd, _ = _normalize(input, reduction_dims, eps)
+
     if weight is None and bias is not None:
         out = out + bias
     elif weight is not None and bias is None:
         out = out * weight
     elif weight is not None and bias is not None:
         out = out * weight + bias
+
     out = prims.convert_element_type(out, input.dtype)
     if input.device.type == "cpu":
         mean = prims.convert_element_type(mean, input.dtype)
@@ -2755,17 +2792,51 @@ def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.transpose(a, _permutation)
 
 
-@register_decomposition(torch.ops.aten.repeat)
-def repeat(a: Tensor, *repeat_shape) -> Tensor:
-    # NOTE: cannot use utils.extract_shape_from_varargs here
-    # because that also validates the shape, but the shape
-    # given to repeat may be "invalid"
-    if len(repeat_shape) == 1 and isinstance(repeat_shape[0], Sequence):
-        repeat_shape = tuple(repeat_shape[0])
+# Get the new shape and stride after applying unfold to an input tensor
+def _get_unfold_copy_shape_stride(
+    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
+):
+    a_ndim = len(a_shape)
+    dimension = utils.canonicalize_dim(a_ndim, dimension)
+    max_size = 1 if a_ndim == 0 else a_shape[dimension]
+    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
 
     utils.check(
+        size <= max_size,
+        lambda: "Maximum size for tensor at dimension "
+        + str(dimension)
+        + " is "
+        + str(max_size)
+        + " but size is "
+        + str(size),
+    )
+
+    utils.check(
+        step > 0,
+        lambda: "Step is " + str(step) + " but must be > 0",
+    )
+
+    new_size = []
+    new_stride = []
+
+    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
+        if d == dimension:
+            new_size.append((dim_size - size) // step + 1)
+            new_stride.append(step * dim_stride)
+        else:
+            new_size.append(dim_size)
+            new_stride.append(dim_stride)
+    new_size.append(size)
+    new_stride.append(last_stride)
+    return new_size, new_stride
+
+
+@register_decomposition(torch.ops.aten.repeat)
+def repeat(a: Tensor, *repeat_shape) -> Tensor:
+    repeat_shape = utils.extract_shape_from_varargs(repeat_shape, validate=False)
+    utils.check(
         len(repeat_shape) >= len(a.shape),
-        lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+        lambda: "repeat: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
     )
 
     if len(repeat_shape) == 0:
@@ -2788,6 +2859,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
             dtype=a.dtype,
             device=a.device,
             requires_grad=a.requires_grad,
+            memory_format=utils.suggest_memory_format(a),
         )
 
     urtensor_shape = target_shape
@@ -2924,13 +2996,17 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     return a_
 
 
-# TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 # CompositeImplicitAutograd - don't register decomp
 # NOTE: shape is a vararg because Tensor.reshape can be called with as
 # Tensor.reshape(a, b, c) or Tensor.reshape((a, b, c)) Function call
 # torch.reshape doesn't support unpacked shapes
 def reshape(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=True)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.reshape(other.size())
 
 
 @register_decomposition(torch.ops.aten.roll)
@@ -3418,44 +3494,6 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-def _get_unfold_copy_shape_stride(
-    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
-):
-    a_ndim = len(a_shape)
-    dimension = utils.canonicalize_dim(a_ndim, dimension)
-    max_size = 1 if a_ndim == 0 else a_shape[dimension]
-    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
-
-    utils.check(
-        size <= max_size,
-        lambda: "Maximum size for tensor at dimension "
-        + str(dimension)
-        + " is "
-        + str(max_size)
-        + " but size is "
-        + str(size),
-    )
-
-    utils.check(
-        step > 0,
-        lambda: "Step is " + str(step) + " but must be > 0",
-    )
-
-    new_size = []
-    new_stride = []
-
-    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
-        if d == dimension:
-            new_size.append((dim_size - size) // step + 1)
-            new_stride.append(step * dim_stride)
-        else:
-            new_size.append(dim_size)
-            new_stride.append(dim_stride)
-    new_size.append(size)
-    new_stride.append(last_stride)
-    return new_size, new_stride
-
-
 @register_decomposition(torch.ops.aten.unfold_copy)
 def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
     new_size, new_stride = _get_unfold_copy_shape_stride(
@@ -3480,6 +3518,11 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
+    return self.view(other.size())
 
 
 # CompositeImplicitAutograd - don't register decomp
