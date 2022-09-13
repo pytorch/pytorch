@@ -585,7 +585,7 @@ def gen_inplace_or_view_type(
         key_fn=lambda fn: fn.func.root_name,
         base_env={
             "generated_comment": "@"
-            + f"generated from {template_path}/ADInplaceOrViewType.cpp",
+            + f"generated from {fm.template_dir_for_comments()}/ADInplaceOrViewType.cpp",
         },
         env_callable=gen_inplace_or_view_type_env,
         num_shards=2,
