@@ -836,7 +836,7 @@ Instead of using :meth:`torch.Tensor.to_sparse`, we can also create the sparse C
 
 .. warning::
 
-  When using a function like :meth:`torch.masked.maskedtensor.MaskedTensor.to_sparse_coo`, if the user does not specify the indices like in the above
+  When using a function like :meth:`MaskedTensor.to_sparse_coo`, if the user does not specify the indices like in the above
   example, then the 0 values will be "unspecified" by default.
 
 Below, we explicitly specify the 0's:
