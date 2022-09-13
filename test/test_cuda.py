@@ -3200,6 +3200,36 @@ torch.cuda.synchronize()
             except Exception as e:
                 raise RuntimeError("Failed on ", op) from e
 
+            # Do the same operations varying seeds
+            seeds = [6, 128, 9999]
+
+            for seed in seeds:
+                torch.cuda.manual_seed(seed)
+                graph_in.copy_(a)
+                for _ in range(3):
+                    g.replay()
+
+                # If the random seed was not updated then the graph would
+                # generate the same output as in previous check.
+                try:
+                    self.assertNotEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
+                # Now repeat the same operations in non-graphed mode.
+                torch.cuda.manual_seed(seed)
+                for _ in range(3):
+                    eager_out.copy_(a)
+                    eager_out = op(eager_out, **kwargs)
+                    eager_out = op(eager_out, **kwargs)
+
+                # In the end, graph_out and eager_out must be equal
+                # as they went under the same set of operations.
+                try:
+                    self.assertEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
             # We hold references to all tensors used across streams up til this sync,
             # so no need to call record_stream on those tensors.
             torch.cuda.synchronize()
@@ -3241,68 +3271,70 @@ torch.cuda.synchronize()
                             ("uniform_", ()),)
 
         def run(module, op, args, kwargs):
-            torch.cuda.manual_seed(5)
+            seeds = [5, 7, 13]
+            for seed in seeds:
+                torch.cuda.manual_seed(seed)
 
-            # Each path runs a dummy op to increment the state a bit before creating controls.
-            if (module == "torch"):
-                dummy = getattr(torch, op)(*args, **kwargs)
-                control1 = getattr(torch, op)(*args, **kwargs)
-                control2 = getattr(torch, op)(*args, **kwargs)
-            else:
-                dummy = alloc.clone()
-                control1 = alloc.clone()
-                control2 = alloc.clone()
-                getattr(dummy, op)(*args)
-                getattr(control1, op)(*args)
-                getattr(control2, op)(*args)
-
-            stream = torch.cuda.Stream()
-            stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(stream):
-                torch.cuda.manual_seed(5)
-
-                g = torch.cuda.CUDAGraph()
-                torch.cuda.empty_cache()
+                # Each path runs a dummy op to increment the state a bit before creating controls.
                 if (module == "torch"):
-                    g.capture_begin()
-                    t1 = getattr(torch, op)(*args, **kwargs)
-                    t2 = getattr(torch, op)(*args, **kwargs)
-                    g.capture_end()
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                    control1 = getattr(torch, op)(*args, **kwargs)
+                    control2 = getattr(torch, op)(*args, **kwargs)
                 else:
-                    t1 = alloc.clone()
-                    t2 = alloc.clone()
-                    g.capture_begin()
-                    getattr(t1, op)(*args)
-                    getattr(t2, op)(*args)
-                    g.capture_end()
-            torch.cuda.current_stream().wait_stream(stream)
+                    dummy = alloc.clone()
+                    control1 = alloc.clone()
+                    control2 = alloc.clone()
+                    getattr(dummy, op)(*args)
+                    getattr(control1, op)(*args)
+                    getattr(control2, op)(*args)
 
-            try:
-                self.assertNotEqual(control1, t1)
-                self.assertNotEqual(control2, t2)
-            except Exception as e:
-                raise RuntimeError("Failed on " + module + "." + op) from e
+                stream = torch.cuda.Stream()
+                stream.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(stream):
+                    torch.cuda.manual_seed(seed)
 
-            # Runs a dummy op prelude, as for controls, to make sure replay()
-            # picks up the dummy op's state increment.
-            if module == "torch":
-                dummy = getattr(torch, op)(*args, **kwargs)
-            else:
-                dummy = alloc.clone()
-                getattr(dummy, op)(*args)
+                    g = torch.cuda.CUDAGraph()
+                    torch.cuda.empty_cache()
+                    if (module == "torch"):
+                        g.capture_begin()
+                        t1 = getattr(torch, op)(*args, **kwargs)
+                        t2 = getattr(torch, op)(*args, **kwargs)
+                        g.capture_end()
+                    else:
+                        t1 = alloc.clone()
+                        t2 = alloc.clone()
+                        g.capture_begin()
+                        getattr(t1, op)(*args)
+                        getattr(t2, op)(*args)
+                        g.capture_end()
+                torch.cuda.current_stream().wait_stream(stream)
 
-            # Runs RNG ops that fill t1 and t2.
-            g.replay()
+                try:
+                    self.assertNotEqual(control1, t1)
+                    self.assertNotEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
 
-            try:
-                self.assertEqual(control1, t1)
-                self.assertEqual(control2, t2)
-            except Exception as e:
-                raise RuntimeError("Failed on " + module + "." + op) from e
+                # Runs a dummy op prelude, as for controls, to make sure replay()
+                # picks up the dummy op's state increment.
+                if module == "torch":
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                else:
+                    dummy = alloc.clone()
+                    getattr(dummy, op)(*args)
 
-            # We hold references to all tensors used across streams up til this sync,
-            # so no need to call record_stream on those tensors.
-            torch.cuda.synchronize()
+                # Runs RNG ops that fill t1 and t2.
+                g.replay()
+
+                try:
+                    self.assertEqual(control1, t1)
+                    self.assertEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
+
+                # We hold references to all tensors used across streams up til this sync,
+                # so no need to call record_stream on those tensors.
+                torch.cuda.synchronize()
 
         for op_with_args in torch_with_args:
             run("torch", *op_with_args)
@@ -3542,8 +3574,8 @@ torch.cuda.synchronize()
              delta_cudaMalloc_bytes_post_del_g,
              pool_string) in cases:
             if pool_string == "small_pool":
-                delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
-                delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+                delta_active_blocks = 3  # one from "b" plus a sneaky one from CUDAGraph's one-element rng seed and offset holders
+                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
             else:
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
