@@ -314,7 +314,7 @@ bool use_mkldnn(const Tensor& input) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
-  if (!input.is_contiguous() || input.numel() == 1) {
+  if (!input.is_contiguous() || input.numel() <= 1) {
     return false;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
