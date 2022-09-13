@@ -74,9 +74,13 @@ has_magma: bool = False
 has_half: bool = False
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
+def _is_compiled() -> bool:
+    r"""Returns true if compile with CUDA support."""
+    return hasattr(torch._C, '_cuda_getDeviceCount')
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
-    if not hasattr(torch._C, '_cuda_getDeviceCount'):
+    if not _is_compiled():
         return False
     # This function never throws and returns 0 if driver is missing or can't
     # be initialized
@@ -458,10 +462,9 @@ def set_stream(stream: Stream):
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
-    if is_available():
-        return torch._C._cuda_getDeviceCount()
-    else:
+    if not _is_compiled():
         return 0
+    return torch._C._cuda_getDeviceCount()
 
 def get_arch_list() -> List[str]:
     r"""Returns list CUDA architectures this library was compiled for."""
