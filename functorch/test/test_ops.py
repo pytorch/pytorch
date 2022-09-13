@@ -1253,7 +1253,7 @@ class TestOperators(TestCase):
         # Mismatched elements: 2 / 120 (1.7%)
         # Greatest absolute difference: 0.09438323974609375
         # Greatest relative difference: 0.00115722746596277
-        xfail('linalg.householder_product'),
+        xfail('linalg.householder_product', device_type='cuda'),
         xfail('linalg.vander'),  # calls item()
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
