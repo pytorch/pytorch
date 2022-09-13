@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from random import randint
 
 import torch
 import torch.cuda
@@ -21,12 +22,10 @@ import torch.cuda.comm as comm
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -569,8 +568,8 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch._UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -1351,7 +1350,6 @@ class TestCuda(TestCase):
                 out = cudart.cudaStreamDestroy(stream.value)
                 self.assertEqual(out, 0)
 
-    @skipIfRocm
     def test_external_streams(self):
         device = torch.cuda.device(0)
         with self._get_external_stream(device) as stream_v:
@@ -1359,7 +1357,6 @@ class TestCuda(TestCase):
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
@@ -1680,24 +1677,6 @@ except RuntimeError as e:
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def test_trilu_indices(self):
-        for test_args in tri_tests_args:
-            _compare_trilu_indices(self, *test_args, device='cuda')
-
-        # test default options
-        x = torch.ones(
-            3, 3, dtype=torch.long, device='cuda', layout=torch.strided)
-        self.assertEqual(
-            x.tril(0).nonzero().transpose(0, 1),
-            torch.tril_indices(3, 3, device='cuda'))
-        self.assertEqual(
-            x.triu(0).nonzero().transpose(0, 1),
-            torch.triu_indices(3, 3, device='cuda'))
-
-    def test_large_trilu_indices(self):
-        for test_args in tri_large_tests_args:
-            _compare_large_trilu_indices(self, *test_args, device='cuda')
-
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -1980,7 +1959,7 @@ t1.start()
 t2.start()
 """])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
+    @unittest.skipIf(TEST_WITH_ROCM, "In ROCm, kernel asserts are disabled due to performance overhead")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -2806,7 +2785,11 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_not_implemented = 'cudnn' in op or 'prelu' in op or 'thnn' in op \
+                should_error_from_cudnn = 'cudnn' in op and not\
+                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
+                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
@@ -3749,7 +3732,11 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    def test_graph_make_graphed_callables(self):
+    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True),
+                 decorators=[unittest.expectedFailure])],
+                 name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
+                                                    {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
+    def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
 
@@ -3780,9 +3767,10 @@ torch.cuda.synchronize()
         relu_control = torch.nn.functional.relu
 
         # This is a good stress test. It graphs four callables: two Modules and two python functions.
-        model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
-            torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
-                                              ((x,), (h,), (y_pred,), (y_pred, y)))
+        with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+            model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
+                torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                                                  ((x,), (h,), (y_pred,), (y_pred, y)))
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
@@ -3797,10 +3785,11 @@ torch.cuda.synchronize()
             torch.cuda.manual_seed(5)
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
-                y_pred = m(data)
-                y_pred = relu(y_pred)
-                loss = loss_fn(y_pred, target)
-                loss.backward()
+                with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+                    y_pred = m(data)
+                    y_pred = relu(y_pred)
+                    loss = loss_fn(y_pred, target)
+                    loss.backward()
                 opt.step()
 
         for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
@@ -3950,6 +3939,15 @@ torch.cuda.synchronize()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+    @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
+    def test_lazy_init(self):
+        """ Validate that no CUDA calls are made during `import torch` call"""
+        from subprocess import check_output
+        VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
+        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
+        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        self.assertEqual(rc, "0")
 
 
 class TestCudaComm(TestCase):
@@ -4390,6 +4388,49 @@ class TestCudaComm(TestCase):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
             self.assertTrue(torch.equal(x, cat))
+
+    def test_memory_snapshot(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True)
+            x = torch.rand(311, 411, device='cuda')
+
+            # create a bunch of tensors that all will tile into the
+            # same segment to  exercise the history merging code
+            # 512B is the minimum block size,
+            # so we allocate all the tensors to this size to make sure
+            # they tile evenly
+            tensors = [torch.rand(128, device='cuda') for _ in range(1000)]
+            while tensors:
+                del tensors[randint(0, len(tensors) - 1)]
+
+            # exercise the history trimming code
+            torch.rand(128 * 5, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue('test_cuda' in h['frames'][0]['filename'])
+                                found_it = True
+            self.assertTrue(found_it)
+            if not IS_WINDOWS:
+                with tempfile.NamedTemporaryFile() as f:
+                    torch.cuda.memory._save_segment_usage(f.name)
+                    with open(f.name, 'r') as f2:
+                        self.assertTrue('test_cuda.py' in f2.read())
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+    def test_raises_oom(self):
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+
+instantiate_parametrized_tests(TestCuda)
 
 if __name__ == '__main__':
     run_tests()

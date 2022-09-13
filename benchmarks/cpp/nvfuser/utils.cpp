@@ -89,6 +89,20 @@ std::string toString(PointwiseParams params) {
   return ss.str();
 }
 
+std::string toString(const std::shared_ptr<HeuristicParams>& params) {
+  auto rparams = std::dynamic_pointer_cast<ReductionParams>(params);
+  if (rparams) {
+    return toString(*rparams);
+  }
+  auto pparams = std::dynamic_pointer_cast<PointwiseParams>(params);
+  if (pparams) {
+    return toString(*pparams);
+  }
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Unknown heuristic parameter type. Did you just added a new heuristic parameter type but forget to update here?");
+}
+
 std::string toString(LaunchParams lparams) {
   std::stringstream ss;
   lparams.toString();
@@ -123,9 +137,7 @@ TensorView* makeContigTensor(size_t ndims, DataType dtype) {
       .build();
 }
 
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype) {
+TensorView* makeConcreteTensor(std::vector<int64_t> shape, DataType dtype) {
   return TensorViewBuilder().shape(shape).dtype(dtype).build();
 }
 
@@ -157,20 +169,14 @@ void runBenchmarkIterations(
     auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
     auto executor_instance = compile_log.fusion_executor;
 
-    if (compile_log.reduction_params.has_value()) {
-      auto rparams = toString(compile_log.reduction_params.value());
-      auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
-      benchmark_state.SetLabel(rparams + lparams);
-    } else if (compile_log.pointwise_params.has_value()){
-      auto pparams = toString(compile_log.pointwise_params.value());
-      auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
-      benchmark_state.SetLabel(pparams + lparams);
-    }
+    auto params = toString(compile_log.params);
+    auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
+    benchmark_state.SetLabel(params + lparams);
 
     executor_instance->setMeasureKernelTimeFlag(true);
 
     // Sync everything up before we start
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     for (auto _ : benchmark_state) {
       clearL2Cache();
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
@@ -179,7 +185,7 @@ void runBenchmarkIterations(
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   } else {
     // Segmented
     // Sync everything up before we start
@@ -187,7 +193,7 @@ void runBenchmarkIterations(
       // Compile/warmup
       auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
     }
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     CudaKernelTimer timer;
     for (auto _ : benchmark_state) {
       clearL2Cache();
@@ -197,7 +203,7 @@ void runBenchmarkIterations(
     }
     // Sync everything up before we're finished, don't want to run ahead on the
     // cpu while benchmarking.
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 

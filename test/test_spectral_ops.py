@@ -948,6 +948,52 @@ class TestFFT(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_istft_against_librosa(self, device, dtype):
+        if not TEST_LIBROSA:
+            raise unittest.SkipTest('librosa not found')
+
+        def librosa_istft(x, n_fft, hop_length, win_length, window, length, center):
+            if window is None:
+                window = np.ones(n_fft if win_length is None else win_length)
+            else:
+                window = window.cpu().numpy()
+
+            return librosa.istft(x.cpu().numpy(), n_fft=n_fft, hop_length=hop_length,
+                                 win_length=win_length, length=length, window=window, center=center)
+
+        def _test(size, n_fft, hop_length=None, win_length=None, win_sizes=None,
+                  length=None, center=True):
+            x = torch.randn(size, dtype=dtype, device=device)
+            if win_sizes is not None:
+                window = torch.randn(*win_sizes, dtype=dtype, device=device)
+            else:
+                window = None
+
+            x_stft = x.stft(n_fft, hop_length, win_length, window, center=center,
+                            onesided=True, return_complex=True)
+
+            ref_result = librosa_istft(x_stft, n_fft, hop_length, win_length,
+                                       window, length, center)
+            result = x_stft.istft(n_fft, hop_length, win_length, window,
+                                  length=length, center=center)
+            self.assertEqual(result, ref_result)
+
+        for center in [True, False]:
+            _test(10, 7, center=center)
+            _test(4000, 1024, center=center)
+            _test(4000, 1024, center=center, length=4000)
+
+            _test(10, 7, 2, center=center)
+            _test(4000, 1024, 512, center=center)
+            _test(4000, 1024, 512, center=center, length=4000)
+
+            _test(10, 7, 2, win_sizes=(7,), center=center)
+            _test(4000, 1024, 512, win_sizes=(1024,), center=center)
+            _test(4000, 1024, 512, win_sizes=(1024,), center=center, length=4000)
+
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     @dtypes(torch.double, torch.cdouble)
@@ -1493,7 +1539,7 @@ class FFTDocTestFinder:
         doctests = []
 
         modname = name if name is not None else obj.__name__
-        globs = dict() if globs is None else globs
+        globs = {} if globs is None else globs
 
         for fname in obj.__all__:
             func = getattr(obj, fname)

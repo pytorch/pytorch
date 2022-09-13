@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 #include <ATen/native/Activation.h>
+#include <ATen/native/mkldnn/Common.h>
 
 namespace torch {
 namespace jit {
@@ -43,6 +44,12 @@ int nnc_lowerings_lazy_registration() {
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> (Tensor Y)"},
       computePrepackedLinearClampRun);
 #endif
+
+#if AT_MKLDNN_ENABLED()
+  RegisterNNCLoweringsFunction mkldnn_prepacked_conv2d_run(
+      {"mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> (Tensor Y)"},
+      computeMkldnnPrepackedConvRun);
+#endif // AT_MKLDNN_ENABLED()
 
   RegisterNNCLoweringsFunction aten_sub(
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
@@ -607,10 +614,7 @@ int nnc_lowerings_lazy_registration() {
             outputShape,
             outputStrides,
             outputType,
-            [](const ExprHandle& a) {
-              auto default_type_a = promoteIntegerToDefaultType(a);
-              return default_type_a * sigmoid(default_type_a);
-            });
+            [](const ExprHandle& a) { return a * sigmoid(a); });
       });
 
   RegisterNNCLoweringsFunction aten_reciprocal(
@@ -1838,7 +1842,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_sum(
       {"aten::sum(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+       "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
       computeSum);
 
   RegisterNNCLoweringsFunction aten_softmax(
@@ -1874,7 +1878,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_mean(
       {"aten::mean(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+       "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
       computeMean);
   RegisterNNCLoweringsFunction aten_max_reduction(
       {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"},

@@ -74,20 +74,28 @@ has_magma: bool = False
 has_half: bool = False
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
+def _is_compiled() -> bool:
+    r"""Returns true if compile with CUDA support."""
+    return hasattr(torch._C, '_cuda_getDeviceCount')
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
-    if not hasattr(torch._C, '_cuda_getDeviceCount'):
+    if not _is_compiled():
         return False
     # This function never throws and returns 0 if driver is missing or can't
     # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
 def is_bf16_supported():
-    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
+    # Check for ROCm, if true return true, no ROCM_VERSION check required,
+    # since it is supported on AMD GPU archs.
+    if torch.version.hip:
+        return True
+
     cu_vers = torch.version.cuda
     if cu_vers is not None:
         cuda_maj_decide = int(cu_vers.split('.')[0]) >= 11
-
     else:
         cuda_maj_decide = False
     return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and cuda_maj_decide
@@ -174,6 +182,7 @@ _lazy_call(_check_cubins)
 class DeferredCudaCallError(Exception):
     pass
 
+OutOfMemoryError = torch._C._OutOfMemoryError
 
 def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
@@ -453,10 +462,9 @@ def set_stream(stream: Stream):
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
-    if is_available():
-        return torch._C._cuda_getDeviceCount()
-    else:
+    if not _is_compiled():
         return 0
+    return torch._C._cuda_getDeviceCount()
 
 def get_arch_list() -> List[str]:
     r"""Returns list CUDA architectures this library was compiled for."""

@@ -205,4 +205,24 @@ inline void HandleWeightsSaturation(int64_t N, float* weight) {
   }
 }
 
+// Util function for quantizing bias.
+inline at::Tensor QuantizeBias(
+    bool is_per_channel,
+    const at::Tensor& bias,
+    const at::Tensor& weight_contig,
+    double input_scale) {
+  at::Tensor qbias;
+  if (is_per_channel) {
+    auto bias_quant_scales =
+        weight_contig.q_per_channel_scales() * input_scale;
+    auto bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
+    qbias = at::native::quantize_per_channel(
+        bias, bias_quant_scales, bias_zp, 0, c10::kQInt32);
+  } else {
+    qbias = at::native::quantize_per_tensor(
+        bias, weight_contig.q_scale() * input_scale, 0, c10::kQInt32);
+  }
+  return qbias;
+}
+
 } // namespace quant_utils

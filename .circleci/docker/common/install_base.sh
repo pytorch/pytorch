@@ -66,7 +66,9 @@ install_ubuntu() {
     software-properties-common \
     wget \
     sudo \
-    vim
+    vim \
+    jq \
+    libtool
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931

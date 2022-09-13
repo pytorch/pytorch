@@ -36,10 +36,10 @@ def _toposort(edges):
         L - an ordered list of nodes that satisfy the dependencies of edges
     >>> _toposort({1: (2, 3), 2: (3, )})
     [1, 2, 3]
-    Closely follows the wikipedia page [2]
-    [1] Kahn, Arthur B. (1962), "Topological sorting of large networks",
-    Communications of the ACM
-    [2] http://en.wikipedia.org/wiki/Toposort#Algorithms
+    >>> # Closely follows the wikipedia page [2]
+    >>> # [1] Kahn, Arthur B. (1962), "Topological sorting of large networks",
+    >>> # Communications of the ACM
+    >>> # [2] http://en.wikipedia.org/wiki/Toposort#Algorithms
     """
     incoming_edges = reverse_dict(edges)
     incoming_edges = OrderedDict((k, set(val))

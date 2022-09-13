@@ -1,24 +1,28 @@
-from torchgen import gen
-from torchgen.context import native_function_manager
-from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
-from torchgen.static_runtime import generator
-
 import argparse
 import itertools
 import os
-from typing import Sequence, Union
-from libfb.py.log import set_simple_logging
+from typing import Sequence, TypeVar, Union
+
+from libfb.py.log import set_simple_logging  # type: ignore[import]
+
+from torchgen import gen
+from torchgen.context import native_function_manager
+from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
+from torchgen.static_runtime import config, generator
 
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
 # `mean.dim` are grouped together by this function.
 
+NativeGroupT = TypeVar(
+    "NativeGroupT",
+    bound=Union[NativeFunctionsGroup, NativeFunctionsViewGroup],
+)
+
 
 def group_functions_by_op_name(
-    grouped_native_functions: Sequence[
-        Union[NativeFunctionsGroup, NativeFunctionsViewGroup]
-    ]
-) -> Sequence[Sequence[Union[NativeFunctionsGroup, NativeFunctionsViewGroup]]]:
+    grouped_native_functions: Sequence[NativeGroupT],
+) -> Sequence[Sequence[NativeGroupT]]:
     if not grouped_native_functions:
         return []
     groups = []
@@ -33,9 +37,7 @@ def group_functions_by_op_name(
         for k, group in (
             itertools.groupby(
                 eligible_ops,
-                key=lambda g: g.functional.func.name.name.base
-                if isinstance(g, NativeFunctionsGroup)
-                else g.view.root_name,
+                key=lambda g: config.func_name_base_str(g),
             )
         )
     ]
@@ -52,6 +54,7 @@ def clang_format(cpp_file_path: str) -> None:
 def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
     code = "\n".join(cpp_ops)
     generated = f"""// @lint-ignore-every CLANGTIDY HOWTOEVEN
+// AUTO-GENERATED FROM: torchgen/static_runtime/gen_static_runtime_ops.py
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <ATen/CPUFunctions.h>
@@ -103,6 +106,7 @@ namespace jit {{
 def write_test_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
     code = "\n".join(cpp_ops)
     generated = f"""// @lint-ignore-every CLANGTIDY HOWTOEVEN
+// AUTO-GENERATED FROM: torchgen/static_runtime/gen_static_runtime_ops.py
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/torch.h>

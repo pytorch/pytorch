@@ -1,19 +1,18 @@
-from typing import Callable
+from typing import Callable, Optional
 
-import torch
+from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
+from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
 
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.utils import getnvFuserDtype, Number
-from torch._prims.context import TorchRefsMode
-import torch.overrides
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-
-if torch.cuda.is_available():
-    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
+from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
 
 
-def execute(gm: GraphModule, *args, executor: str = "aten"):
+def execute(
+    gm: GraphModule,
+    *args,
+    executor: str = "aten",
+    executor_parameters: Optional[dict] = None,
+):
     """
     Prototype ATen executor.
 
@@ -23,55 +22,11 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     if executor == "aten":
         return gm.forward(*args)
     elif executor == "nvfuser":
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Attempting to use nvFuser trace executor but CUDA is not available!"
-            )
-
-        # PROTOTYPE nvfuser executor
-        # Everything in the graph must support nvfuser
-
-        fusion = Fusion()
-        with FusionDefinition(fusion) as fd:
-
-            def _to_nvfuser_constant(arg):
-                if isinstance(arg, Number):
-                    return fd.define_constant(arg)
-                else:
-                    return arg
-
-            class FusionInterpreter(torch.fx.Interpreter):
-                def call_function(self, target, args, kwargs):
-                    args = tuple(map(_to_nvfuser_constant, args))
-                    target = target.impl_nvfuser
-                    args = (fd,) + args
-                    return target(*args, **kwargs)
-
-            def to_nv(arg):
-                if isinstance(arg, torch.Tensor):
-                    x = fd.define_tensor(
-                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
-                    )
-                    fd.add_input(x)
-                    return x
-                else:
-                    return arg
-
-            # Transforms graph to call nvfuser lowerings
-            # Note, this doesn't handle nested structures in the args, TODO: add tree_flatten
-            nv_args = tree_map(to_nv, args)
-            out = FusionInterpreter(gm).run(*nv_args)
-            flat_out, unflatten_spec = tree_flatten(out)
-            for o in flat_out:
-                fd.add_output(o)
-            assert len(args) == 1
-            args = args[0]  # we are passing a packed list of args
-            return tree_unflatten(
-                fusion.execute(
-                    tuple(arg for arg in args if isinstance(arg, torch.Tensor))
-                ),
-                unflatten_spec,
-            )
+        return nvfuser_execute_partitioned(
+            gm, *args, executor_parameters=executor_parameters
+        )
+    elif executor == "strictly_nvfuser":
+        return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
@@ -107,18 +62,9 @@ def make_traced(fn: Callable):
 
     def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
-        nargs = len(args)
-        fn_kwargs = kwargs
-        flat_fn_kwargs = list(fn_kwargs.values())
-        all_args = list(args) + flat_fn_kwargs
+        wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
 
-        def wrapped(args):
-            fn_args = args[:nargs]
-            kwargs_keys = list(fn_kwargs.keys())
-            kwargs = dict(zip(kwargs_keys, args[nargs:]))
-            return fn(*fn_args, **kwargs)
-
-        with TorchRefsMode.push():
+        with NvfuserPrimsMode(), TorchRefsMode():
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 

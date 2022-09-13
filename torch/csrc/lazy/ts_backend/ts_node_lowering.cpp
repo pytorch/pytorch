@@ -61,7 +61,7 @@ torch::jit::Value* GenerateClone(
   std::vector<torch::jit::NamedValue> clone_arguments;
   clone_arguments.emplace_back(val);
   TSOpVector cloned = LowerBuiltin(at::aten::clone, function, clone_arguments);
-  CHECK_EQ(cloned.size(), 1);
+  TORCH_CHECK_EQ(cloned.size(), 1);
   return cloned.front();
 }
 
@@ -89,7 +89,7 @@ torch::jit::Value* GenerateSlice(
   arguments.emplace_back(end);
   arguments.emplace_back(step);
   TSOpVector selected = LowerBuiltin(at::aten::slice, function, arguments);
-  CHECK_EQ(selected.size(), 1);
+  TORCH_CHECK_EQ(selected.size(), 1);
   return selected.front();
 }
 
@@ -141,7 +141,7 @@ torch::lazy::TSOpVector Expand::Lower(
     // of rank 0. This leads to false positives when checking for internal
     // memory overlap, because at::has_internal_overlap returns
     // MemOverlap::YES when a stride is set to 0.
-    CHECK_EQ(expand_out.size(), 1);
+    TORCH_CHECK_EQ(expand_out.size(), 1);
     return {GenerateClone(expand_out.front(), function)};
   }
   return expand_out;
@@ -168,7 +168,7 @@ torch::lazy::TSOpVector AsStrided::Lower(
   arguments.emplace_back(stride);
   arguments.emplace_back(storage_offset);
   TSOpVector as_strided_out = LowerBuiltin(this, function, arguments);
-  CHECK_EQ(as_strided_out.size(), 1);
+  TORCH_CHECK_EQ(as_strided_out.size(), 1);
   return {GenerateClone(as_strided_out.front(), function)};
 }
 
@@ -188,7 +188,7 @@ torch::lazy::TSOpVector AsStridedViewUpdate::Lower(
   dest_arguments.emplace_back(storage_offset);
   TSOpVector as_strided_out =
       LowerBuiltin(at::aten::as_strided, function, dest_arguments);
-  CHECK_EQ(as_strided_out.size(), 1);
+  TORCH_CHECK_EQ(as_strided_out.size(), 1);
   torch::jit::Value* as_strided = as_strided_out.front();
   GenerateCopy(as_strided, loctx->GetOutputOp(input_op), function);
   return {destination};
@@ -236,8 +236,8 @@ torch::lazy::TSOpVector Narrow::Lower(
   const torch::lazy::Output& input = operand(0);
   torch::jit::Value* base = loctx->GetOutputOp(input);
   const torch::lazy::Shape& input_shape = input.shape();
-  CHECK_EQ(sizes.size(), base_indices.size());
-  CHECK_EQ(input_shape.dim(), base_indices.size());
+  TORCH_CHECK_EQ(sizes.size(), base_indices.size());
+  TORCH_CHECK_EQ(input_shape.dim(), base_indices.size());
   for (size_t dim = 0; dim < base_indices.size(); ++dim) {
     int64_t start = base_indices[dim];
     base = GenerateSlice(
@@ -258,7 +258,7 @@ torch::lazy::TSOpVector NarrowViewUpdate::Lower(
       GenerateClone(loctx->GetOutputOp(operand(0)), function);
   const torch::lazy::Output& source_argument = operand(1);
   const torch::lazy::Shape& source_shape = source_argument.shape();
-  CHECK_EQ(source_shape.dim(), base_indices.size());
+  TORCH_CHECK_EQ(source_shape.dim(), base_indices.size());
   torch::jit::Value* base = dest;
   for (size_t dim = 0; dim < base_indices.size(); ++dim) {
     int64_t start = base_indices[dim];

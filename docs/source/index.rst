@@ -91,7 +91,8 @@ Features described in this documentation are classified by release status:
    quantization
    rpc
    torch.random <random>
-   nested
+   masked
+   torch.nested <nested>
    sparse
    storage
    torch.testing <testing>

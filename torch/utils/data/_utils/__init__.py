@@ -40,6 +40,11 @@ r"""The key to share the same seed for shuffle DataPipe across distributed proce
 DATAPIPE_SHARED_SEED_COUNTER = "_dl_shared_seed_recv_cnt"
 r"""The key to count the number of distributed processes that have received the shared seed"""
 
+DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT = 30 * 60
+r"""Timeout (in seconds) sending the shared seed from Rank 0 and sending
+    the signal of the shared seed received from other Ranks.
+    It uses the same default timeout for the distributed process group"""
+
 DATAPIPE_SHARED_SEED_CHECK_INTERVAL = 0.01
 r"""Interval to check if each rank has received the shared seed"""
 
