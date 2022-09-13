@@ -713,9 +713,6 @@ class FSDPTest(MultiProcessTestCase):
     def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
         self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
 
-    def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
-        self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
-
     def run_subtests(
         self,
         subtest_config: Dict[str, List[Any]],
@@ -889,7 +886,6 @@ class FSDPTest(MultiProcessTestCase):
         save_model: bool = True,
         cpu_offload: CPUOffload = CPUOffload(),
         backward_prefetch: Optional[BackwardPrefetch] = None,
-        forward_prefetch: bool = False,
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         enable_sharded_grad_scaler: bool = False,
@@ -948,7 +944,6 @@ class FSDPTest(MultiProcessTestCase):
             {
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
-                "forward_prefetch": forward_prefetch,
                 "sharding_strategy": sharding_strategy,
                 "mixed_precision": mixed_precision,
             }
