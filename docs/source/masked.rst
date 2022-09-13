@@ -16,8 +16,11 @@ MaskedTensor serves as an extension to `torch.Tensor` that provides the user wit
 - differentiation between 0 and NaN gradients
 - various sparse applications (see tutorial below)
 
-The goal of MaskedTensor is to become the source of truth for "specified" and "unspecified" values in PyTorch;
-in turn, this should further unlock [sparsity's](https://pytorch.org/docs/stable/sparse.html) potential,
+"Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without 
+consistency; indeed, MaskedTensor was born out of a build up of :ref:`issues` that vanilla `torch.Tensor`s could
+not properly address. Thus, a primary goal of MaskedTensor is to become the source of truth for
+said "specified" and "unspecified" values in PyTorch where they are a first class citizen instead of an afterthought.
+In turn, this should further unlock [sparsity's](https://pytorch.org/docs/stable/sparse.html) potential, 
 enable safer and more consistent operators, and provide a smoother and more intuitive experience
 for users and developers alike.
 
@@ -58,7 +61,6 @@ There are a few different ways to construct a MaskedTensor:
 
 Accessing the data and mask
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 
 The underlying fields in a MaskedTensor can be accessed through:
 
@@ -123,6 +125,107 @@ as :class:`torch.Tensor`. Below are some examples of common indexing and slicing
       ]
     )
 
+Sparsity
+--------
+
+Sparsity has been an area of rapid growth and importance within PyTorch; if any sparsity terms are confusing below,
+please refer to the [sparsity tutorial](https://pytorch.org/docs/stable/sparse.html) for additional details.
+
+Sparse storage formats have been proven to be powerful in a variety of ways. As a primer, the first use case
+most practitioners think about is when the majority of elements are equal to zero (a high degree of sparsity),
+but even in cases of lower sparsity, certain formats (e.g. BSR) can take advantage of substructures within a matrix.
+
+.. note::
+
+    At the moment, MaskedTensor supports COO and CSR tensors with plans to support additional formats
+    (e.g. BSR and CSC) in the future. If you have any requests for additional formats, please file a feature request!
+
+Principles
+^^^^^^^^^^
+
+When creating a :class:`MaskedTensor` with sparse tensors, there are a few principles that must be observed:
+
+1. `input` and `mask` must have the same storage format, whether that's `torch.strided`, `torch.sparse_coo`, or
+`torch.sparse_csr`
+2. `input` and `mask` must have the same size, indicated by `.size()`
+
+Sparse COO tensors
+^^^^^^^^^^^^^^^^^^
+
+In accordance with Principle #1, a sparse COO MaskedTensor is created by passing in two sparse COO tensors,
+which can be initialized by any of its constructors, e.g. `torch.sparse_coo_tensor`.
+
+As a recap of [sparse COO tensors](https://pytorch.org/docs/stable/sparse.html#sparse-coo-tensors), the COO format
+stands for "coordinate format", where the specified elements are stored as tuples of their indices and the
+corresponding values. That is, the following are provided:
+
+* `indices`: array of size ``(ndim, nse)`` and dtype `torch.int64`
+* `values`: array of size `(nse,)` with any integer or floating point dtype
+
+where `ndim` is the dimensionality of the tensor and `nse` is the number of specified elements
+
+For both sparse COO and CSR tensors, you can construct a :class:`MaskedTensor` by doing either:
+
+1. `masked_tensor(sparse_tensor_data, sparse_tensor_mask)`
+2. `dense_masked_tensor.to_sparse_coo()` or `dense_masked_tensor.to_sparse_csr()`
+
+The second method is easier to illustrate so we've shown that below, but for more on the first and the nuances behind
+the approach, please read the :ref:`sparse-coo-appendix`.
+
+    >>> values = torch.tensor([[0, 0, 3], [4, 0, 5]])
+    >>> mask = torch.tensor([[False, False, True], [False, False, True]])
+    >>> mt = masked_tensor(values, mask)
+    >>> sparse_coo_mt = mt.to_sparse_coo()
+    >>> mt
+    MaskedTensor(
+      [
+        [      --,       --, 3],
+        [      --,       --, 5]
+      ]
+    )
+    >>> sparse_coo_mt
+    MaskedTensor(
+      [
+        [      --,       --, 3],
+        [      --,       --, 5]
+      ]
+    )
+    >>> sparse_coo_mt.get_data()
+    tensor(indices=tensor([[0, 1],
+                          [2, 2]]),
+          values=tensor([3, 5]),
+          size=(2, 3), nnz=2, layout=torch.sparse_coo)
+
+Sparse CSR tensors
+^^^^^^^^^^^^^^^^^^
+
+Similarly, :class:`MaskedTensor` also supports the [CSR (Compressed Sparse Row)](https://pytorch.org/docs/stable/sparse.html#sparse-csr-tensor)
+sparse tensor format. Instead of storing the tuples of the indices like sparse COO tensors, sparse CSR tensors
+aim to decrease the memory requirements by storing compressed row indices.
+In particular, a CSR sparse tensor consists of three 1-D tensors:
+
+* `crow_indices``: array of compressed row indices with size `(size[0] + 1,)`. This array indicates which row
+a given entry in values lives in. The last element is the number of specified elements,
+while crow_indices[i+1] - crow_indices[i] indicates the number of specified elements in row i.
+* `col_indices``: array of size `(nnz,)`. Indicates the column indices for each value.
+* `values``: array of size `(nnz,)`. Contains the values of the CSR tensor.
+
+Of note, both sparse COO and CSR tensors are in a [beta](https://pytorch.org/docs/stable/index.html) state.
+
+By way of example:
+
+    >>> mt_sparse_csr = mt.to_sparse_csr()
+    >>> mt_sparse_csr
+    MaskedTensor(
+      [
+        [      --,       --, 3],
+        [      --,       --, 5]
+      ]
+    )
+    >>> mt_sparse_csr.get_data()
+    tensor(crow_indices=tensor([0, 1, 2]),
+          col_indices=tensor([2, 2]),
+          values=tensor([3, 5]), size=(2, 3), nnz=2, layout=torch.sparse_csr)
 
 Semantics
 ---------
@@ -184,7 +287,7 @@ please find the section on reductions.
     ValueError: Input masks must match. If you need support for this, please open an issue on Github.
 
 However, if this behavior is desired, MaskedTensor does support these semantics by giving access to the data and masks
-and conveniently converting a MaskedTensor to a Tensor with masked values filled in.
+and conveniently converting a MaskedTensor to a Tensor with masked values filled in using :func:`to_tensor`.
 
     >>> t0 = mt0.to_tensor(0)
     >>> t1 = mt1.to_tensor(0)
@@ -197,7 +300,88 @@ and conveniently converting a MaskedTensor to a Tensor with masked values filled
     MaskedTensor(
       [      --,       --,       --,       --,       --]
 
+Reduction semantics
+~~~~~~~~~~~~~~~~~~~
 
+The basis for reduction semantics [has been documented and discussed at length](https://github.com/pytorch/rfcs/pull/27),
+but again, by way of example:
+
+    >>> data = torch.arange(12, dtype=torch.float).reshape(3, 4)
+    >>> mask = torch.randint(2, (3, 4), dtype=torch.bool)
+    >>> mt = masked_tensor(data, mask)
+    >>> mt
+    MaskedTensor(
+      [
+        [      --,   1.0000,       --,       --],
+        [      --,   5.0000,   6.0000,   7.0000],
+        [  8.0000,   9.0000,       --,  11.0000]
+      ]
+    )
+
+    >>> torch.sum(mt, 1)
+    MaskedTensor(
+      [  1.0000,  18.0000,  28.0000]
+    )
+    >>> torch.mean(mt, 1)
+    MaskedTensor(
+      [  1.0000,   6.0000,   9.3333]
+    )
+    >>> torch.prod(mt, 1)
+    MaskedTensor(
+      [  1.0000, 210.0000, 792.0000]
+    )
+    >>> torch.amin(mt, 1)
+    MaskedTensor(
+      [  1.0000,   5.0000,   8.0000]
+    )
+    >>> torch.amax(mt, 1)
+    MaskedTensor(
+      [  1.0000,   7.0000,  11.0000]
+    )
+
+Now we can revisit the question: why do we enforce the invariant that masks must match for binary operators?
+In other words, why don't we use the same semantics as `np.ma.masked_array`? Consider the following example:
+
+    >>> data0 = torch.arange(10.).reshape(2, 5)
+    >>> data1 = torch.arange(10.).reshape(2, 5) + 10
+    >>> mask0 = torch.tensor([[True, True, False, False, False], [False, False, False, True, True]])
+    >>> mask1 = torch.tensor([[False, False, False, True, True], [True, True, False, False, False]])
+
+    >>> npm0 = np.ma.masked_array(data0.numpy(), (mask0).numpy())
+    >>> npm1 = np.ma.masked_array(data1.numpy(), (mask1).numpy())
+    >>> npm0
+    masked_array(
+      data=[[--, --, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, --, --]],
+      mask=[[ True,  True, False, False, False],
+            [False, False, False,  True,  True]],
+      fill_value=1e+20,
+      dtype=float32)
+    >>> npm1
+    masked_array(
+      data=[[10.0, 11.0, 12.0, --, --],
+            [--, --, 17.0, 18.0, 19.0]],
+      mask=[[False, False, False,  True,  True],
+            [ True,  True, False, False, False]],
+      fill_value=1e+20,
+      dtype=float32)
+    >>> (npm0 + npm1).sum(0)
+    masked_array(data=[--, --, 38.0, --, --],
+                mask=[ True,  True, False,  True,  True],
+          fill_value=1e+20,
+                dtype=float32)
+    >>> npm0.sum(0) + npm1.sum(0)
+    masked_array(data=[15.0, 17.0, 38.0, 21.0, 23.0],
+                mask=[False, False, False, False, False],
+          fill_value=1e+20,
+                dtype=float32)
+
+Sum and addition should clearly be associative, but with NumPy's semantics, they are allowed to not be,
+which can certainly be confusing for the user. That being said, if the user wishes, there are ways around this 
+(e.g. filling in the MaskedTensor's undefined elements with 0 values using :func:`to_tensor` as shown in a previous
+example), but the user must now be more explicit with their intentions.
+
+.. _issues:
 
 Issues fixed
 ------------
@@ -374,7 +558,7 @@ while MaskedTensor would more accurately indicate a masked out result.
     MaskedTensor(--, False)
 
 
-Available Operators
+Supported Operators
 -------------------
 
 Unary Operators
@@ -467,7 +651,253 @@ The available inplace unary operators are all of the above **except**:
 Binary Operators
 ^^^^^^^^^^^^^^^^
 
+As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat 
+that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you 
+need support for a particular operator or have proposed semantics for how they should be behave instead, please open 
+an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users 
+know exactly what is going on and are being intentional about their decisions with masked semantics.
 
+The available binary operators are:
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
+    add
+    atan2
+    arctan2
+    bitwise_and
+    bitwise_or
+    bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
+    div
+    divide
+    floor_divide
+    fmod
+    logaddexp
+    logaddexp2
+    mul
+    multiply
+    nextafter
+    remainder
+    sub
+    subtract
+    true_divide
+    eq
+    ne
+    le
+    ge
+    greater
+    greater_equal
+    gt
+    less_equal
+    lt
+    less
+    maximum
+    minimum
+    fmax
+    fmin
+    not_equal
 
+The available inplace binary operators are all of the above **except**:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    logaddexp
+    logaddexp2
+    equal
+    fmin
+    minimum
+    fmax
+
+Reductions
+^^^^^^^^^^
+
+The following reductions are available (with autograd support):
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sum
+    mean
+    amin
+    amax
+    argmin
+    argmax
+    prod
+    all
+    norm
+    var
+    std
+
+View and select functions
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+We've included a number of view and select functions as well; intuitively, these operators will apply to
+both the input and the mask and then wrap the result in a :class:`MaskedTensor`. For a quick example,
+consider :func:`select`:
+
+    >>> data = torch.arange(12, dtype=torch.float).reshape(3, 4)
+    >>> data
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.]])
+    >>> mask = torch.tensor([[True, False, False, True], [False, True, False, False], [True, True, True, True]])
+    >>> mt = masked_tensor(data, mask)
+    >>> data.select(0, 1)
+    tensor([4., 5., 6., 7.])
+    >>> mask.select(0, 1)
+    tensor([False,  True, False, False])
+    >>> mt.select(0, 1)
+    MaskedTensor(
+      [      --,   5.0000,       --,       --]
+    )
+
+The following ops are currently supported:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    atleast_1d
+    broadcast_tensors
+    broadcast_to
+    cat
+    chunk
+    column_stack
+    dsplit
+    flatten
+    hsplit
+    hstack
+    kron
+    meshgrid
+    narrow
+    ravel
+    select
+    split
+    t
+    transpose
+    vsplit
+    vstack
+    Tensor.expand
+    Tensor.expand_as
+    Tensor.reshape
+    Tensor.reshape_as
+    Tensor.view
+
+.. _Appendix:
+
+Appendix
+--------
+
+.. _sparse-coo-appendix:
+
+Sparse COO construction
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Recall in our original example, we created a :class:`MaskedTensor` and then converted it to a sparse COO MaskedTensor
+with :func:`to_sparse_coo`.
+
+Alternatively, we can also construct a sparse COO MaskedTensor directly by passing in two sparse COO tensors:
+
+    >>> values = torch.tensor([[0, 0, 3], [4, 0, 5]]).to_sparse()
+    >>> mask = torch.tensor([[False, False, True], [False, False, True]]).to_sparse()
+    >>> mt = masked_tensor(values, mask)
+    >>> values
+    tensor(indices=tensor([[0, 1, 1],
+                          [2, 0, 2]]),
+          values=tensor([3, 4, 5]),
+          size=(2, 3), nnz=3, layout=torch.sparse_coo)
+    >>> mask
+    tensor(indices=tensor([[0, 1],
+                          [2, 2]]),
+          values=tensor([True, True]),
+          size=(2, 3), nnz=2, layout=torch.sparse_coo)
+    >>> mt
+    MaskedTensor(
+      [
+        [      --,       --, 3],
+        [      --,       --, 5]
+      ]
+    )
+
+Instead of using :func:`to_sparse`, we can also create the sparse COO tensors directly, which brings us to a warning:
+
+.. warning::
+
+  When using a function like :func:`to_sparse_coo`, if the user does not specify the indices like in the above
+  example, then the 0 values will be "unspecified" by default.
+
+    >>> values = torch.sparse_coo_tensor(i, v, (2, 3))
+    >>> mask = torch.sparse_coo_tensor(i, m, (2, 3))
+    >>> mt2 = masked_tensor(values, mask)
+    >>> values
+    tensor(indices=tensor([[0, 1, 1],
+                          [2, 0, 2]]),
+          values=tensor([3, 4, 5]),
+          size=(2, 3), nnz=3, layout=torch.sparse_coo)
+    >>> mask
+    tensor(indices=tensor([[0, 1, 1],
+                          [2, 0, 2]]),
+          values=tensor([ True, False,  True]),
+          size=(2, 3), nnz=3, layout=torch.sparse_coo)
+    >>> mt2
+    MaskedTensor(
+      [
+        [      --,       --, 3],
+        [      --,       --, 5]
+      ]
+    )
+
+Note that `mt`` and `mt2`` look identical on the surface, and in the vast majority of operations, will yield the same
+result. But this brings us to a detail on the implementation:
+
+`input` and `mask` -- only for sparse MaskedTensors -- can have a different umber of elements (`torch.nnz()`)
+**at creation**, but the indices of `mask` must then be a subset of the indices of `input`. In this case,
+`input` will assume the shape of `mask` by `input = input.sparse_mask(mask)`; in other words, any of the elements
+in `input` that are not `True` in `mask` (i.e. not specified) will be thrown away.
+
+Therefore, under the hood, the data looks slightly different; `mt2` has the "4" value masked out and `mt` is completely
+without it. Their underlying data has different shapes, which would make operations like `mt + mt2` invalid.
+
+    >>> mt.get_data()
+    tensor(indices=tensor([[0, 1],
+                          [2, 2]]),
+          values=tensor([3, 5]),
+          size=(2, 3), nnz=2, layout=torch.sparse_coo)
+    >>> mt2.get_data()
+    tensor(indices=tensor([[0, 1, 1],
+                          [2, 0, 2]]),
+          values=tensor([3, 4, 5]),
+          size=(2, 3), nnz=3, layout=torch.sparse_coo)
+
+.. _sparse-csr-appendix:
+
+We can also construct a sparse CSR MaskedTensor using sparse CSR tensors,
+and like the example above, this results in a similar treatment under the hood.
+
+    >>> crow_indices = torch.tensor([0, 2, 4])
+    >>> col_indices = torch.tensor([0, 1, 0, 1])
+    >>> values = torch.tensor([1, 2, 3, 4])
+    >>> mask_values = torch.tensor([True, False, False, True])
+    >>>
+    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.double)
+    >>> mask = torch.sparse_csr_tensor(crow_indices, col_indices, mask_values, dtype=torch.bool)
+    >>>
+    >>> mt = masked_tensor(csr, mask)
+    >>> mt
+    MaskedTensor(
+      [
+        [  1.0000,       --],
+        [      --,   4.0000]
+      ]
+    )
+    >>> mt.get_data()
+    tensor(crow_indices=tensor([0, 2, 4]),
+          col_indices=tensor([0, 1, 0, 1]),
+          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+          dtype=torch.float64, layout=torch.sparse_csr)
