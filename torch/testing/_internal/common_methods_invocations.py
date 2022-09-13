@@ -2225,19 +2225,20 @@ def error_inputs_multinomial(op_info, device, **kwargs):
 
     rep_arg = (False, True) if torch.device(device).type == 'cpu' else (False,)
 
-    for shape, rep in product(inputs, rep_arg):
+    for rep in rep_arg:
         kwargs = {'num_samples': 2, 'replacement': rep}
 
-        # error case when input tensor contains `inf`, `nan` or negative element
-        yield ErrorInput(SampleInput(torch.tensor(shape), kwargs=kwargs),
-                         error_regex=err_msg1 if rep is False else err_msg2)
+        for shape in inputs:
+            # error case when input tensor contains `inf`, `nan` or negative element
+            yield ErrorInput(SampleInput(torch.tensor(shape), kwargs=kwargs),
+                             error_regex=err_msg1 if rep is False else err_msg2)
 
-        # error case for the invalid multinomial distribution, 1-dimensional input
+        # error case for the invalid multinomial distribution (sum of probabilities <= 0), 1-D input
         x = torch.zeros(3, device=device)
         yield ErrorInput(SampleInput(x, kwargs=kwargs),
                          error_regex=err_msg2)
 
-        # error case for the invalid multinomial distribution, 2-dimensional input
+        # error case for the invalid multinomial distribution (sum of probabilities <= 0), 2-D input
         x = torch.zeros(3, 3, device=device)
         yield ErrorInput(SampleInput(x, kwargs=kwargs),
                          error_regex=err_msg2)
