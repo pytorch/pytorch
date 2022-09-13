@@ -489,9 +489,9 @@ class _ExecOrderData:
 
     def record_pre_forward(self, handles: List[FlatParamHandle], is_training: bool) -> None:
         """
-        Records ``handles`` in the pre-forward order on the first iteration,
-        where ``handles`` should be a group of handles used in the same
-        module's forward. If ``handles`` is empty, then it is omitted.
+        Records ``handles`` in the pre-forward order, where ``handles`` should
+        be a group of handles used in the same module's forward. If ``handles``
+        is empty, then it is omitted.
 
         On the first iteration, this checks the execution order across ranks.
         See :meth:`_check_order` for details.
@@ -688,6 +688,8 @@ class _ExecOrderData:
         self.is_first_iter = False
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
+        self.handles_to_pre_forward_order_index.clear()
+        self.handles_pre_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
@@ -954,6 +956,7 @@ class FullyShardedDataParallel(nn.Module):
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
+        use_orig_params: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -970,6 +973,7 @@ class FullyShardedDataParallel(nn.Module):
                 sync_module_states=sync_module_states,
                 forward_prefetch=forward_prefetch,
                 limit_all_gathers=limit_all_gathers,
+                use_orig_params=use_orig_params,
             )
             return
 
@@ -1001,6 +1005,7 @@ class FullyShardedDataParallel(nn.Module):
                 "sync_module_states": sync_module_states,
                 "forward_prefetch": forward_prefetch,
                 "limit_all_gathers": limit_all_gathers,
+                "use_orig_params": use_orig_params,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -1019,6 +1024,7 @@ class FullyShardedDataParallel(nn.Module):
             sharding_strategy = ShardingStrategy.NO_SHARD
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision or MixedPrecision()
+        self._use_orig_params = use_orig_params
         # Save a mapping from fully prefixed buffer name to its original dtype
         # since for mixed precision, buffers are restored to their original
         # dtype for model checkpointing
@@ -1047,8 +1053,10 @@ class FullyShardedDataParallel(nn.Module):
             params_to_flatten,
             self.compute_device,
             config,
+            use_orig_params,
         )
-        self._check_orig_params_flattened(ignored_params)
+        if not use_orig_params:
+            self._check_orig_params_flattened(ignored_params)
         # Invariant: `self.params` contains exactly the `FlatParameter`s of the
         # handles in `self._handles`
         self._handles: List[FlatParamHandle] = []
@@ -1465,14 +1473,20 @@ class FullyShardedDataParallel(nn.Module):
     ) -> Iterator[nn.Parameter]:
         """
         Returns an iterator over the original parameters in ``module``,
-        ignoring the parameters in ``ignored_params`` and any ``FlatParameter``
-        s (which may be present due to nested FSDP wrapping).
+        ignoring the parameters in ``ignored_params``, any ``FlatParameter``
+        s (which may be present due to nested FSDP wrapping), and any original
+        parameters already flattened (only relevant when using the original
+        parameters).
         """
         param_gen = module.parameters()
         try:
             while True:
                 param = next(param_gen)
-                if param not in ignored_params and not isinstance(param, FlatParameter):
+                if (
+                    param not in ignored_params
+                    and not isinstance(param, FlatParameter)
+                    and not hasattr(param, "_flattened")  # only for `use_orig_params=True`
+                ):
                     yield param
         except StopIteration:
             pass
@@ -1484,7 +1498,10 @@ class FullyShardedDataParallel(nn.Module):
         check after flattening the wrapped module's parameters.
         """
         for param_name, param in self.named_parameters():
-            if param not in ignored_params and not isinstance(param, FlatParameter):
+            if (
+                param not in ignored_params
+                and not isinstance(param, FlatParameter)
+            ):
                 raise RuntimeError(
                     f"Found an unflattened parameter: {param_name}; "
                     f"{param.size()} {param.__class__}"
@@ -2144,7 +2161,7 @@ class FullyShardedDataParallel(nn.Module):
         # If the `FlatParameter` is registered, then this rank only needed to
         # participate in the all-gather but does not actually save the state
         # dict (e.g. when `rank0_only=True` and `self.rank != 0`)
-        if hasattr(self._fsdp_wrapped_module, "flat_param"):
+        if "flat_param" in self._fsdp_wrapped_module._parameters:
             return state_dict
 
         offload_to_cpu = self._state_dict_config.offload_to_cpu
@@ -2965,6 +2982,49 @@ class FullyShardedDataParallel(nn.Module):
             shard, _ = FlatParamHandle._get_unpadded_shard(handle.flat_param, handle.rank, handle.world_size)
             handle.flat_param._local_shard[:shard.numel()].copy_(shard)
 
+    @contextlib.contextmanager
+    def _deregister_orig_params(self):
+        assert self._use_orig_params
+        for fsdp_module in self.fsdp_modules(self):
+            assert len(fsdp_module._handles) <= 1, (
+                "Expects at most one handle per FSDP instance; needs a "
+                "separate code path for more than one handle (i.e. non-"
+                "recursive wrapping)"
+            )
+            if not fsdp_module._handles:
+                continue
+            handle = fsdp_module._handles[0]
+            flat_param = handle.flat_param
+            if handle._registered_orig_params:
+                assert flat_param.size() == flat_param._sharded_size
+                handle._deregister_orig_params()
+                fsdp_module._fsdp_wrapped_module._register_flat_param()
+        try:
+            yield
+        finally:
+            for fsdp_module in self.fsdp_modules(self):
+                if not fsdp_module._handles:
+                    continue
+                handle = fsdp_module._handles[0]
+                flat_param = handle.flat_param
+                if handle._registered_orig_params:
+                    fsdp_module._fsdp_wrapped_module._deregister_flat_param()
+                    fsdp_module._fsdp_wrapped_module.handle._use_sharded_views()
+                    fsdp_module._fsdp_wrapped_module.handle._use_sharded_grad_views()
+
+    def _apply(self, *args, **kwargs):
+        """
+        When using the original parameters, this deregisters the original
+        parameters and exposes the :class:`FlatParameter` s before calling
+        ``_apply()``.
+        """
+        if self._use_orig_params:
+            context = self._deregister_orig_params()
+        else:
+            context = contextlib.suppress()
+        with context:
+            return super()._apply(*args, **kwargs)
+
     def named_buffers(
         self,
         *args,
@@ -3446,6 +3506,14 @@ class FullyShardedDataParallel(nn.Module):
             m.training_state = TrainingState_.IDLE
             for handle in m._handles:
                 handle._training_state = HandleTrainingState.IDLE
+                # TODO (awgu): For now, we only use the sharded views here in
+                # the post-backward callback (in preparation for the optimizer
+                # step) to be safe. For a cleaner design, we may move the
+                # `_use_sharded_views()` to `_use_sharded_flat_param()` in
+                # flat_param.py. This needs more thought.
+                if handle._use_orig_params:
+                    handle._use_sharded_views()
+                    handle._use_sharded_grad_views()
             m._handles_prefetched.clear()
             if m._is_root:
                 # reset this flag for cases like "one forward pass + multiple backward passes"
