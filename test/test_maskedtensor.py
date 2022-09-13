@@ -130,9 +130,9 @@ class TestBasics(TestCase):
         xinf = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
         tensor_res = torch.softmax(xinf, -1)
         tensor_res.sum().backward()
+
         _compare_mt_t(masked_res, tensor_res)
-        if mt.grad is not None and xinf.grad is not None:
-            _compare_mt_t(mt.grad, xinf.grad)
+        _compare_mt_t(mt.grad, xinf.grad)
 
     def test_where(self):
         data = torch.tensor([-10.0, -5, 0, 5, 10, 50, 60, 70, 80, 90, 100])
@@ -148,6 +148,7 @@ class TestBasics(TestCase):
         tensor_res = torch.where(mask, torch.exp(x), y)
         tensor_res.sum().backward()
 
+        _compare_mt_t(masked_res, tensor_res)
         _compare_mt_t(mx.grad, x.grad)
         _compare_mt_t(my.grad, y.grad)
 
@@ -196,6 +197,7 @@ class TestBasics(TestCase):
             converted2 = mts.to_dense()
             converted2.sum().backward()
 
+            _compare_mts(converted, converted2)
             _compare_mts(mt.grad, mts.grad.to_dense())
 
     def test_to_dense_and_sparse_csr(self):
@@ -215,6 +217,7 @@ class TestBasics(TestCase):
             converted2 = mts.to_dense()
             converted2.sum().backward()
 
+            _compare_mts(converted, converted2)
             _compare_mts(mt.grad, mts.grad.to_dense())
 
     def test_contiguous(self):
