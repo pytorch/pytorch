@@ -1,31 +1,38 @@
-torch.masked
-============
-
 .. automodule:: torch.masked
 .. automodule:: torch.masked.maskedtensor
 
+.. currentmodule:: torch
+
+.. _masked-docs:
+
+torch.masked
+============
+
 Introduction
 ++++++++++++
+
+Motivation
+----------
 
 .. warning::
 
   The PyTorch API of masked tensors is in prototype stage and may or may not change in the future.
 
-MaskedTensor serves as an extension to `torch.Tensor` that provides the user with the ability to:
+MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the user with the ability to:
 - use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
 - differentiation between 0 and NaN gradients
 - various sparse applications (see tutorial below)
 
-"Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without 
-consistency; indeed, MaskedTensor was born out of a build up of :ref:`issues` that vanilla `torch.Tensor`s could
-not properly address. Thus, a primary goal of MaskedTensor is to become the source of truth for
+"Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without
+consistency; indeed, MaskedTensor was born out of a build up of :ref:`issues` that the vanilla :class:`torch.Tensor`
+class could not properly address. Thus, a primary goal of MaskedTensor is to become the source of truth for
 said "specified" and "unspecified" values in PyTorch where they are a first class citizen instead of an afterthought.
-In turn, this should further unlock [sparsity's](https://pytorch.org/docs/stable/sparse.html) potential, 
+In turn, this should further unlock `sparsity's <https://pytorch.org/docs/stable/sparse.html>`__ potential,
 enable safer and more consistent operators, and provide a smoother and more intuitive experience
 for users and developers alike.
 
-Overview
-++++++++
+What is a MaskedTensor?
+-----------------------
 
 A MaskedTensor is a tensor subclass that consists of 1) an input (data), and 2) a mask. The mask tells us
 which entries from the input should be included or ignored.
@@ -33,47 +40,47 @@ which entries from the input should be included or ignored.
 By way of example, suppose that we wanted to mask out all values that are equal to 0 (represented by the gray)
 and take the max:
 
-.. figure:: _static/img/masked/tensor_comparison.png
+.. image:: _static/img/masked/tensor_comparison.png
+      :scale: 50 %
 
-  On top is the vanilla tensor example while the bottom is MaskedTensor where all the 0's are masked out.
-  This clearly yields a different result depending on whether we have the mask, but this flexible structure
-  allows the user to systematically ignore any elements they'd like during computation.
+On top is the vanilla tensor example while the bottom is MaskedTensor where all the 0's are masked out.
+This clearly yields a different result depending on whether we have the mask, but this flexible structure
+allows the user to systematically ignore any elements they'd like during computation.
 
 Using MaskedTensor
-------------------
+++++++++++++++++++
 
 Construction
-^^^^^^^^^^^^
+------------
 
 There are a few different ways to construct a MaskedTensor:
 
 * The first way is to directly invoke the MaskedTensor class
-
-* The second (and our recommended way) is to use :func:`masked_tensor` and :func:`as_masked_tensor` factory functions, which are
-  analogous to `torch.tensor` and `torch.as_tensor`
+* The second (and our recommended way) is to use :func:`masked.masked_tensor` and :func:`masked.as_masked_tensor` factory functions,
+  which are analogous to :func:`torch.tensor` and :func:`torch.as_tensor`
 
   .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    torch.masked.masked_tensor
-    torch.masked.as_masked_tensor
+    masked.masked_tensor
+    masked.as_masked_tensor
 
 Accessing the data and mask
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------
 
 The underlying fields in a MaskedTensor can be accessed through:
 
-* the :func:`get_data` function
-* the :func:`get_mask` function. Recall that `True` indicates "specified" or "valid" while `False` indicates
-"unspecified" or "invalid".
+* the :meth:`MaskedTensor.get_data` function
+* the :meth:`MaskedTensor.get_mask` function. Recall that ``True`` indicates "specified" or "valid" while ``False`` indicates
+  "unspecified" or "invalid".
 
 In general, the underlying data that is returned may not be valid in the unspecified entries, so we recommend that
-when users require a Tensor without any masked entries, that they use :func:`to_tensor` (as shown above) to
+when users require a Tensor without any masked entries, that they use :meth:`MaskedTensor.to_tensor` (as shown above) to
 return a Tensor with filled values.
 
 Indexing and slicing
-^^^^^^^^^^^^^^^^^^^^
+--------------------
 
 :class:`MaskedTensor` is a Tensor subclass, which means that it inherits the same semantics for indexing and slicing
 as :class:`torch.Tensor`. Below are some examples of common indexing and slicing patterns:
@@ -126,10 +133,10 @@ as :class:`torch.Tensor`. Below are some examples of common indexing and slicing
     )
 
 Sparsity
---------
+++++++++
 
 Sparsity has been an area of rapid growth and importance within PyTorch; if any sparsity terms are confusing below,
-please refer to the [sparsity tutorial](https://pytorch.org/docs/stable/sparse.html) for additional details.
+please refer to the `sparsity tutorial <https://pytorch.org/docs/stable/sparse.html>`__ for additional details.
 
 Sparse storage formats have been proven to be powerful in a variety of ways. As a primer, the first use case
 most practitioners think about is when the majority of elements are equal to zero (a high degree of sparsity),
@@ -141,33 +148,32 @@ but even in cases of lower sparsity, certain formats (e.g. BSR) can take advanta
     (e.g. BSR and CSC) in the future. If you have any requests for additional formats, please file a feature request!
 
 Principles
-^^^^^^^^^^
+----------
 
 When creating a :class:`MaskedTensor` with sparse tensors, there are a few principles that must be observed:
 
-1. `input` and `mask` must have the same storage format, whether that's `torch.strided`, `torch.sparse_coo`, or
-`torch.sparse_csr`
-2. `input` and `mask` must have the same size, indicated by `.size()`
+1. ``data`` and ``mask`` must have the same storage format, whether that's :attr:`torch.strided`, :attr:`torch.sparse_coo`, or :attr:`torch.sparse_csr`
+2. ``data`` and ``mask`` must have the same size, indicated by :func:`size()`
 
 Sparse COO tensors
-^^^^^^^^^^^^^^^^^^
+------------------
 
 In accordance with Principle #1, a sparse COO MaskedTensor is created by passing in two sparse COO tensors,
-which can be initialized by any of its constructors, e.g. `torch.sparse_coo_tensor`.
+which can be initialized by any of its constructors, e.g. :func:`torch.sparse_coo_tensor`.
 
-As a recap of [sparse COO tensors](https://pytorch.org/docs/stable/sparse.html#sparse-coo-tensors), the COO format
+As a recap of `sparse COO tensors <https://pytorch.org/docs/stable/sparse.html#sparse-coo-tensors>`__, the COO format
 stands for "coordinate format", where the specified elements are stored as tuples of their indices and the
 corresponding values. That is, the following are provided:
 
-* `indices`: array of size ``(ndim, nse)`` and dtype `torch.int64`
-* `values`: array of size `(nse,)` with any integer or floating point dtype
+* ``indices``: array of size ``(ndim, nse)`` and dtype ``torch.int64``
+* ``values``: array of size `(nse,)` with any integer or floating point dtype
 
-where `ndim` is the dimensionality of the tensor and `nse` is the number of specified elements
+where ``ndim`` is the dimensionality of the tensor and ``nse`` is the number of specified elements
 
 For both sparse COO and CSR tensors, you can construct a :class:`MaskedTensor` by doing either:
 
-1. `masked_tensor(sparse_tensor_data, sparse_tensor_mask)`
-2. `dense_masked_tensor.to_sparse_coo()` or `dense_masked_tensor.to_sparse_csr()`
+1. ``masked_tensor(sparse_tensor_data, sparse_tensor_mask)``
+2. ``dense_masked_tensor.to_sparse_coo()`` or ``dense_masked_tensor.to_sparse_csr()``
 
 The second method is easier to illustrate so we've shown that below, but for more on the first and the nuances behind
 the approach, please read the :ref:`sparse-coo-appendix`.
@@ -197,20 +203,21 @@ the approach, please read the :ref:`sparse-coo-appendix`.
           size=(2, 3), nnz=2, layout=torch.sparse_coo)
 
 Sparse CSR tensors
-^^^^^^^^^^^^^^^^^^
+------------------
 
-Similarly, :class:`MaskedTensor` also supports the [CSR (Compressed Sparse Row)](https://pytorch.org/docs/stable/sparse.html#sparse-csr-tensor)
+Similarly, :class:`MaskedTensor` also supports the
+`CSR (Compressed Sparse Row) <https://pytorch.org/docs/stable/sparse.html#sparse-csr-tensor>`__
 sparse tensor format. Instead of storing the tuples of the indices like sparse COO tensors, sparse CSR tensors
 aim to decrease the memory requirements by storing compressed row indices.
 In particular, a CSR sparse tensor consists of three 1-D tensors:
 
-* `crow_indices``: array of compressed row indices with size `(size[0] + 1,)`. This array indicates which row
-a given entry in values lives in. The last element is the number of specified elements,
-while crow_indices[i+1] - crow_indices[i] indicates the number of specified elements in row i.
-* `col_indices``: array of size `(nnz,)`. Indicates the column indices for each value.
-* `values``: array of size `(nnz,)`. Contains the values of the CSR tensor.
+* ``crow_indices``: array of compressed row indices with size ``(size[0] + 1,)``. This array indicates which row
+  a given entry in values lives in. The last element is the number of specified elements,
+  while crow_indices[i+1] - crow_indices[i] indicates the number of specified elements in row i.
+* ``col_indices``: array of size ``(nnz,)``. Indicates the column indices for each value.
+* ``values``: array of size ``(nnz,)``. Contains the values of the CSR tensor.
 
-Of note, both sparse COO and CSR tensors are in a [beta](https://pytorch.org/docs/stable/index.html) state.
+Of note, both sparse COO and CSR tensors are in a `beta <https://pytorch.org/docs/stable/index.html>`__ state.
 
 By way of example:
 
@@ -228,23 +235,22 @@ By way of example:
           values=tensor([3, 5]), size=(2, 3), nnz=2, layout=torch.sparse_csr)
 
 Semantics
----------
++++++++++
 
-MaskedTensor vs NumPy's MaskedArray semantics
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+MaskedTensor vs NumPy's MaskedArray
+-----------------------------------
 
-NumPy's `MaskedArray` has a few fundamental semantics differences from MaskedTensor.
+NumPy's ``MaskedArray`` has a few fundamental semantics differences from MaskedTensor.
 
-1. Their factory function and basic definition inverts the mask (similar to `torch.nn.MHA`); that is, we (MaskedTensor)
-uses `True` to denote "specified" and `False` to denote "unspecified", or "valid"/"invalid", whereas NumPy does the
-opposite. 
-
+1. Their factory function and basic definition inverts the mask (similar to ``torch.nn.MHA``); that is, MaskedTensor
+uses ``True`` to denote "specified" and ``False`` to denote "unspecified", or "valid"/"invalid", whereas NumPy does the
+opposite.
 2. Intersection semantics. In NumPy, if one of two elements are masked out, the resulting element will be
-masked out as well -- in practice, they [apply the `logical_or` operator](https://github.com/numpy/numpy/blob/68299575d8595d904aff6f28e12d21bf6428a4ba/numpy/ma/core.py#L1016-L1024).
+masked out as well -- in practice, they
+`apply the logical_or operator <https://github.com/numpy/numpy/blob/68299575d8595d904aff6f28e12d21bf6428a4ba/numpy/ma/core.py#L1016-L1024>`__.
 
     >>> data = torch.arange(5.)
     >>> mask = torch.tensor([True, True, False, True, False])
-
     >>> npm0 = np.ma.masked_array(data.numpy(), (~mask).numpy())
     >>> npm1 = np.ma.masked_array(data.numpy(), (mask).numpy())
     >>> npm0
@@ -268,7 +274,6 @@ please find the section on reductions.
 
     >>> mt0 = masked_tensor(data, mask)
     >>> mt1 = masked_tensor(data, ~mask)
-  
     >>> m0
     MaskedTensor(
       [  0.0000,   1.0000,       --,   3.0000,       --]
@@ -300,10 +305,12 @@ and conveniently converting a MaskedTensor to a Tensor with masked values filled
     MaskedTensor(
       [      --,       --,       --,       --,       --]
 
-Reduction semantics
-~~~~~~~~~~~~~~~~~~~
+.. _reduction-semantics:
 
-The basis for reduction semantics [has been documented and discussed at length](https://github.com/pytorch/rfcs/pull/27),
+Reduction semantics
+-------------------
+
+The basis for reduction semantics `has been documented and discussed at length <https://github.com/pytorch/rfcs/pull/27>`__,
 but again, by way of example:
 
     >>> data = torch.arange(12, dtype=torch.float).reshape(3, 4)
@@ -340,7 +347,7 @@ but again, by way of example:
     )
 
 Now we can revisit the question: why do we enforce the invariant that masks must match for binary operators?
-In other words, why don't we use the same semantics as `np.ma.masked_array`? Consider the following example:
+In other words, why don't we use the same semantics as ``np.ma.masked_array``? Consider the following example:
 
     >>> data0 = torch.arange(10.).reshape(2, 5)
     >>> data1 = torch.arange(10.).reshape(2, 5) + 10
@@ -377,27 +384,27 @@ In other words, why don't we use the same semantics as `np.ma.masked_array`? Con
                 dtype=float32)
 
 Sum and addition should clearly be associative, but with NumPy's semantics, they are allowed to not be,
-which can certainly be confusing for the user. That being said, if the user wishes, there are ways around this 
+which can certainly be confusing for the user. That being said, if the user wishes, there are ways around this
 (e.g. filling in the MaskedTensor's undefined elements with 0 values using :func:`to_tensor` as shown in a previous
 example), but the user must now be more explicit with their intentions.
 
 .. _issues:
 
-Issues fixed
-------------
+Issues
+++++++
 
-:class:`MaskedTensor` fixes a number of different issues that have persisted across PyTorch for a number of years
+:class:`MaskedTensor` has fixed a number of different issues that have persisted across PyTorch for a number of years
 by making masking a first class citizen.
 
 Distinguishing between 0 and NaN gradient
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------------------
 
 One issue that :class:`torch.Tensor` runs into is the inability to distinguish between gradients that are not
 defined (NaN) vs. gradients that are actually 0. By way of example, below are several different issues where
 :class:`MaskedTensor` can resolve and/or work around the NaN gradient problem.
 
-[Issue 10729](https://github.com/pytorch/pytorch/issues/10729) -- torch.where
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+`Issue 10729 <https://github.com/pytorch/pytorch/issues/10729>`__ -- torch.where
+--------------------------------------------------------------------------------
 
 Current result:
 
@@ -421,8 +428,8 @@ Current result:
       [  0.0000,   0.0067,       --,       --,       --,       --,       --,       --,       --,       --,       --]
     )
 
-[Issue 52248](https://github.com/pytorch/pytorch/issues/52248) -- another torch.where
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+`Issue 52248 <https://github.com/pytorch/pytorch/issues/52248>`__ -- another torch.where
+----------------------------------------------------------------------------------------
 
 Current result:
 
@@ -444,8 +451,8 @@ Current result:
     >>> torch.autograd.grad(torch.where(b, a/0, c), a)
     (MaskedTensor(--, False),)
 
-[Issue 67180](https://github.com/pytorch/pytorch/issues/67180) -- torch.nansum and torch.nanmean
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+`Issue 67180 <https://github.com/pytorch/pytorch/issues/67180>`__ -- :func:`torch.nansum` and :func:`torch.nanmean`
+-------------------------------------------------------------------------------------------------------------------
 
 Current result:
 
@@ -468,8 +475,8 @@ Current result:
     >>> bgrad1
     MaskedTensor(  3.0000, True)
 
-[Issue 4132](https://github.com/pytorch/pytorch/issues/4132) -- when using mask, x/0 yields NaN grad
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+`Issue 4132 <https://github.com/pytorch/pytorch/issues/4132>`__ -- when using mask, x/0 yields NaN grad
+-------------------------------------------------------------------------------------------------------
 
 Current result:
 
@@ -486,7 +493,7 @@ Current result:
     >>> x = torch.tensor([1., 1.], requires_grad=True)
     >>> div = torch.tensor([0., 1.])
     >>> y = x/div # => y is [inf, 1]
-    >>> 
+    >>>
     >>> mask = (div != 0) # => mask is [0, 1]
     >>> loss = as_masked_tensor(y, mask)
     >>> loss.sum().backward()
@@ -495,14 +502,13 @@ Current result:
       [      --,   1.0000]
     )
 
-Safe Softmax
-^^^^^^^^^^^^
+`Issue 55056 <https://github.com/pytorch/pytorch/issues/55056>`__ -- Safe Softmax
+---------------------------------------------------------------------------------
 
 One of the issues that frequently comes up is the necessity for a safe softmax -- that is, if there is an entire
 batch that is "masked out" or consists entirely of padding (which, in the softmax case, translates to being set `-inf`),
 then this will result in NaNs, which can leading to training divergence. For more detail on why this functionality
-is necessary, please find
-[Issue 55056 -- Feature Request for Safe Softmax](https://github.com/pytorch/pytorch/issues/55056).
+is necessary, please find refer to the issue.
 
 Luckily, :class:`MaskedTensor` has solved this issue:
 
@@ -525,14 +531,15 @@ Luckily, :class:`MaskedTensor` has solved this issue:
     )
 
 
-[Issue 61474](https://github.com/pytorch/pytorch/issues/61474) Implementing missing torch.nan* operators
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+`Issue 61474 <https://github.com/pytorch/pytorch/issues/61474>`__ -- Implementing missing torch.nan* operators
+--------------------------------------------------------------------------------------------------------------
+
 In the above issue, there is a request to add additional operators to cover the various `torch.nan*` applications,
-such as `torch.nanmax`, `torch.nanmin`, etc.
+such as ``torch.nanmax``, ``torch.nanmin``, etc.
 
 In general, these problems lend themselves more naturally to masked semantics, so instead of introducing additional
-operators, we propose using MaskedTensors instead. Since [nanmean](https://github.com/pytorch/pytorch/issues/21987)
-has already landed, we can use it as a comparison point:
+operators, we propose using MaskedTensors instead. Since
+`nanmean has already landed <https://github.com/pytorch/pytorch/issues/21987>`__, we can use it as a comparison point:
 
     >>> x = torch.arange(16).float()
     >>> y = x * x.fmod(4)
@@ -545,9 +552,9 @@ has already landed, we can use it as a comparison point:
     >>> torch.mean(masked_tensor(y, ~torch.isnan(y)))
     MaskedTensor( 16.6667, True)
 
-Furthermore, :class:`MaskedTensor` supports reductions when the input is fully masked out, which is equivalent
-to the case above when the input Tensor is completely `nan`. `nanmean` would return `nan` (an ambiguous return value)
-while MaskedTensor would more accurately indicate a masked out result.
+Furthermore, :class:`MaskedTensor` supports reductions when the data is fully masked out, which is equivalent
+to the case above when the data Tensor is completely ``nan``. ``nanmean`` would return ``nan``
+(an ambiguous return value), while MaskedTensor would more accurately indicate a masked out result.
 
     >>> x = torch.empty(16).fill_(float('nan'))
     >>> x
@@ -559,10 +566,10 @@ while MaskedTensor would more accurately indicate a masked out result.
 
 
 Supported Operators
--------------------
++++++++++++++++++++
 
 Unary Operators
-^^^^^^^^^^^^^^^
+---------------
 
 Unary operators are operators that only contain only a single input.
 Applying them to MaskedTensors is relatively straightforward: if the data is masked out at a given index,
@@ -649,12 +656,12 @@ The available inplace unary operators are all of the above **except**:
     isnan
 
 Binary Operators
-^^^^^^^^^^^^^^^^
+----------------
 
-As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat 
-that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you 
-need support for a particular operator or have proposed semantics for how they should be behave instead, please open 
-an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users 
+As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat
+that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you
+need support for a particular operator or have proposed semantics for how they should be behave instead, please open
+an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users
 know exactly what is going on and are being intentional about their decisions with masked semantics.
 
 The available binary operators are:
@@ -714,7 +721,7 @@ The available inplace binary operators are all of the above **except**:
     fmax
 
 Reductions
-^^^^^^^^^^
+----------
 
 The following reductions are available (with autograd support):
 
@@ -735,10 +742,10 @@ The following reductions are available (with autograd support):
     std
 
 View and select functions
-^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------
 
 We've included a number of view and select functions as well; intuitively, these operators will apply to
-both the input and the mask and then wrap the result in a :class:`MaskedTensor`. For a quick example,
+both the data and the mask and then wrap the result in a :class:`MaskedTensor`. For a quick example,
 consider :func:`select`:
 
     >>> data = torch.arange(12, dtype=torch.float).reshape(3, 4)
@@ -792,15 +799,15 @@ The following ops are currently supported:
 .. _Appendix:
 
 Appendix
---------
+++++++++
 
 .. _sparse-coo-appendix:
 
 Sparse COO construction
-^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------
 
 Recall in our original example, we created a :class:`MaskedTensor` and then converted it to a sparse COO MaskedTensor
-with :func:`to_sparse_coo`.
+with :meth:`MaskedTensor.to_sparse_coo`.
 
 Alternatively, we can also construct a sparse COO MaskedTensor directly by passing in two sparse COO tensors:
 
@@ -825,12 +832,14 @@ Alternatively, we can also construct a sparse COO MaskedTensor directly by passi
       ]
     )
 
-Instead of using :func:`to_sparse`, we can also create the sparse COO tensors directly, which brings us to a warning:
+Instead of using :meth:`torch.Tensor.to_sparse`, we can also create the sparse COO tensors directly, which brings us to a warning:
 
 .. warning::
 
-  When using a function like :func:`to_sparse_coo`, if the user does not specify the indices like in the above
+  When using a function like :meth:`torch.masked.maskedtensor.MaskedTensor.to_sparse_coo`, if the user does not specify the indices like in the above
   example, then the 0 values will be "unspecified" by default.
+
+Below, we explicitly specify the 0's:
 
     >>> values = torch.sparse_coo_tensor(i, v, (2, 3))
     >>> mask = torch.sparse_coo_tensor(i, m, (2, 3))
@@ -853,16 +862,16 @@ Instead of using :func:`to_sparse`, we can also create the sparse COO tensors di
       ]
     )
 
-Note that `mt`` and `mt2`` look identical on the surface, and in the vast majority of operations, will yield the same
+Note that ``mt`` and ``mt2`` look identical on the surface, and in the vast majority of operations, will yield the same
 result. But this brings us to a detail on the implementation:
 
-`input` and `mask` -- only for sparse MaskedTensors -- can have a different umber of elements (`torch.nnz()`)
-**at creation**, but the indices of `mask` must then be a subset of the indices of `input`. In this case,
-`input` will assume the shape of `mask` by `input = input.sparse_mask(mask)`; in other words, any of the elements
-in `input` that are not `True` in `mask` (i.e. not specified) will be thrown away.
+``data`` and ``mask`` -- only for sparse MaskedTensors -- can have a different number of elements (:func:`nnz`)
+**at creation**, but the indices of ``mask`` must then be a subset of the indices of ``data``. In this case,
+``data`` will assume the shape of ``mask`` by ``data = data.sparse_mask(mask)``; in other words, any of the elements
+in ``data`` that are not ``True`` in ``mask`` (i.e. not specified) will be thrown away.
 
-Therefore, under the hood, the data looks slightly different; `mt2` has the "4" value masked out and `mt` is completely
-without it. Their underlying data has different shapes, which would make operations like `mt + mt2` invalid.
+Therefore, under the hood, the data looks slightly different; ``mt2`` has the "4" value masked out and ``mt`` is completely
+without it. Their underlying data has different shapes, which would make operations like ``mt + mt2`` invalid.
 
     >>> mt.get_data()
     tensor(indices=tensor([[0, 1],
@@ -876,6 +885,9 @@ without it. Their underlying data has different shapes, which would make operati
           size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
 .. _sparse-csr-appendix:
+
+Sparse CSR construction
+-----------------------
 
 We can also construct a sparse CSR MaskedTensor using sparse CSR tensors,
 and like the example above, this results in a similar treatment under the hood.
