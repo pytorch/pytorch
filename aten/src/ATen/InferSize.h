@@ -2,6 +2,8 @@
 
 #include <ATen/DimVector.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymIntArrayRef.h>
+#include <c10/util/DimVector.h>
 #include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
@@ -16,7 +18,6 @@ namespace at {
 // templated to handle std::vector<int64_t> and DimVector use cases, see
 // below
 //
-
 template <typename InputArrayRef, typename NumelType, typename ResultVec>
 inline void infer_size_impl(
     InputArrayRef shape,
