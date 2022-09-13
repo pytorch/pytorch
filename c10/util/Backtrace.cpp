@@ -23,7 +23,6 @@
 #include <unwind.h>
 #else
 #include <execinfo.h>
-#define _GNU_SOURCE
 #include <dlfcn.h>
 #include <link.h>
 #endif
@@ -232,7 +231,7 @@ class SymbolHelper {
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
-#ifdef SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
+#if SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
 
 // converts a function's address in memory to its VMA address in the executable
 // file. VMA is what addr2line expects
