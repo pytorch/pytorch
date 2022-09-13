@@ -291,7 +291,6 @@ class TestFSDPMixedPrecision(FSDPTest):
         mp_config,
         cpu_offload,
         backward_prefetch,
-        forward_prefetch,
         full_precision_param_dtype,
         sharding_strategy,
         enable_sharded_grad_scaler,
@@ -304,7 +303,6 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
@@ -312,7 +310,6 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch
             ),
         ]
         for model in fsdp_models:
@@ -439,7 +436,6 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         """Returns a subtest configuration that subtests prefetching settings
         together."""
         return {
-            "forward_prefetch": [False, True],
             "backward_prefetch": [
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
@@ -456,7 +452,6 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
-            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             enable_sharded_grad_scaler=False,
@@ -614,7 +609,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
-            expected_regex="BatchNorm units will be wrapped as a separate"
+            expected_regex="batch norm submodules will be wrapped as separate"
         ):
             model = FSDP(
                 net,
@@ -627,8 +622,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # policy should not have wrapped any other submodules
         self.assertFalse(isinstance(model.fc1, FSDP))
         self.assertFalse(isinstance(model.fc2, FSDP))
-        self.assertEqual(None, bn.mixed_precision)
-        self.assertNotEqual(None, model.mixed_precision)
+        no_mixed_precision = MixedPrecision()
+        self.assertEqual(no_mixed_precision, bn.mixed_precision)
+        self.assertNotEqual(no_mixed_precision, model.mixed_precision)
 
         inp = torch.randn((1, 2), device='cuda')
         # Without FSDP BN mixed precision fix, this would result in
@@ -654,7 +650,6 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
-            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             enable_sharded_grad_scaler=False,
@@ -667,7 +662,6 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
-            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.FULL_SHARD,
             enable_sharded_grad_scaler=False,

@@ -167,9 +167,14 @@ def load_derivatives(
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
+# TODO: Why is this going through CppSignatureGroup, that doesn't make sense...
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
+    sigs = CppSignatureGroup.from_native_function(f, method=False)
+    if sigs.symint_signature is not None:
+        return sigs.symint_signature.arguments()
+    else:
+        return sigs.signature.arguments()
 
 
 def create_derivative(
@@ -184,7 +189,9 @@ def create_derivative(
     ]
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
+    return_types = tuple(
+        cpp.return_type(r, symint=True).remove_const_ref() for r in f.func.returns
+    )
 
     named_returns = [
         NamedCType(name, type) for name, type in zip(return_names, return_types)
@@ -375,7 +382,7 @@ def postprocess_forward_derivatives(
                 new_args.append(arg_name)
 
             # TODO we are trolling
-            if f.func.is_symint_fn():
+            if f.func.has_symint():
                 defn_name += "_symint"
 
             # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.

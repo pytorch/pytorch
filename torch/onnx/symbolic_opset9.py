@@ -170,6 +170,7 @@ __all__ = [
     "instance_norm",
     "is_floating_point",
     "isnan",
+    "is_pinned",
     "item",
     "kl_div",
     "layer_norm",
@@ -5835,6 +5836,11 @@ def broadcast_tensors(g, self):
     return g.op("prim::ListConstruct", *t_list)
 
 
+def is_pinned(g, self, device=None):
+    # Unused by ONNX.
+    return None
+
+
 class Prim:
     domain = "prim"
 
@@ -5890,6 +5896,11 @@ class Prim:
     @_beartype.beartype
     def data(g, self):
         return self
+
+    @staticmethod
+    def layout(g, self):
+        # Unused by ONNX.
+        return None
 
     @staticmethod
     @_beartype.beartype

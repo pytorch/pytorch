@@ -1365,6 +1365,21 @@ torch.cuda.synchronize()
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
+    @onlyCUDA
+    @largeTensorTest('6GB')
+    def test_pooling_large(self, device):
+        def helper(pool):
+            inp = torch.randn(2**7 + 10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda")
+            self.assertTrue(inp.numel() > 2**31 - 1)
+            out = pool(inp)
+            torch.cuda.synchronize()    # asserts test finishes normally without raising errors
+
+        helper(nn.MaxPool2d(4, 4))
+        helper(nn.AvgPool2d(4, 4))
+        helper(nn.FractionalMaxPool2d(4, 4))
+        helper(nn.AdaptiveMaxPool2d((2**6, 2**6)))
+        helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
+
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @skipIfMps
     @dtypes(torch.float)
@@ -1421,6 +1436,18 @@ torch.cuda.synchronize()
                 t, output_size = inp
                 m(output_size)(t)
 
+    @slowTest
+    def test_adaptive_pool_odd_size(self, device):
+        # See https://github.com/pytorch/pytorch/issues/81409
+        Ih, Iw, Oh, Ow = 5873, 3693, 3527, 2219
+        imgs = torch.randint(low=0, high=256, size=(11, Ih, Iw), dtype=torch.float)
+        imgs_ = F.adaptive_avg_pool2d(imgs, (Oh, Ow))
+        imgs_ = F.adaptive_max_pool2d(imgs, (Oh, Ow))
+
+        Id, Ih, Iw, Od, Oh, Ow = 3, 5873, 3693, 3, 3527, 2219
+        imgs = torch.randint(low=0, high=256, size=(3, Id, Ih, Iw), dtype=torch.float)
+        imgs_ = F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
+        imgs_ = F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals())
 instantiate_parametrized_tests(TestPoolingNN)
