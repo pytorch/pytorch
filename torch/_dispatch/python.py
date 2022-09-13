@@ -33,13 +33,15 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):  # type: ignore[v
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
-    if (k != DispatchKey.Undefined and is_included_in_alias(k, cand)) and has_key(op, cand) and not has_backend_kernel:  # type: ignore[attr-defined]
+    if (
+        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))  # type: ignore[attr-defined]
+            and has_key(op, cand) and not has_backend_kernel):
         return cand
     cand = DispatchKey.CompositeImplicitAutograd
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined]
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined] # noqa: B950
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
