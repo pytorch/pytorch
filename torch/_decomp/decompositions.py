@@ -1579,7 +1579,7 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
     if self.is_cuda:
-        buffer = torch.zeros(()).expand_as(self)
+        buffer = self.new_zeros(()).expand_as(self)
     else:
         buffer = z
     return min - torch.log1p(z), buffer
