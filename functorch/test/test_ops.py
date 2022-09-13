@@ -288,7 +288,6 @@ def is_inplace(op, variant):
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
-    xfail('to_sparse'),
 }
 
 
@@ -299,6 +298,7 @@ class TestOperators(TestCase):
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('to_sparse', ''),  # Could not run 'aten::sum.dim_IntList'
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -526,7 +526,6 @@ class TestOperators(TestCase):
         xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("cumprod"),  # calls item
         xfail("double"),  # rank 4 tensor for channels_last
-        xfail("eig"),  # calls item
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
         # It looks like you're either (1) calling .item() on a Tensor or
@@ -603,6 +602,8 @@ class TestOperators(TestCase):
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
+        # view doesn't work on sparse
+        xfail("to_sparse"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -677,6 +678,7 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
+        xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
@@ -685,7 +687,6 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
         xfail('_masked.prod'),  # calls aten::item
-        xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
@@ -920,7 +921,6 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('eig'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('special.log_ndtr'),
@@ -1035,6 +1035,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        skip('to_sparse', ''),  # non-dense output
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1129,6 +1130,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
+        xfail('to_sparse', ''),  # NYI
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
@@ -1137,7 +1139,6 @@ class TestOperators(TestCase):
         xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
-        xfail('eig', ''),  # NYI: forward-AD for eig
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
