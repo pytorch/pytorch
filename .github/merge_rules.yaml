@@ -323,6 +323,7 @@
   - '*'
   approved_by:
   - pytorch/metamates
+  - mruberry
   mandatory_checks_name:
   - Facebook CLA Check
   - Lint
