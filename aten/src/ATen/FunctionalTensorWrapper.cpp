@@ -29,12 +29,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
     refresh_numel();
     refresh_contiguous();
   } else {
-    // TODO: put this in refresh_numel
-    SymInt numel = 1;
-    for (const auto& s : extra_meta_->sizes_) {
-      numel *= s;
-    }
-    extra_meta_->numel_ = numel;
+    extra_meta_->numel_ = value_.sym_numel();
     // TODO: contiguity
   }
   storage_access_should_throw_ = false;

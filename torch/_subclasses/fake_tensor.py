@@ -732,19 +732,6 @@ class FakeTensorMode(TorchDispatchMode):
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
-            with no_dispatch():
-                # TODO: the naming of this function is awful, this doesn't
-                # mean that an op is SymInt, it is more narrow
-                if symbolic_shapes.is_symbolic_op(func):
-                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-                if func == aten.size.default:
-                    sys.stderr.write(
-                        "Trying to call aten.size on a tensor with symbolic shapes. "
-                        "It's likely that this is from calling tensor.shape in C++"
-                    )
-                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
-                    return None
-
             with self.restore():
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
