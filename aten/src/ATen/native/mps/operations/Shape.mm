@@ -239,7 +239,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
     idx++;
   }
 
-  dimension = legacy_cat_wrap_dim(dimension, inputs);
+  dimension = legacy_cat_wrap_dim(dimension, materialized_inputs);
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
