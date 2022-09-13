@@ -9,6 +9,4 @@ warnings.warn(
     "torch.distributed._sharding_spec will be deprecated, use torch.distributed._shard.sharding_spec instead",
     DeprecationWarning
 )
-
-import torch.distributed._shard.sharding_spec as _sharding_spec
-sys.modules['torch.distributed._sharding_spec'] = _sharding_spec
+sys.modules['torch.distributed._sharding_spec'] = torch.distributed._shard.sharding_spec
