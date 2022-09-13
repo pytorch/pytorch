@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import multiprocessing as mp
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -125,7 +126,6 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-        "test_deploy",
     ]
 )
 
@@ -264,6 +264,28 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_trace",
 ] + FSDP_TEST
 
+CI_SERIAL_LIST = [
+    'test_nn',
+    'test_fake_tensor',
+    'test_cpp_api_parity',
+    'test_reductions',
+    'test_cuda',
+    'test_jit_cuda_fuser',  # OOM on test_issue_1785, also profiling?
+    'test_indexing',
+    'test_fx_backends',
+    'test_linalg',
+    'test_cpp_extensions_jit',
+    'test_torch',
+    'test_tensor_creation_ops',
+    'test_sparse_csr',
+    'test_dispatch',
+    'nn/test_pooling',
+    'distributions/test_distributions',
+    'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
+    'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
+]
+
+
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -340,6 +362,7 @@ def discover_functorch_tests():
     assert len(result) >= 8
     return result
 
+
 FUNCTORCH_TESTS = discover_functorch_tests()
 
 TESTS_REQUIRING_LAPACK = [
@@ -374,7 +397,8 @@ def run_test(
     launcher_cmd=None,
     extra_unittest_args=None,
     env=None,
-):
+    log_file=None,
+) -> int:
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -404,6 +428,9 @@ def run_test(
 
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+    if log_file is not None:
+        with open(log_file, "w") as f:
+            return shell(command, test_directory, stdout=f, stderr=f, env=env)
     return shell(command, test_directory, env=env)
 
 
@@ -676,6 +703,62 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
+def print_log_file(test, file_path):
+    with open(file_path, "r") as f:
+        print_to_stderr("")
+        print_to_stderr(f'PRINT LOG FILE of {test} ({file_path})')
+        print_to_stderr(f'##[group]PRINT LOG FILE of {test} ({file_path})')
+        print_to_stderr(f.read())
+        print_to_stderr('##[endgroup]')
+        print_to_stderr(f"FINISHED PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr("")
+    os.remove(file_path)
+
+
+def run_test_ops(test_module, test_directory, options):
+    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
+        # it's also on periodic so we don't care about TTS as much
+        return run_test(test_module, test_directory, copy.deepcopy(options),
+                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
+                        )
+
+    subprocess.run(["python", "-m", "pip", "install", "pytest-shard"])
+
+    file_names = []
+    return_codes = []
+    num_procs = 3
+    os.environ["PARALLEL_TESTING"] = "1"
+    pool = mp.Pool(num_procs)
+    for i in range(num_procs):
+        log_fd, file_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                             prefix=test_module.replace("\\", "-").replace("/", "-"))
+        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
+                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                                     f'--shard-id={i}', f'--num-shards={num_procs}',
+                                                                     "-k=not _linalg_cholesky_"],
+                                             "log_file": file_path
+                                             })
+        file_names.append(file_path)
+        return_codes.append(return_code)
+        os.close(log_fd)
+    pool.close()
+    pool.join()
+    del os.environ['PARALLEL_TESTING']
+
+    for log_file in file_names:
+        print_log_file(test_module, log_file)
+
+    for return_code in return_codes:
+        if return_code.get() != 0:
+            return return_code.get()
+    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
+                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                "-k=_linalg_cholesky_"],
+                           )
+    return return_code
+
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
@@ -695,6 +778,9 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "test_ops": run_test_ops,
+    "test_ops_gradients": run_test_ops,
+    "test_ops_jit": run_test_ops,
 }
 
 
@@ -911,6 +997,18 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
     return selected_tests
 
 
+def must_serial(file: str) -> bool:
+    return (
+        "distributed" in os.getenv("TEST_CONFIG", "") or
+        "functorch" in os.getenv("TEST_CONFIG", "") or
+        "dynamo" in os.getenv("TEST_CONFIG", "") or
+        "distributed" in file or
+        file in CUSTOM_HANDLERS or
+        file in RUN_PARALLEL_BLOCKLIST or
+        file in CI_SERIAL_LIST
+    )
+
+
 def get_selected_tests(options):
     selected_tests = options.include
 
@@ -1010,11 +1108,12 @@ def get_selected_tests(options):
             print(
                 "::warning:: Gathered no stats from artifacts. Proceeding with default sharding plan."
             )
-            selected_tests = selected_tests[which_shard - 1 :: num_shards]
+            selected_tests = selected_tests[which_shard - 1:: num_shards]
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[test_config]
-            shards = calculate_shards(num_shards, selected_tests, test_file_times_config)
+            shards = calculate_shards(num_shards, selected_tests, test_file_times_config,
+                                      must_serial=must_serial)
             _, tests_from_shard = shards[which_shard - 1]
             selected_tests = tests_from_shard
 
@@ -1031,16 +1130,19 @@ def get_selected_tests(options):
     return selected_tests
 
 
-def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
+def run_test_module(test: str, test_directory: str, options, log_file=None) -> Optional[str]:
     test_module = parse_test_module(test)
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr("Running {} ... [{}]".format(test, datetime.now()))
     handler = CUSTOM_HANDLERS.get(test_module, run_test)
-    return_code = handler(test_module, test_directory, options)
+    if log_file is not None and handler == run_test:
+        return_code = handler(test_module, test_directory, options, log_file=log_file)
+    else:
+        return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
-    ), "Return code should be an integer"
+    ), f"While running {test} got non integer return code {return_code}"
     if return_code == 0:
         return None
 
@@ -1051,6 +1153,14 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
     return message
+
+
+def mp_run_test_module(test, test_directory, options):
+    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                        prefix=test.replace("\\", "-").replace("/", "-"))
+    os.close(log_fd)
+    message = run_test_module(test, test_directory, options, log_file=log_path)
+    return test, message, log_path
 
 
 def main():
@@ -1073,22 +1183,55 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
-    has_failed = False
     failure_messages = []
+
+    selected_tests_parallel = [x for x in selected_tests if not must_serial(x)]
+    selected_tests_serial = [x for x in selected_tests if x not in selected_tests_parallel]
+    print_to_stderr("parallel tests:\n {}".format("\n ".join(selected_tests_parallel)))
+    print_to_stderr("serial tests:\n {}".format("\n ".join(selected_tests_serial)))
+
+    proc_limit = 3
+    pool = mp.get_context("spawn").Pool(proc_limit, maxtasksperchild=1)
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
+    def success_callback(res):
+        test, err_message, log_file_path = res
+        print_log_file(test, log_file_path)
+        if err_message is None:
+            return True
+        failure_messages.append(err_message)
+        print_to_stderr(err_message)
+        if not options.continue_through_error:
+            pool.terminate()
+        return False
+
     try:
-        for test in selected_tests:
+        os.environ['PARALLEL_TESTING'] = '1'
+        for test in selected_tests_parallel:
+            pool.apply_async(mp_run_test_module, args=(test, test_directory,
+                             copy.deepcopy(options)), callback=success_callback)
+        pool.close()
+        pool.join()
+        del os.environ['PARALLEL_TESTING']
+
+        if not options.continue_through_error and len(failure_messages) != 0:
+            raise RuntimeError("\n".join(failure_messages))
+
+        for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
             if test in USE_PYTEST_LIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue
-            has_failed = True
             failure_messages.append(err_message)
             if not options_clone.continue_through_error:
                 raise RuntimeError(err_message)
             print_to_stderr(err_message)
     finally:
+        pool.terminate()
+        pool.join()
+
         if options.coverage:
             from coverage import Coverage
 
@@ -1101,7 +1244,7 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-    if options.continue_through_error and has_failed:
+    if len(failure_messages) != 0:
         for err in failure_messages:
             print_to_stderr(err)
         sys.exit(1)
