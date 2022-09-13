@@ -1826,6 +1826,7 @@ class FullyShardedDataParallel(nn.Module):
                 device=self.compute_device,
                 dtype=full_param_dtype,
             )
+            p._padded_unsharded_size = p._full_param_padded.size()  # type: ignore[attr-defined]
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
             if self._mixed_precision_enabled_for_params():
@@ -2131,7 +2132,7 @@ class FullyShardedDataParallel(nn.Module):
         flat_param = getattr(self._fsdp_wrapped_module, FLAT_PARAM, None)
         assert flat_param is not None
         # Construct a ShardedTensor from the flat_param.
-        full_numel = flat_param._unsharded_size.numel()
+        full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
         shard_offset = flat_param.numel() * self.rank
         valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
         if valid_data_size > 0 and flat_param._shard_numel_padded > 0:
