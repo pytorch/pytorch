@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable, Union, Tuple, List, Any
+from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
@@ -260,13 +260,23 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         outer one. This is because ``vjp`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
+    return _vjp_with_argnums(func, *primals, has_aux=has_aux)
+
+
+# only to be used with jacrev to allow for all passed variables to be wrapped correctly, even if they don't participate
+# in autograd
+def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
     level = _grad_increment_nesting()
     try:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            diff_primals = _create_differentiable(primals, level)
-            primals_out = func(*diff_primals)
+            if argnums is None:
+                diff_primals = _create_differentiable(primals, level)
+            else:
+                diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
+                tree_map_(partial(_create_differentiable, level=level), diff_primals)
+            primals_out = func(*primals)
 
             if has_aux:
                 if not (isinstance(primals_out, tuple) and len(primals_out) == 2):
@@ -436,8 +446,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     """
     @wraps(func)
     def wrapper_fn(*args):
-        f_wrapper, primals = _argnums_partial(func, args, argnums)
-        vjp_out = vjp(f_wrapper, *primals, has_aux=has_aux)
+        vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
         if has_aux:
             output, vjp_fn, aux = vjp_out
         else:
@@ -454,6 +463,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
         results = vmap(vjp_fn)(basis)
 
+        primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_results, results_spec = tree_flatten(results)
 
