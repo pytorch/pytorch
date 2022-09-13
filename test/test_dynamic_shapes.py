@@ -4,13 +4,13 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 import unittest
 import torch
 import operator
 import itertools
 from torch.utils._pytree import tree_map
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
 
 aten = torch.ops.aten
 
@@ -89,9 +89,6 @@ class FakeSymbolicTensor(torch.Tensor):
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
-
-        r.sym_shape = sym_shape
-        r.sym_stride = sym_stride
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -103,22 +100,6 @@ class FakeSymbolicTensor(torch.Tensor):
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
-
-        if func_overload == torch.ops.aten.sym_size.default:
-            self = args[0]
-            return self.sym_shape
-
-        if func_overload == torch.ops.aten.sym_stride.default:
-            self = args[0]
-            return self.sym_stride
-
-        # some calls can be redirected to `sym_size` rather than
-        # `sym_sizes`. `sym_size` uses `dim` to canonicalize an index
-        # so we need to implement both `sym_size` and `dim` for python
-        # tensors
-        if func_overload == torch.ops.aten.dim.default:
-            self = args[0]
-            return len(self.sym_shape)
 
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
@@ -134,9 +115,10 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
 
 
+@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
     @skipIfNoSympy
@@ -287,6 +269,13 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
+
+    @skipIfNoSympy
+    def test_int_to_float(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        r = sym_float(x.shape[0])
+        self.assertTrue(isinstance(r, torch.SymFloatNode))
 
     @skipIfNoSympy
     def test_aten_ops(self):

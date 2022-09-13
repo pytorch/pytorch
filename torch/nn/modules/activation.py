@@ -654,7 +654,8 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     When the approximate argument is 'tanh', Gelu is estimated with:
-        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
@@ -1094,6 +1095,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
         elif self.num_heads % 2 == 1:
             why_not_fast_path = "num_heads is odd"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
             tensor_args = (
