@@ -4,9 +4,39 @@ from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple
 )
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 __all__ = []  # type: ignore[var-annotated]
+
+def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[str, ...], Tuple[Any, ...]]:
+    """
+    Turn argument list into separate key list and value list (unpack_kwargs does the opposite)
+
+    Usage::
+
+        kwarg_keys, flat_args = pack_kwargs(1, 2, a=3, b=4)
+        assert kwarg_keys == ("a", "b")
+        assert flat_args == (1, 2, 3, 4)
+        args, kwargs = unpack_kwargs(kwarg_keys, flat_args)
+        assert args == (1, 2)
+        assert kwargs == {"a": 3, "b": 4}
+    """
+    kwarg_keys: List[str] = []
+    flat_args: List[Any] = list(args)
+    for k, v in kwargs.items():
+        kwarg_keys.append(k)
+        flat_args.append(v)
+    return tuple(kwarg_keys), tuple(flat_args)
+
+
+def _unpack_kwargs(kwarg_keys: Tuple[str, ...], flat_args: Tuple[Any, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+    """See pack_kwargs."""
+    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    if len(kwarg_keys) == 0:
+        return flat_args, {}
+    args = flat_args[: -len(kwarg_keys)]
+    kwargs = {k: v for k, v in zip(kwarg_keys, flat_args[-len(kwarg_keys) :])}
+    return args, kwargs
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""

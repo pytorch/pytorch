@@ -1,13 +1,13 @@
-from enum import Enum, auto
 from contextlib import suppress
+from enum import auto, Enum
+from functools import partial
+from typing import Any, Dict, Iterator, Tuple
 
 import torch
-from torch.autograd.graph import save_on_cpu
-from torch.utils.checkpoint import checkpoint
-from torch.distributed.utils import _replace_by_prefix
 import torch.nn as nn
-from typing import Any, Dict, Iterator, Tuple
-from functools import partial
+from torch.autograd.graph import save_on_cpu
+from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
+from torch.utils.checkpoint import checkpoint
 
 _CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
 
@@ -77,11 +77,35 @@ class CheckpointWrapper(torch.nn.Module):
             with save_on_cpu(pin_memory=True):
                 return self._checkpoint_wrapped_module(*args, **kwargs)
         else:
-            return self.checkpoint_fn(
-                self._checkpoint_wrapped_module,
-                *args,
-                **kwargs
-            )
+            # Support keyword arguments for reentrant checkpoint. Note that this
+            # only works if user has specified self.checkpoint_impl and is not
+            # using their own custom checkpoint_fn.
+
+            if self.checkpoint_impl == CheckpointImpl.REENTRANT:
+                # Pack the args and kwargs
+                kwarg_keys, flat_args = _pack_kwargs(*args, **kwargs)
+
+                # Function that only takes (packed) args, but can unpack them
+                # into the original args and kwargs for the checkpointed
+                # function, and runs that function.
+                def my_function(*inputs):
+                    # unpack
+                    print("FOO")
+                    unpacked_args, unpacked_kwargs = _unpack_kwargs(kwarg_keys, inputs)
+                    return self._checkpoint_wrapped_module(*unpacked_args, **unpacked_kwargs)
+
+                # Pass the function that only takes packed args into reentrant
+                # checkpoint API.
+                return self.checkpoint_fn(
+                    my_function,
+                    *flat_args,
+                )
+            else:
+                return self.checkpoint_fn(
+                    self._checkpoint_wrapped_module,
+                    *args,
+                    **kwargs
+                )
 
     def named_parameters(
         self,
