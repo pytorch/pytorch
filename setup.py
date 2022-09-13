@@ -794,10 +794,6 @@ def configure_extension_build():
             # http://legacy.python.org/dev/peps/pep-3123/
             # We also depend on it in our code (even Python 3).
             '-fno-strict-aliasing',
-            # Clang has an unfixed bug leading to spurious missing
-            # braces warnings, see
-            # https://bugs.llvm.org/show_bug.cgi?id=21629
-            '-Wno-missing-braces',
         ]
 
     library_dirs.append(lib_path)
