@@ -491,3 +491,6 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
+
+set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)

@@ -614,6 +614,23 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
                 i += 1
+
+        # Copy functorch extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "functorch._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
         setuptools.command.build_ext.build_ext.build_extensions(self)
 
 
@@ -893,6 +910,12 @@ def configure_extension_build():
                     name=str('caffe2.python.caffe2_pybind11_state_hip'),
                     sources=[]),
             )
+    if cmake_cache_vars['BUILD_FUNCTORCH']:
+        extensions.append(
+            Extension(
+                name=str('functorch._C'),
+                sources=[]),
+        )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,

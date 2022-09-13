@@ -1248,6 +1248,8 @@ install(FILES
 
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
+set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 
 # ==========================================================
 # END formerly-libtorch flags
