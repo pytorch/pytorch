@@ -6,7 +6,7 @@ import pickle
 import time
 import warnings
 from datetime import timedelta
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 from torch._C._distributed_c10d import (
@@ -25,16 +25,34 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
+    Work
 )
 from torch._six import string_classes
 
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
-
-# This module is wildcard imported from torch.distributed.
-# TODO: specify __all__
-
+__all__ = [
+    'Backend', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
+    'all_gather_multigpu', 'all_gather_object', 'all_reduce',
+    'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
+    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
+    'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
+    'dist_backend', 'gather', 'gather_object', 'get_backend', 'get_rank',
+    'get_world_size', 'group', 'init_process_group', 'irecv',
+    'is_gloo_available', 'is_initialized', 'is_mpi_available',
+    'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
+    'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
+    'new_subgroups_by_enumeration', 'recv', 'reduce', 'reduce_multigpu',
+    'reduce_scatter', 'reduce_scatter_multigpu', 'scatter',
+    'scatter_object_list', 'send', 'supports_complex',
+    'AllreduceCoalescedOptions', 'AllreduceOptions', 'AllToAllOptions',
+    'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
+    'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
+    'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
+    'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
+    'reduce_op',
+]
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -44,25 +62,56 @@ _UCC_AVAILABLE = True
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
+# Change __module__ of all imported types from torch._C._distributed_c10d that are public
+def _export_c_types():
+    _public_types_to_change_module = [
+        AllreduceCoalescedOptions,
+        AllreduceOptions,
+        AllToAllOptions,
+        BarrierOptions,
+        BroadcastOptions,
+        GatherOptions,
+        PrefixStore,
+        ProcessGroup,
+        ReduceOp,
+        ReduceOptions,
+        ReduceScatterOptions,
+        ScatterOptions,
+        Store,
+        DebugLevel,
+        get_debug_level,
+        Work
+    ]
+    for type in _public_types_to_change_module:
+        type.__module__ = "torch.distributed.distributed_c10d"
+_export_c_types()
+
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
+    ProcessGroupMPI.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupMPI"]
 except ImportError:
     _MPI_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+    ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupGloo
     from torch._C._distributed_c10d import _ProcessGroupWrapper
+    ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupGloo"]
 except ImportError:
     _GLOO_AVAILABLE = False
 
 try:
     from torch._C._distributed_c10d import ProcessGroupUCC
     ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupUCC"]
 except ImportError:
     _UCC_AVAILABLE = False
 
@@ -434,42 +483,42 @@ def _check_p2p_op_list(p2p_op_list):
         raise RuntimeError("All ops need to use the same group.")
 
 
-def is_mpi_available():
+def is_mpi_available() -> bool:
     """
     Checks if the MPI backend is available.
     """
     return _MPI_AVAILABLE
 
 
-def is_nccl_available():
+def is_nccl_available() -> bool:
     """
     Checks if the NCCL backend is available.
     """
     return _NCCL_AVAILABLE
 
 
-def is_gloo_available():
+def is_gloo_available() -> bool:
     """
     Checks if the Gloo backend is available.
     """
     return _GLOO_AVAILABLE
 
 
-def is_ucc_available():
+def is_ucc_available() -> bool:
     """
     Checks if the UCC backend is available.
     """
     return _UCC_AVAILABLE
 
 
-def is_initialized():
+def is_initialized() -> bool:
     """
     Checking if the default process group has been initialized
     """
     return GroupMember.WORLD is not None
 
 
-def is_torchelastic_launched():
+def is_torchelastic_launched() -> bool:
     """
     Checks whether this process was launched with ``torch.distributed.elastic``
     (aka torchelastic). The existence of ``TORCHELASTIC_RUN_ID`` environment
@@ -511,7 +560,7 @@ def _update_default_pg(pg):
     GroupMember.WORLD = group.WORLD = pg
 
 
-def get_backend(group=None):
+def get_backend(group: Optional[ProcessGroup] = None) -> str:
     """
     Returns the backend of the given process group.
 
@@ -536,14 +585,14 @@ def get_backend(group=None):
 
 
 def init_process_group(
-    backend,
-    init_method=None,
-    timeout=default_pg_timeout,
-    world_size=-1,
-    rank=-1,
-    store=None,
-    group_name="",
-    pg_options=None,
+    backend: Union[str, Backend],
+    init_method: Optional[str] = None,
+    timeout: timedelta = default_pg_timeout,
+    world_size: int = -1,
+    rank: int = -1,
+    store: Optional[Store] = None,
+    group_name: str = "",
+    pg_options: Optional[Any] = None,
 ):
     """
     Initializes the default distributed process group, and this will also
@@ -861,7 +910,7 @@ def _new_process_group_helper(
     return pg
 
 
-def destroy_process_group(group=None):
+def destroy_process_group(group: Optional[ProcessGroup] = None):
     """
     Destroy a given process group, and deinitialize the distributed package
 
@@ -911,7 +960,7 @@ def destroy_process_group(group=None):
         del _pg_group_ranks[pg]
 
 
-def get_rank(group=None):
+def get_rank(group: Optional[ProcessGroup] = None) -> int:
     """
     Returns the rank of the current process in the provided ``group`` or the
     default group if none was provided.
@@ -939,7 +988,7 @@ def get_rank(group=None):
     return get_group_rank(group, default_pg.rank())
 
 
-def get_world_size(group=None):
+def get_world_size(group: Optional[ProcessGroup] = None) -> int:
     """
     Returns the number of processes in the current process group
 
@@ -958,7 +1007,7 @@ def get_world_size(group=None):
     return _get_group_size(group)
 
 
-def isend(tensor, dst, group=None, tag=0):
+def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
     """
     Sends a tensor asynchronously.
 
@@ -991,7 +1040,7 @@ def isend(tensor, dst, group=None, tag=0):
         return group.send([tensor], group_dst_rank, tag)
 
 
-def irecv(tensor, src=None, group=None, tag=0):
+def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
     """
     Receives a tensor asynchronously.
 
@@ -1028,7 +1077,7 @@ def irecv(tensor, src=None, group=None, tag=0):
             return pg.recv([tensor], group_src_rank, tag)
 
 
-def send(tensor, dst, group=None, tag=0):
+def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
     """
     Sends a tensor synchronously.
 
@@ -1053,7 +1102,7 @@ def send(tensor, dst, group=None, tag=0):
         group.send([tensor], group_dst_rank, tag).wait()
 
 
-def recv(tensor, src=None, group=None, tag=0):
+def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
     """
     Receives a tensor synchronously.
 
