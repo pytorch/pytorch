@@ -64,6 +64,16 @@ ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
       // avoiding std::advance(it, step),
       // although it does work unlike std::distance on CUDA.
       it += step;
+      // The decision which separates finding a lower bound vs an upper bound.
+      // Note that a lower bound is a value at *it with the smallest index
+      // such that *it >= value if such value exists, or last if does not.
+      // Similarly, an upper bound is a value at *it with the smallest index
+      // such that *it > value if such value exists, or last if does not.
+      // Let is_lower = true and *it < value, then we know that *it and values
+      // preceeding *it cannot contain a lower bound, so we adjust initial iterator range
+      // from [first, first + count] to [first + step + 1, first + count - (step + 1)],
+      // where +1 skips the element at which we have just evaluated *it < value.
+      // Samilar logic holds when is_lower = false.
       if (is_lower ? *it < value : value >= *it) {
         first = ++it;
         count -= step + 1;
@@ -94,7 +104,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& x_,
     const Tensor& y_,
     const std::vector<int64_t> broadcasted_shape,
-    const bool is_commutative = true
+    const bool commutes_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
   // This is because binary_of_t produces new values and it could be that
@@ -139,8 +149,8 @@ void _sparse_binary_op_intersection_kernel_impl(
   const Tensor y = y_.coalesce();
   // Read IMPORTANT NOTE from above BEFORE UNCOMMENTING anything!
   // Uncomment next 2 lines for better performance with uncoalesced inputs
-  // const Tensor x = is_commutative ? x_ : x_.coalesce();
-  // const Tensor y = is_commutative ? y_ : y_.coalesce();
+  // const Tensor x = commutes_with_sum ? x_ : x_.coalesce();
+  // const Tensor y = commutes_with_sum ? y_ : y_.coalesce();
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
@@ -506,7 +516,7 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
-    const bool is_commutative = true
+    const bool commutes_with_sum = true
 ) {
   TORCH_CHECK(
       (x.is_sparse() && y.is_sparse())
@@ -545,7 +555,7 @@ void _sparse_binary_op_intersection_kernel_out(
       using hash_t = index_t1;
       using offset_t = index_t0;
       _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t, offset_t>(
-          res, x, y, broadcasted_shape, is_commutative);
+          res, x, y, broadcasted_shape, commutes_with_sum);
   });
 }
 
