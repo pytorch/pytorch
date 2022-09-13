@@ -3621,6 +3621,13 @@ class TestSparse(TestSparseBase):
                 x = self._gen_sparse(sparse_dim, nnz_val, empty_sparse_shape, dtype, device, coalesce)[0]
                 check(self, x, x)
 
+        def check_autograd(x, y):
+            if dtype in {torch.double, torch.cdouble}:
+                xa = x.detach().clone().requires_grad_(True)
+                ya = y.detach().clone().requires_grad_(True)
+                gradcheck(lambda a, b: (a * b).to_dense(), (xa, ya), check_sparse_nnz=True)
+                gradcheck(lambda a, b: (a * b).to_dense(), (ya, xa), check_sparse_nnz=True)
+
         for dim in range(len(shape) + 1):
             sub_shape = shape[dim:]
             sparse_dim = len(sub_shape) // 2
@@ -3630,12 +3637,14 @@ class TestSparse(TestSparseBase):
             x = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             y = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             check(self, x, y)
+            check_autograd(x, y)
 
             # check broadcasting in dense dims
             for d in range(sparse_dim, len(sub_shape)):
                 new_shape = sub_shape[:d] + (1,) + sub_shape[d + 1:]
                 y = self._gen_sparse(sparse_dim, nnz, new_shape, dtype, device, coalesced)[0]
                 check(self, x, y)
+                check_autograd(x, y)
 
     @coalescedonoff
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))

@@ -125,7 +125,11 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& exponent,
     at::Tensor result);
 at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
-at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor mul_tensor_backward(
+    const Tensor& grad,
+    const Tensor& other,
+    const Tensor& self,
+    ScalarType self_st);
 at::Tensor div_tensor_self_backward(
     Tensor grad,
     Tensor other,
