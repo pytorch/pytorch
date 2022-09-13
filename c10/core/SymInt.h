@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <memory>
+#include <numeric>
 
 namespace c10 {
 
@@ -37,17 +38,20 @@ namespace c10 {
 #endif
 
 class C10_API SymInt {
+ public:
   enum Unchecked {
     UNCHECKED,
   };
 
- public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
     SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
   };
   SymInt() : data_(0) {}
 
   // unchecked c-tor accepting raw `data_`
+  // One appropriate use for this is when you are constructing a symint
+  // in a situation where you know it is non-negative (or, if it is negative,
+  // the negative value is -1; i.e., not user controlled)
   SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
@@ -64,18 +68,22 @@ class C10_API SymInt {
   }
 
   SymInt& operator=(const SymInt& s) {
-    if (s.is_symbolic()) {
-      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
-    } else {
-      data_ = s.data_;
+    if (this != &s) {
+      if (s.is_symbolic()) {
+        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+      } else {
+        data_ = s.data_;
+      }
     }
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
-    release_(); // release the current SymIntNode if any
-    data_ = s.data_;
-    if (s.is_symbolic())
-      s.data_ = 0;
+    if (this != &s) {
+      release_(); // release the current SymIntNode if any
+      data_ = s.data_;
+      if (s.is_symbolic())
+        s.data_ = 0;
+    };
     return *this;
   }
 
@@ -177,6 +185,20 @@ class C10_API SymInt {
 };
 
 #undef SKIP_IS_SYMBOLIC_ON_MOBILE
+
+/// Sum of a list of SymInt; accumulates into the c10::SymInt expression
+template <
+    typename C,
+    typename std::enable_if<
+        std::is_same<typename C::value_type, c10::SymInt>::value,
+        int>::type = 0>
+inline c10::SymInt multiply_integers(const C& container) {
+  return std::accumulate(
+      container.begin(),
+      container.end(),
+      c10::SymInt(1),
+      [](c10::SymInt a, c10::SymInt b) { return a * b; });
+}
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10

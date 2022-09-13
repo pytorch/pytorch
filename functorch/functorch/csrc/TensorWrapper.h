@@ -12,6 +12,26 @@
 namespace at {
 namespace functorch {
 
+// NOTE: [functorch's TensorWrapper]
+//
+// Taking better suggestions for a name. TensorWrapper is the wrapper Tensor
+// Subclass for functorch's grad-based transforms (grad, vjp, jvp). It is
+// analogous to how vmap uses BatchedTensor as the wrapper Tensor subclass.
+//
+// If you're familiar with the Tensor-Variable merge, TensorWrapper is effectively
+// another Variable.
+//
+// Consider grad(grad(torch.sin))(x). This wraps `x` as TensorWrapper(TensorWrapper(x)).
+// The reason why is so that each TensorWrapper can hold its own AutogradMeta and
+// participate in a **separate** autograd graph.
+//
+// There are alternative designs we could have chosen (e.g. each grad transform
+// stores a weak map of Tensor -> AutogradMeta); the benefit of the TensorWrapper
+// design is that we can re-use existing VariableType kernels (i.e. Autograd kernels)
+// without much modification. Since a TensorWrapper looks like a regular Tensor,
+// the VariableType kernel can pull out the AutogradMeta struct from where it
+// expects and extend the autograd graph
+
 struct FUNCTORCH_API TensorWrapper : public c10::TensorImpl {
   explicit TensorWrapper(
       c10::DispatchKeySet key_set,
@@ -52,6 +72,11 @@ struct FUNCTORCH_API TensorWrapper : public c10::TensorImpl {
   Tensor value_;
   int64_t level_;
 
+  // TensorWrapper receives a boolean flag on whether or not the Grad Interpreter
+  // that created it is still alive or not.
+  // If the Grad Interpreter is no longer alive then it attempts to behave like
+  // a regular Tensor.
+  //
   // When we exit the level, this wrapper may be marked as "not alive".
   // Wrappers that are not alive:
   // 1) May still have autograd metadata on them
