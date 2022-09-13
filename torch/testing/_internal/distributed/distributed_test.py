@@ -1051,7 +1051,6 @@ class DistributedTest:
                         self.assertEqual(param.data, tensor)
 
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         def test_periodic_model_averager_param_group(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
@@ -2330,8 +2329,6 @@ class DistributedTest:
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
                 if dist.get_debug_level() != dist.DebugLevel.DETAIL:
-                    print('events: ', events)
-                    print('opcalls: ', op_calls)
                     self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
@@ -4357,7 +4354,6 @@ class DistributedTest:
             BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])
@@ -4385,7 +4381,6 @@ class DistributedTest:
             BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
         def test_ddp_hook_with_optimizer_parity_adam(self, optimize_subset):
@@ -5113,6 +5108,8 @@ class DistributedTest:
                 dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
 
             self.assertEqual(averager2.step, 0)
+
+            dist.barrier()
 
             if self.rank == 0:
                 os.remove(chkpt_file)
@@ -9032,6 +9029,7 @@ class DistributedTest:
             for orig_param, dummy_param in zip(ddp_model.parameters(), dummy_ddp_model.parameters()):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
+            dist.barrier()
             if rank == 0:
                 os.remove(chkpt_file)
 
