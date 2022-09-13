@@ -77,6 +77,14 @@ PyCodeObject* nnModuleCode() {
   return module_call_code;
 }
 
+template <CallType C>
+PyCodeObject* getCode();
+
+template <>
+PyCodeObject* getCode<CallType::PyModuleCall>() {
+  return nnModuleCode();
+};
+
 } // namespace
 } // namespace impl
 } // namespace profiler
@@ -188,13 +196,13 @@ struct Config<CallType::PyCall> {
 template <>
 struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
+  using cls_t = PyModuleCls;
   using ephemeral_t = PyFrameObject*;
-  using info_t =
-      std::pair<PyModuleCls, std::vector<std::pair<std::string, void*>>>;
+  using info_t = std::pair<cls_t, std::vector<std::pair<std::string, void*>>>;
   struct cache_t {
-    c10::optional<CodeLocation> module_forward_;
-    ska::flat_hash_map<PyModuleSelf, info_t> modules_and_params_;
-    ska::flat_hash_map<PyModuleCls, at::StringView> module_cls_names_;
+    c10::optional<CodeLocation> location_; // nn.Module.forward;
+    ska::flat_hash_map<key_t, info_t> modules_and_params_;
+    ska::flat_hash_map<cls_t, at::StringView> cls_names_;
   };
   static constexpr EventType event_type = EventType::PyCall;
 };
@@ -231,6 +239,13 @@ class Callsite {
   Config<CallType::PyCall>::key_t caller_;
 };
 
+// ============================================================================
+// == Type specific store and load implementations. ===========================
+// ============================================================================
+using PyCallKey = Config<CallType::PyCall>::key_t;
+using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
+using PyCCallKey = Config<CallType::PyCCall>::key_t;
+
 class ValueCache {
  public:
   template <CallType C>
@@ -260,12 +275,27 @@ class ValueCache {
   CallTypeHelper<State>::tuple_type state_;
 };
 
-// ============================================================================
-// == Type specific store and load implementations. ===========================
-// ============================================================================
-using PyCallKey = Config<CallType::PyCall>::key_t;
-using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
-using PyCCallKey = Config<CallType::PyCCall>::key_t;
+template <CallType C>
+typename Config<C>::cls_t set_class(
+    ValueCache* value_cache,
+    typename Config<C>::cache_t& cache,
+    const typename Config<C>::key_t& key,
+    const typename Config<C>::ephemeral_t& frame) {
+  if (C10_UNLIKELY(!cache.location_.has_value())) {
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+    TORCH_INTERNAL_ASSERT(code.get() == getCode<C>());
+    cache.location_ = PyCallKey(frame);
+    value_cache->store<CallType::PyCall>(*cache.location_, no_ephemeral_t());
+  }
+
+  auto cls_handle = py::handle((PyObject*)key).attr("__class__");
+  auto cls = typename Config<C>::cls_t(cls_handle.ptr());
+  if (cache.cls_names_.find(cls) == cache.cls_names_.end()) {
+    cache.cls_names_[cls] =
+        at::StringView(py::str(cls_handle.attr("__name__")));
+  }
+  return cls;
+}
 
 template <>
 void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
@@ -292,12 +322,7 @@ void ValueCache::store<CallType::PyModuleCall>(
   if (C10_UNLIKELY(
           cache.modules_and_params_.find(key) ==
           cache.modules_and_params_.end())) {
-    if (C10_UNLIKELY(!cache.module_forward_.has_value())) {
-      auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-      TORCH_INTERNAL_ASSERT(code.get() == nnModuleCode());
-      cache.module_forward_ = PyCallKey(frame);
-      store<CallType::PyCall>(*cache.module_forward_, no_ephemeral_t());
-    }
+    auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
     std::vector<std::pair<std::string, void*>> params_;
@@ -310,14 +335,7 @@ void ValueCache::store<CallType::PyModuleCall>(
         }
       }
     }
-    auto cls_handle = py::handle((PyObject*)key).attr("__class__");
-    auto cls = PyModuleCls(cls_handle.ptr());
     cache.modules_and_params_[key] = make_pair(cls, params_);
-
-    if (cache.module_cls_names_.find(cls) == cache.module_cls_names_.end()) {
-      cache.module_cls_names_[cls] =
-          at::StringView(py::str(cls_handle.attr("__name__")));
-    }
   }
 }
 
@@ -325,15 +343,15 @@ template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
     const PyModuleCallKey& key) const {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
-  TORCH_INTERNAL_ASSERT(cache.module_forward_.has_value());
+  TORCH_INTERNAL_ASSERT(cache.location_.has_value());
   auto cls = cache.modules_and_params_.at(key).first;
-  auto fwd = std::get<CallType::PyCall>(state_).at(*cache.module_forward_);
+  auto fwd = std::get<CallType::PyCall>(state_).at(*cache.location_);
   return {
       fwd,
       NNModuleInfo{
           key,
           cls,
-          cache.module_cls_names_.at(cls),
+          cache.cls_names_.at(cls),
           cache.modules_and_params_.at(key).second}};
 }
 
