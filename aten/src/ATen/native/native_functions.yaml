@@ -5315,13 +5315,13 @@
 # The input arguments' types to this functions are temporary. When nested tensors switch to using SymInts for their metadata representation
 # this will need to be updated
 - func: _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
-  variants: method, function
+  variants: function
   device_check: NoCheck
   dispatch:
     CPU, CUDA: _nested_view_from_buffer
 
 - func: _nested_view_from_buffer_copy(Tensor self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor
-  variants: method
+  variants: function
   device_check: NoCheck
   tags: view_copy
   dispatch:

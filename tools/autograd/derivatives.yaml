@@ -1786,7 +1786,7 @@
     Default:
       self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
     AutogradNestedTensor:
-      self: grad.contiguous()._nested_view_from_buffer(self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
+      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
