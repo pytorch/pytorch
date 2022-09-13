@@ -3166,7 +3166,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng = rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
 
         # Test Case: fast forward works with list
         rng.manual_seed(0)
@@ -3199,7 +3199,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
                                              expected_res=res3)
@@ -3219,7 +3219,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
         rng = rng.manual_seed(100)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph6, rng)
         res6 = [(x, x) for x in res5]
         self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
                                              expected_res=res6)
@@ -3250,7 +3250,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
         it = iter(datapipe)
         for _ in range(n_iter):
             next(it)
@@ -3277,7 +3277,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._snapshot_test_helper(graph3, expected_res=res3)
 
@@ -3307,13 +3307,13 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
 
         # Get expected result
         expected_res = list(graph)
 
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
         it = iter(graph)
         n_iter = 3
         for _ in range(n_iter):
