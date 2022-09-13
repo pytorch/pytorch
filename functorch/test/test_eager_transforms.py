@@ -31,7 +31,7 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
+from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad, _slice_argnums, _replace_args
 from functorch.experimental import functionalize
 
 # NB: numpy is a testing dependency!
@@ -1591,6 +1591,31 @@ class TestJac(TestCase):
         x = torch.randn(3)
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_inplace(self, device, jacapi):
+        def f(x, y):
+            y.copy_(x)
+            return y
+
+        out = jacapi(f, argnums=0)  # x is differentiable
+        x, y = torch.randn(2, device=device), torch.randn(2, device=device)
+        self.assertEqual(out(x, y), torch.eye(y.shape[0]))
+
+        # testing tuple of argnums with the example that raised this issue originally
+        def g(x, y, z):
+            x[:2] = y
+            return torch.vstack([(x**2).sum(), (z**3).sum()])
+
+        out = jacapi(g, argnums=(1, 2))
+        x, y, z = torch.randn(3, device=device), torch.randn(2, device=device), torch.randn(2, device=device)
+
+        expected_out = (torch.zeros(2, 1, 2, device=device), torch.zeros(2, 1, 2, device=device))
+        expected_out[0][0][0] = 2 * y  # top left corner
+        expected_out[1][1][0] = 3 * (z ** 2)  # bottom right corner
+
+        out_val = out(x, y, z)
+        self.assertEqual(out_val, expected_out)
 
 
 class TestHessian(TestCase):
