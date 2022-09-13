@@ -2853,6 +2853,11 @@ class CompilerTest(test_c10d_common.CompilerTest):
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_nested_comm_tensor_wrapping(self):
+        self._test_nested_comm_tensor_wrapping(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
 if __name__ == "__main__":
     assert (

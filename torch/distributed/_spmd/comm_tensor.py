@@ -93,7 +93,8 @@ class CommTensor(torch.Tensor):
     def __new__(cls, tensor: torch.Tensor):
         r = torch.Tensor._make_subclass(
             cls,
-            tensor,
+            # avoid nested CommTensor Wrapping
+            tensor._tensor if isinstance(tensor, CommTensor) else tensor,
             require_grad=tensor.requires_grad,
         )
         # The tensor object wrapped by this CommTensor
