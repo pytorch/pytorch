@@ -3208,11 +3208,18 @@ class TestNLLLoss(TestCase):
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
-            for dtype in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
+                cpu_x = None
+                cpu_y = None
+                if(dtype in [torch.float32, torch.float16]):
+                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                else:
+                    cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+
                 mps_x = cpu_x.detach().clone().to('mps')
                 # clamp to avoid division by 0
-                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_y = cpu_y.detach().clone().to('mps')
 
                 result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
@@ -6272,7 +6279,7 @@ class TestFallbackWarning(TestCase):
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
 
-        with self.assertRaisesRegex(NotImplementedError, "not current implemented for the MPS device"):
+        with self.assertRaisesRegex(NotImplementedError, "not currently implemented for the MPS device"):
             fn(*args, **kwargs)
 
     def test_warn_on_not_implemented_with_fallback(self):
@@ -6507,7 +6514,6 @@ class TestConsistency(TestCase):
         'isreal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'kron': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.matrix_norm': ['f16'],
-        'linalg.norm': ['f16', 'f32'],
         'linalg.svd': ['f32'],
         'linalg.vector_norm': ['f16', 'f32'],
         'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -6723,7 +6729,6 @@ class TestConsistency(TestCase):
         'isreal': ['f16', 'f32'],
         'kron': ['f32'],
         'linalg.matrix_norm': ['f16'],
-        'linalg.norm': ['f16', 'f32'],
         'linalg.svd': ['f32'],
         'linspace': ['f16', 'f32'],
         'log': ['f32'],
