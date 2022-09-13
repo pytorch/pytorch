@@ -61,6 +61,8 @@ ALLOW_LIST = [
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
+    ("aten::eig", datetime.date(9999, 1, 1)),
+    ("aten::eig.e", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
@@ -276,6 +278,7 @@ ALLOW_LIST = [
     # Distributed c10d ops are all going to be updated
     ("c10d::.*", datetime.date(2022, 10, 31)),
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
+    ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
