@@ -238,6 +238,9 @@ class SampleInput(object):
     def numpy(self):
         def to_numpy(t):
             if isinstance(t, torch.Tensor):
+                # handle sparse inputs by converting to dense
+                if not t.layout == torch.strided:
+                    return to_numpy(t.to_dense())
                 if t.dtype is torch.bfloat16:
                     return t.detach().cpu().to(torch.float32).numpy()
                 if t.dtype is torch.chalf:
@@ -252,7 +255,8 @@ class SampleInput(object):
 
     def noncontiguous(self):
         def to_noncontiguous(t):
-            if isinstance(t, torch.Tensor):
+            # currently sparse layouts have continuity invariants that make this impossible
+            if isinstance(t, torch.Tensor) and t.layout == torch.strided:
                 return noncontiguous_like(t)
             elif isinstance(t, torch.dtype):
                 return t
