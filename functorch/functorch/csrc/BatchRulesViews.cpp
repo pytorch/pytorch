@@ -15,6 +15,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 
 namespace at { namespace functorch {
 
@@ -58,7 +59,7 @@ namespace at { namespace functorch {
 //
 // Now that we have written `sum_batch_rule`, we have to register it inside a
 // TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     VMAP_SUPPORT2(sum, int, sum_batch_rule);
 //     ...
@@ -79,7 +80,7 @@ namespace at { namespace functorch {
 //     return torch.add(self, product, value);
 //   }
 // And register it inside a TORCH_LIBRARY_IMPL block:
-//   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+//   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 //     ...
 //     m.impl("addcmul", addcmul_decomp);
 //     ...
@@ -175,7 +176,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
-    c10::impl::ExcludeDispatchKeyGuard guard2(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
     return self.resize_(size, optional_memory_format);
   }
 
@@ -190,7 +191,7 @@ const Tensor& resize__plumbing(
   TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
 
   // Resize the wrapped tensor
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   self_value = moveBatchDimToFront(self_value, self_bdim);
   VmapDimVector new_size(size);
   new_size.insert(new_size.begin(), self_value.size(*self_bdim));
@@ -438,12 +439,6 @@ std::tuple<Tensor, optional<int64_t>> view_batching_rule(
   return std::make_tuple(self_.view_symint(size_), 0);
 }
 
-Tensor view_symint_decomposition(const Tensor& self,
-            c10::SymIntArrayRef size) {
-  return self.view( c10::asIntArrayRefSlow(size));
-}
-
-
 template <typename F, F Func>
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
     const Tensor &self, optional<int64_t> self_bdim, SymIntArrayRef size, bool implicit)
@@ -511,20 +506,12 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
   return std::make_tuple(at::diag_embed(self_, offset, dim1, dim2), 0);
 }
 
-// We need to write a real batching rule to fully support symint.
-// This requires symint variants of other operations, like `view`,
-// which don't exist yet.
-Tensor expand_symint_decomp_hack(const Tensor& self, SymIntArrayRef packed_size, bool implicit) {
-   auto size = asIntArrayRefSlow(packed_size);
-   return self.expand(size, implicit);
-}
-
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
-  RUN_JIT_DECOMPOSITION(trace)
+  m.impl("trace", torch::CppFunction::makeFromBoxedFunction<&torch::jit::run_jit_decomposition>());
   VMAP_SUPPORT(tril, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
   VMAP_SUPPORT(triu, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
   VMAP_SUPPORT(repeat, repeat_batch_rule);

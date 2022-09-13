@@ -93,11 +93,6 @@ void lazy_linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvecto
   linalg_eigh_stub(DeviceType::CUDA, eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 }
 
-std::tuple<Tensor, Tensor> lazy_eig_kernel(const Tensor& self, bool& eigenvectors) {
-  loadLazyTorchLinalgLibrary();
-  return eig_stub(DeviceType::CUDA, self, eigenvectors);
-}
-
 void lazy_linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   getTorchLinalgLibrary();
   linalg_eig_stub(DeviceType::CUDA, eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
@@ -155,7 +150,6 @@ REGISTER_CUDA_DISPATCH(orgqr_stub, &lazy_orgqr_kernel);
 REGISTER_CUDA_DISPATCH(ormqr_stub, &lazy_ormqr_kernel);
 REGISTER_CUDA_DISPATCH(geqrf_stub, &lazy_geqrf_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel);
-REGISTER_CUDA_DISPATCH(eig_stub, &lazy_eig_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel);
 REGISTER_CUDA_DISPATCH(svd_stub, &lazy_svd_kernel)
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
