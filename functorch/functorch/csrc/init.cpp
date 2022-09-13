@@ -10,7 +10,7 @@
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
-#include <functorch/csrc/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
@@ -335,11 +335,11 @@ static std::tuple<Tensor, int64_t> unwrapTensorAtCurrentLevel(const Tensor& tens
 }
 
 static void tls_set_vmap_excluded(bool excluded) {
-  c10::impl::tls_set_dispatch_key_excluded(kBatchedKey, excluded);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::FuncTorchBatched, excluded);
 }
 
 static bool tls_set_is_included() {
-  return c10::impl::tls_is_dispatch_key_included(kDynamicLayerFrontModeKey);
+  return c10::impl::tls_is_dispatch_key_included(DispatchKey::FuncTorchDynamicLayerFrontMode);
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
