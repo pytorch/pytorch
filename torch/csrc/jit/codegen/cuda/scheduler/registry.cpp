@@ -827,6 +827,103 @@ bool hasNonUniqueBcast(Fusion* fusion) {
 //!        This function will be called when compiling a kernel. It should apply
 //!        scheduling to the given fusion
 
+//! NoOp scheduler represents the case where scheduler will
+//!  not do any scheduling operations and forward the un-scheduled
+//!  fusion directly to code generation and kernel compilation.
+//!
+//! Typical use case of this scheduler is to handle edge cases
+//!  such as where all tensors are size-1 or size-0.
+class NoOpScheduler : public SchedulerEntry {
+  //! Provides a dummy heuristic type to ensure
+  //!  unified interface on NoOp scheduler.
+  class NoOpHeuristic : public HeuristicParams {
+   public:
+    size_t hash() const override {
+      return 0;
+    }
+    std::shared_ptr<HeuristicParams> clone() const override {
+      return std::make_shared<NoOpHeuristic>();
+    }
+    bool sameAs(const std::shared_ptr<HeuristicParams>& other) const override {
+      auto other_casted = std::dynamic_pointer_cast<ReductionParams>(other);
+      return other_casted != nullptr;
+    };
+  };
+
+ public:
+  explicit NoOpScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr)
+      : SchedulerEntry(ScheduleHeuristic::NoOp) {
+    params_ = std::make_shared<NoOpHeuristic>();
+  }
+
+  //! Check if the no-op heuristics apply in given fusion
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    // Check there're no non-trivial reduction ops.
+    if (!ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
+    // Check that all outputs are either broadcast or ignored reduction.
+    for (auto out_tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+      auto non_zero_candidate_dimension = TensorDomain::noReductions(
+          TensorDomain::noBroadcasts(out_tv->domain()->domain()));
+
+      // non_zero_candidate_dimension is empty would mean this out tv has only
+      //  broadcast and trivial reduction axes, and this out tv would not
+      //  require scheduling ops.
+      // If any of the dimensions in non_zero_candidate_dimension is compile
+      // time
+      //  constant zero, this out tv also does not require any scheduling
+      //  operation as it is essentially a scalar.
+      // TODO:
+      // There seems to be a runtime component to it
+      //  too, i.e. if the runtime sizes are zero, then we should
+      //  handle it through null scheduler.
+      if (!non_zero_candidate_dimension.empty() &&
+          std::none_of(
+              non_zero_candidate_dimension.begin(),
+              non_zero_candidate_dimension.end(),
+              [](IterDomain* id) { return id->extent()->isZeroInt(); })) {
+        // We have found a out_tv with a dimension that NoOp scheduler couldn't
+        //  handle and therefore reject this fusion.
+        return false;
+      }
+    }
+
+    // We have verified that all iterdomains on all output tv's are trivial
+    // reductions,
+    //  broadcasts or zero-sized. Therefore accepting this fusion for NoOp
+    //  scheduling.
+    return true;
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    // TODO:
+    //  Pipe through dynamic zero checks.
+    return true;
+  }
+
+  void schedule(Fusion* fusion) override {
+    // Schedule is no-op.
+    return;
+  }
+
+ private:
+  void computeHeuristics(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    // Heuristics is no-op.
+    return;
+  }
+};
+
 class ReductionScheduler : public SchedulerEntry {
  public:
   explicit ReductionScheduler(
@@ -1377,6 +1474,7 @@ class PersistentKernelScheduler : public SchedulerEntry {
 // Schedule Table
 const std::vector<ScheduleHeuristic>& all_heuristics() {
   static const std::vector<ScheduleHeuristic> hlist = {
+      ScheduleHeuristic::NoOp,
       ScheduleHeuristic::Reduction,
       ScheduleHeuristic::Transpose,
       ScheduleHeuristic::PointWise,
@@ -1416,6 +1514,8 @@ bool SchedulerEntry::canSchedule(
     SchedulerRuntimeInfo& runtime_info,
     HeuristicSummary* data_cache) {
   switch (sh) {
+    case ScheduleHeuristic::NoOp:
+      return checkCanSchedule<NoOpScheduler>(fusion, runtime_info, data_cache);
     case ScheduleHeuristic::PointWise:
       return checkCanSchedule<PointWiseScheduler>(
           fusion, runtime_info, data_cache);
@@ -1442,6 +1542,10 @@ std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
     HeuristicSummary* data_cache) {
   std::unique_ptr<SchedulerEntry> scheduler_entry = nullptr;
   switch (sh) {
+    case ScheduleHeuristic::NoOp:
+      scheduler_entry =
+          std::make_unique<NoOpScheduler>(fusion, runtime_info, data_cache);
+      break;
     case ScheduleHeuristic::PointWise:
       scheduler_entry = std::make_unique<PointWiseScheduler>(
           fusion, runtime_info, data_cache);
@@ -1485,6 +1589,8 @@ size_t SchedulerEntryHash::operator()(const SchedulerEntry& se) const {
 
 std::string toString(ScheduleHeuristic sh) {
   switch (sh) {
+    case ScheduleHeuristic::NoOp:
+      return "no-op";
     case ScheduleHeuristic::PointWise:
       return "pointwise";
     case ScheduleHeuristic::Reduction:
@@ -1533,6 +1639,9 @@ HeuristicSummary::HeuristicSummary(
     : heuristic_(heuristic) {
   recording_ = true;
   switch (heuristic) {
+    case ScheduleHeuristic::NoOp:
+      NoOpScheduler::canScheduleRunTime(fusion, runtime_info, this);
+      break;
     case ScheduleHeuristic::PointWise:
       getPointwiseHeuristics(fusion, runtime_info, this);
       PointWiseScheduler::canScheduleRunTime(fusion, runtime_info, this);
@@ -1558,6 +1667,10 @@ HeuristicSummary::HeuristicSummary(
 
 void HeuristicSummary::validate() const {
   switch (heuristic_) {
+    case ScheduleHeuristic::NoOp: {
+      // TODO: need to cache the dynamically zero inputs?
+      break;
+    }
     case ScheduleHeuristic::PointWise: {
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::DOMAIN_MAP));
       TORCH_INTERNAL_ASSERT(

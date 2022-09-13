@@ -25790,6 +25790,40 @@ TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction2_CUDA) {
       fusion, {out}, {t0, t1}, {t1 + t0.squeeze(-1)}, __LINE__, __FILE__);
 }
 
+// Simple test case exercising the null scheduler path.
+TEST_F(NVFuserTest, FusionNullScheduler_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({1, 1, 1});
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {0, 1, 2});
+
+  fusion->addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1, 1, 1}, options);
+
+  std::vector<IValue> aten_inputs({t0});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t1 = t0.sum({0, 1, 2});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t1}, __LINE__, __FILE__);
+
+  auto groups =
+      executor_cache.getMostRecentKernelRuntime()->fusionSegments()->groups();
+
+  // Check that all groups on the resulting runtime are null.
+  for (auto group : groups) {
+    TORCH_INTERNAL_ASSERT(group->heuristic() == ScheduleHeuristic::NoOp);
+  }
+}
+
 TEST_F(NVFuserTest, FusionMappingRelation_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
