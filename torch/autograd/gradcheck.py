@@ -368,7 +368,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
                     dual_outputs = filter(_is_float_or_complex_tensor, raw_outputs)
                     for index_o, d_o in enumerate(dual_outputs):
                         val, res = fwAD.unpack_dual(d_o)
-                        if check_grad_dtypes and val.is_complex() != res.is_complex():
+                        if check_grad_dtypes and res is not None and val.is_complex() != res.is_complex():
                             raise GradcheckError('Forward AD gradient has dtype mismatch.')
 
                         if res is None:

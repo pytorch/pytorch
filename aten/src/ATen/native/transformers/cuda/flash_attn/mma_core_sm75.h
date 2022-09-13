@@ -37,19 +37,19 @@
 
 #pragma once
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
-#include <third_party/cutlass/include/cutlass/array.h>
-#include <third_party/cutlass/include/cutlass/platform/platform.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/array.h>
+#include <cutlass/platform/platform.h>
 
-#include <third_party/cutlass/include/cutlass/numeric_types.h>
-#include <third_party/cutlass/include/cutlass/matrix_shape.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/matrix_shape.h>
 
-#include <third_party/cutlass/include/cutlass/layout/tensor_op_multiplicand_sm75.h>
-#include <third_party/cutlass/include/cutlass/transform/pitch_linear_thread_map.h>
-#include <third_party/cutlass/include/cutlass/transform/threadblock/regular_tile_iterator_tensor_op.h>
+#include <cutlass/layout/tensor_op_multiplicand_sm75.h>
+#include <cutlass/transform/pitch_linear_thread_map.h>
+#include <cutlass/transform/threadblock/regular_tile_iterator_tensor_op.h>
 
-#include <third_party/cutlass/include/cutlass/gemm/warp/default_mma_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/gemm/threadblock/default_mma_core.h>
+#include <cutlass/gemm/warp/default_mma_tensor_op.h>
+#include <cutlass/gemm/threadblock/default_mma_core.h>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
