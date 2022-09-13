@@ -761,7 +761,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
       opType, 
-      torch_ucc_config.enable_profiling ? prof_title : nullptr, 
+      prof_title,
       inputTensors, 
       logger);
 
