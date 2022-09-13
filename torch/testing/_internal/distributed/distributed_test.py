@@ -4401,7 +4401,6 @@ class DistributedTest:
             BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
-        @sandcastle_skip_if(BACKEND == "ucc", "TODO(ucc): investigate why failing")
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
         def test_ddp_hook_with_optimizer_parity_sgd(self, optimize_subset):
@@ -5110,7 +5109,6 @@ class DistributedTest:
             self.assertEqual(averager2.step, 0)
 
             dist.barrier()
-
             if self.rank == 0:
                 os.remove(chkpt_file)
 
