@@ -217,18 +217,4 @@ inline c10::SymInt multiply_integers(const C& container) {
 }
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
-
-template <
-    typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
-inline c10::SymInt multiply_integers(const C& container) {
-  return std::accumulate(
-      container.begin(),
-      container.end(),
-      static_cast<c10::SymInt>(1),
-      std::multiplies<c10::SymInt>());
-}
-
 } // namespace c10
