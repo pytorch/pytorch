@@ -2,6 +2,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <functional>
 #include <memory>
@@ -22,10 +23,11 @@
 #include <unwind.h>
 #else
 #include <execinfo.h>
-#endif
-#endif
-
+#define _GNU_SOURCE
+#include <dlfcn.h>
 #include <link.h>
+#endif
+#endif
 
 #ifdef FBCODE_CAFFE2
 #include <common/process/StackTrace.h>
@@ -230,6 +232,8 @@ class SymbolHelper {
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
+#ifdef SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
+
 // converts a function's address in memory to its VMA address in the executable
 // file. VMA is what addr2line expects
 size_t ConvertToVMA(size_t addr) {
@@ -257,6 +261,16 @@ std::string rstrip(const std::string& s) {
   size_t end = s.find_last_not_of(WHITESPACE);
   return (end == std::string::npos) ? "" : s.substr(0, end + 1);
 }
+
+bool use_addr2line() {
+  static bool _use_addr2line = []() {
+    return torch::get_cpp_stacktraces_enabled() &&
+        !system("which addr2line > /dev/null 2>&1");
+  }();
+  return _use_addr2line;
+}
+
+#endif // SUPPORTS_BACKTRACE && !defined(C10_ANDROID)
 
 std::string get_backtrace(
     size_t frames_to_skip,
@@ -312,12 +326,6 @@ std::string get_backtrace(
   // Toggles to true after the first skipped python frame.
   bool has_skipped_python_frames = false;
 
-  bool has_addr2line = true;
-  if (system("which addr2line > /dev/null 2>&1")) {
-    // addr2line command doesn't exist
-    has_addr2line = false;
-  }
-
   for (const auto frame_number : c10::irange(callstack.size())) {
     const auto frame = parse_frame_information(symbols[frame_number]);
 
@@ -331,7 +339,7 @@ std::string get_backtrace(
     }
 
     std::string filename_lineno;
-    if (has_addr2line && !_is_python_frame) {
+    if (use_addr2line() && !_is_python_frame) {
       Dl_info info;
       if (dladdr(callstack[frame_number], &info)) {
         char command[256];
