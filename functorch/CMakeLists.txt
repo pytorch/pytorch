@@ -20,7 +20,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/functorch)
 
-# Copy-pasted prefix/suffix logic for Python extensions from 
+# Copy-pasted prefix/suffix logic for Python extensions from
 # https://github.com/pytorch/pytorch/blob/33bb8ae350611760139457b85842b1d7edf9aa11/caffe2/CMakeLists.txt#L1975
 # https://github.com/pytorch/pytorch/blob/33bb8ae350611760139457b85842b1d7edf9aa11/caffe2/CMakeLists.txt#L2022
 # TODO: It would be good to be able to use Python3_add_library target, but it does not work in many cases
@@ -31,7 +31,7 @@ else()
   set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".so")
 endif()
 # Needed to link functorch on MacOS
-if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+if(NOT ${TORCH_PYTHON_LINK_FLAGS} STREQUAL "")
   set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
 install(TARGETS ${PROJECT_NAME} DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}")
