@@ -34,6 +34,7 @@ __all__ = [
     "l1_loss",
     "layer_norm",
     "leaky_relu",
+    "log_softmax",
     "margin_ranking_loss",
     "mish",
     "mse_loss",
@@ -42,8 +43,12 @@ __all__ = [
     "relu",
     "relu6",
     "selu",
+    "sigmoid",
+    "softmax",
+    "softmin",
     "softplus",
     "softshrink",
+    "tanh",
     "tanhshrink",
     "threshold",
     "gelu",
@@ -236,6 +241,39 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
+sigmoid = torch.sigmoid  # alias
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmin(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.softmax(a=-a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(torch.ops.aten.softplus)
 @out_wrapper()
@@ -360,6 +398,21 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
 @register_decomposition(torch.ops.aten.margin_ranking_loss)
 def margin_ranking_loss(
     input1: TensorLikeType,
@@ -420,6 +473,9 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+tanh = torch.tanh  # alias
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out

@@ -48,8 +48,16 @@ __all__ = [
     # Elementwise Unary References
     #
     "abs",
+    "absolute",
     "acos",
     "acosh",
+    "arccos",
+    "arccosh",
+    "arcsin",
+    "arcsinh",
+    "arctan2",
+    "arctan",
+    "arctanh",
     "asinh",
     "asin",
     "atan",
@@ -70,6 +78,7 @@ __all__ = [
     "expm1",
     "exp2",
     "fill",
+    "fix",
     "floor",
     "frac",
     "isfinite",
@@ -83,10 +92,12 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "logit",
     "log_softmax",
     "logsumexp",
     "nan_to_num",
     "neg",
+    "negative",
     "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -115,6 +126,7 @@ __all__ = [
     # "complex",
     "copysign",
     "div",
+    "divide",
     "eq",
     "float_power",
     "floor_divide",
@@ -123,6 +135,8 @@ __all__ = [
     "fmod",
     "gcd",
     "ge",
+    "greater",
+    "greater_equal",
     "gt",
     "heaviside",
     "hypot",
@@ -133,6 +147,8 @@ __all__ = [
     "lcm",
     # 'ldexp',
     "le",
+    "less",
+    "less_equal",
     "logical_and",
     "logical_not",
     "logical_or",
@@ -143,6 +159,8 @@ __all__ = [
     # 'min', # implement with reductions
     "minimum",
     "mul",
+    "multiply",
+    "not_equal",
     "ne",
     "nextafter",
     # 'polar',  # abs, cos, sin
@@ -156,6 +174,7 @@ __all__ = [
     # # special.xlog1py
     # # special.zeta
     "sub",
+    "subtract",
     "true_divide",
     "trunc_divide",
     # 'xlogy', # where?, log, mul
@@ -164,6 +183,7 @@ __all__ = [
     #
     "addcdiv",
     "clamp",
+    "clip",
     #
     # Conditional references
     #
@@ -206,6 +226,7 @@ __all__ = [
     "broadcast_tensors",
     "broadcast_to",
     "cat",
+    "concat",
     "chunk",
     "column_stack",
     "conj",
@@ -216,29 +237,36 @@ __all__ = [
     "dsplit",
     "dstack",
     "expand",
+    "expand_as",
     "flatten",
     "flip",
     "fliplr",
     "flipud",
     "hsplit",
     "hstack",
+    "layer_norm",
     "meshgrid",
+    "moveaxis",
     "movedim",
     "narrow",
     "native_layer_norm",
     "permute",
     "ravel",
+    "repeat",
     "reshape",
     "reshape_as",
     "roll",
     "rot90",
+    "row_stack",
     "rsqrt",
     "stack",
-    "swap_axes",  # alias for transpose
+    "swapaxes",
+    "swapdims",
     "squeeze",
     "t",
     "tensor_split",
     "transpose",
+    "unfold_copy",
     "unsqueeze",
     "view",
     "view_as",
@@ -407,9 +435,15 @@ def abs(a):
     return prims.abs(a)
 
 
+absolute = torch.abs  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def acos(a):
     return prims.acos(a)
+
+
+arccos = torch.acos  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -417,9 +451,15 @@ def acosh(a):
     return prims.acosh(a)
 
 
+arccosh = torch.acosh  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def asin(a):
     return prims.asin(a)
+
+
+arcsin = torch.asin  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -427,14 +467,23 @@ def asinh(a):
     return prims.asinh(a)
 
 
+arcsinh = torch.asinh  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atan(a):
     return prims.atan(a)
 
 
+arctan = torch.atan  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atanh(a):
     return prims.atanh(a)
+
+
+arctanh = torch.atanh  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -627,20 +676,24 @@ def log2(a):
     return prims.log2(a)
 
 
+# alias
+logit = torch.special.logit  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log10(a):
     return prims.log10(a)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def log_softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
@@ -712,6 +765,9 @@ def _neg_meta(a: TensorLikeType):
 )
 def neg(a):
     return prims.neg(a)
+
+
+negative = torch.neg  # alias
 
 
 # positive does not use _make_elementwise_unary_reference because it does not support out
@@ -804,6 +860,9 @@ def trunc(a):
     return prims.trunc(a)
 
 
+fix = torch.trunc  # alias
+
+
 def _make_elementwise_binary_reference(
     prim: Callable,
     *,
@@ -893,41 +952,45 @@ def add(
 
 # TODO: add docstring
 atan2 = _make_elementwise_binary_reference(
-    prims.atan2,
+    prims.atan2,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
+
+arctan2 = torch.atan2  # alias
+
+
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and,
+    prims.bitwise_and,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left,
+    prims.shift_left,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_or = _make_elementwise_binary_reference(
-    prims.bitwise_or,
+    prims.bitwise_or,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_right_shift = _make_elementwise_binary_reference(
-    prims.shift_right_arithmetic,
+    prims.shift_right_arithmetic,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_xor = _make_elementwise_binary_reference(
-    prims.bitwise_xor,
+    prims.bitwise_xor,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
@@ -982,9 +1045,12 @@ def div(
         raise ValueError(msg)
 
 
+divide = torch.div  # alias
+
+
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
-    prims.eq,
+    prims.eq,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1148,7 +1214,7 @@ floor_divide = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmax = _make_elementwise_binary_reference(
-    prims.fmax,
+    prims.fmax,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
     supports_lhs_python_scalar=False,
@@ -1157,7 +1223,7 @@ fmax = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmin = _make_elementwise_binary_reference(
-    prims.fmin,
+    prims.fmin,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
     supports_lhs_python_scalar=False,
@@ -1166,7 +1232,7 @@ fmin = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmod = _make_elementwise_binary_reference(
-    prims.fmod,
+    prims.fmod,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
     supports_lhs_python_scalar=False,
@@ -1175,7 +1241,7 @@ fmod = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gcd = _make_elementwise_binary_reference(
-    prims.gcd,
+    prims.gcd,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.gcd,
     supports_lhs_python_scalar=False,
@@ -1184,17 +1250,24 @@ gcd = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
-    prims.ge,
+    prims.ge,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
+
+greater_equal = torch.ge  # alias
+
+
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt,
+    prims.gt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
+
+
+greater = torch.gt  # alias
 
 
 def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
@@ -1214,21 +1287,21 @@ heaviside = _make_elementwise_binary_reference(
 )
 
 hypot = _make_elementwise_binary_reference(
-    prims.hypot,
+    prims.hypot,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(
-    prims.igamma,
+    prims.igamma,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igammac = _make_elementwise_binary_reference(
-    prims.igammac,
+    prims.igammac,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1333,10 +1406,13 @@ lcm = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.le,
+    prims.le,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
+
+
+less_equal = torch.le  # alias
 
 
 def _logical_and(a: TensorLikeType, b: TensorLikeType):
@@ -1396,39 +1472,51 @@ logical_xor = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt,
+    prims.lt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
+
+less = torch.lt  # alias
+
+
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.maximum,
+    prims.maximum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.minimum,
+    prims.minimum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul,
+    prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+multiply = torch.mul  # alias
+
+
 # TODO: add docstring
 ne = _make_elementwise_binary_reference(
-    prims.ne,
+    prims.ne,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 
+
+not_equal = torch.ne  # alias
+
+
 # TODO: add docstring
 nextafter = _make_elementwise_binary_reference(
-    prims.nextafter,
+    prims.nextafter,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1436,7 +1524,7 @@ nextafter = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 remainder = _make_elementwise_binary_reference(
-    prims.remainder,
+    prims.remainder,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
@@ -1495,9 +1583,12 @@ def sub(
     return prims.sub(a, b)
 
 
+subtract = torch.sub  # alias
+
+
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div,
+    prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
 )
@@ -1585,6 +1676,9 @@ def clamp(
         a = torch.where(condition, a, max)  # type: ignore[arg-type]
 
     return a
+
+
+clip = torch.clamp  # alias
 
 
 @register_decomposition(torch.ops.aten.clamp_min)
@@ -2250,6 +2344,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.cat(filtered, dim)
 
 
+concat = torch.cat  # alias
+
+
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
@@ -2398,6 +2495,11 @@ def expand(a: Tensor, *shape) -> Tensor:
     )
 
 
+# CompositeImplicitAutograd - don't register decomp
+def expand_as(a: Tensor, b: Tensor) -> Tensor:
+    return a.expand(b.shape)
+
+
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -2544,20 +2646,32 @@ def native_layer_norm(
         + ", but got input of size "
         + str(input.shape),
     )
+
+    input = input.contiguous()
+    if weight is not None:
+        weight = weight.contiguous()
+    if bias is not None:
+        bias = bias.contiguous()
+
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
     out, mean, rstd = _normalize(input, reduction_dims, eps)
+
     if weight is None and bias is not None:
         out = out + bias
     elif weight is not None and bias is None:
         out = out * weight
     elif weight is not None and bias is not None:
         out = out * weight + bias
+
     out = prims.convert_element_type(out, input.dtype)
     if input.device.type == "cpu":
         mean = prims.convert_element_type(mean, input.dtype)
         rstd = prims.convert_element_type(rstd, input.dtype)
     return (out, mean, rstd)
+
+
+layer_norm = torch.nn.functional.layer_norm  # alias
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
@@ -2566,6 +2680,102 @@ def native_layer_norm(
 def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
+
+
+# Get the new shape and stride after applying unfold to an input tensor
+def _get_unfold_copy_shape_stride(
+    a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
+):
+    a_ndim = len(a_shape)
+    dimension = utils.canonicalize_dim(a_ndim, dimension)
+    max_size = 1 if a_ndim == 0 else a_shape[dimension]
+    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
+
+    utils.check(
+        size <= max_size,
+        lambda: "Maximum size for tensor at dimension "
+        + str(dimension)
+        + " is "
+        + str(max_size)
+        + " but size is "
+        + str(size),
+    )
+
+    utils.check(
+        step > 0,
+        lambda: "Step is " + str(step) + " but must be > 0",
+    )
+
+    new_size = []
+    new_stride = []
+
+    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
+        if d == dimension:
+            new_size.append((dim_size - size) // step + 1)
+            new_stride.append(step * dim_stride)
+        else:
+            new_size.append(dim_size)
+            new_stride.append(dim_stride)
+    new_size.append(size)
+    new_stride.append(last_stride)
+    return new_size, new_stride
+
+
+@register_decomposition(torch.ops.aten.repeat)
+def repeat(a: Tensor, *repeat_shape) -> Tensor:
+    repeat_shape = utils.extract_shape_from_varargs(repeat_shape, validate=False)
+    utils.check(
+        len(repeat_shape) >= len(a.shape),
+        lambda: "repeat: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+    )
+
+    if len(repeat_shape) == 0:
+        return torch.clone(a)
+
+    num_new_dimensions = len(repeat_shape) - a.ndim
+    padded_shape = [1] * num_new_dimensions
+    for dim_size in a.shape:
+        padded_shape.append(dim_size)
+
+    target_shape = tuple(
+        padded_size * repeat_size
+        for padded_size, repeat_size in zip(padded_shape, repeat_shape)
+    )
+
+    # return an empty tensor if one of the repeat_shape dimensions is zero
+    if 0 in repeat_shape:
+        return torch.empty(
+            target_shape,
+            dtype=a.dtype,
+            device=a.device,
+            requires_grad=a.requires_grad,
+            memory_format=utils.suggest_memory_format(a),
+        )
+
+    urtensor_shape = target_shape
+    urtensor_stride = utils.make_contiguous_strides_for(target_shape)
+    for dim, dim_size in enumerate(padded_shape):
+        # repeat each dimension by using unfold_copy operation
+        urtensor_shape, urtensor_stride = _get_unfold_copy_shape_stride(
+            urtensor_shape, urtensor_stride, dim, dim_size, max(dim_size, 1)
+        )
+
+    # derive permute order by sorting urtensor strides
+    enumerated_stride = list(enumerate(urtensor_stride))
+    enumerated_stride.sort(key=lambda item: item[1], reverse=True)
+    permute_order, sorted_stride = zip(*enumerated_stride)
+
+    # add new and expand dimensions according to urtensor
+    repeat_xtensor = a.expand(urtensor_shape)
+
+    # clone tensor to concretize expanded dimensions
+    cloned_result = torch.clone(repeat_xtensor)
+
+    # transpose axis so strides are in sorted order
+    permuted_result = cloned_result.permute(permute_order)
+
+    # reshape to get contiguous tensor with correct target shape
+    return permuted_result.reshape(target_shape)
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
@@ -2792,17 +3002,16 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    assert isinstance(a_, TensorLike)  # to avoid MyPy error for amax
     a_max = amax(a_, dim, keepdim=True)
     a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
@@ -2826,6 +3035,9 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
     aligned_tensors = atleast_2d(*tensors)
     return cat(aligned_tensors, 0)
+
+
+row_stack = torch.vstack  # alias
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3031,7 +3243,7 @@ def vsplit(
 
 @register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
 def diagonal(
-    self: TensorLikeType,
+    input: TensorLikeType,
     offset: int = 0,
     dim1: int = 0,
     dim2: int = 1,
@@ -3039,7 +3251,7 @@ def diagonal(
     """
     Reference implementation of torch.diagonal
     """
-    num_dims = self.dim()
+    num_dims = input.dim()
     dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
 
@@ -3047,26 +3259,26 @@ def diagonal(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    storage_offset = self.storage_offset()
+    storage_offset = input.storage_offset()
 
     if offset >= 0:
-        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        diag_size = max(min(input.size()[dim1], input.size()[dim2] - offset), 0)
     else:
-        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+        diag_size = max(min(input.size()[dim1] + offset, input.size()[dim2]), 0)
 
     if diag_size > 0:
         if offset >= 0:
-            storage_offset += offset * self.stride()[dim2]
+            storage_offset += offset * input.stride()[dim2]
         else:
-            storage_offset -= offset * self.stride()[dim1]
+            storage_offset -= offset * input.stride()[dim1]
 
-    sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
+    sizes = [s for i, s in enumerate(input.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)
 
-    strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
-    strides.append(self.stride()[dim1] + self.stride()[dim2])
+    strides = [s for i, s in enumerate(input.stride()) if i not in (dim1, dim2)]
+    strides.append(input.stride()[dim1] + input.stride()[dim2])
 
-    result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
+    result = input.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
 
@@ -3170,8 +3382,18 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     return torch.permute(a, _permutation)
 
 
-# Aliases for transpose
-swap_axes = transpose
+swapaxes = torch.transpose  # alias
+
+
+swapdims = torch.transpose  # alias
+
+
+@register_decomposition(torch.ops.aten.unfold_copy)
+def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
+    new_size, new_stride = _get_unfold_copy_shape_stride(
+        a.shape, a.stride(), dimension, size, step
+    )
+    return a.as_strided(new_size, new_stride)
 
 
 @register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
@@ -3715,6 +3937,9 @@ def movedim(
     result = torch.permute(input, tuple(dims))
 
     return result
+
+
+moveaxis = torch.movedim  # alias
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints

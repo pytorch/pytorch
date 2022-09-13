@@ -8113,15 +8113,6 @@
     CUDA: _symeig_helper_cuda
   autogen: _symeig_helper.out
 
-- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CompositeExplicitAutograd: eig_out
-
-- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: eig
-
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
@@ -12567,6 +12558,21 @@
 - func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
+## Functions related to the `torch.nested` namespace
+# Note [nested namespace binding]
+# Functions in the nested python module should have their names start with
+#   "nested_" underscore and be bound to the desired Python name in
+#   torch/nested/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/nested.h.
+#   The "nested_" names should be hidden from the user and not documented.
+
+- func: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  python_module: nested
+  variants: function
+  dispatch:
+    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
+  autogen: nested_to_padded_tensor.out
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
@@ -13077,13 +13083,6 @@
   dispatch:
     CompositeExplicitAutograd: alias_copy_out
 
-- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
-  variants: method
-  dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
-    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
-  autogen: to_padded_tensor.out
-
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
@@ -13135,6 +13134,11 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+- func: _flash_scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool causal) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: flash_scaled_dot_product_attention
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function

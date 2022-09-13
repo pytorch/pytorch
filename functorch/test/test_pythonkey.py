@@ -412,7 +412,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
-        xfail('logit'),
+        xfail('special.logit'),
         xfail('trapezoid'),
         xfail('trapz'),
         xfail('corrcoef'),

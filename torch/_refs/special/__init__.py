@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
@@ -16,12 +15,62 @@ from torch._refs import (
 
 
 __all__ = [
+    "digamma",
+    "erf",
+    "erfc",
+    "erfinv",
+    "exp2",
+    "expit",
+    "expm1",
+    "gammaln",
+    "gammainc",
+    "gammaincc",
+    "i0",
     "i0e",
     "i1",
     "i1e",
+    "log1p",
     "logit",
+    "log_softmax",
+    "logsumexp",
+    "psi",
+    "softmax",
+    "round",
     "zeta",
 ]
+
+
+digamma = torch.digamma  # alias
+
+
+erf = torch.erf  # alias
+
+
+erfc = torch.erfc  # alias
+
+
+erfinv = torch.erfinv  # alias
+
+
+exp2 = torch.exp2  # alias
+
+
+expit = torch.sigmoid  # alias
+
+
+expm1 = torch.expm1  # alias
+
+
+gammaln = torch.lgamma  # alias
+
+
+gammainc = torch.igamma  # alias
+
+
+gammaincc = torch.igammac  # alias
+
+
+i0 = torch.i0  # alias
 
 
 @_make_elementwise_unary_reference(
@@ -48,20 +97,50 @@ def i1e(a):
 @register_decomposition(torch.ops.aten.logit)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=("input",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
+def logit(input: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     if eps is None:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
-    return torch.log(torch.true_divide(self, torch.sub(1, self)))
+    input = torch.clamp(input, lo, hi)
+    return torch.log(torch.true_divide(input, torch.sub(1, input)))
+
+
+log1p = torch.log1p  # alias
+
+
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+logsumexp = torch.logsumexp  # alias
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+psi = torch.digamma  # alias
+
+
+round = torch.round  # alias
 
 
 zeta = _make_elementwise_binary_reference(
-    prims.zeta,
+    prims.zeta,  # type: ignore[has-type]
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_zeta,
 )

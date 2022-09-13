@@ -115,22 +115,6 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 
-def _default_meta_device_init_fn(module):
-    """
-    Default initializer for modules initialized on the meta device.
-    """
-    # TODO: move module to device_id here once device_id is available.
-    module.to_empty(device=torch.cuda.current_device())
-    try:
-        with torch.no_grad():
-            module.reset_parameters()
-    except BaseException as e:
-        warnings.warn(
-            f"Unable to call reset_parameters() for module on meta device with error {str(e)}. "
-            "Please ensure your module implements a ``reset_parameters`` function."
-        )
-        raise e
-
 
 class ShardingStrategy(Enum):
     """
@@ -712,11 +696,11 @@ class FullyShardedDataParallel(nn.Module):
                 "sharding_strategy": sharding_strategy,
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
-                "forward_prefetch": forward_prefetch,
                 "mixed_precision": mixed_precision,
                 "param_init_fn": param_init_fn,
                 "device_id": device_id,
                 "sync_module_states": sync_module_states,
+                "forward_prefetch": forward_prefetch,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -773,7 +757,6 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_graph_order: List[FullyShardedDataParallel] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
         self._pre_backward_hook_full_params_prefetched: bool = False
-        self._forward_full_params_prefetched: bool = False
         self._init_reshard_after_forward()
         self._exec_order_data = _ExecOrderData()
         # Used for `BACKWARD_POST` prefetching
@@ -1503,7 +1486,6 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_graph_order: List[nn.Module] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
         self._pre_backward_hook_full_params_prefetched: bool = False
-        self._forward_full_params_prefetched: bool = False
 
         for p in self.params:
             if hasattr(p, "_local_shard"):
@@ -1716,15 +1698,7 @@ class FullyShardedDataParallel(nn.Module):
             self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None
         )
-        if state == TrainingState_.FORWARD:
-            return (
-                self.forward_prefetch
-                and valid_fsdp_graph_and_index
-                and self._my_fsdp_idx_in_graph < len(self._fsdp_graph_order) - 1
-                and self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1].training_state
-                != TrainingState_.FORWARD
-            )
-        elif state == TrainingState_.BACKWARD_PRE:
+        if state == TrainingState_.BACKWARD_PRE:
             return (
                 self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
                 and valid_fsdp_graph_and_index
@@ -2373,23 +2347,9 @@ class FullyShardedDataParallel(nn.Module):
                     input_dtype, *args, **kwargs
                 )
 
-            # Only rebuilding full params when the params are not prefetched in previous layers
-            if not self._forward_full_params_prefetched:
-                self._rebuild_full_params()
-            self._forward_full_params_prefetched = False
+            self._rebuild_full_params()
             # Wait for all_gather full parameters to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Prefetch next layer's full params in forward pass
-            if self._need_prefetch_full_params(self.training_state):
-                # This guarantees that pre-fetching is initialized only after all
-                # previous computations are finished. Therefore, all gather next layer's
-                # parameters will only overlap with this layer's computation. This
-                # prevents over-prefetching, where multiple layer's parameters are prefetched
-                # before the computation.
-                self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._rebuild_full_params()
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph + 1]._forward_full_params_prefetched = True
 
             # Register backward hooks to reshard params and reduce-scatter grads.
             # These need to be re-registered every forward pass in some cases where grad_fn
@@ -4201,19 +4161,6 @@ class FullyShardedDataParallel(nn.Module):
                     not hasattr(p, "_params_exec_order_hook_handle")
                 ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
         return is_prep_stage
-
-def _get_default_cuda_device(module: nn.Module) -> torch.device:
-    """Try to infer CUDA device from module parameters."""
-    try:
-        compute_device = next(module.parameters()).device
-        if compute_device.type == "cuda":
-            return compute_device
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return cuda device.
-    except StopIteration:
-        pass
-    # Fall back to current CUDA device
-    return torch.device("cuda", torch.cuda.current_device())
 
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
