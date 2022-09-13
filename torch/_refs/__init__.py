@@ -3275,6 +3275,20 @@ def new_empty_strided(
     )
 
 
+@register_decomposition(torch.ops.aten.zeros)
+def zeros(
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    return torch.full(
+        size, 0, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_decomposition(torch.ops.aten.new_zeros)
 def new_zeros(
     a: TensorLikeType,
@@ -3285,8 +3299,26 @@ def new_zeros(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
     return torch.full(
         size, 0, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_decomposition(torch.ops.aten.ones)
+def ones(
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    return torch.full(
+        size, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
 
 
@@ -3300,6 +3332,10 @@ def new_ones(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
     return torch.full(
         size, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -3309,15 +3345,24 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: NumberType,
+    fill_value: Union[int, float, bool],
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
     return torch.full(
-        size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        fill_value,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
     )
 
 
@@ -3765,17 +3810,18 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
-# TODO: missing kwargs (e.g. layout)
 @out_wrapper()
 def full(
     shape: ShapeType,
     fill_value: NumberType,
     *,
-    dtype: torch.dtype,
-    device: torch.device,
-    requires_grad: bool,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    e = empty(shape, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory, requires_grad=requires_grad)
     return fill(e, fill_value)
 
 
