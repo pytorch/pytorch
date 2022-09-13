@@ -2816,6 +2816,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_mismatch(self):
         self._test_tensor_dtype_mismatch(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="nccl")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 

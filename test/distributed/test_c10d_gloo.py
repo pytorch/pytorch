@@ -2353,6 +2353,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_mismatch(self):
         self._test_tensor_dtype_mismatch(backend="gloo")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="gloo")
+
 class CompilerTest(test_c10d_common.CompilerTest):
 
     @property
