@@ -21,7 +21,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
+     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
@@ -4274,6 +4274,8 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
+        # narrow accepts `start` argument to be a Tensor.
+        yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
@@ -11998,7 +12000,15 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_narrow),
+           sample_inputs_func=sample_inputs_narrow,
+           skips=(
+               # Use of .item()
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -14760,7 +14770,6 @@ op_db: List[OpInfo] = [
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         decorators=[
             onlyCUDA,
-            skipCUDAIfRocm,
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
@@ -14785,6 +14794,9 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.bool]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=[torch.bool]),
+            # ROCm generates -inf+infj instead of nan+infj for complex64 for some of the results
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                         dtypes=[torch.complex64], active_if=TEST_WITH_ROCM),
             # Expected failure: torch.jiterator_unary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -14802,7 +14814,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         supports_rhs_python_scalar=False,
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14827,7 +14839,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=4, alpha=3.14, beta=-4.20),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14847,7 +14859,7 @@ op_db: List[OpInfo] = [
         op=torch.cuda.jiterator._create_multi_output_jit_fn(
             """
             template <typename T>
-            T binary_return_by_ref(T i0, T i1, T& out0) {
+            void binary_return_by_ref(T i0, T i1, T& out0) {
                 out0 = i0 + i1;
             }
             """,
@@ -14858,7 +14870,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         supports_rhs_python_scalar=False,
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14878,7 +14890,7 @@ op_db: List[OpInfo] = [
         op=torch.cuda.jiterator._create_multi_output_jit_fn(
             """
             template <typename T>
-            T binary_2outputs(T i0, T i1, T& out0, T& out1) {
+            void binary_2outputs(T i0, T i1, T& out0, T& out1) {
                 out0 = i0 + i1;
                 out1 = i0 - i1;
             }
@@ -14889,7 +14901,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -16961,6 +16973,10 @@ python_ref_db = [
         "_refs.narrow",
         torch_opinfo_name="narrow",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
