@@ -53,7 +53,7 @@ struct BinaryRandomPointwiseBatchRuleHelper;
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
     auto maybe_layer = maybeCurrentDynamicLayer();
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
@@ -301,7 +301,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   m.impl("binomial", BINARY_RANDOM_POINTWISE_BATCH_RULE(at::functorch::binomial_wrapper));
 }
 
-TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT2(op, overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 #define BINARY_POINTWISE(op) \
