@@ -64,7 +64,7 @@ TORCH_API IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
-py::object toPyObject(IValue ivalue);
+TORCH_API py::object toPyObject(IValue ivalue);
 
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
@@ -698,8 +698,6 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
   }
   return py_class;
 }
-
-TORCH_API py::object toPyObject(IValue ivalue);
 
 struct VISIBILITY_HIDDEN tuple_slice {
   /*implicit*/ tuple_slice(py::tuple tup_)
