@@ -117,8 +117,8 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  const Tensor x = is_commutative ? x_ : x_.coalesce();
-  const Tensor y = is_commutative ? y_ : y_.coalesce();
+  const Tensor x = commutes_with_sum ? x_ : x_.coalesce();
+  const Tensor y = commutes_with_sum ? y_ : y_.coalesce();
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
