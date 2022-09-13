@@ -1687,63 +1687,64 @@ def _to_dispatch(
     layout: Optional[torch.layout] = None,
     pin_memory: Optional[bool] = None,
 ):
-    args0, *args = (
-        args
-        if args
+    arg_list = list(args)
+    arg0, *arg_list = (
+        arg_list
+        if arg_list
         else [
             None,
         ]
     )
-    args0 = torch.device(args0) if isinstance(args0, str) else args0
-    if isinstance(args0, TensorLike):
+    arg0 = torch.device(arg0) if isinstance(arg0, str) else arg0
+    if isinstance(arg0, TensorLike):
         # overload to `to.other`
-        device = args0.device
-        dtype = args0.dtype
-        layout = args0.layout
+        device = arg0.device
+        dtype = arg0.dtype
+        layout = arg0.layout
         # TODO: is_pinned is not currently supported in refs or fake_tensor
-        # pin_memory = args0.is_pinned()
-        # load positional argsuments:
-        if args:
+        # pin_memory = arg0.is_pinned()
+        # load positional arg_listuments:
+        if arg_list:
             assert non_blocking is None
-            non_blocking, *args = args
-        if args:
+            non_blocking, *arg_list = arg_list
+        if arg_list:
             assert copy is None
-            copy, *args = args
-        if args:
+            copy, *arg_list = arg_list
+        if arg_list:
             assert memory_format is None
-            memory_format, *args = args
-    elif isinstance(args0, torch.dtype):
+            memory_format, *arg_list = arg_list
+    elif isinstance(arg0, torch.dtype):
         # overload to `to.dtype`
-        dtype = args0
-        if args:
+        dtype = arg0
+        if arg_list:
             assert non_blocking is None
-            non_blocking, *args = args
-        if args:
+            non_blocking, *arg_list = arg_list
+        if arg_list:
             assert copy is None
-            copy, *args = args
-        if args:
+            copy, *arg_list = arg_list
+        if arg_list:
             assert memory_format is None
-            memory_format, *args = args
-    elif isinstance(args0, torch.device):
+            memory_format, *arg_list = arg_list
+    elif isinstance(arg0, torch.device):
         # overload to `to.device`
-        device = args0
-        if args:
+        device = arg0
+        if arg_list:
             assert dtype is None
-            dtype, *args = args
-        if args:
+            dtype, *arg_list = arg_list
+        if arg_list:
             assert non_blocking is None
-            non_blocking, *args = args
-        if args:
+            non_blocking, *arg_list = arg_list
+        if arg_list:
             assert copy is None
-            copy, *args = args
-        if args:
+            copy, *arg_list = arg_list
+        if arg_list:
             assert memory_format is None
-            memory_format, *args = args
+            memory_format, *arg_list = arg_list
     else:
-        # overload to `to.dtype_layout` takes no positional argss
-        assert args0 is None
-    # assert that we have processed all positional argsument
-    assert not args
+        # overload to `to.dtype_layout` takes no positional arg_lists
+        assert arg0 is None
+    # assert that we have processed all positional argument
+    assert not arg_list
     return device, dtype, non_blocking, copy, memory_format, layout, pin_memory
 
 
