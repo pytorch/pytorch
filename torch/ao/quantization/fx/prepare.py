@@ -1345,7 +1345,10 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
                                  "'%s' type: '%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
                                  "torch.ao.quantization.get_default_qat_qconfig_mapping"
-                                 " instead." % (node.format_node(), module_type_or_function_or_method))
+                                 " instead. Example: \n"
+                                 "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\") \n"
+                                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
+                                 "" % (node.format_node(), module_type_or_function_or_method))
 
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
