@@ -1872,10 +1872,12 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(tensors, args=(dim,))
 
 def error_inputs_cat(op_info, device, **kwargs):
-    # error inputs for unsupported operation
-    x = torch.rand((1, 3), device=device).expand((6, 3))
-    y = torch.rand((3, 3), device=device)
-    yield ErrorInput(SampleInput((y, y), kwargs={'out': x}),
+
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # error inputs for more than one element of the written-to tensor refer to a single memory location
+    yield ErrorInput(SampleInput([make_arg((S, S)), make_arg((S, S))],
+                                 kwargs={'out': make_arg((1, S)).expand((2 * S, S))}),
                      error_regex='unsupported operation')
 
     # error inputs for empty tensors
@@ -1883,19 +1885,15 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex='non-empty list of Tensors')
 
     # error inputs for different sizes
-    dtype = torch.float32
-    x = torch.randn((4, 3, 32, 32), dtype=dtype, device=device)
-    empty = torch.randn((4, 0, 31, 32), dtype=dtype, device=device)
-    yield ErrorInput(SampleInput((x, empty), kwargs={'dim': 1}),
+    yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
                      error_regex='Sizes of tensors must match except in dimension')
-    yield ErrorInput(SampleInput((empty, x), kwargs={'dim': 1}),
+    yield ErrorInput(SampleInput([make_arg((S, 0, L - 1, L)), make_arg((S, S, L, L))], kwargs={'dim': 1}),
                      error_regex='Sizes of tensors must match except in dimension')
 
     # error inputs for different dimensions
-    empty = torch.randn((4, 0), dtype=dtype, device=device)
-    yield ErrorInput(SampleInput((x, empty), kwargs={'dim': 1}),
+    yield ErrorInput(SampleInput([make_arg((S - 1, 0)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
                      error_regex='Tensors must have same number of dimensions')
-    yield ErrorInput(SampleInput((empty, x), kwargs={'dim': 1}),
+    yield ErrorInput(SampleInput([make_arg((S, 0, L - 1, L)), make_arg((S - 1, 0))], kwargs={'dim': 1}),
                      error_regex='Tensors must have same number of dimensions')
 
     # error inputs for same memory locations
@@ -1914,39 +1912,31 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex=err_msg)
 
     # error inputs for different devices
-    if device == 'cuda':
-        x_cuda = torch.randn((3, 3), device=device)
-        y_cpu = torch.randn((3, 3), device='cpu')
+    if torch.device(device).type == 'cuda':
+        x_cuda = make_tensor((3, 3), device=device, dtype=torch.float32)
+        y_cpu = make_tensor((3, 3), device='cpu', dtype=torch.float32)
         yield ErrorInput(SampleInput((x_cuda, y_cpu)),
                          error_regex='Expected all tensors to be on the same device')
 
     # error inputs for different input sizes for more than 2 tensors
-    x = torch.randn(2, 1, device=device)
-    y = torch.randn(2, 1, 1, device=device)
-    z = torch.randn(2, 1, 1, device=device)
-    yield ErrorInput(SampleInput((x, y, z)),
+    yield ErrorInput(SampleInput([make_arg((L, 1)), make_arg((L, 1, 1)), make_arg((L, 1, 1))]),
                      error_regex='Tensors must have same number of dimensions')
 
-    x = torch.randn(2, 1, 2, device=device)
-    y = torch.randn(2, 1, 1, device=device)
-    z = torch.randn(2, 2, 1, device=device)
-    yield ErrorInput(SampleInput((x, y, z), kwargs={'dim': 1}),
+    yield ErrorInput(SampleInput([make_arg((S, 1, M)), make_arg((S, 1, 1)), make_arg((S, M, 1))],
+                                 kwargs={'dim': 1}),
                      error_regex='Sizes of tensors must match')
 
     # error inputs for None input
-    x = torch.rand(4, 1, 1, device=device)
-    yield ErrorInput(SampleInput((x, None)), error_type=TypeError,
+    yield ErrorInput(SampleInput((make_arg((S, 1, 1)), None)), error_type=TypeError,
                      error_regex='got None')
 
     # error inputs for zero-dimensional tensors
-    x = torch.tensor(0, device=device)
-    y = torch.tensor(1, device=device)
-    yield ErrorInput(SampleInput((x, y)),
+    yield ErrorInput(SampleInput([make_arg(()), make_arg(())]),
                      error_regex='zero-dimensional.*cannot be concatenated')
 
     # error inputs for different dtype of out tensors
-    d = torch.tensor((2, 3), device=device, dtype=torch.double)
-    x = torch.zeros((2, 3), device=device, dtype=torch.float32)
+    d = make_tensor((2, 3), device=device, dtype=torch.double)
+    x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
                      error_regex='invalid combination of arguments')
 
