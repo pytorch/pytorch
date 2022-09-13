@@ -84,7 +84,6 @@ class TestParityWithDDP(FSDPTest):
         modes and prefetching settings together."""
         return {
             "cuda_init_mode": self._get_cuda_init_modes(cpu_offload),
-            "forward_prefetch": [False, True],
             "backward_prefetch": [
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
