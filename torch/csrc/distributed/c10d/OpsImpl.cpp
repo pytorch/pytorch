@@ -83,30 +83,36 @@ c10::intrusive_ptr<Work> reduce_cuda_(
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> broadcast_cpu_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  return process_group->broadcast(
+  auto work = process_group->broadcast(
       tensor_vec,
       BroadcastOptions{
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(tensor_vec), work);
 }
 
-c10::intrusive_ptr<Work> broadcast_cuda_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_cuda_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  return process_group->broadcast(
+  auto work = process_group->broadcast(
       tensor_vec,
       BroadcastOptions{
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(tensor_vec), work);
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cpu_(
