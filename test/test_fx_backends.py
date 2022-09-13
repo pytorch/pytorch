@@ -13,7 +13,6 @@ from torch.fx.passes.backends.nvfuser import NvFuserBackend
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfRocm,
     dtypes,
 )
 
@@ -130,7 +129,6 @@ class TestFxNvFuserBackend(TestCase):
         return inputs
 
 
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_nvfuser_call_module_backend(self, device, dtype):
 
@@ -162,7 +160,6 @@ class TestFxNvFuserBackend(TestCase):
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
 
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_nvfuser_backend(self, device, dtype):
         m = HF_T5_Partial()
@@ -180,7 +177,6 @@ class TestFxNvFuserBackend(TestCase):
 
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_aten_square(self, device, dtype):
 
@@ -204,7 +200,6 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser_result = compiled_module(inputs)
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_aten_leakyrelu(self, device, dtype):
 
@@ -228,7 +223,6 @@ class TestFxNvFuserBackend(TestCase):
         nvfuser_result = compiled_module(inputs)
         torch.testing.assert_close(eager_result, nvfuser_result, rtol=1e-5, atol=1e-5)
 
-    @skipCUDAIfRocm
     @dtypes(torch.float32)
     def test_aten_where(self, device, dtype):
 

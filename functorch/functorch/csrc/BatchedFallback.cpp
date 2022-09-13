@@ -6,7 +6,6 @@
 
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/LegacyVmapTransforms.h>
-#include <functorch/csrc/Constants.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/PlumbingHelper.h>
@@ -268,7 +267,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
               "We could not generate a fallback.");
 
   if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }
@@ -354,7 +353,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // argument is a BatchedTensor
       TORCH_INTERNAL_ASSERT(input_physical_views_iter != input_physical_views.end());
       const auto& physical_view_for_argument = *input_physical_views_iter;
-      c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
       torch::jit::push(stack, physical_view_for_argument.tensor().index(index));
       batched_tensor_inputs_pos_iter++;
       input_physical_views_iter++;
@@ -362,7 +361,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
     // std::cout << "[Fallback]: ";
     // at::dump_tensor((*stack)[stack->size() - 1].toTensor());
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
 
     // Store the result into `output_shards`. See NOTE: [Output shards layout]
@@ -379,7 +378,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_batches);
   for (const auto return_idx : c10::irange(0, num_returns)) {
     auto shards = output_shards_chunks[return_idx];
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     auto flat_output = safeStack(shards);
     // See NOTE [vmap through backward and undefined grad]
     if (!flat_output.defined()) {

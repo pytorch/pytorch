@@ -2046,52 +2046,27 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: empty
+    CompositeExplicitAutograd: empty_names
   autogen: empty.names_out
 
-- func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: empty.memory_format(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
     MPS: empty_mps
-    Meta: empty_meta
+    Meta: empty_meta_symint
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
-# all calls to empty() in python used to go through the symint overload
-# even if all arguments were concerete integers.
-# adding symint overloads of kernels for every dispatch key allowed us
-# to skip redispatching to `empty.memory_format` and hit backend kernels directly
-# we recently updated signature parsing to dispath `empty()` calls in python
-# to `empty.SymInt` iff there's is a symint node argument
-# hopefully, we could simplify this entry soon
-- func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  dispatch:
-    CPU: empty_symint_cpu
-    CUDA: empty_symint_cuda
-    MPS: empty_symint_mps
-    Meta: empty_symint_meta
-    MkldnnCPU: empty_symint_mkldnn
-    SparseCPU, SparseCUDA, SparseMeta: empty_symint_sparse
-    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
-    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
-  autogen: empty.SymInt_out
-
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
-- func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  variants: method
-  dispatch:
-    CompositeExplicitAutograd: new_empty
-  autogen: new_empty.out
-
-- func: new_empty.SymInt(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     CompositeExplicitAutograd: new_empty_symint
-  autogen: new_empty.SymInt_out
+  autogen: new_empty.out
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -2170,7 +2145,7 @@
     QuantizedCPU, QuantizedCUDA: empty_quantized
   autogen: empty_quantized.out
 
-- func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
+- func: empty.out(SymInt[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   device_guard: False
 
@@ -2294,14 +2269,7 @@
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
 
-- func: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
-  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: expand_symint
-
-- func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
+- func: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_check: NoCheck
   device_guard: False
@@ -3697,7 +3665,7 @@
   dispatch:
     CompositeExplicitAutograd: mvlgamma_
 
-- func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
+- func: narrow_copy(Tensor self, int dim, SymInt start, SymInt length) -> Tensor
   variants: function, method
   dispatch:
     CPU: narrow_copy_dense_cpu
@@ -3705,13 +3673,7 @@
     CompositeExplicitAutogradNonFunctional: narrow_copy_dense
   tags: view_copy
 
-- func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: narrow_copy_symint
-  autogen: narrow_copy.SymInt_out
-
-- func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
+- func: narrow_copy.out(Tensor self, int dim, SymInt start, SymInt length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
@@ -4238,16 +4200,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-
-- func: _reshape_nested(Tensor self, int[] shape) -> Tensor
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _reshape_nested
-  autogen: _reshape_nested.out
-
-- func: _reshape_nested_backward(Tensor self, Tensor grad) -> Tensor
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _reshape_nested_backward
-  autogen: _reshape_nested_backward.out
+    CompositeImplicitAutograd: reshape
+    CompositeImplicitAutogradNestedTensor: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -4271,6 +4226,9 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: reshape_as
+    CompositeImplicitAutogradNestedTensor: reshape_as_nested
 
 - func: round(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4481,6 +4439,13 @@
     CompositeExplicitAutogradNonFunctional: select_backward
   autogen: select_backward.out
 
+- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, int index) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_select_backward
+
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
 
@@ -4667,6 +4632,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: detach
+    NestedTensorCPU, NestedTensorCUDA: detach
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -5324,7 +5290,7 @@
 - func: _nested_tensor_size(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_get_nested_size_tensor
+    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_size
   autogen: _nested_tensor_size.out
 
 # _nested_from_padded is not usable from Python, so
@@ -5580,19 +5546,14 @@
     CUDA: _efficientzerotensor_cuda
   autogen: _efficientzerotensor.out
 
-- func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: zeros
-
-- func: zeros.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: zeros(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: zeros_symint
-  autogen: zeros.SymInt_out
 
-- func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: zeros_out
-    SparseCPU, SparseCUDA, SparseMeta: zeros_out
+    SparseCPU, SparseCUDA, SparseMeta: zeros_sparse_out
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -6561,6 +6522,8 @@
 
 - func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
+  dispatch:
+    CPU, CUDA: _fake_quantize_learnable_per_tensor_affine_backward
 
 - func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6583,6 +6546,8 @@
 
 - func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
+  dispatch:
+    CPU, CUDA: _fake_quantize_learnable_per_channel_affine_backward
 
 - func: fused_moving_avg_obs_fake_quant(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> Tensor
   variants: function
@@ -6919,21 +6884,14 @@
     CPU: masked_softmax_backward_cpu
   autogen: _masked_softmax_backward.out
 
-- func: view.SymInt(Tensor(a) self, SymInt[] size) -> Tensor(a)
+- func: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: view_symint
-    MkldnnCPU: mkldnn_view_symint
-
-- func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, MPS: view
+    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
     MkldnnCPU: mkldnn_view
+    NestedTensorCPU, NestedTensorCUDA: view_nested
 
 # Warning: If you want to change the name or overload name of this
 # operator, you might also want to change the `isBlockListedSchema`
@@ -8154,15 +8112,6 @@
     CPU: _symeig_helper_cpu
     CUDA: _symeig_helper_cuda
   autogen: _symeig_helper.out
-
-- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CompositeExplicitAutograd: eig_out
-
-- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
@@ -12609,6 +12558,21 @@
 - func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
+## Functions related to the `torch.nested` namespace
+# Note [nested namespace binding]
+# Functions in the nested python module should have their names start with
+#   "nested_" underscore and be bound to the desired Python name in
+#   torch/nested/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/nested.h.
+#   The "nested_" names should be hidden from the user and not documented.
+
+- func: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  python_module: nested
+  variants: function
+  dispatch:
+    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
+  autogen: nested_to_padded_tensor.out
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
@@ -12764,16 +12728,10 @@
     CompositeExplicitAutogradNonFunctional: diagonal_copy
   tags: view_copy
 
-- func: expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor
+- func: expand_copy(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: expand_copy
-  tags: view_copy
-
-- func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: expand_copy_SymInt
   tags: view_copy
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
@@ -12904,7 +12862,7 @@
     CompositeExplicitAutogradNonFunctional: unbind_copy_int
   tags: view_copy
 
-- func: view_copy(Tensor self, int[] size) -> Tensor
+- func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: view_copy
@@ -12964,14 +12922,6 @@
     CompositeExplicitAutograd: _neg_view_copy_out
 
 
-- func: view_copy.SymInt(Tensor self, SymInt[] size) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: view_copy_SymInt
-  tags: view_copy
-  autogen: view_copy.SymInt_out
-
-
 - func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
@@ -12990,16 +12940,10 @@
     CompositeExplicitAutograd: diagonal_copy_out
 
 
-- func: expand_copy.SymInt_out(Tensor self, SymInt[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
+- func: expand_copy.out(Tensor self, SymInt[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: expand_copy_SymInt_out
-
-
-- func: expand_copy.out(Tensor self, int[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: expand_copy_out
+    CompositeExplicitAutograd: expand_copy_out_symint
 
 
 - func: permute_copy.out(Tensor self, int[] dims, *, Tensor(a!) out) -> Tensor(a!)
@@ -13116,10 +13060,10 @@
     CompositeExplicitAutograd: unbind_copy_int_out
 
 
-- func: view_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: view_copy.out(Tensor self, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_copy_out
+    CompositeExplicitAutograd: view_copy_out_symint
 
 
 - func: view_copy.dtype_out(Tensor self, ScalarType dtype, *, Tensor(a!) out) -> Tensor(a!)
@@ -13138,13 +13082,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: alias_copy_out
-
-- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
-  variants: method
-  dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
-    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
-  autogen: to_padded_tensor.out
 
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
@@ -13197,6 +13134,11 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+
+- func: _flash_scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool causal) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: flash_scaled_dot_product_attention
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function
