@@ -11,20 +11,6 @@
 
 namespace c10 {
 
-/// Sum of a list of SymInt; accumulates into the c10::SymInt expression
-template <
-    typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
-inline c10::SymInt multiply_integers(const C& container) {
-  return std::accumulate(
-      container.begin(),
-      container.end(),
-      c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
-}
-
 /// Sum of a list of integers; accumulates into the int64_t datatype
 template <
     typename C,
