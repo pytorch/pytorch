@@ -894,6 +894,7 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
+        forward_prefetch: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
             self._init_param_exec_order_wrap_policy(
@@ -908,6 +909,7 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fn=param_init_fn,
                 device_id=device_id,
                 sync_module_states=sync_module_states,
+                forward_prefetch=forward_prefetch,
             )
             return
 
@@ -937,6 +939,7 @@ class FullyShardedDataParallel(nn.Module):
                 "param_init_fn": param_init_fn,
                 "device_id": device_id,
                 "sync_module_states": sync_module_states,
+                "forward_prefetch": forward_prefetch,
             }
             self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
 
@@ -946,6 +949,7 @@ class FullyShardedDataParallel(nn.Module):
         self.training_state = TrainingState_.IDLE
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
+        self.forward_prefetch = forward_prefetch
         # We clamp the strategy to `NO_SHARD` for world size of 1 since they
         # are currently functionally equivalent. This may change if/when we
         # integrate FSDP with MoE.
