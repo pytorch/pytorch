@@ -3,7 +3,6 @@ import copy
 import functools
 from typing import (
     Any,
-    cast,
     Dict,
     Iterable,
     Iterator,
@@ -13,11 +12,11 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 import torch
 import torch.distributed as dist
-
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 from torch.distributed._shard.sharded_tensor import ShardedTensor
@@ -174,10 +173,13 @@ def _communicate_optim_state(
     for state_name, value in sorted_items(flat_param_state):
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
-            # If the parameter is not sharded (e.g. world size of 1), then
-            # neither is the positive-dimension tensor state, so no need to
-            # communicate it -- we take the target rank's value
-            if not flat_param._is_sharded:  # type: ignore[attr-defined]
+            # If the parameter is not sharded, then neither is the
+            # positive-dimension tensor state, so no need to communicate it --
+            # we take the target rank's value
+            if (
+                fsdp_module.world_size == 1
+                or fsdp_module.sharding_strategy == FSDP.ShardingStrategy.NO_SHARD
+            ):
                 tensor_state[state_name] = value.cpu()
                 continue
             if not value.is_cuda:
