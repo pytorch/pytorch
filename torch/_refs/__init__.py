@@ -1702,6 +1702,7 @@ def _to_dispatch(
         dtype = arg0.dtype
         layout = arg0.layout
         # TODO: is_pinned is not currently supported in refs or fake_tensor
+        # https://github.com/pytorch/pytorch/issues/84925
         # pin_memory = arg0.is_pinned()
         # load positional arg_listuments:
         if arg_list:
@@ -1764,6 +1765,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         and (device is None or device == a.device)
         and (layout is None or layout == a.layout)
         # TODO: is_pinned is not currently supported in refs or fake_tensor
+        # https://github.com/pytorch/pytorch/issues/84925
         # and (pin_memory is None or pin_memory == a.is_pinned())
     ):
         return prims.convert_element_type(a, dtype)
