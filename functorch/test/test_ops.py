@@ -1322,6 +1322,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
