@@ -426,7 +426,6 @@ meta_function_expected_failures = {
     torch.mvlgamma : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f64, bf16, f32},
-    torch.nn.functional.grid_sample : {f64, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
     torch.nn.functional.max_pool3d_with_indices : {f64, f32},
     torch.nn.functional.max_unpool1d : {f64, f32},
@@ -444,7 +443,6 @@ meta_function_expected_failures = {
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
     torch.cholesky_solve : {f64, f32, c128, c64},
-    torch.eig : {f64, f32, c128, c64},
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -496,6 +494,7 @@ meta_function_skips = {
     torch.linalg.svd : {c128, c64},
     torch.matmul : {bf16, c128, f64, f32, f16, c64},
     torch.nanquantile : {f64, f32},
+    torch.narrow : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c32, c64},
     torch.nn.functional.batch_norm : {f64, f32},
     torch.nn.functional.binary_cross_entropy : {bf16, f64, f32, f16},
     torch.nn.functional.dropout3d : {bf16, f64, f32, f16},
@@ -518,6 +517,9 @@ meta_function_skips = {
     torch.linalg.vander: {c128, c64, f32, f64, i16, i32, i64, i8, u8},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
+    # This fails for arguments dispatched to grid_sampler_3d, but succeeds
+    # for grid_sampler_2d, so we can't just xfail it
+    torch.nn.functional.grid_sample : {f64, f32},
 }
 
 
@@ -543,7 +545,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
-    torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
@@ -567,6 +568,9 @@ meta_function_device_skips['cuda'] = {
     torch.nn.functional.interpolate: {f16},
     torch.nn.functional.nll_loss: {f16},
     torch.svd: {f32, f64},
+    # This fails for arguments dispatched to grid_sampler_3d, but succeeds
+    # for grid_sampler_2d, so we can't just xfail it
+    torch.nn.functional.grid_sample : {f16},
 }
 
 # This is a __torch_function__ mode that, when enabled, interposes every
@@ -629,7 +633,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_solve.out : {c64, c128, f64, f32},
     aten.count_nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.count_nonzero.dim_IntList : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.eig.default : {c64, c128, f64, f32},
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_householder_product.default : {c64, c128, f64, f32},
@@ -656,7 +659,7 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
-    aten._local_scalar_dense.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._pdist_forward.default : {f32, f64},
     aten._unique2.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
@@ -665,7 +668,6 @@ meta_dispatch_expected_failures = {
     aten.col2im.default : {c64, f32, f64, c128},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
-    aten.grid_sampler_2d.default : {f32, f64},
     aten.grid_sampler_3d.default : {f32, f64},
     aten.histc.default : {bf16, f32, f64},
     aten.histc.out : {bf16, f32, f64},
@@ -720,7 +722,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
