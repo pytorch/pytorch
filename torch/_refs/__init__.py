@@ -3283,9 +3283,19 @@ def zeros(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
     return torch.full(
-        size, 0, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        False,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3298,13 +3308,20 @@ def new_zeros(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
     return torch.full(
-        size, 0, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        False,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3316,9 +3333,19 @@ def ones(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
     return torch.full(
-        size, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        True,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3331,13 +3358,20 @@ def new_ones(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
     return torch.full(
-        size, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        True,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -3802,8 +3836,14 @@ def eye(
     if dtype is torch.bool:
         return cond
     else:
-        # TODO: pin_memory=pin_memory, layout=layout
-        one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
+        one = torch.ones(
+            (1,),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=False,
+        )
         return torch.where(cond, one, 0)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
