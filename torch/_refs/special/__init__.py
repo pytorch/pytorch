@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
@@ -20,6 +19,8 @@ __all__ = [
     "i1",
     "i1e",
     "logit",
+    "log_softmax",
+    "softmax",
     "zeta",
 ]
 
@@ -58,6 +59,24 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     hi = 1 - eps
     self = torch.clamp(self, lo, hi)
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
+
+
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 zeta = _make_elementwise_binary_reference(
