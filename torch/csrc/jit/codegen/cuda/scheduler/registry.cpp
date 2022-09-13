@@ -408,6 +408,11 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   // A set of connected components on the fusion graph
   DisjointSets<Val*> component_sets;
 
+  TORCH_INTERNAL_ASSERT(
+      !fusion->outputs().empty(), "Fusion without output is not supported");
+  auto output0 = fusion->outputs()[0];
+  component_sets.initializeSet(output0);
+
   // Iterate through all used exprs
   for (auto expr : fusion->exprs()) {
     TORCH_INTERNAL_ASSERT(
@@ -433,7 +438,6 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   //  If there is no independent compute flow
   // on this fusion graph, all outputs will be
   // equivalent/connected to the first output.
-  auto output0 = fusion->outputs()[0];
   for (auto output : fusion->outputs()) {
     if (!component_sets.strictAreMapped(output0, output)) {
       return false;
