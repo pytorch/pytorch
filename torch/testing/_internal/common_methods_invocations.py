@@ -4347,11 +4347,14 @@ def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
+    '''
+    sample_inputs_narrow accepts the same inputs as narrow_copy, in addition
+    narrow also accepts `start` argument to be a Tensor.
+    '''
     for sample in sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
         yield sample
-        # narrow accepts `start` argument to be a Tensor.
-        args = sample.args
-        yield SampleInput(sample.input, args=(args[0], torch.tensor(args[1]), args[2]))
+        yield SampleInput(sample.input, args=(sample.args[0], torch.tensor(sample.args[1]), sample.args[2]))
+
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
