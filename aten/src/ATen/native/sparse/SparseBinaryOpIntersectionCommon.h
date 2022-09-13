@@ -117,8 +117,14 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  const Tensor x = commutes_with_sum ? x_ : x_.coalesce();
-  const Tensor y = commutes_with_sum ? y_ : y_.coalesce();
+  // Coalesce inputs to remove potential issues with OOM.
+  const Tensor x = x_.coalesce();
+  const Tensor y = y_.coalesce();
+  // Comment the two lines above and uncomment the two ones below
+  // to enable speed-ups which are not conditioned on whether
+  // the inputs are coalesced.
+  // const Tensor x = commutes_with_sum ? x_ : x_.coalesce();
+  // const Tensor y = commutes_with_sum ? y_ : y_.coalesce();
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
