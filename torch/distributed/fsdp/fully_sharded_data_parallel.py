@@ -900,8 +900,8 @@ class FullyShardedDataParallel(nn.Module):
         ``fsdp_kwargs``.
 
         Precondition: ``auto_wrap_policy`` contains the arguments expected by
-            ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
-            ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
+        ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
+        ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
         """
         auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
         root_module = auto_wrap_kwargs["module"]
@@ -1114,6 +1114,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Synchronizes module states (i.e. parameters ``params`` and all
         not-yet-synced buffers) by broadcasting from rank 0 to all ranks.
+
         Precondition: ``sync_module_states == True`` and ``self.process_group``
         has been set.
         """
@@ -1239,46 +1240,26 @@ class FullyShardedDataParallel(nn.Module):
 
         return ret
 
-    def _offload_to_cpu(self, p):
-        """
-        Offloads parameter to CPU from self.compute_device. If the parameter is
-        already on CPU then this is a noop.
-        """
-        cpu_device = torch.device("cpu")
-        if p.device == cpu_device:
-            return
-        with torch.no_grad():
-            p.data = p.to(cpu_device)
-
     def _mixed_precision_enabled_for_params(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
         parameters or not.
         """
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.param_dtype is not None
-        )
+        return self.mixed_precision.param_dtype is not None
 
     def _mixed_precision_enabled_for_buffers(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
         buffers or not.
         """
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.buffer_dtype is not None
-        )
+        return self.mixed_precision.buffer_dtype is not None
 
     def _mixed_precision_enabled_for_reduce(self) -> bool:
         """
         Whether user explicitly enabled mixed precision for
         gradient reduction or not.
         """
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.reduce_dtype is not None
-        )
+        return self.mixed_precision.reduce_dtype is not None
 
     def _low_precision_hook_enabled(self) -> bool:
         """
@@ -1289,19 +1270,20 @@ class FullyShardedDataParallel(nn.Module):
             and self._communication_hook in LOW_PRECISION_HOOKS
         )
 
-    def _cast_fp_inputs_to_precision(
+    def _cast_fp_inputs_to_dtype(
         self, dtype: torch.dtype, *args: Any, **kwargs: Any
     ) -> Tuple[Any, Any]:
         """
-        Casts floating point tensors in args and kwargs to precision given by dtype.
-        requires_grad field is respected.
+        Casts floating point tensors in ``args`` and ``kwargs`` to the
+        precision given by ``dtype``, while respecting the existing
+        ``requires_grad`` on the tensors.
         """
         def cast_fn(x: torch.Tensor) -> torch.Tensor:
             if not torch.is_floating_point(x):
                 return x
             y = x.to(dtype)
-            # Explicitly copy over requires_grad context since this is happening
-            # within torch.no_grad.
+            # Explicitly copy over `requires_grad` since this runs inside
+            # `torch.no_grad()`
             if x.is_leaf:
                 y.requires_grad = x.requires_grad
             return y
@@ -2343,7 +2325,7 @@ class FullyShardedDataParallel(nn.Module):
                 and self._mixed_precision_enabled_for_params()
             ):
                 input_dtype = self.mixed_precision.param_dtype
-                args, kwargs = self._cast_fp_inputs_to_precision(
+                args, kwargs = self._cast_fp_inputs_to_dtype(
                     input_dtype, *args, **kwargs
                 )
 
@@ -4280,10 +4262,9 @@ def _get_param_name_to_param(
 
 
 def clean_tensor_name(tensor_name: str) -> str:
-    """Cleans the parameter or buffer name by removing any FSDP-related
+    """Cleans the parameter or buffer name by removing any module wrapper
     prefixes."""
-    # FSDP full tensor names may not have both (i.e. `FSDP_PREFIX`), so we
-    # call `replace()` twice separately
+    # Call `replace()` twice separately since the name may not have both
     tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
     tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
     # TODO: Explicitly replacing checkpoint_wrapper prefix is not ideal,
