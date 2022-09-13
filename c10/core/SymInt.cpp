@@ -57,7 +57,7 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
     return data_;
   }
   SymIntNode a = toSymIntNodeImpl();
-  return a->int_(file, line);
+  return a->guard_int(file, line);
 }
 
 SymInt SymInt::operator+(SymInt sci) const {

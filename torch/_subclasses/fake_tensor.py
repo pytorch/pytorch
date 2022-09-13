@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -656,7 +657,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
