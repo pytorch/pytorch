@@ -1495,9 +1495,18 @@ void _linalg_check_errors(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-bool _requires_fw_or_bw_grad(const Tensor& input) {
+// If an input requires fw or bw grad then we need to go down a different
+// (slower) path to ensure that the gradients are computable.
+// That is what `_may_require_fw_or_bw_grad` is helpful for.
+//
+// Why is there a isTensorSubclassLike check here?
+// Without it, this function can lead to composite compliance problems, which
+// may lead to bugs in functorch, where a Tensor Subclass that doesn't
+// require grad may wrap a Tensor subclass that requires grad.
+bool _may_require_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined());
+          || input._fw_grad(/*level */ 0).defined()
+          || isTensorSubclassLike(input));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.inv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2688,9 +2697,8 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view u
 
 
 Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
-  // See [Note: svdvals_compute_uv] for the condition in compute_v
   return std::get<0>(at::_linalg_eigh(A, uplo,
-                     /*comptue_v=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
+                     /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
 Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
@@ -3148,7 +3156,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 Tensor linalg_eigvals(const Tensor& input) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (_requires_fw_or_bw_grad(input)) {
+  if (_may_require_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
 
@@ -3158,66 +3166,6 @@ Tensor linalg_eigvals(const Tensor& input) {
   at::linalg_eigvals_outf(input, values);
 
   return values;
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-DEFINE_DISPATCH(eig_stub);
-
-std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tensor& e, Tensor& v) {
-  TORCH_WARN_ONCE(
-    "torch.eig is deprecated in favor of torch.linalg.eig and will be removed in a future ",
-    "PyTorch release.\n",
-    "torch.linalg.eig returns complex tensors of dtype cfloat or cdouble rather than real tensors ",
-    "mimicking complex tensors.\n",
-    "L, _ = torch.eig(A)\n",
-    "should be replaced with\n",
-    "L_complex = torch.linalg.eigvals(A)\n",
-    "and\n",
-    "L, V = torch.eig(A, eigenvectors=True)\n",
-    "should be replaced with\n",
-    "L_complex, V_complex = torch.linalg.eig(A)"
-  );
-  TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
-  TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
-  TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
-  checkSameDevice("torch.eig", e, self, "eigenvalues");
-  checkLinalgCompatibleDtype("torch.eig", e, self, "eigenvalues");
-  if (eigenvectors) {
-    checkSameDevice("torch.eig", v, self, "eigenvectors");
-    checkLinalgCompatibleDtype("torch.eig", v, self, "eigenvectors");
-  }
-  int64_t n = self.size(-1);
-
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-      at::native::resize_output(e, {n});
-  } else {
-      at::native::resize_output(e, {n, 2});
-  }
-  if (eigenvectors) {
-      at::native::resize_output(v, self.sizes());
-  }
-
-  // optimization: if self is empty, we can immediately return the empty
-  // tensors, instead of getting empty tensors from eig_helper
-  if (self.numel() == 0) {
-      return std::tuple<Tensor&, Tensor&>(e, v);
-  }
-
-  Tensor vals_, vecs_;
-  std::tie(vals_, vecs_) = eig_stub(self.device().type(), self, eigenvectors);
-  e.copy_(vals_);
-  if (eigenvectors) {
-    v.copy_(vecs_);
-  }
-  return std::tuple<Tensor&, Tensor&>(e, v);
-}
-
-std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
-  Tensor e = at::empty({0}, self.options());
-  Tensor v = at::empty({0}, self.options());
-  at::eig_out(e, v, self, eigenvectors);
-  return std::tuple<Tensor, Tensor>(e, v);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3318,12 +3266,8 @@ Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driv
 }
 
 Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
-  // [Note: svdvals_compute_uv]
-  // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
-  //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
-  //     a TensorWrapper requiring fw or bw grad.
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
-                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A),
+                     /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
 }
 

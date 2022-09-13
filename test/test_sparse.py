@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -66,6 +66,7 @@ class CrossRefSparseFakeMode(TorchDispatchMode):
             ]
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
+            and torch.Tag.data_dependent_output not in func.tags
         ):
             from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
             from torch.utils._pytree import tree_map
@@ -908,6 +909,7 @@ class TestSparse(TestSparseBase):
         test_shape(10, 20, 0, 0)
         test_shape(10, 20, 0, 20)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
     @dtypes(torch.double, torch.cdouble)
     def test_t_empty(self, device, dtype):
         def test_in_place(x):
@@ -3329,6 +3331,7 @@ class TestSparse(TestSparseBase):
                 J[i] = g.to_dense() if g.is_sparse else g
             return J
 
+        @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
         def test_op(sparse_dims, nnz, with_size, coalesced):
             if isinstance(with_size, Number):
                 with_size = [with_size] * sparse_dims
