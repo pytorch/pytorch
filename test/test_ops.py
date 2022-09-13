@@ -1652,6 +1652,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # other
+        '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
@@ -1715,6 +1716,7 @@ fake_skips = (
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
+    "narrow",  # Fails only for one overload with DataDependentOutputException (hence skip).
 )
 
 fake_autocast_device_skips = defaultdict(dict)
