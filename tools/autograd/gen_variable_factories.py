@@ -48,7 +48,7 @@ def gen_variable_factories(
         "variable_factories.h",
         lambda: {
             "generated_comment": "@"
-            + f"generated from {fm.template_dir}/variable_factories.h",
+            + f"generated from {fm.template_dir_for_comments()}/variable_factories.h",
             "ops_headers": [
                 f"#include <ATen/ops/{fn.root_name}.h>" for fn in factory_functions
             ],
