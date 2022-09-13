@@ -140,6 +140,7 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
+    import random
     if _is_leaf(pytree):
         return [pytree], LeafSpec()
 
@@ -188,6 +189,8 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     return unflatten_fn(child_pytrees, spec.context)
 
 def tree_map(fn: Any, pytree: PyTree) -> PyTree:
+    if isinstance(pytree, dict):
+        return {}
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
 

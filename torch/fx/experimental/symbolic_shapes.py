@@ -224,10 +224,12 @@ for method, _func in magic_methods.items():
             if isinstance(other, PySymInt):
                 other = other.expr
             # TODO: consider constant prop here
-            return PySymInt(func(self.expr, other), self.shape_env)
+            out = func(self.expr, other)
+            return PySymInt(out, self.shape_env)
         return magic_impl
 
     # this should be wrapped transparently into torch._C.SymIntNode
+    _func = lru_cache(256)(_func)
     setattr(PySymInt, method, _create_magic_impl(_func))
     setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
     if method in reflectable_magic_methods:
@@ -379,6 +381,7 @@ class ShapeEnv(object):
         return concrete_val
 
 
+    @lru_cache(256)
     def evaluate_expr(self, expr):
         try:
             if len(list(expr.free_symbols)) == 0:

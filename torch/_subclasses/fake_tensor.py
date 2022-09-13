@@ -96,6 +96,7 @@ _like_tensor_constructors = (
     aten.new_ones.default,
     aten.new_ones.out,
 )
+_like_tensor_constructors = [aten.rand_like.default]
 
 
 @functools.lru_cache(None)
@@ -253,7 +254,7 @@ class FakeTensorConverter(object):
 op_implementations = []
 
 
-def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
+def register_op_impl2(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
     def impl_decorator(op_impl):
         global op_implementations
         if isinstance(run_impl_check, OpOverload):
@@ -265,8 +266,15 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
 
     return impl_decorator
 
+def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
+    def impl_decorator(op_impl):
 
-@register_op_impl(
+        return op_impl
+
+    return impl_decorator
+
+
+@register_op_impl2(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
 def constructors(fake_mode, func, *args, **kwargs):
@@ -516,6 +524,7 @@ class FakeTensor(torch.Tensor):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+
         # Need this to handle infinite recursion with sparse tensors.
         # Sparse tensors have custom stride policy which means that
         # they will dispatch here on dispatch, and we need to trigger
@@ -540,16 +549,16 @@ class FakeTensor(torch.Tensor):
         # because the next dispatch after a fake mode will attempt to use
         # subclasses of tensors to dispatch, and any FakeTensor arguments
         # will be considered eligible.
-        if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
-            return NotImplemented
+        # if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
+        #     return NotImplemented
 
         fake_mode = None
-        for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
-            if isinstance(arg, FakeTensor):
-                if fake_mode is None:
-                    fake_mode = arg.fake_mode
-                else:
-                    assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+        # for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
+        #     if isinstance(arg, FakeTensor):
+        #         if fake_mode is None:
+        #             fake_mode = arg.fake_mode
+        #         else:
+        #             assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         with enable_torch_dispatch_mode(fake_mode):
             return func(*args, **kwargs)
@@ -598,9 +607,8 @@ class FakeTensor(torch.Tensor):
             raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
-
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        list(map(merge_devices, args))
+        # tree_map(merge_devices, kwargs)
 
         assert common_device is not None, f"Could not find common device for {func}"
 
@@ -655,8 +663,8 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
-        flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_arg_tensors = [t for t in args if isinstance(t, FakeTensor)]
+        flat_symints = [i for i in args if isinstance(i, torch.SymIntNode)]
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
@@ -682,7 +690,8 @@ class FakeTensorMode(TorchDispatchMode):
         # objects on an FX Graph.
 
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
-        all_constant = all(e.constant is not None for e in flat_arg_tensors)
+        # all_constant = all(e.constant is not None for e in flat_arg_tensors)
+        all_constant = False
         if (
             torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
             and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
@@ -714,8 +723,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
-        self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
-
+        # self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
         functions_with_cpp_meta_impl_that_support_symint = [
             aten.empty_strided.default,
             aten.empty.memory_format,
@@ -753,8 +761,9 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
-            with self.restore():
-                return func.prim_meta_impl(*args, **kwargs)
+            return args[0]
+            # with self.restore():
+            #     return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
             if func not in functions_with_cpp_meta_impl_that_support_symint:
@@ -781,8 +790,8 @@ class FakeTensorMode(TorchDispatchMode):
                     and type(x) is not torch.nn.Parameter
                 )
 
-            tree_map(check_non_fake_tensor, args)
-            tree_map(check_non_fake_tensor, kwargs)
+            # tree_map(check_non_fake_tensor, args)
+            # tree_map(check_non_fake_tensor, kwargs)
 
             # Suppose we enable fake tensor mode.  This means that fake tensor
             # mode will run first.  But what if we do an operation that
@@ -822,21 +831,22 @@ class FakeTensorMode(TorchDispatchMode):
                     f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
                 )
 
+            if func == torch.ops.aten.rand_like.default:
+                return op_implementations[0][1](self, func, *args, **kwargs)
             for run_impl_check, op_impl in op_implementations:
                 if run_impl_check(func):
                     op_impl_out = op_impl(self, func, *args, **kwargs)
                     if op_impl_out != NotImplemented:
                         return op_impl_out
 
-            try:
-                with in_kernel_invocation_manager(self):
-                    r = func(*args, **kwargs)
-            except NotImplementedError as not_implemented_error:
-                if not self.allow_fallback_kernels:
-                    raise not_implemented_error
-                return run_fallback_kernel(
-                    self, func, args, kwargs, not_implemented_error
-                )
+            r = args[0]
+            # try:
+            # except NotImplementedError as not_implemented_error:
+            #     if not self.allow_fallback_kernels:
+            #         raise not_implemented_error
+            #     return run_fallback_kernel(
+            #         self, func, args, kwargs, not_implemented_error
+            #     )
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -859,7 +869,7 @@ class FakeTensorMode(TorchDispatchMode):
             if kwargs.get("device", None):
                 return tree_map(partial(wrap, device=kwargs["device"]), r)
 
-            return tree_map(partial(wrap), r)
+            return partial(wrap)(r)
 
     def may_turn_const(self, t):
         return (

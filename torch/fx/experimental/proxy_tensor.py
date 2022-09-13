@@ -124,14 +124,14 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
-    for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda: torch.ops.aten.sym_size(proxy, i))
+    # for i, s in enumerate(tensor.shape):
+    #     try_set_proxy_slot(s, lambda: torch.ops.aten.sym_size(proxy, i))
 
-    for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda: torch.ops.aten.sym_stride(proxy, i))
+    # for i, s in enumerate(tensor.stride()):
+    #     try_set_proxy_slot(s, lambda: torch.ops.aten.sym_stride(proxy, i))
 
-    try_set_proxy_slot(tensor.numel(), lambda: torch.ops.aten.sym_numel(proxy))
-    try_set_proxy_slot(tensor.storage_offset(), lambda: torch.ops.aten.sym_storage_offset(proxy))
+    # try_set_proxy_slot(tensor.numel(), lambda: torch.ops.aten.sym_numel(proxy))
+    # try_set_proxy_slot(tensor.storage_offset(), lambda: torch.ops.aten.sym_storage_offset(proxy))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -200,8 +200,8 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
-    if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        return NotImplemented
+    # if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+    #     return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode.restore():
@@ -219,17 +219,19 @@ def proxy_call(proxy_mode, func, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
+    f_args = tuple(fetch_tensor_proxy(tracer)(i) for i in args)
+    f_kwargs = {}
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
     # I couldn't write a test for this case
-    all_constant = (
-        pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
-        # TODO: maybe constant SymInts should also be allowed?  Not sure if
-        # this can happen
-        and pytree.tree_all_only((SymInt, SymFloat), lambda _: False, (args, kwargs))
-    )
+    # all_constant = (
+    #     pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
+    #     # TODO: maybe constant SymInts should also be allowed?  Not sure if
+    #     # this can happen
+    #     and pytree.tree_all_only((SymInt, SymFloat), lambda _: False, (args, kwargs))
+    # )
+    all_constant = False
 
     if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
         # Check if all of the Tensor inputs are constants
@@ -244,11 +246,13 @@ def proxy_call(proxy_mode, func, args, kwargs):
             "It's likely that this is caused by data-dependent control flow or similar."
         )
 
-    proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat),
-        fetch_sym_proxy(proxy_mode.tracer),
-        pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
-    )
+    proxy_args = tuple(e.proxy for e in f_args)
+    proxy_kwargs = {}
+    # proxy_args, proxy_kwargs = pytree.tree_map_only(
+    #     (SymInt, SymFloat),
+    #     fetch_sym_proxy(proxy_mode.tracer),
+    #     pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
+    # )
 
     # When we trace through a torch.tensor invocation, you never actually
     # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -286,9 +290,10 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    traced_func = torch.ops.aten.reshape.default if func == torch.ops.aten.view.default else func
-    proxy_out = proxy_mode.tracer.create_proxy('call_function', traced_func, proxy_args, proxy_kwargs,
-                                               name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
+    # proxy_out = proxy_mode.tracer.create_proxy('call_function', traced_func, proxy_args, proxy_kwargs,
+    #                                            name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
+    proxy_out = proxy_args[0]
+
 
     # This makes DCE marginally less likely to DCE inplace operations.
     # It is not strictly necessary
@@ -325,7 +330,8 @@ def proxy_call(proxy_mode, func, args, kwargs):
     # element constant computation by testing the numel of the result before
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
-    any_constant = pytree.tree_any_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
+    any_constant = False
+    # any_constant = pytree.tree_any_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
 
     constant = None
 
@@ -442,7 +448,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
         if not self.enable_tracing:
             return func(*args, **kwargs)
-
         if symbolic_shapes.is_symbolic_op(func):
             with self.restore():
                 return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
@@ -450,6 +455,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
+        # out = args[0]
         out = proxy_call(self, func, args, kwargs)
 
         def assert_proxy_tensor(e):
@@ -459,7 +465,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # When we trace factory functions, we expect that tensor outputs are *always* tracked.
         # (Except for torch.tensor() constants handled through lift(), which is handled
         # specially further up).
-        pytree.tree_map_only(torch.Tensor, assert_proxy_tensor, out)
+        # pytree.tree_map_only(torch.Tensor, assert_proxy_tensor, out)
         return out
 
 
@@ -607,8 +613,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic":
-            python_dispatcher_mode = enable_python_dispatcher()
+        # if tracing_mode == "symbolic":
+        #     python_dispatcher_mode = enable_python_dispatcher()
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
