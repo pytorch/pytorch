@@ -1490,30 +1490,6 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    def test_jacrev_inplace(self):
-        def f(x, y):
-            y.copy_(x)
-            return y
-
-        out = jacrev(f, argnums=0)  # x is differentiable
-        x, y = torch.randn(2), torch.randn(2)
-        self.assertEqual(out(x, y), torch.eye(y.shape[0]))
-
-        # testing tuple of argnums with the example that raised this issue originally
-        def g(x, y, z):
-            x[:2] = y
-            return torch.vstack([(x**2).sum(), (z**3).sum()])
-
-        out = jacrev(g, argnums=(1, 2))
-        x, y, z = torch.randn(3), torch.randn(2), torch.randn(2)
-
-        expected_out = (torch.zeros(2, 1, 2), torch.zeros(2, 1, 2))
-        expected_out[0][0][0] = 2 * y  # top left corner
-        expected_out[1][1][0] = 3 * (z ** 2)  # bottom right corner
-
-        out_val = out(x, y, z)
-        self.assertEqual(out_val, expected_out)
-
     def test_vmapvmapjvp_linalg_solve(self):
         ops = [op for op in op_db if op.name == "linalg.solve"]
         assert len(ops) > 0
