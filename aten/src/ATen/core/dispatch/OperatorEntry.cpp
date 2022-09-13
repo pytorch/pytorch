@@ -329,10 +329,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // to let the original CompositeImplicitAutograd handle Undefined
   if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
     if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
-      if (!has_backend_kernel) {
-        return {*nested_registration, "nested kernel"};
+      return {*nested_registration, "nested kernel"};
       }
-    }
   }
 
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {

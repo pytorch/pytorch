@@ -71,6 +71,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
     "sparse_dim",  # returns an int
+    "_nested_tensor_offsets",  # returns a vector of ints
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
