@@ -21,7 +21,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
+     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
@@ -749,6 +749,27 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(2)
     yield SampleInput(1, args=(3, 1))
+
+
+def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), -100, 100),
+        ((S, S), 0, 1),
+        ((S, S, S), 1, 2),
+    )
+    for shape, hi, lo in samples:
+        yield SampleInput(make_arg(shape), args=(hi, lo))
+
+
+def error_inputs_uniform(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    yield ErrorInput(
+        SampleInput(t, args=(3, -1)),
+        error_type=RuntimeError,
+        error_regex=r"uniform_ expects to return a \[from, to\) range, but found from=3 > to=-1",
+    )
 
 
 def error_inputs_linspace(op, device, **kwargs):
@@ -2126,14 +2147,6 @@ def error_inputs_renorm(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(zero_d, args=(0.5, 0, 1.0)), error_type=RuntimeError,
                      error_regex="needs at least 2 dimensions, got 0 dimensions")
 
-def error_inputs_eig(op_info, device, **kwargs):
-    zero_d = torch.randn((), device=device)
-
-    yield ErrorInput(SampleInput(zero_d, args=(False,)), error_type=RuntimeError,
-                     error_regex="input should be 2 dimensional")
-
-    yield ErrorInput(SampleInput(zero_d, args=(True,)), error_type=RuntimeError,
-                     error_regex="input should be 2 dimensional")
 
 def error_inputs_ormqr(op_info, device, **kwargs):
     # this is only implemented on cpu
@@ -4801,41 +4814,6 @@ def sample_inputs_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs
 
     yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
 
-def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
-    eigvecs = make_tensor((S, S), device=device, dtype=dtype,
-                          low=None, high=None)
-    eigvals = make_tensor((S,), device=device, dtype=dtype,
-                          low=None, high=None)
-    # we produce only diagonazible inputs which do not have
-    # complex eigenvalues for real inputs, as there is no
-    # backward implementation for real inputs with complex
-    # eigenvalues yet.
-    input = (eigvecs * eigvals.unsqueeze(-2)) @ eigvecs.inverse()
-    input.requires_grad_(requires_grad)
-
-    def process_output(eigpair):
-        eigvals, eigvecs = eigpair
-        if dtype.is_complex:
-            # eig produces eigenvectors which are normalized to 1 norm.
-            # Note that if v is an eigenvector, so is v * e^{i \phi},
-            # and |v| = |v * e^{i \phi}| = 1.
-            # This, however, makes the eigenvector backward computation process
-            # rather unstable unless the objective function is gauge-invariant,
-            # that is if f(z) == f(|z|), for example.
-            # Hence for complex inputs we ignore the phases and return only
-            # the absolute values.
-            return eigvals, eigvecs.abs()
-        else:
-            return eigvals, eigvecs
-
-    return [
-        SampleInput(
-            input,
-            kwargs=dict(eigenvectors=True),
-            output_process_fn_grad=process_output
-        ),
-    ]
-
 
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
@@ -4900,22 +4878,15 @@ def error_inputs_flipud(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device)),
                      error_regex="Input must be >= 1-d.")
 
-# TODO: clamp shares tensors among its sample inputs --- we should prohibit this!
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
-    x = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    lb = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    ub = make_tensor((S, M, S), dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    shape = (S, M, S)
 
-    def detach(tensor):
-        return tensor.clone().detach_().requires_grad_(requires_grad)
-
-    return [
-        SampleInput(detach(x), args=(lb, ub)),
-        SampleInput(detach(x), args=(detach(lb[0]), detach(ub[0]))),
-        SampleInput(detach(x), args=(detach(lb[:, :1]),)),
-        SampleInput(detach(x), args=(None, ub)),
-        SampleInput(detach(x), args=(lb, None)),
-    ]
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape[1:]), make_arg(shape[1:])))
+    yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
+    yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -8028,6 +7999,31 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('uniform',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
+           method_variant=None,
+           inplace_variant=torch.Tensor.uniform_,
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_autograd=False,
+           is_factory_function=False,
+           sample_inputs_func=sample_inputs_uniform,
+           error_inputs_func=error_inputs_uniform,
+           skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Tests that assume input tensor has a meningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # aten.uniform_.default - couldn't find symbolic meta function/decomposition
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               # aten.uniform was not decomposed
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
@@ -12962,16 +12958,6 @@ op_db: List[OpInfo] = [
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
                    supports_autograd=False),
-    OpInfo('eig',
-           op=torch.eig,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_eig,
-           error_inputs_func=error_inputs_eig,
-           decorators=[
-               skipCUDAIfNoMagma,
-               skipCPUIfNoLapack,
-           ],
-           ),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
@@ -14774,7 +14760,6 @@ op_db: List[OpInfo] = [
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         decorators=[
             onlyCUDA,
-            skipCUDAIfRocm,
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
@@ -14799,6 +14784,9 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.bool]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=[torch.bool]),
+            # ROCm generates -inf+infj instead of nan+infj for complex64 for some of the results
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                         dtypes=[torch.complex64], active_if=TEST_WITH_ROCM),
             # Expected failure: torch.jiterator_unary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -14816,7 +14804,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         supports_rhs_python_scalar=False,
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14841,7 +14829,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=4, alpha=3.14, beta=-4.20),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14861,7 +14849,7 @@ op_db: List[OpInfo] = [
         op=torch.cuda.jiterator._create_multi_output_jit_fn(
             """
             template <typename T>
-            T binary_return_by_ref(T i0, T i1, T& out0) {
+            void binary_return_by_ref(T i0, T i1, T& out0) {
                 out0 = i0 + i1;
             }
             """,
@@ -14872,7 +14860,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         supports_rhs_python_scalar=False,
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14892,7 +14880,7 @@ op_db: List[OpInfo] = [
         op=torch.cuda.jiterator._create_multi_output_jit_fn(
             """
             template <typename T>
-            T binary_2outputs(T i0, T i1, T& out0, T& out1) {
+            void binary_2outputs(T i0, T i1, T& out0, T& out1) {
                 out0 = i0 + i1;
                 out1 = i0 - i1;
             }
@@ -14903,7 +14891,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
-        decorators=[onlyCUDA, skipCUDAIfRocm],
+        decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -14926,20 +14914,24 @@ op_db: List[OpInfo] = [
         "norm",
         sample_inputs_func=sample_inputs_norm,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
-        check_batched_forward_grad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Dispatches in Python to vector_norm. Not sure how to make this test happy
-            # Happens to pass on complex64. Also a mystery
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
     ),
     OpInfo('norm',
            variant_test_name='nuc',
+           aten_name='nuclear_norm',
            sample_inputs_func=sample_inputs_norm_nuc,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            check_batched_gradgrad=False,
@@ -14951,14 +14943,19 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
-               # Dispatches in Python to matrix_norm. Not sure how to make this test happy
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
+               # RuntimeError not raised :
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # RuntimeError:
+               # Arguments for call are not valid.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
+           )
            ),
     OpInfo('norm',
            variant_test_name='fro',
+           aten_name='frobenius_norm',
            sample_inputs_func=sample_inputs_norm_fro,
-           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
@@ -14972,25 +14969,30 @@ op_db: List[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Dispatches in Python to vector_norm. Not sure how to make this test happy
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
-           ),
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # Arguments for call are not valid.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
+           )),
     OpInfo(
         "norm",
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
-        check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         # fast gradcheck produces NaNs
         gradcheck_fast_mode=False,
         skips=(
-            # Dispatches in Python to vector_norm. Not sure how to make this test happy
-            # Happens to pass on complex64. Also a mystery
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
     ),
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
@@ -16866,12 +16868,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
