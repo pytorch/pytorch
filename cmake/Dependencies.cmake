@@ -1365,7 +1365,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
