@@ -11,11 +11,6 @@ import torch._C
 import torch.jit
 from torch import _utils_internal
 
-# from torch._C import DispatchKey  # type: ignore[attr-defined]
-# from torch.overrides import handle_torch_function, has_torch_function
-# from torch.utils._python_dispatch import TorchDispatchMode
-# from torch.utils._pytree import tree_flatten
-
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
