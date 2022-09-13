@@ -281,7 +281,7 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupUCC::WorkUCC::getFuture() {
 int ProcessGroupUCC::WorkUCC::sourceRank() const {
   if (opType_ != OpType::RECV && opType_ != OpType::RECVANYSOURCE) {
     // Throw an error
-    return ProcessGroup::Work::sourceRank();
+    return Work::sourceRank();
   }
   return sourceRank_;
 }
