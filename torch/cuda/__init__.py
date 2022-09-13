@@ -16,7 +16,7 @@ import traceback
 import warnings
 import threading
 from functools import lru_cache as _lru_cache
-from typing import List, Optional, Tuple, Union, Any
+from typing import Any, List, Optional, Set, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, \
@@ -461,12 +461,62 @@ def set_stream(stream: Stream):
         return
     torch._C._cuda_setStream(stream._cdata)
 
+def _parse_visible_devices() -> Set[int]:
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+    if var is None:
+        return set(x for x in range(64))
+
+    def _strtoul(s: str) -> int:
+        """ Return -1 or integer sequence string starts with """
+        if len(s) == 0:
+            return -1
+        for idx, c in enumerate(s):
+            if not c.isdigit():
+                break
+            if idx + 1 == len(s):
+                idx += 1
+        return int(s[:idx]) if idx > 0 else -1
+
+    # CUDA_VISIBLE_DEVICES uses something like strtoul
+    # which makes `1gpu2,2ampere` is equivalent to `1,2`
+    rc: Set[int] = set()
+    for elem in var.split(","):
+        rc.add(_strtoul(elem.strip()))
+    return rc
+
+def _raw_device_count_nvml() -> int:
+    from ctypes import CDLL, c_int
+    nvml_h = CDLL("libnvidia-ml.so.1")
+    rc = nvml_h.nvmlInit()
+    if rc != 0:
+        warnings.warn("Can't initialize NVML")
+        return -1
+    dev_arr = (c_int * 1)(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(dev_arr)
+    if rc != 0:
+        warnings.warn("Can't get nvml device count")
+        return -1
+    del nvml_h
+    return dev_arr[0]
+
+def _device_count_nvml() -> int:
+    try:
+        raw_cnt = _raw_device_count_nvml()
+        if raw_cnt <= 0:
+            return raw_cnt
+        return len(set(range(raw_cnt)).intersection(_parse_visible_devices()))
+    except OSError:
+        return -1
+    except AttributeError:
+        return -1
+
 @_lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if not _is_compiled():
         return 0
-    return torch._C._cuda_getDeviceCount()
+    nvml_count = _device_count_nvml()
+    return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
 
 def get_arch_list() -> List[str]:
     r"""Returns list CUDA architectures this library was compiled for."""

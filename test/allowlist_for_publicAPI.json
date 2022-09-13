@@ -331,6 +331,7 @@
     "Dict",
     "List",
     "Optional",
+    "Set",
     "Tuple",
     "Union",
     "classproperty"
