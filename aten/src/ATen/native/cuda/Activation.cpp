@@ -20,6 +20,7 @@
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/prelu_backward_native.h>
 #include <ATen/ops/prelu_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at { namespace native {
@@ -90,7 +91,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, T
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
   auto result = at::empty_like(input);
-  auto buffer = at::empty_like(input);
+  auto buffer = at::zeros({}, input.options()).expand_as(input);
   log_sigmoid_forward_out_cuda(input, result, buffer);
   return std::forward_as_tuple(result, buffer);
 }
