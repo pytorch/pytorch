@@ -209,10 +209,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::ListType: {
       // If the object is a ScriptList, retrieve the c10::List
       // instance inside it.
-      try {
-        auto script_list = py::cast<ScriptList>(obj);
-        return script_list.list_;
-      } catch (...) {
+      if (py::isinstance<ScriptList>(obj)) {
+        return py::cast<ScriptList>(obj).list_;
       }
 
       // If not (i.e. it is a regular Python list), make a new
