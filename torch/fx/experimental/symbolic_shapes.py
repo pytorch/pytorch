@@ -9,11 +9,11 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten
+aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "is_symbolic_op", "handle_symbolic_op", "PySymInt", "ShapeEnv",
-    "SymDispatchMode"
+    "SymDispatchMode", "PySymFloat", "sym_float"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -59,7 +59,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return any([isinstance(i, torch._C.SymIntNode) for i in elem.shape])
+    return any([isinstance(i, torch.SymIntNode) for i in elem.shape])
 
 def create_contiguous(shape):
     strides = [1]
@@ -101,6 +101,11 @@ def _handle_sym_dispatch(func, args, kwargs):
     finally:
         SYM_FUNCTION_MODE = mode
 
+def sym_float(a):
+    if hasattr(a, '__sym_float__'):
+        return a.__sym_float__()
+    return float(a)
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -129,8 +134,29 @@ class PySymInt(object):
     def __int__(self):
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
+    def __sym_float__(self):
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(sym_float, (self,), {})
+        # TODO: consider constant prop here
+        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
+        # not?
+        return PySymFloat(self.expr, self.shape_env)
+
     def __bool__(self):
         return bool(self.shape_env.evaluate_expr(self.expr))
+
+class PySymFloat:
+    def __init__(self, expr, shape_env, constant=None):
+        self.expr = expr
+        self.shape_env = shape_env
+        self.constant = constant
+
+    def wrap(self, num):
+        return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
+
+    def __str__(self):
+        return f"{self.expr}"
+
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -159,10 +185,11 @@ for method, _func in magic_methods.items():
                 return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
             if isinstance(other, PySymInt):
                 other = other.expr
+            # TODO: consider constant prop here
             return PySymInt(func(self.expr, other), self.shape_env)
         return magic_impl
 
-    # this should be wrapped transparently into torch._C.SymIntNode
+    # this should be wrapped transparently into torch.SymIntNode
     setattr(PySymInt, method, _create_magic_impl(_func))
     setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
     if method in reflectable_magic_methods:
@@ -183,7 +210,7 @@ class ShapeEnv(object):
             return val
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch._C.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         shape_env[sympy_expr] = val
         return cpp_sym_int
 
