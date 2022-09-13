@@ -23,9 +23,15 @@ aten = torch.ops.aten
 # Note that we would be building the backward graph at the decomposed level
 # too, but that is OK, because we would've errored out otherwise anyway.
 #
-# TODO: what if jit decompositions exists, should we just use it?
-#       or do we want to have an explicit white list like functorch had
-#       using special JVP_DECOMP DynamicLayerFront kernel
+# TODO: The mechanism we are using to register decompositions doesn't
+# seem to be exclusively used for jvp. So open question here is whether
+# torch/csrc/jit/runtime/decomposition_registry.cpp is being used for other things.
+# If that is the case, we may go down the decomposition path unexpectedly
+# (and possibly produce an unintelligible error) vs erroring out earlier and
+# printing that the forward AD formula is not implemented.
+#
+# The solution to this may be to have a explicitly white list control when
+# to enable the decomposition.
 
 
 def maybe_register_decomposition(op):
@@ -179,7 +185,7 @@ def native_layer_norm_backward(
         if len(outer_dim_indices) > 0:
             d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
-            d_bias = grad_out
+            d_bias = grad_out.clone()
     elif bias is not None:
         d_bias = torch.zeros_like(bias)  # should be None but doesn't work with vjp
     else:
