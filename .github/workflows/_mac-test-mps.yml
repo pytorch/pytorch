@@ -6,7 +6,7 @@ on:
       build-environment:
         required: true
         type: string
-        description: Top-level label for whats being built/tested.
+        description: Top-level label for what's being built/tested.
       sync-tag:
         required: false
         type: string
