@@ -143,10 +143,14 @@ class PySymInt(object):
         return f"{self.expr}"
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
-    # In the future we'll probably need some explicit way of allowing this
+    # You can manually trigger a guard
     def __int__(self):
+        raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
+
+    def guard_int(self, file, line):
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
         return int(self.shape_env.evaluate_expr(self.expr))
-        # raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
     def __sym_float__(self):
         if SYM_FUNCTION_MODE:

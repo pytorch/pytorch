@@ -156,10 +156,14 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return getPyObj().attr("__bool__")().is(py::handle(Py_True));
   }
 
-  virtual int64_t int_(const char* file, int64_t line) override {
+  virtual int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
-    // TODO: propagate file and line
-    return getPyObj().attr("__int__")().cast<int64_t>();
+    return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
+  }
+
+  virtual int64_t int_() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("__int__").cast<int64_t>();
   }
 
   // TODO: virtualize
@@ -1387,9 +1391,10 @@ void initJITBindings(PyObject* module) {
                 return a->ge(snb);
               })
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
+          .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
           // Intentionally don't set file line, as the Python backtrace matters
           // more here
-          .def("__int__", [](c10::SymIntNode a) { return a->int_(nullptr, 0); })
+          .def("guard_int", [](c10::SymIntNode a) { return a->guard_int(nullptr, 0); })
           .def(
               "__sym_float__",
               [](c10::SymIntNode a) {
