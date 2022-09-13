@@ -1461,6 +1461,18 @@ TEST(TestSymInt, TestIntrusive) {
   ASSERT_EQ(b.use_count(), 3);
 }
 
+TEST(TestSymInt, TestIntrusiveScalar) {
+  auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
+  Scalar b;
+  {
+    auto as = a->toSymInt();
+    b = as;
+  }
+  ASSERT_EQ(a.use_count(), 2);
+  b = 0;
+  ASSERT_EQ(a.use_count(), 1);
+}
+
 class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
  public:
   TestSymIntNodeImpl(int64_t i) : i_(i) {}
