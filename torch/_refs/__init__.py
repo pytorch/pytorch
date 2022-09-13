@@ -3285,11 +3285,9 @@ def new_zeros(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    return torch.full(
+        size, 0, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
-    r.zero_()
-    return r
 
 
 @register_decomposition(torch.ops.aten.new_ones)
@@ -3302,11 +3300,9 @@ def new_ones(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    return torch.full(
+        size, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
-    r.fill_(1)
-    return r
 
 
 @register_decomposition(torch.ops.aten.new_full)
@@ -3320,11 +3316,9 @@ def new_full(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    return torch.full(
+        size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
-    r.fill_(fill_value)  # type: ignore[arg-type]
-    return r
 
 
 def empty_like(
