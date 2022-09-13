@@ -143,7 +143,12 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     PTMCoreMLExecutor *executor = model_wrapper->executor;
     [executor setInputs:inputs];
 
-    id<MLFeatureProvider> outputsProvider = [executor forward];
+    NSError *error;
+    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
+    if (!outputsProvider) {
+      TORCH_CHECK(false, [[error description] UTF8String]);
+    }
+
     return pack_outputs(model_wrapper->outputs, outputsProvider);
   }
 
