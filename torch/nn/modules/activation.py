@@ -162,7 +162,6 @@ class RReLU(Module):
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
-        assert self.lower < self.upper, "Lower bound should be less than the upper bound"
 
     def forward(self, input: Tensor) -> Tensor:
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)

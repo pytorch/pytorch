@@ -14503,11 +14503,11 @@ class TestNNDeviceType(NNTestCase):
 
     def test_rrelu_bounds(self, device):
         def test(inplace, module, input, lower, upper):
-            with self.assertRaisesRegex(AssertionError, "Lower bound should be less than the upper bound"):
+            with self.assertRaisesRegex(RuntimeError, "Lower bound must be less than the upper bound"):
                 if inplace is None:
                     module(input, lower, upper)
                 elif input is None:
-                    module(lower, upper, inplace)
+                    module(lower, upper, inplace)(torch.rand((2)))
                 module(input, lower, upper, inplace)
 
         input = torch.rand((3, 3), device=device, dtype=torch.float32)

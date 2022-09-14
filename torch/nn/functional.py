@@ -1672,8 +1672,6 @@ def rrelu(
 
     See :class:`~torch.nn.RReLU` for more details.
     """
-    if lower > upper:
-        raise AssertionError("Lower bound should be less than the upper bound")
     if has_torch_function_unary(input):
         return handle_torch_function(
             rrelu, (input,), input, lower=lower, upper=upper, training=training, inplace=inplace
@@ -1685,17 +1683,13 @@ def rrelu(
     return result
 
 
-def rrelu_(
-    input: Tensor, lower: float = 1.0 / 8, upper: float = 1.0 / 3, training: bool = False
-) -> Tensor:
-    r"""rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
-
-    In-place version of :func:`~rrelu`.
-    """
-    if lower > upper:
-        raise AssertionError("Lower bound should be less than the upper bound")
-    return torch.rrelu_(input, lower, upper, training)
-
+rrelu_ = _add_docstr(
+    torch.rrelu_,
+    r"""
+rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
+In-place version of :func:`~rrelu`.
+""",
+)
 
 logsigmoid = _add_docstr(
     torch._C._nn.log_sigmoid,
