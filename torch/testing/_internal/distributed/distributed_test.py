@@ -5978,6 +5978,7 @@ class DistributedTest:
         def test_all_gather_object_default_pg(self):
             return self._test_allgather_object()
 
+        @sandcastle_skip_if(BACKEND == "ucc", "TODO: add UCC sequence number support")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
@@ -6036,11 +6037,13 @@ class DistributedTest:
                     group=pg
                 )
 
+        @sandcastle_skip_if(BACKEND == "ucc", "TODO: add UCC sequence number support")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
+        @sandcastle_skip_if(BACKEND == "ucc", "TODO: add UCC sequence number support")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):

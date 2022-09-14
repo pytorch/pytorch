@@ -69,6 +69,7 @@ TEST_SKIPS = {
     ),
 }
 
+
 @dataclass
 class DistTestCases:
     # Backends that do not support a specific collective
@@ -80,7 +81,7 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo", "ucc"} 
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
@@ -113,6 +114,7 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+
 def skip_if_odd_worldsize(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -122,6 +124,7 @@ def skip_if_odd_worldsize(func):
         return func(*args, **kwargs)
 
     return wrapper
+
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
@@ -343,6 +346,7 @@ TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 if TEST_WITH_ROCM:
     TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
+
 def create_device(interface=None):
     if sys.platform == "win32" or interface is None:
         return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
@@ -434,7 +438,7 @@ def init_multigpu_helper(world_size: int, backend: str):
         nGPUs_per_process = nGPUs // world_size
     rank_to_GPU = {
         i: list(
-            visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
+            visible_devices[i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
         )
         for i in range(world_size)
     }
@@ -806,8 +810,10 @@ class MultiProcessTestCase(TestCase):
     def is_master(self) -> bool:
         return self.rank == 0
 
+
 # Cannot use functools.cache as it requires python 3.9
 EFA_PROBE_RESULT = None
+
 
 def has_efa() -> bool:
     """
