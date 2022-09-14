@@ -51,17 +51,23 @@ MINIMUM_MSVC_VERSION = (19, 0, 24215)
 CUDA_GCC_VERSIONS = {
     '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.2': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.3': (MINIMUM_GCC_VERSION, (10, 2, 1)),
+    '11.4': ((6, 0, 0), (11, 5, 0)),
+    '11.5': ((6, 0, 0), (11, 5, 0)),
+    '11.6': ((6, 0, 0), (11, 5, 0)),
+    '11.7': ((6, 0, 0), (11, 5, 0)),
 }
 
 CUDA_CLANG_VERSIONS = {
     '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (10, 0, 0)),
-    '11.2': ((6, 0, 0), (10, 0, 0)),
-    '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.1': ((6, 0, 0), (9, 0, 0)),
+    '11.2': ((6, 0, 0), (9, 0, 0)),
+    '11.3': ((6, 0, 0), (11, 0, 0)),
+    '11.4': ((6, 0, 0), (11, 0, 0)),
+    '11.5': ((6, 0, 0), (12, 0, 0)),
+    '11.6': ((6, 0, 0), (12, 0, 0)),
+    '11.7': ((6, 0, 0), (13, 0, 0)),
 }
 
 
@@ -387,6 +393,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
         min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds that 11.4.1
+        if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
+            max_compiler_version = (10, 0, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
         max_compiler_version_str = '.'.join(map(str, max_compiler_version))
 
@@ -896,19 +905,20 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
-                name='extension',
-                ext_modules=[
-                    CppExtension(
-                        name='extension',
-                        sources=['extension.cpp'],
-                        extra_compile_args=['-g']),
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='extension',
+        ...     ext_modules=[
+        ...         CppExtension(
+        ...             name='extension',
+        ...             sources=['extension.cpp'],
+        ...             extra_compile_args=['-g']),
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -942,20 +952,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
-                name='cuda_extension',
-                ext_modules=[
-                    CUDAExtension(
-                            name='cuda_extension',
-                            sources=['extension.cpp', 'extension_kernel.cu'],
-                            extra_compile_args={'cxx': ['-g'],
-                                                'nvcc': ['-O2']})
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='cuda_extension',
+        ...     ext_modules=[
+        ...         CUDAExtension(
+        ...                 name='cuda_extension',
+        ...                 sources=['extension.cpp', 'extension_kernel.cu'],
+        ...                 extra_compile_args={'cxx': ['-g'],
+        ...                                     'nvcc': ['-O2']})
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
 
     Compute capabilities:
 
@@ -989,10 +1000,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
+        >>> # xdoctest: +SKIP
         >>> #include <ATen/ATen.h>
         >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
+        >>> # xdoctest: +SKIP
         >>> #include <torch/extension.h>
         >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
@@ -1017,13 +1030,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> CUDAExtension(
-                    name='cuda_extension',
-                    sources=['extension.cpp', 'extension_kernel.cu'],
-                    dlink=True,
-                    dlink_libraries=["dlink_lib"],
-                    extra_compile_args={'cxx': ['-g'],
-                                        'nvcc': ['-O2', '-rdc=true']})
+        ...        name='cuda_extension',
+        ...        sources=['extension.cpp', 'extension_kernel.cu'],
+        ...        dlink=True,
+        ...        dlink_libraries=["dlink_lib"],
+        ...        extra_compile_args={'cxx': ['-g'],
+        ...                            'nvcc': ['-O2', '-rdc=true']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1155,7 +1169,7 @@ def library_paths(cuda: bool = False) -> List[str]:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif cuda:
         if IS_WINDOWS:
-            lib_dir = 'lib/x64'
+            lib_dir = os.path.join('lib', 'x64')
         else:
             lib_dir = 'lib64'
             if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -1255,12 +1269,13 @@ def load(name,
             added to the PATH environment variable as a side effect.)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load
         >>> module = load(
-                name='extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_cflags=['-O2'],
-                verbose=True)
+        ...     name='extension',
+        ...     sources=['extension.cpp', 'extension_kernel.cu'],
+        ...     extra_cflags=['-O2'],
+        ...     verbose=True)
     '''
     return _jit_compile(
         name,
@@ -1346,14 +1361,14 @@ def load_inline(name,
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
-        >>> source = \'\'\'
+        >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
           return x.sin() + y.sin();
         }
-        \'\'\'
+        """
         >>> module = load_inline(name='inline_extension',
-                                 cpp_sources=[source],
-                                 functions=['sin_add'])
+        ...                      cpp_sources=[source],
+        ...                      functions=['sin_add'])
 
     .. note::
         By default, the Ninja backend uses #CPUS + 2 workers to build the
@@ -1681,10 +1696,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if verbose:
             print('Detected CUDA files, patching ldflags', file=sys.stderr)
         if IS_WINDOWS:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib/x64")}')
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
+                extra_ldflags.append(os.path.join(CUDNN_HOME, "lib", "x64"))
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')

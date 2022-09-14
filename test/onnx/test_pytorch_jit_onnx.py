@@ -17,9 +17,6 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     PyTorch tensor inputs.
     """
 
-    # Shape inference is required because some ops' symbolic functions
-    # generate sub-graphs based on inputs' types.
-    torch.onnx.symbolic_helper._set_onnx_shape_inference(True)
     torch.onnx.symbolic_helper._set_opset_version(opset_version)
     graph = torch.onnx.utils._optimize_graph(
         graph, operator_export_type, params_dict={}
@@ -50,6 +47,9 @@ class _TestJITIRToONNX:
 
     opset_version = -1  # Sub-classes must override
     ort_providers = ["CPUExecutionProvider"]
+    check_shape = True
+    check_dtype = True
+    ignore_none = True  # True for tracing, and Flase for scripting
 
     def run_test(self, graph_ir, example_inputs):
         graph = torch._C.parse_ir(graph_ir)
@@ -64,7 +64,14 @@ class _TestJITIRToONNX:
         ort_outs = verification._run_ort(ort_sess, example_inputs)
 
         verification._compare_ort_pytorch_outputs(
-            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+            ort_outs,
+            jit_outs,
+            rtol=1e-3,
+            atol=1e-7,
+            check_shape=self.check_shape,
+            check_dtype=self.check_dtype,
+            ignore_none=self.ignore_none,
+            acceptable_error_percentage=None,
         )
 
     def test_example_ir(self):

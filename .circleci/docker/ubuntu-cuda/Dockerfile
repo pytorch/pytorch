@@ -62,6 +62,17 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+# (optional) Install UCC
+ARG UCX_COMMIT
+ARG UCC_COMMIT
+ENV UCX_COMMIT $UCX_COMMIT
+ENV UCC_COMMIT $UCC_COMMIT
+ENV UCX_HOME /usr
+ENV UCC_HOME /usr
+ADD ./common/install_ucc.sh install_ucc.sh
+RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
+RUN rm install_ucc.sh
+
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
@@ -107,9 +118,14 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 # Install CUDNN
 ARG CUDNN_VERSION
+ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
 RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
+
+# Delete /usr/local/cuda-11.X/cuda-11.X symlinks
+RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
+RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 
 USER jenkins
 CMD ["bash"]

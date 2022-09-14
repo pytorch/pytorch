@@ -2144,9 +2144,10 @@ def embedding(
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding(input, embedding_matrix)
         tensor([[[ 0.8490,  0.9625,  0.6753],
                  [ 0.9666,  0.7761,  0.6108],
@@ -2284,6 +2285,7 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
@@ -2675,7 +2677,7 @@ def nll_loss(
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.tensor([1, 0, 4])
-        >>> output = F.nll_loss(F.log_softmax(input), target)
+        >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -2937,12 +2939,12 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+        input (Tensor) : Predicted unnormalized logits;
             see Shape section below for supported shapes.
         target (Tensor) : Ground truth class indices or class probabilities;
             see Shape section below for supported shapes.

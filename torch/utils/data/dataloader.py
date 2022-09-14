@@ -624,7 +624,7 @@ class _BaseDataLoaderIter(object):
         if isinstance(self._dataset, IterDataPipe):
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
+            self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -665,7 +665,7 @@ class _BaseDataLoaderIter(object):
         if isinstance(self._dataset, IterDataPipe):
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
+            self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
 
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
@@ -1430,8 +1430,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # Called when shutting down this `_MultiProcessingDataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
-        python_exit_status = _utils.python_exit_status
-        if python_exit_status is True or python_exit_status is None:
+        if _utils is None or _utils.python_exit_status is True or _utils.python_exit_status is None:
             # See (2) of the note. If Python is shutting down, do no-op.
             return
         # Normal exit when last reference is gone / iterator is depleted.

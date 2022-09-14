@@ -6,10 +6,11 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from contextlib import suppress
+from typing import Callable
 
 import torch
 import torch.distributed as dist
@@ -19,17 +20,17 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.distributed.distributed_c10d as c10d
-from torch.utils.checkpoint import checkpoint
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch.distributed._spmd.comm_tensor import _wait_comm, CommTensor
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
-
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
@@ -38,6 +39,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize
 )
+from torch.utils.checkpoint import checkpoint
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
@@ -1116,6 +1119,32 @@ class AbstractCommTest(object):
             dist.barrier(group=group)
             dist.broadcast(x, src=0, group=group)
 
+    def _test_rank_membership(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self.assertTrue(self.world_size > 1)
+
+        group = dist.new_group(ranks=[1])
+        self.assertEqual(dist.get_group_rank(group, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_group_rank(group, 0)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_group_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_global_rank(group, 0), 1)
+        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+            dist.get_global_rank(group, 1)
+        with self.assertRaisesRegex(RuntimeError, "not registered"):
+            dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
+
+        self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -1324,6 +1353,131 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
+
+
+class CompilerTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CompilerTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(CompilerTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _get_process_group(self):
+        raise NotImplementedError("To be implemented by subclass")
+
+    def _test_work_wait(self, x: torch.Tensor, comm_fn: Callable):
+        pg = self._get_default_group()
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            # N.B.: explicitly wrapping with CommTensor instead of updating
+            # all_reduce Python implementation, as the later will need more
+            # discussion.
+            y = CommTensor(x + x)
+            work, z = comm_fn(y, group=pg)
+            # this wait() will be ignored in tracing mode as
+            # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
+            # and torch.nn.Parameter objects
+            work.wait()
+            return z * 2
+
+        xx = x.clone()
+
+        # trace fn into a GraphModule
+        traced_fn = make_fx(fn)(xx)
+        traced_fn.graph.lint()
+        traced_fn.graph.eliminate_dead_code()
+
+        # make sure the mul op indeed waits for comm
+        for node in traced_fn.graph.nodes:
+            if node.op == "call_function" and "mul.Tensor" in node.target.__name__:
+                prev = node.args[0]
+                curr = None
+                waited = False
+                commed = False
+                while prev is not None and not commed:
+                    curr = prev
+                    waited |= all([
+                        curr.op == "call_function",
+                        curr.target == _wait_comm,
+                    ])
+                    commed |= all([
+                        curr.op == "call_function",
+                        CommTensor._is_supported(curr.target.__name__),
+                    ])
+
+                    prev = curr.args[0]
+
+                self.assertTrue(waited)
+                self.assertTrue(commed)
+
+        # Update input to make sure we are not recording it as constant during
+        # tracing.
+        x += 1
+        xx += 1
+
+        y = fn(x)
+        yy = traced_fn(xx)
+
+        # check correctness
+        self.assertEqual(y, yy)
+
+        xx += 1
+        yy = traced_fn(xx)
+        self.assertFalse(y.allclose(yy))
+
+    def _test_allreduce_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(tensor, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_allgather_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            work = dist.all_gather(out_tensors, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, sum(out_tensors)
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor.clone() + i for i in range(group.size())]
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_broadcast_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.broadcast(tensor, src=0, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor + i for i in range(group.size())] if self.rank == 0 else None
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_nested_comm_tensor_wrapping(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(CommTensor(tensor), group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
 if __name__ == "__main__":

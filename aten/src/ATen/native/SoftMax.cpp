@@ -131,7 +131,18 @@ void host_softmax(
     Tensor output,
     const Tensor& input,
     const int64_t dim,
-    bool* mask = nullptr) {
+    bool* mask = nullptr,
+    const c10::optional<int64_t> mask_type_ = NULL) {
+
+  if (MaskedSoftMax) {
+    TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
+    int64_t mask_type = mask_type_.value();
+    TORCH_CHECK((mask_type == 0) || (mask_type == 1), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask)");
+
+    // TODO: Add support for TxT src_mask
+    TORCH_CHECK(mask_type != 0, "src_mask not currently supported on CPU");
+  }
+
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
@@ -337,13 +348,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, input_.scalar_type(), "log_softmax", [&] {
-          host_softmax<
-              scalar_t,
-              true /* LogSoftMax */,
-              false /* MaskedSoftMax */>(output, input_, dim_);
-        });
+    log_softmax_kernel(kCPU, output, input_, dim_);
   }
 }
 
@@ -372,13 +377,7 @@ TORCH_IMPL_FUNC(softmax_backward_cpu_out)
   if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
-          host_softmax_backward<
-              scalar_t,
-              false /* LogSoftMax */,
-              false /* MaskedSoftmax */>(grad_input, grad_, output, dim_);
-        });
+    softmax_backward_kernel(kCPU, grad_input, grad_, output, dim_);
   }
 }
 
@@ -401,16 +400,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
     if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
       log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output_);
     } else {
-      AT_DISPATCH_FLOATING_TYPES_AND(
-          at::ScalarType::BFloat16,
-          grad.scalar_type(),
-          "log_softmax_backward",
-          [&] {
-            host_softmax_backward<
-                scalar_t,
-                true /* LogSoftMax */,
-                false /* MaskedSoftMax */>(grad_input, grad_, output_, dim_);
-          });
+      log_softmax_backward_kernel(kCPU, grad_input, grad_, output_, dim_);
     }
   }
 }
@@ -551,6 +541,8 @@ DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
 DEFINE_DISPATCH(log_softmax_kernel);
+DEFINE_DISPATCH(softmax_backward_kernel);
+DEFINE_DISPATCH(log_softmax_backward_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
@@ -560,7 +552,7 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
+Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
   TORCH_CHECK(
       input_.sizes() == mask_.sizes(), "Mask shape should match input shape");
   TORCH_CHECK(
@@ -583,7 +575,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>());
+            output, input, dim, mask.data_ptr<bool>(), mask_type_);
       });
   return output;
 }

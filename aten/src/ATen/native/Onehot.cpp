@@ -23,14 +23,14 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     // non-empty tensor
-    if (self.device().type() != at::kCUDA) {
+    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS) {
       //for cuda, rely on device assert thrown by scatter
       TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
     }
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        if (self.device().type() != at::kCUDA) {
+        if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS) {
           //rely on device asserts from scatter to avoid sync here
           TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
         } else {

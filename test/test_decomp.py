@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
@@ -188,12 +189,16 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
             1e-3,
         ),
+        (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # This exceeds default tolerances only on CPU, on CUDA it's fine
+        (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
+        # Exceeds tolerances on CUDA, likely due to fma
+        (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
-
     test_case.assertEqual(orig, decomp, rtol=rtol, atol=atol, msg=f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}")
 
 
@@ -279,7 +284,7 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
-
+    (None, None, "meshgrid"),
 }
 
 all_decomposed = set()
@@ -354,6 +359,7 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
             None,
@@ -392,8 +398,7 @@ class TestDecomp(TestCase):
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
-                    torch.ops.aten.new_empty.default,
-                    torch.ops.aten.new_empty.SymInt
+                    torch.ops.aten.new_empty.default
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 
@@ -424,14 +429,16 @@ class TestDecomp(TestCase):
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
                     for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
-                        if orig is None:
-                            assert decomp is None
+                        if not isinstance(orig, torch.Tensor):
+                            assert type(orig) == type(decomp)
+                            assert orig == decomp
                             continue
                         op_assert_ref(self, func, test_dtype, i, orig, decomp, ref, args, kwargs)
                 else:
                     for orig, decomp in zip(real_out, decomp_out):
-                        if orig is None:
-                            assert decomp is None
+                        if not isinstance(orig, torch.Tensor):
+                            assert type(orig) == type(decomp)
+                            assert orig == decomp
                             continue
                         op_assert_equal(self, func, test_dtype, orig, decomp, args, kwargs)
 

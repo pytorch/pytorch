@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_7-cpu
@@ -188,7 +188,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_7-cpu
@@ -340,7 +340,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_7-cuda11_3
@@ -414,7 +414,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_7-cuda11_3
@@ -567,7 +567,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_7-cuda11_6
@@ -641,7 +641,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_7-cuda11_6
@@ -794,7 +794,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_7-cuda11_7
@@ -868,7 +868,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_7-cuda11_7
@@ -1020,7 +1020,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_8-cpu
@@ -1093,7 +1093,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_8-cpu
@@ -1245,7 +1245,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_8-cuda11_3
@@ -1319,7 +1319,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_8-cuda11_3
@@ -1472,7 +1472,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_8-cuda11_6
@@ -1546,7 +1546,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_8-cuda11_6
@@ -1699,7 +1699,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_8-cuda11_7
@@ -1773,7 +1773,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_8-cuda11_7
@@ -1925,7 +1925,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_9-cpu
@@ -1998,7 +1998,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_9-cpu
@@ -2150,7 +2150,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_9-cuda11_3
@@ -2224,7 +2224,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_9-cuda11_3
@@ -2377,7 +2377,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_9-cuda11_6
@@ -2451,7 +2451,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_9-cuda11_6
@@ -2604,7 +2604,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_9-cuda11_7
@@ -2678,7 +2678,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_9-cuda11_7
@@ -2830,7 +2830,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_10-cpu
@@ -2903,7 +2903,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cpu
@@ -3055,7 +3055,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_10-cuda11_3
@@ -3129,7 +3129,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda11_3
@@ -3282,7 +3282,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_10-cuda11_6
@@ -3356,7 +3356,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda11_6
@@ -3509,7 +3509,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: wheel-py3_10-cuda11_7
@@ -3583,7 +3583,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda11_7

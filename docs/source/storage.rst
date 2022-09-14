@@ -15,7 +15,7 @@ same class methods that :class:`torch.TypedStorage` has.
 
 A :class:`torch.TypedStorage` is a contiguous, one-dimensional array of
 elements of a particular :class:`torch.dtype`. It can be given any
-:class:`torch.dtype`, and the internal data will be interpretted appropriately.
+:class:`torch.dtype`, and the internal data will be interpreted appropriately.
 :class:`torch.TypedStorage` contains a :class:`torch.UntypedStorage` which
 holds the data as an untyped array of bytes.
 

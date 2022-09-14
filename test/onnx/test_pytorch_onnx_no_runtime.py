@@ -6,7 +6,7 @@ import contextlib
 import io
 import itertools
 import unittest
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import onnx
 import onnx.numpy_helper
@@ -66,77 +66,6 @@ def export_to_onnx(
     return onnx_model
 
 
-@common_utils.instantiate_parametrized_tests
-class TestOptionalOutput(common_utils.TestCase):
-    # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
-    # ONNX Runtime 1.11 is released and supports opset 16.
-
-    class IfNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
-            if x.size(0) > 1:
-                y = x
-            return y
-
-    class IfNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
-            if x.size(0) > 1:
-                y = None
-            return y
-
-    class LoopNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
-            for _ in range(x.size(0)):
-                y = x
-            return y
-
-    class LoopNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
-            for _ in range(x.size(0)):
-                y = None
-            return y
-
-    @common_utils.parametrize(
-        "module_class",
-        (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
-        name_fn=lambda module_class: module_class.__name__,
-    )
-    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
-    def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
-        # Need scripting to preserve control flow for this test to be
-        # meaningful.
-        model = torch.jit.script(module_class())
-        f = io.BytesIO()
-        x = torch.ones(x_size)
-        dynamic_axis_name = "condition"
-        torch.onnx.export(
-            model,
-            (x,),
-            f,
-            opset_version=15,
-            # Ensure condition is not constant
-            dynamic_axes={"x": {0: dynamic_axis_name}},
-            input_names=["x"],
-        )
-        exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = symbolic_helper.scalar_type_to_onnx[
-            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)
-        ].value
-        expected_output_type = onnx.helper.make_optional_type_proto(
-            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
-        )
-        self.assertEqual(expected_output_type, exported.graph.output[0].type)
-        for node in exported.graph.node:
-            # Both branches output types should match.
-            if node.op_type == "If":
-                for attr in node.attribute:
-                    if attr.name in ("then_branch", "else_branch"):
-                        self.assertEqual(expected_output_type, attr.g.output[0].type)
-
-
 class TestONNXExport(common_utils.TestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
@@ -169,7 +98,7 @@ class TestONNXExport(common_utils.TestCase):
         tm = TraceMe()
         tm = torch.jit.trace(tm, torch.rand(3, 4))
         f = io.BytesIO()
-        torch.onnx._export(tm, (torch.rand(3, 4),), f)
+        torch.onnx.export(tm, (torch.rand(3, 4),), f)
 
     def test_export_tensoroption_to(self):
         def foo(x):
@@ -829,6 +758,23 @@ class TestONNXExport(common_utils.TestCase):
                         shape.tolist(),
                         [max_position_embeddings, batch_size, hidden_size],
                     )
+
+    def test_is_fp_for_C_TypeList(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x.squeeze(1)
+                w = x.shape[2]
+                pos = x.view(2, -1).argmax(1)
+                x_int = pos % w
+                y_int = (pos - x_int) // w
+                return y_int, x_int
+
+        model = torch.jit.script(M())
+        inputs = torch.randn(2, 4, 6)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
+        )
 
 
 if __name__ == "__main__":

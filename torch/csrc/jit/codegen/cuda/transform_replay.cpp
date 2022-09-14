@@ -681,9 +681,9 @@ int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
   auto it_consumer = consumer_domain.begin();
   auto it_producer = producer_domain.begin();
 
-  id_map c2p_map =
+  auto disjoint_sets =
       BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
-          .getReplay();
+          .getDisjointSets();
 
   int mismatched_consumer_pos = 0;
   int mismatched_producer_pos = 0;
@@ -703,13 +703,8 @@ int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
       return -1;
     }
 
-    auto c2p_it = c2p_map.find(consumer_id);
-    if (c2p_it == c2p_map.end()) {
-      return -1;
-    }
-
     auto producer_id = *it_producer;
-    if (c2p_it->second == producer_id) {
+    if (disjoint_sets.permissiveAreMapped(producer_id, consumer_id)) {
       ++mismatched_consumer_pos;
       ++mismatched_producer_pos;
       ++it_consumer;
@@ -759,9 +754,9 @@ int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
   auto it_producer = producer_domain.begin();
   auto it_consumer = consumer_domain.begin();
 
-  id_map replay_map =
-      BestEffortReplay::replayCasP(consumer, producer, -1, pairwise_map)
-          .getReplay();
+  auto disjoint_sets =
+      BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
+          .getDisjointSets();
 
   int mismatched_producer_pos = 0;
   int mismatched_consumer_pos = 0;
@@ -788,12 +783,7 @@ int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
       continue;
     }
 
-    auto replay_it = replay_map.find(producer_id);
-    if (replay_it == replay_map.end()) {
-      return -1;
-    }
-
-    if (replay_it->second == consumer_id) {
+    if (disjoint_sets.permissiveAreMapped(producer_id, consumer_id)) {
       ++mismatched_producer_pos;
       ++mismatched_consumer_pos;
       ++it_producer;

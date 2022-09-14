@@ -62,6 +62,14 @@ size_t computeStorageNbytes(
     size_t itemsize_bytes,
     size_t storage_offset
   ) {
+  TORCH_CHECK(
+    sizes.size() == strides.size(),
+    "dimensionality of sizes (",
+    sizes.size(),
+    ") must match dimensionality of strides (",
+    strides.size(),
+    ")");
+
   // Ignore overflow checks on mobile
 #ifndef C10_MOBILE
   // size of the underlying storage is 1 bigger than the offset
@@ -335,7 +343,7 @@ TensorBase empty_symint_meta(
       TORCH_CHECK(0, "other memory format not implemented yet");
   }
 
-  tensor.unsafeGetTensorImpl()->set_sym_sizes_and_strides(size, strides);
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, strides);
 
   return tensor;
 }

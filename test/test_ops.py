@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
-    _NOTHING,
     UnaryUfuncInfo,
     ReductionOpInfo,
     ReductionPythonRefInfo,
@@ -64,7 +63,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
-import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
@@ -89,8 +88,7 @@ _ref_test_ops = tuple(
         lambda op: not isinstance(
             op, (UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, BinaryUfuncInfo)
         )
-        and op.ref is not None
-        and op.ref is not _NOTHING,
+        and op.ref is not None,
         op_db,
     )
 )
@@ -113,9 +111,9 @@ class TestCommon(TestCase):
                 "This is OK for testing, but be sure to set the dtypes manually before landing your PR!"
             )
             # Assure no opinfo entry has dynamic_dtypes
-            filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+            filtered_ops = list(filter(opinfo.utils.is_dynamic_dtype_set, op_db))
             for op in filtered_ops:
-                fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+                fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
                 err_msg += "\n" + fmt_str
 
             assert len(filtered_ops) == 0, err_msg
@@ -169,7 +167,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -187,6 +187,8 @@ class TestCommon(TestCase):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
@@ -197,13 +199,43 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):
+    def _ref_test_helper(
+        self,
+        ctx,
+        device,
+        dtype,
+        op,
+        skip_zero_numel=False,
+        skip_zero_dim=False,
+        skip_bfloat=False,
+        skip_view_consistency=False,
+    ):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
                 continue
             if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
+                continue
+
+            is_lower_than_cuda11_0 = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
+
+            if (
+                skip_bfloat
+                and is_lower_than_cuda11_0
+                and (
+                    (
+                        isinstance(sample.input, torch.Tensor)
+                        and sample.input.dtype == torch.bfloat16
+                    )
+                    or any(
+                        isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                        for arg in sample.args
+                    )
+                )
+            ):
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
@@ -212,7 +244,7 @@ class TestCommon(TestCase):
             for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
-                    if getattr(op, 'validate_view_consistency', True):
+                    if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
                         self.assertEqual(a._is_view(), b._is_view())
 
             # Computes the dtype the more precise computatino would occur in
@@ -356,6 +388,10 @@ class TestCommon(TestCase):
             op,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
+            skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
+            # # nvfuser doesn't support view consistency
+            # https://github.com/pytorch/pytorch/issues/84863
+            skip_view_consistency=("nvfuser" in executor),
         )
 
     @skipMeta
@@ -372,7 +408,9 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_python_ref_errors(self, device, op):
-        mode = torch._prims.get_prim_fake_mode()
+        mode = FakeTensorMode()
+        with mode:
+            pass
 
         def _to_tensormeta(x):
             if isinstance(x, torch.Tensor):
@@ -1547,6 +1585,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.item',
+        '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
         '_refs.std_var',
@@ -1555,22 +1594,25 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
         '_refs.zeros',
-        '_refs.zeros_like'
+        '_refs.zeros_like',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.masked_fill',
-        '_refs.transpose',
         '_refs.var',
         '_refs.rsub',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
-        '_refs.swap_axes',
+        '_refs.rfloordiv',
+        '_refs.rtruediv',
+        '_refs.rpow',
         # CompositeImplicitAutograd
         '_refs.allclose',
         '_refs.atleast_1d',
@@ -1591,12 +1633,16 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.movedim',
         '_refs.narrow',
+        '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.poisson_nll_loss',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
         '_refs.square',
         '_refs.tensor_split',
+        '_refs.to',
         '_refs.true_divide',
         '_refs.trunc_divide',
         '_refs.vsplit',
@@ -1605,6 +1651,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.norm',
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
+        '_refs.unflatten',
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
@@ -1617,11 +1664,14 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # other
+        '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
         '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
+        '_refs.real',
+        '_refs.imag',
     }
 
     @parametrize("op", ref_ops_names)
@@ -1678,6 +1728,7 @@ fake_skips = (
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
+    "narrow",  # Fails only for one overload with DataDependentOutputException (hence skip).
 )
 
 fake_autocast_device_skips = defaultdict(dict)
@@ -1706,6 +1757,13 @@ sometimes_dynamic_output_op_test = (
     "index_select",
 )
 
+data_dependent_op_tests = (
+    "equal",
+    "corrcoef",
+    "nn.functional.gaussian_nll_loss",
+    "allclose",
+)
+
 aliasing_failures = (
     "histogramdd",
     "nn.functional.pixel_shuffle",
@@ -1713,6 +1771,7 @@ aliasing_failures = (
 )
 
 fake_striding_skips = (
+    "diag_embed",
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1749,7 +1808,7 @@ class TestFakeTensorNonErroring(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(inner=None)
+                mode = FakeTensorMode(throw_on_data_dependent_ops=True)
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
@@ -1805,12 +1864,14 @@ class TestFakeTensorNonErroring(TestCase):
                         real_aliasing = outputs_alias_inputs((sample.input, sample, args, sample.kwargs), res)
                         self.assertEqual(fake_aliasing, real_aliasing)
 
-                self.assertTrue(name not in dynamic_output_op_tests)
+                self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
+            except torch._subclasses.fake_tensor.DataDependentOutputException:
+                self.assertTrue(name in data_dependent_op_tests)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
