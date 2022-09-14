@@ -198,8 +198,7 @@ class TestCommon(TestCase):
                     self.assertEqual(cpu_result.shape, cuda_result.shape)
                 else:
                     self.assertEqual(cpu_result, cuda_result)
-                # TODO: compare equality of tensors
-
+            # TODO: compare equality of tensors
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
