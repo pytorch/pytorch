@@ -24,7 +24,6 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type);
 enum class DebugDumpOption {
   FusionIr, //!< Dump the Fusion IR before lowering
   FusionIrMath, //!< Dump just the compute (math) part of the Fusion IR
-  FusionIrPresched, //!< Dump the Fusion IR before it is scheduled.
   KernelIr, //!< Dump the compiler Kernel IR
   ComputeAtMap, //!< Dump the computeAt map
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
@@ -47,12 +46,10 @@ enum class DebugDumpOption {
   Halo, //! Halo information of tensors
   PerfDebugVerbose, //! When running kernels, print verbose information
                     //! associated with what's running
-  PythonDefinition, //! Python Frontend Fusion Definition.
-  PythonFrontendDebug, //! Python Frontend debug information.
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
-  InlinePropagator //! When running InlinePropagator, print propagation
-                   //! path and inlining result
+  InlinePropagator, //! When running InlinePropagator, print propagation
+                    //! path and inlining result
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
