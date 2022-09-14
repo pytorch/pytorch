@@ -199,7 +199,17 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False):
+    def _ref_test_helper(
+        self,
+        ctx,
+        device,
+        dtype,
+        op,
+        skip_zero_numel=False,
+        skip_zero_dim=False,
+        skip_bfloat=False,
+        skip_view_consistency=False,
+    ):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
@@ -234,7 +244,7 @@ class TestCommon(TestCase):
             for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
-                    if getattr(op, 'validate_view_consistency', True):
+                    if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
                         self.assertEqual(a._is_view(), b._is_view())
 
             # Computes the dtype the more precise computatino would occur in
@@ -379,6 +389,9 @@ class TestCommon(TestCase):
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
+            # # nvfuser doesn't support view consistency
+            # https://github.com/pytorch/pytorch/issues/84863
+            skip_view_consistency=("nvfuser" in executor),
         )
 
     @skipMeta
