@@ -85,6 +85,8 @@ class TorchDispatchMode:
         return instance
 
 
+# WARNING: If you access this list to see all the active modes in order, do not update the list in place
+# since it alters the actual mode stack
 _cur_torch_dispatch_mode: List[TorchDispatchMode] = []
 
 
