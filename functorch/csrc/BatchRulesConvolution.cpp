@@ -49,7 +49,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
     if (groups == 1) {
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
       auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-      out = reshape_dim_outof(out_spec[1], rhs.sizes(*rhs_bdim), out);
+      out = reshape_dim_outof(out_spec[1], rhs.size(*rhs_bdim), out);
       result = std::make_tuple(out, out_spec[1]);
     } else {
       if (transposed) {
@@ -66,7 +66,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
         // N(GBO)HW -> NG(BO)HW
         out = reshape_dim_outof(1, groups, out);
         // NG(BO)HW -> NGBOHW
-        out = reshape_dim_outof(2, rhs.sizes(*rhs_bdim), out);
+        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
         // NGBOHW -> NB(GO)HW
         out = reshape_dim_into(1, 2, out);
         result = std::make_tuple(out, 1);
@@ -88,7 +88,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
         // N(GBO)HW -> NG(BO)HW
         out = reshape_dim_outof(1, groups, out);
         // NG(BO)HW -> NGBOHW
-        out = reshape_dim_outof(2, rhs.sizes(*rhs_bdim), out);
+        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
         // NGBOHW -> NB(GO)HW
         out = reshape_dim_into(1, 2, out);
         result = std::make_tuple(out, 1);
