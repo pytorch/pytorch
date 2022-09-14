@@ -49,18 +49,50 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
     if (groups == 1) {
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
       auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-      out = reshape_dim_outof(out_spec[1], rhs.sizes()[*rhs_bdim], out);
+      out = reshape_dim_outof(out_spec[1], rhs.size(*rhs_bdim), out);
       result = std::make_tuple(out, out_spec[1]);
     } else {
-      auto dim_with_groups = transposed ? 1 : 0;
-      auto new_w = reshape_dim_outof(rhs_spec[dim_with_groups] + (*rhs_bdim <= rhs_spec[0]), groups, rhs);
-      new_w = reshape_dim_into(*rhs_bdim + (rhs_spec[0] < rhs_bdim), rhs_spec[0] + 1, new_w);
-      new_w = reshape_dim_into(rhs_spec[0], rhs_spec[0], new_w);
-      auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-      out = reshape_dim_outof(out_spec[1], groups, out);
-      out = reshape_dim_outof(out_spec[1] + 1, rhs.sizes()[*rhs_bdim], out);
-      out = reshape_dim_into(out_spec[1], out_spec[1] + 1, out);
-      result = std::make_tuple(out, out_spec[1]);
+      if (transposed) {
+        // conv_transpose with groups is normally NIHW, IOHW -> N(GO)HW
+        // With RHS batched, we do the following:
+        // NIHW, BIOHW -> NIHW, I(BO)HW -> N(GBO)HW -> BN(GO)HW
+        // NB: the following isn't written using rhs_spec
+        // (PyTorch convs have a fixed dimension order)
+
+        // BIOHW -> I(BO)HW
+        auto new_w = reshape_dim_into(*rhs_bdim, 1, rhs);
+        // NIHW, I(BO)HW -> N(GBO)HW
+        auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
+        // N(GBO)HW -> NG(BO)HW
+        out = reshape_dim_outof(1, groups, out);
+        // NG(BO)HW -> NGBOHW
+        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
+        // NGBOHW -> NB(GO)HW
+        out = reshape_dim_into(1, 2, out);
+        result = std::make_tuple(out, 1);
+      } else {
+        // conv with groups is normally N(GI)HW, (GO)IHW -> N(GO)HW
+        // With RHS batched, we do the following:
+        // N(GI)HW, B(GO)IHW -> N(GI)HW, (GBO)IHW -> N(GBO)HW -> BN(GO)HW
+        // NB: the following isn't written using rhs_spec
+        // (PyTorch convs have a fixed dimension order)
+
+        // B(GO)IHW -> BGOIHW
+        auto new_w = reshape_dim_outof(0 + (*rhs_bdim == 0), groups, rhs);
+        // BGOIHW -> G(BO)IHW
+        new_w = reshape_dim_into(*rhs_bdim + (*rhs_bdim > 0), 1, new_w);
+        // G(BO)IHW -> (GBO)IHW
+        new_w = reshape_dim_into(0, 0, new_w);
+        // N(GI)HW, (GBO)IHW -> N(GBO)HW
+        auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
+        // N(GBO)HW -> NG(BO)HW
+        out = reshape_dim_outof(1, groups, out);
+        // NG(BO)HW -> NGBOHW
+        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
+        // NGBOHW -> NB(GO)HW
+        out = reshape_dim_into(1, 2, out);
+        result = std::make_tuple(out, 1);
+      }
     }
   } else if (lhs_bdim && rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[1], lhs);

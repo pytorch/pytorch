@@ -545,15 +545,6 @@ class TestOperators(TestCase):
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d"),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -596,9 +587,6 @@ class TestOperators(TestCase):
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
-        # locally fails with `bias tensor has to be contiguous`
-        # but passes on CI, hence the skip.
-        skip("nn.functional.conv_transpose3d", device_type='cuda'),
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
