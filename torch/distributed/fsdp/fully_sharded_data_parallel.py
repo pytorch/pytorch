@@ -1522,7 +1522,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not handles:
             return
-        assert len(handles) == len(free_unsharded_flat_params), (
+        p_assert(
+            len(handles) == len(free_unsharded_flat_params),
             "Expects both lists to have equal length but got "
             f"{len(handles)} and {len(free_unsharded_flat_params)}"
         )
@@ -2641,7 +2642,11 @@ class FullyShardedDataParallel(nn.Module):
             )
             self._pre_forward(self._handles, unshard_fn, unused, unused)
             for handle in self._handles:
-                assert handle.flat_param.device == self.compute_device
+                p_assert(
+                    handle.flat_param.device == self.compute_device,
+                    "Expected `FlatParameter` to be on the compute device "
+                    f"{self.compute_device} but got {handle.flat_param.device}"
+                )
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return self._post_forward(self._handles, reshard_fn, unused, unused, output)
 
@@ -2751,7 +2756,7 @@ class FullyShardedDataParallel(nn.Module):
         inputs appropriately. If this is called on a non-root FSDP instance,
         then the forward inputs are returned directly.
         """
-        assert self._is_root is not None, "Expects a root FSDP to have been set"
+        p_assert(self._is_root is not None, "Expects a root FSDP to have been set")
         if not self._is_root:
             return args, kwargs
         self._wait_for_previous_optim_step()
@@ -3087,9 +3092,11 @@ class FullyShardedDataParallel(nn.Module):
                 continue
             # Get the `AccumulateGrad` object
             temp_flat_param = flat_param.expand_as(flat_param)
-            assert (
-                temp_flat_param.grad_fn is not None
-            ), "The `grad_fn` is needed to access the `AccumulateGrad` and register the post-backward hook"
+            p_assert(
+                temp_flat_param.grad_fn is not None,
+                "The `grad_fn` is needed to access the `AccumulateGrad` and "
+                "register the post-backward hook"
+            )
             acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
             hook_handle = acc_grad.register_hook(
                 functools.partial(self._post_backward_hook, handle)
