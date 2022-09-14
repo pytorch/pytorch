@@ -334,6 +334,39 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    def test_nvfuser_executor_parameters(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 4, device=device)
+
+        def func(a):
+            return torch.ops.nvprims.add(a, a)
+
+        gm = make_fx(func)(a)
+
+        expected = execute(gm, a, executor="aten")
+        # Shouldn't raise an error because unuseful parameters are ignored
+        params_dicts = [None, {}, {"none": None}]
+        for params in params_dicts:
+            actual = execute(gm, a, executor="nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
+
+        # Check caching parameter
+        for use_cache in [True, False]:
+            params = {"use_python_fusion_cache": use_cache}
+            actual = execute(gm, a, executor="nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
+
+        # Check allow_single_op_fusion parameter
+        for allow_single_op_fusion in [True, False]:
+            params = {"allow_single_op_fusion": allow_single_op_fusion}
+            actual = execute(gm, a, executor="nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
+
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     def test_nvfuser_executor_partitioned(self, device):
         # This test is to ensure that nvfuser partitioned executor works correctly
         # It's assumed that digamma is not supported by nvfuser
