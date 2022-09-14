@@ -525,7 +525,6 @@ class TestOperators(TestCase):
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
-        xfail("_masked.prod"),  # calls item
         xfail("_masked.cumprod"),  # calls item
         xfail("as_strided"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
@@ -694,8 +693,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
-        xfail('_masked.prod'),  # calls aten::item
-        xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
@@ -778,7 +775,6 @@ class TestOperators(TestCase):
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
-        xfail('_masked.prod'),  # .item or data-dependent control flow
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -1181,9 +1177,9 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
-         tol1('_masked.prod',
-              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-     ))
+        tol1('_masked.prod',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
+    ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -1284,7 +1280,6 @@ class TestOperators(TestCase):
 
         # Potential bugs/errors
         xfail('_masked.cumprod'),  # calls item()
-        xfail('_masked.prod'),  # calls item()
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
