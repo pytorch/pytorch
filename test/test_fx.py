@@ -3905,7 +3905,6 @@ class TestFunctionalTracing(JitTestCase):
         "pixel_unshuffle": BUILT_IN_FUNC,
         "prelu": BUILT_IN_FUNC,
         "relu_": BUILT_IN_FUNC,
-        "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,
