@@ -160,6 +160,43 @@ class TestCommon(TestCase):
         finally:
             torch.set_default_dtype(cur_default)
 
+    # Tests that the cpu and gpu results are consistent
+    @onlyCUDA
+    @suppress_warnings
+    @ops(_ops_and_refs)
+    def test_compare_cpu(self, device, dtype, op):
+
+        if dtype not in op.dtypes:
+            raise unittest.SkipTest("This test requires both cuda and cpu support")
+        if dtype not in op.dtypesIfCUDA:
+            raise unittest.SkipTest("This test requires both cuda and cpu support")
+
+        def to_cpu(arg):
+            if isinstance(arg, torch.dtype):
+                return arg
+            return arg.to(device='cpu')
+
+        samples = op.sample_inputs(device, dtype)
+
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            cuda_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+            self.assertEqual(type(cuda_results), type(cpu_results))
+
+            # Make all retults a tuple to compare
+            if not isinstance(cuda_results, tuple):
+                cuda_results = (cuda_results,)
+                cpu_results = (cpu_results,)
+
+            # Simple first check that the return values have the same number of arguments
+            self.assertEqual(len(cuda_results), len(cpu_results))
+
+            for cpu_result, cuda_result in zip(cpu_results, cuda_results):
+                # TODO: Add tests and checks
+                pass
+
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.

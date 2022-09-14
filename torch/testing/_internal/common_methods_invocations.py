@@ -14802,6 +14802,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         )
     ),
     BinaryUfuncInfo(
@@ -14828,6 +14830,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         )
     ),
     OpInfo(
@@ -14853,6 +14857,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         )
     ),
     BinaryUfuncInfo(
@@ -14882,6 +14888,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
@@ -14913,6 +14921,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
