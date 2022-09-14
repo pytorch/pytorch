@@ -1,7 +1,6 @@
 import contextlib
 import functools
 import itertools
-import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import PyTree, tree_any, tree_flatten, tree_map
+from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -517,24 +516,6 @@ class FakeTensor(torch.Tensor):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        # Need this to handle infinite recursion with sparse tensors.
-        # Sparse tensors have custom stride policy which means that
-        # they will dispatch here on dispatch, and we need to trigger
-        # the default behavior.
-        # TODO: when we get other tensor types online they will also
-        # need to get entries here.
-        elif func == torch.ops.aten.sym_size.default:
-            return None
-        elif func == torch.ops.aten.sym_stride.default:
-            return None
-        elif func == torch.ops.aten.sym_storage_offset.default:
-            return None
-        elif func == torch.ops.aten.size.default:
-            return None
-        elif func == torch.ops.aten.stride.default:
-            return None
-        elif func == torch.ops.aten.is_contiguous.default:
-            return True  # hack
 
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
