@@ -498,7 +498,7 @@ def _check_trace(
                             equal_nan=True,
                         )
                     else:
-                        if orig.is_mps() or ref.is_mps():
+                        if orig.is_mps or ref.is_mps:
                             torch.testing.assert_close(
                                 orig.float(),
                                 ref.float(),
