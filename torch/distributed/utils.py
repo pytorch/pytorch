@@ -11,7 +11,7 @@ __all__ = []  # type: ignore[var-annotated]
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[str, ...], Tuple[Any, ...]]:
     """
     Turn argument list into separate key list and value list (unpack_kwargs does the opposite)
-
+    Inspiration: https://github.com/facebookresearch/fairscale/blob/eeb6684/fairscale/internal/containers.py#L70
     Usage::
 
         kwarg_keys, flat_args = pack_kwargs(1, 2, a=3, b=4)
