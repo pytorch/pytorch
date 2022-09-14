@@ -81,7 +81,7 @@ class CheckpointWrapper(torch.nn.Module):
             # using their own custom checkpoint_fn.
             if self.checkpoint_impl == CheckpointImpl.REENTRANT and kwargs != {}:
                 # Pack the args and kwargs
-                kwarg_keys, flat_args = _pack_kwargs(*args, **kwargs)
+                flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
 
                 # Function that only takes (packed) args, but can unpack them
                 # into the original args and kwargs for the checkpointed
@@ -89,7 +89,7 @@ class CheckpointWrapper(torch.nn.Module):
                 def my_function(*inputs):
                     # unpack back into args and kwargs
                     unpacked_args, unpacked_kwargs = _unpack_kwargs(
-                        kwarg_keys, inputs
+                        inputs, kwarg_keys
                     )
                     # run original module
                     return self._checkpoint_wrapped_module(
@@ -187,8 +187,8 @@ def checkpoint_wrapper(
             arguments will be ignored in favor of the activations being
             offloaded to CPU. Default is ``False``. Wrappers with activation
             offload can be composed with ones that do recomputation-based
-            checkpoint to trade off increased compute versus CPU memory usage
-            and H2D transfer.
+            checkpoint to trade off increased compute versus increased CPU
+            memory usage and additional H2D transfers.
         checkpoint_fn (Optional[Callable]):
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
