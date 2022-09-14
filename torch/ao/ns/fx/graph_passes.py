@@ -13,6 +13,7 @@ from .utils import (
     get_arg_indices_of_inputs_to_log,
     get_node_input_qparams,
     op_type_supports_shadowing,
+    get_normalized_nth_input,
 )
 
 from .ns_types import (
@@ -27,40 +28,6 @@ from torch.ao.quantization.quantize import is_activation_post_process
 
 from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
 
-def _get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
-    """
-    Given a node, gets the n'th input to that node, normalizing
-    args and kwargs to the best of its ability.
-    """
-    try:
-        norm_args_and_kwargs = node.normalized_arguments(
-            gm, normalize_to_only_use_kwargs=True)
-        if norm_args_and_kwargs is not None:
-            norm_args, norm_kwargs = norm_args_and_kwargs
-            assert len(norm_args) + len(norm_kwargs) > idx
-            if idx < len(norm_args):
-                return norm_args[idx]
-            else:
-                # note: in Python 3.7+ dicts are ordered
-                return list(norm_kwargs.values())[idx]
-        else:
-            assert len(node.args) + len(node.kwargs) > idx
-            if idx < len(node.args):
-                return node.args[idx]  # type: ignore[return-value]
-            else:
-                kwargs_idx = idx + len(node.args)
-                return list(node.kwargs.values())[kwargs_idx]  # type: ignore[return-value]
-    except RuntimeError:
-        # this RuntimeError happens when node argument normalization
-        # requires typehints to proceed, such as for torch.add where
-        # either the first, second or both arguments could be tensors
-        assert len(node.args) + len(node.kwargs) > idx
-        if idx < len(node.args):
-            return node.args[idx]  # type: ignore[return-value]
-        else:
-            kwargs_idx = idx + len(node.args)
-            return list(node.kwargs.values())[kwargs_idx]  # type: ignore[return-value]
-
 def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
     fqn = None
     if hasattr(gm, '_node_name_to_scope'):
@@ -72,7 +39,7 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
             assert isinstance(node.target, str)
             module = getattr_from_fqn(gm, node.target)
             if is_activation_post_process(module):
-                node_to_use_for_fqn = _get_normalized_nth_input(node, gm, 0)
+                node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
         fqn = gm._node_name_to_scope[node_to_use_for_fqn.name][0]  # type: ignore[index]
     return fqn  # type: ignore[return-value]
 
@@ -137,7 +104,7 @@ def add_loggers_to_model(
 
     for node in gm.graph.nodes:
         if node.op == 'output':
-            new_graph.output(map_arg(_get_normalized_nth_input(node, gm, 0), load_arg))
+            new_graph.output(map_arg(get_normalized_nth_input(node, gm, 0), load_arg))
             continue
 
         if (
@@ -154,7 +121,7 @@ def add_loggers_to_model(
                 # second (x + 1 versus 1 + x).
                 arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
                 for node_arg_idx in arg_indices_to_log:
-                    node_arg = _get_normalized_nth_input(node, gm, node_arg_idx)
+                    node_arg = get_normalized_nth_input(node, gm, node_arg_idx)
                     if type(node_arg) == Node:
                         # create a single input logger
                         prev_node = env[node_arg.name]
@@ -375,7 +342,7 @@ def _copy_node_from_a_to_c(
             f"target {node_a.target} is not implemented"
         if node_a.target == 'dequantize':
             arg_copy = _copy_node_from_a_to_c(
-                _get_normalized_nth_input(node_a, gm_a, 0),
+                get_normalized_nth_input(node_a, gm_a, 0),
                 gm_a, gm_b, graph_c)  # type: ignore[arg-type]
             node_a_copy_name = \
                 get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
@@ -384,12 +351,12 @@ def _copy_node_from_a_to_c(
             return node_a_copy
         else:  # to
             arg_copy = _copy_node_from_a_to_c(
-                _get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c)  # type: ignore[arg-type]
+                get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c)  # type: ignore[arg-type]
             node_a_copy_name = \
                 get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
             node_a_copy = graph_c.create_node(
                 node_a.op, node_a.target,
-                (arg_copy, _get_normalized_nth_input(node_a, gm_a, 1)),
+                (arg_copy, get_normalized_nth_input(node_a, gm_a, 1)),
                 {}, node_a_copy_name)
             return node_a_copy
 
@@ -412,7 +379,7 @@ def _can_insert_copy_of_subgraph_a(
     cur_node = subgraph_a.end_node
     while cur_node != subgraph_a.start_node:
         nodes.append(cur_node)
-        cur_node = _get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
+        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
     nodes.append(cur_node)
     nodes.reverse()
 
@@ -492,7 +459,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     nodes_of_a = [subgraph_a.end_node]
     cur_node = subgraph_a.end_node
     while cur_node != subgraph_a.start_node:
-        cur_node = _get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
+        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
         nodes_of_a.insert(0, cur_node)
 
     # go through nodes of a in order, and insert them into the graph of c
@@ -798,7 +765,7 @@ def create_a_shadows_b(
 
                 # if necessary, log the input of node_c
                 if should_log_inputs:
-                    prev_node_b = _get_normalized_nth_input(node_b, gm_b, 0)
+                    prev_node_b = get_normalized_nth_input(node_b, gm_b, 0)
                     if isinstance(prev_node_b, Node):
                         prev_node_c = env_c[prev_node_b.name]
                         env_c[prev_node_c.name] = _insert_logger_after_node(
@@ -850,13 +817,13 @@ def create_a_shadows_b(
                 # cast dtype from the dtype of node_c's input to the dtype of
                 # node_a's input (dequant, etc)
                 # prev_node_c = node_c.args[0]
-                prev_node_c = _get_normalized_nth_input(node_c, gm_b, 0)
+                prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
-                        prev_node_c = _get_normalized_nth_input(node_c, gm_b, 0)
+                        prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
                     elif isinstance(prev_node_c, list):
-                        prev_node_c = [_get_normalized_nth_input(arg, gm_b, 0) for arg in prev_node_c]
+                        prev_node_c = [get_normalized_nth_input(arg, gm_b, 0) for arg in prev_node_c]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node, node_c, prev_node_c, gm_a, gm_b, graph_c,
                     node_b.name + '_dtype_cast_', logger_cls,
@@ -912,7 +879,7 @@ def create_a_shadows_b(
                 num_non_param_args_node_a = get_number_of_non_param_args(subgraph_a.start_node, gm_a)
                 if num_non_param_args_node_a == 2:
                     # node_c_second_non_param_arg = node_c.args[1]
-                    node_c_second_non_param_arg = _get_normalized_nth_input(node_c, gm_b, 1)
+                    node_c_second_non_param_arg = get_normalized_nth_input(node_c, gm_b, 1)
                 node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
                     dtype_cast_node, node_c_second_non_param_arg,
                     subgraph_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
@@ -934,8 +901,8 @@ def create_a_shadows_b(
                     # input_logger = env_c[dtype_cast_node.name]
                     # Find the first node in the subgraph
                     cur_node = node_a_shadows_c
-                    while _get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:
-                        cur_node = _get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
+                    while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:
+                        cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
                     if isinstance(input_logger, Node):
                         input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name

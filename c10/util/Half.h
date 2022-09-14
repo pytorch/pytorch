@@ -45,8 +45,10 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#ifdef SYCL_LANGUAGE_VERSION
-#include <CL/sycl.hpp>
+#if defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp> // for SYCL 2020
+#elif defined(CL_SYCL_LANGUAGE_VERSION)
+#include <CL/sycl.hpp> // for SYCL 1.2.1
 #endif
 
 // Standard check for compiling CUDA with clang
@@ -427,19 +429,19 @@ struct alignas(4) complex<Half> {
     return imag_;
   }
 
-  complex<Half>& operator+=(const complex<Half>& other) {
+  C10_HOST_DEVICE complex<Half>& operator+=(const complex<Half>& other) {
     real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
     imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
     return *this;
   }
 
-  complex<Half>& operator-=(const complex<Half>& other) {
+  C10_HOST_DEVICE complex<Half>& operator-=(const complex<Half>& other) {
     real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
     imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
     return *this;
   }
 
-  complex<Half>& operator*=(const complex<Half>& other) {
+  C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
     auto a = static_cast<float>(real_);
     auto b = static_cast<float>(imag_);
     auto c = static_cast<float>(other.real());

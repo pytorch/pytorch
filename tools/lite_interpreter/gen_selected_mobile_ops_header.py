@@ -2,10 +2,10 @@
 import argparse
 import os
 from typing import Set
-from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.code_template import CodeTemplate
 
 import yaml
+from torchgen.code_template import CodeTemplate
+from torchgen.selective_build.selector import SelectiveBuilder
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:

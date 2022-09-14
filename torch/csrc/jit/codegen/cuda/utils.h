@@ -29,6 +29,8 @@ enum class DebugDumpOption {
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
   CudaFull, //!< Dump the complete CUDA C++ code
   CudaToFile, //!< Dump CUDA Strings to File
+  DebugInfo, //!< Embed line info and debug info to compiled kernel, and dump
+             //!< the full CUDA C++ code
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
   FusionSegmenterLog, //!< Dump Detailed Segmenter Logging
@@ -42,8 +44,12 @@ enum class DebugDumpOption {
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions, //!< Dump known parallel dimensions
   Halo, //! Halo information of tensors
-  PerfDebugVerbose //! When running kernels, print verbose information
-                   //! associated with what's running
+  PerfDebugVerbose, //! When running kernels, print verbose information
+                    //! associated with what's running
+  TransformPropagator, //! When running TransformPropagator, print propagation
+                       //! path and replay result
+  InlinePropagator, //! When running InlinePropagator, print propagation
+                    //! path and inlining result
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
@@ -53,6 +59,7 @@ TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 //! These can be set through the `PYTORCH_NVFUSER_DISABLE` environment variable
 //!
 enum class DisableOption {
+  ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
@@ -61,7 +68,20 @@ enum class DisableOption {
   UnrollWithRng //! Disable unrolling for kernels with RNG in them
 };
 
-TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
+TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);
+
+//! Types of features to enable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_ENABLE` environment variable
+//!
+enum class EnableOption {
+  Complex, //! Enable complex support on python
+  KernelProfile, //! Enable intra-kernel performance profiling
+  LinearDecomposition, //! Enable linear-bias decomposition
+  ConvDecomposition //! Enable conv-bias decomposition
+};
+
+TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);
 
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.

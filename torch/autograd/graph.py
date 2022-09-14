@@ -1,8 +1,9 @@
 import torch
 from typing import Callable, Any
 import contextlib
-from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
-
+from torch.utils._python_dispatch import TorchDispatchMode
+from typing import Dict, Tuple, Optional
+import weakref
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
@@ -49,11 +50,11 @@ class saved_tensors_hooks():
         >>> b = torch.ones(5, requires_grad=True) * 2
         >>> with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         ...     y = a * b
-        Packing tensor([1., 1., 1., 1., 1.])
-        Packing tensor([2., 2., 2., 2., 2.])
+        Packing tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Packing tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
         >>> y.sum().backward()
-        Unpacking tensor([1., 1., 1., 1., 1.])
-        Unpacking tensor([2., 2., 2., 2., 2.])
+        Unpacking tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Unpacking tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
 
     .. warning ::
         Performing an inplace operation on the input to either hooks may lead
@@ -95,6 +96,7 @@ class save_on_cpu(saved_tensors_hooks):
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")
@@ -133,59 +135,133 @@ class save_on_cpu(saved_tensors_hooks):
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
+_cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_view_funcs: Dict[Tuple[int, int], Callable] = dict()
+_sid_to_weakref: Dict[Tuple[int, int], weakref.ReferenceType] = dict()
+_ctx_id = 0
+_inside_ctx = False
 
-_cloned = dict()
-_use_counts = dict()
-_keep_graph = False
+def _get_tid(t) -> Tuple[int, int]:
+    return (id(t), t._version)
+
+def _get_sid(t) -> Tuple[int, int]:
+    if t._is_view():
+        base = t._base
+        sid = (base.data_ptr(), base._version)
+    else:
+        sid = (t.data_ptr(), t._version)
+    return sid
+
+class _Handle():
+    pass
+
+# Lifetimes
+
+# We want to the lifetime of cloned vars to match the lifetime of the graph
+# So everytime we use a saved variable, we store a owning ref to it on the graph
+
 class _swap_with_cloned(saved_tensors_hooks):
     def __init__(self):
         def pack_hook(t):
-            uid = (t.data_ptr(), t._version)
-            if not _keep_graph:
-                _use_counts[uid] = _use_counts.get(uid, 0) + 1
-            return uid, t
+            tid = _get_tid(t)
+            sid = _get_sid(t)
+
+            handle: Optional[_Handle] = None
+            if sid not in _sid_to_weakref or _sid_to_weakref[sid]() is None:
+                handle = _Handle()
+                _sid_to_weakref[sid] = weakref.ref(handle)
+            else:
+                handle = _sid_to_weakref[sid]()
+
+            return _ctx_id, t, sid, tid, t._is_view(), handle
 
         def unpack_hook(tup):
-            uid, t = tup
-            if uid in _cloned:
-                res = _cloned[uid]
+            ctx_id, t, sid, tid, is_view, handle = tup
+
+            assert ctx_id == _ctx_id, (
+                "Trying to backward outside of the same context that the graph was created in")
+
+            if handle in _cloned:
+                res = _cloned[handle]
+                if is_view:
+                    view_func = _view_funcs[tid]
+                    res = view_func(res)
             else:
                 res = t
-            if not _keep_graph:
-                if uid not in _use_counts:
-                    raise RuntimeError("If you are trying to backward through the graph a second time "
-                                       "or trying to compute higher-order gradients, please specify "
-                                       "`keep_graph=True` when enabling allow_mutation_on_saved_tensors")
-                _use_counts[uid] -= 1
-                if _use_counts[uid] == 0:
-                    if uid in _cloned:
-                        del _cloned[uid]
-                    del _use_counts[uid]
+
             return res
+
         super().__init__(pack_hook, unpack_hook)
 
+def _maybe_clone_arg(t):
+    sid = _get_sid(t)
+    if sid not in _sid_to_weakref or _sid_to_weakref[sid]() is None:
+        return
+    handle = _sid_to_weakref[sid]()
+    if t._is_view():
+        if sid not in _cloned:
+            _cloned[handle] = t._base.clone()
+    else:
+        if sid not in _cloned:
+            _cloned[handle] = t.clone()
+
+# TODO: When we replay a view functions, do the modes matter?
+# TODO: Find a better way to get these (we may also be missing some).
+VIEW_FUNCTIONS = {
+    "numpy_T": "self",
+    "alias": "self",
+    "as_strided": "self",
+    "diagonal": "self",
+    "expand": "self",
+    "permute": "self",
+    "select": "self",
+    "slice": "self",
+    "split": "self",
+    "split_with_sizes": "self",
+    "squeeze": "self",
+    "t": "self",
+    "transpose": "self",
+    "unfold": "self",
+    "unsqueeze": "self",
+    "flatten": "self",
+    "view": "self",
+    "unbind": "self",
+    "_indices": "self",
+    "_values": "self",
+    "indices": "self",
+    "values": "self",
+    "crow_indices": "self",
+    "col_indices": "self",
+    "ccol_indices": "self",
+    "row_indices": "self",
+    # sparse_coo ctor output should really be views of both indices and values,
+    # but we only supports making as view of a single variable, and indices is
+    # discrete anyways.
+    # FIXME: clone indices on construction.
+    "sparse_coo_tensor_with_dims_and_tensors": "values",
+    "_reshape_alias": "self",
+}
+
 class _CloneArgBeforeMutateMode(TorchDispatchMode):
-    @staticmethod
-    def is_mutating(func):
-        # We may want to also handle out= later
-        return func.__name__.split('.')[0][-1] == "_"
-
-    @staticmethod
-    def maybe_clone_arg(t):
-        uid = (t.data_ptr(), t._version)
-        if uid not in _cloned:
-            _cloned[uid] = t.clone()
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if _CloneArgBeforeMutateMode.is_mutating(func):
-            _CloneArgBeforeMutateMode.maybe_clone_arg(args[0])
+
+        # We may want to handle out= later
+        if func.__name__.split('.')[0][-1] == "_":
+            _maybe_clone_arg(args[0])
+
         rs = func(*args, **kwargs)
+
+        # Eagerly save all the views, so we can replay them if necessary
+        if func.__name__.split('.')[0] in VIEW_FUNCTIONS.keys():
+            # What about multi-views like chunk?
+            tid = _get_tid(rs)
+            _view_funcs[tid] = func
         return rs
 
 @contextlib.contextmanager
-def allow_mutation_on_saved_tensors(keep_graph=False):
+def allow_mutation_on_saved_tensors():
     """Context manager under which mutating tensors that will be saved
     for backward is allowed.
 
@@ -198,15 +274,16 @@ def allow_mutation_on_saved_tensors(keep_graph=False):
                            multiple times and enables higher-order gradients.
                            Defaults to ``False``.
     """
-    with _swap_with_cloned(), push_torch_dispatch_mode(_CloneArgBeforeMutateMode):
-        global _keep_graph
-        # Do we even care about nesting? Maybe just track nesting level and raise an error?
-        prev_keep_graph = _keep_graph
-        _keep_graph = keep_graph
+    global _inside_ctx, _ctx_id
+    with _swap_with_cloned(), _CloneArgBeforeMutateMode():
         try:
+            _ctx_id += 1
+            assert not _inside_ctx, "allow_mutation_on_saved_tensors cannot be nested"
+            _inside_ctx = True
             yield
         finally:
-            if _keep_graph:
-                _cloned.clear()
-                _use_counts.clear()
-            _keep_graph = prev_keep_graph
+            _cloned.clear()
+            _view_funcs.clear()
+
+            _ctx_id += 1
+            _inside_ctx = False

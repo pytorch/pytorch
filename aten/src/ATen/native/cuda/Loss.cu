@@ -60,32 +60,6 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 
 namespace at { namespace native {
 
-Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::empty_like(input);
-  if (!log_target) {
-    TensorIterator iter = TensorIteratorConfig()
-        .add_output(grad_input)
-        .add_input(target)
-        .add_input(grad)
-        .build();
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "kl_div_backward_cuda", [&]() {
-      scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
-      gpu_kernel(iter,
-        [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
-          return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
-        });
-    });
-  }
-  else {
-    grad_input = -at::exp(target) * grad;
-    if (reduction == at::Reduction::Mean) {
-      grad_input /= input.numel();
-    }
-  }
-
-  return grad_input;
-}
-
 Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -178,17 +152,10 @@ namespace {
 
 constexpr int NLL_LOSS_THREADS = 32;
 
-#define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                   \
-  [&] {                                                                     \
-    at::ScalarType _it = TYPE;                                              \
-    RECORD_KERNEL_FUNCTION_DTYPE(NAME, _it)                                 \
-    switch (_it) {                                                          \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, at::ScalarType::Byte, uint8_t, index_t, __VA_ARGS__) \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, at::ScalarType::Long, int64_t, index_t, __VA_ARGS__)\
-      default:                                                              \
-        AT_ERROR(#NAME, " not implemented for '", toString(_it), "'");      \
-    }                                                                       \
-  }()
+#define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
+  AT_DISPATCH_SWITCH(TYPE, NAME,                                              \
+  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
+  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(
@@ -244,6 +211,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     // If the only element was omited, we get 0. See the discussion in
     // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
     *output = scalar_t{0};
+    *total_weight = scalar_t{0};
   }
 }
 
@@ -313,6 +281,7 @@ void nll_loss_forward_out_cuda_template(
 
   if (reduction == Reduction::None && n_dims == 2) {
     at::native::resize_output(output, {batch_size});
+    total_weight.zero_();
     if (batch_size == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
       // 0 blocks.

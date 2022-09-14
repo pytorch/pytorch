@@ -7,12 +7,12 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase,)
+    (parametrize, run_tests, TestCase, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
-    (get_all_dtypes, get_all_fp_dtypes,)
+    (get_all_dtypes,)
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -185,19 +185,23 @@ class TestScatterGather(TestCase):
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter_add_(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
-                                is_scalar=False, reduction=None)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                self._test_scatter_base(torch.Tensor.scatter_add_, device=device, dtype=dtype,
+                                        is_scalar=False, reduction=None)
 
     @dtypes(torch.float32)
     def test_scatter_add_mult_index_base(self, device, dtype):
-        m, n = 30, 40
-        idx = torch.zeros(m, n, device=device, dtype=torch.long)
-        src = torch.ones(m, n, device=device, dtype=dtype)
-        res0 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(0, idx, src)
-        res1 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(1, idx, src)
+        for deterministic in [False, True]:
+            with DeterministicGuard(deterministic):
+                m, n = 30, 40
+                idx = torch.zeros(m, n, device=device, dtype=torch.long)
+                src = torch.ones(m, n, device=device, dtype=dtype)
+                res0 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(0, idx, src)
+                res1 = torch.zeros(m, n, device=device, dtype=dtype).scatter_add_(1, idx, src)
 
-        self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
-        self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
+                self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
+                self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
@@ -208,7 +212,7 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_prod(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -216,7 +220,7 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -224,7 +228,7 @@ class TestScatterGather(TestCase):
                                     include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amax(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -243,7 +247,7 @@ class TestScatterGather(TestCase):
 
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amin(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,

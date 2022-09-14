@@ -16,24 +16,38 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
+      run-doxygen:
+        required: false
+        type: boolean
+        default: false
+        description: If set, will enable C++ API doc generation using doxygen / breathe / exhale.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
         description: Permissions for pushing to the docs site.
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: [self-hosted, linux.4xlarge]
     strategy:
       matrix:
-        docs_type: [cpp, python]
+        include:
+          - docs_type: cpp
+            # Nightly cpp docs take about 150m to finish, and the number is stable
+            timeout-minutes: 180
+          - docs_type: python
+            # It takes less than 30m to finish python docs unless there are issues
+            timeout-minutes: 30
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -68,12 +82,13 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        timeout-minutes: ${{ matrix.timeout-minutes }}
+        id: build-docs
         env:
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
+          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
@@ -86,13 +101,11 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
-            -e PR_LABELS \
+            -e RUN_DOXYGEN \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -113,7 +126,7 @@ jobs:
 
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           s3-bucket: doc-previews
@@ -123,7 +136,7 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           if-no-files-found: error

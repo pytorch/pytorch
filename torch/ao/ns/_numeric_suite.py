@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 from torch.ao.quantization import prepare
 from typing import Dict, List, Optional, Any, Union, Callable, Set
 
@@ -467,13 +467,14 @@ def prepare_model_outputs(
 
     qconfig_debug = torch.ao.quantization.QConfig(activation=logger_cls, weight=None)
     float_module.qconfig = qconfig_debug  # type: ignore[assignment]
-    prepare(float_module, inplace=True, allow_list=allow_list)
+    prepare(float_module, inplace=True, allow_list=allow_list, prepare_custom_config_dict={})
     q_module.qconfig = qconfig_debug  # type: ignore[assignment]
     prepare(
         q_module,
         inplace=True,
         allow_list=allow_list,
         observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST,
+        prepare_custom_config_dict={}
     )
 
 

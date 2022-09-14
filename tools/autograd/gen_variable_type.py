@@ -25,81 +25,97 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .context import with_native_function_with_differentiability_info
-from .gen_trace_type import (
-    MANUAL_BACKEND,
-    MANUAL_AUTOGRAD_AND_TRACER,
-    declare_returned_variables,
-    tie_return_values,
-    get_return_value,
-    type_wrapper_name,
-)
-from .gen_inplace_or_view_type import (
-    get_view_info,
-    is_tensor_type,
-    is_tensor_list_type,
-    unpack_args,
-    get_base_name,
-    use_derived,
-    modifies_arguments,
-    WRAPPER_REGISTRATION,
-    TMP_VAR,
-    METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE,
-    gen_formals,
-    ALL_VIEW_FUNCTIONS,
-    unpacked_name,
-    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+
+from torchgen.api import cpp
+from torchgen.api.autograd import (
+    DifferentiableInput,
+    dispatch_strategy,
+    ForwardDerivative,
+    gen_differentiable_outputs,
+    is_differentiable,
+    NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute,
 )
 
 from torchgen.api.types import (
+    BaseCType,
     Binding,
     DispatcherSignature,
-    BaseCType,
     intArrayRefT,
-    tensorT,
-    tensorListT,
+    ListCType,
     MutRefCType,
     OptionalCType,
-    ListCType,
-    SpecialArgName,
     scalarT,
+    SpecialArgName,
     stringT,
+    symIntArrayRefT,
+    tensorListT,
+    tensorT,
     TupleCType,
     VectorCType,
 )
-from torchgen.api.autograd import (
-    DifferentiableInput,
-    NativeFunctionWithDifferentiabilityInfo,
-    SavedAttribute,
-    dispatch_strategy,
-    gen_differentiable_outputs,
-    is_differentiable,
-)
-from torchgen.api import cpp
 from torchgen.code_template import CodeTemplate
-from torchgen.context import native_function_manager, with_native_function
-from torchgen.utils import mapMaybe, FileManager
+from torchgen.context import (
+    native_function_manager,
+    with_native_function,
+    with_native_function_and,
+)
 from torchgen.model import (
     Argument,
+    BaseType,
+    ListType,
     NativeFunction,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    ListType,
 )
-from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
+from torchgen.utils import FileManager, mapMaybe
+
+from .context import with_native_function_with_differentiability_info_and_key
+from .gen_inplace_or_view_type import (
+    ALL_VIEW_FUNCTIONS,
+    ASSIGN_RETURN_VALUE,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
+    gen_formals,
+    get_base_name,
+    get_view_info,
+    is_tensor_list_type,
+    is_tensor_type,
+    METHOD_DEFINITION,
+    modifies_arguments,
+    TMP_VAR,
+    unpack_args,
+    unpacked_name,
+    use_derived,
+    WRAPPER_REGISTRATION,
+)
+from .gen_trace_type import (
+    declare_returned_variables,
+    get_return_value,
+    MANUAL_AUTOGRAD_AND_TRACER,
+    MANUAL_BACKEND,
+    tie_return_values,
+    type_wrapper_name,
+)
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
 # not examine or modify requires_grad or grad_fn.
+# NB: this does NOT include overload name
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
+    "empty_like",
     "ones_like",
+    "full_like",
     "zeros_like",
     "rand_like",
     "randn_like",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_zeros",
+    "new_ones",
     # These are only implemented on integral types
     "__and__",
     "__iand__",
@@ -134,6 +150,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "isinf",
     "signbit",
     "isin",
+    "allclose",
     # Functions return none are not differentiable
     "record_stream",
     # These functions are not differentiable
@@ -141,12 +158,15 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
+    # This function returns nested_tensor shape as a tensor that is non-differentiable
+    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    "fill",
     "t",
     "view",
     "reshape",
@@ -236,6 +256,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
+    "std_mean",
+    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
@@ -243,7 +265,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
-    "linalg_eigh",
+    "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
     "_linalg_svd",
@@ -257,7 +279,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "index_add_",
     "linalg_inv",
     "linalg_inv_ex",
-    "l1_loss_backward",
     "baddbmm",
     "addbmm",
     "addmm",
@@ -282,6 +303,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad2d",
     "replication_pad3d",
     "take",
+    "put",
     "put_",
     "_to_copy",
     "replication_pad1d_backward",
@@ -321,7 +343,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_det_lu_based_helper",
+    "_linalg_det",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",
@@ -336,6 +358,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_lu",
     "pixel_shuffle",
     "pixel_unshuffle",
+    "linalg_lu_solve",
+    "_linalg_slogdet",
+    "_linalg_solve_ex",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -377,7 +402,9 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 # If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
-if (${tensor_name}_storage_saved.has_value() && !torch_dispatch_set())
+if (${tensor_name}_storage_saved.has_value() &&
+    !at::impl::dispatch_mode_enabled() &&
+    !at::impl::tensor_has_dispatch(${tensor_name}))
   AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
@@ -393,8 +420,8 @@ for (const Tensor& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value() && !torch_dispatch_set())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """
@@ -411,8 +438,8 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
-  if (${tensorlist_name}_storage_saved[i].has_value())
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value() && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
         static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
 }
@@ -428,19 +455,21 @@ if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntr
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate(
     """\
-if (${tensor_name}_impl_saved && !torch_dispatch_set()) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """
 )
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
     """\
-if (!torch_dispatch_set()) AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
+  AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """
 )
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate(
     """\
-if (${tensor_name}.has_storage() && !torch_dispatch_set()) {
+if (${tensor_name}.has_storage() && !at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name})) {
   AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
 }
 """
@@ -456,8 +485,8 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
-  if (${tensorlist_name}_impl_saved[i])
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
+  if (${tensorlist_name}_impl_saved[i] && !at::impl::tensorlist_has_dispatch(${tensorlist_name}))
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
 """
@@ -475,7 +504,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate(
     """\
-for (size_t i=0; i<${tensorlist_name}.size() && !torch_dispatch_set(); i++) {
+for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
@@ -504,6 +533,11 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    "lift_fresh",
+    "lift_fresh_copy",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -511,8 +545,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
-    # lift() should never actually be called with a requires_grad=True tensor,
-    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
@@ -566,8 +598,14 @@ at::redispatch::${api_name}(${unpacked_args})"""
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate(
     """\
 auto ${tmp_var} = ([&]() {
-  ${guard}
-  return ${base_type_call};
+  if (${try_jit_decomposition_bool} && ${any_has_forward_grad}) {
+    static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
+    static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
+    return impl::run_jit_decomposition_with_args_for_jvp<${return_types}>("${op_name}", *opt_op, ks, ${arg_names});
+  } else {
+    ${guard}
+    return ${base_type_call};
+  }
 })();
 """
 )
@@ -611,6 +649,12 @@ isFwGradDefined(${req_inp})\
 """
 )
 
+FW_DERIVATIVE_TENSORLIST_CHECK_TEMPLATE = CodeTemplate(
+    """\
+isFwGradDefinedTensorList(${req_inp})\
+"""
+)
+
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate(
     """\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
@@ -628,7 +672,7 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate(
     """\
-if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined() && ${out_arg}.defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
   ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
@@ -637,7 +681,8 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate(
     """\
-if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()) {
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()
+    && ${out_arg}.defined()) {
   ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
 }
 """
@@ -649,7 +694,7 @@ if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
-    if (${out_arg}_new_fw_grad[i].defined()) {
+    if (${out_arg}_new_fw_grad[i].defined() && ${out_arg}[i].defined()) {
       // The hardcoded 0 here will need to be updated once we support multiple levels.
       ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
     }
@@ -689,6 +734,7 @@ def gen_variable_type(
     tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
+    used_keys: Set[str],
 ) -> None:
 
     """VariableType.h and VariableType.cpp body
@@ -705,9 +751,52 @@ def gen_variable_type(
         },
     )
 
+    # helper that generates a TORCH_LIBRARY_IMPL macro for each
+    # dispatch key that appears in derivatives.yaml
+    def wrapper_registrations(used_keys: Set[str]) -> str:
+        library_impl_macro_list: List[str] = []
+        for key in used_keys:
+            dispatch_key = key
+            if key == "Default":
+                dispatch_key = "Autograd"
+            library_impl_macro = (
+                f"TORCH_LIBRARY_IMPL(aten, {dispatch_key}, m) "
+                + "{\n"
+                + "${"
+                + f"wrapper_registrations_{key}"
+                + "}\n}"
+            )
+            library_impl_macro_list += [library_impl_macro]
+        return "\n\n".join(library_impl_macro_list)
+
+    # Generate a new template from VariableType.cpp which replaces ${wrapper_registrations}
+    # with per key TORCH_LIBRARY_IMPL macros for each key that appears in derivatives.yaml
+    fm1 = FileManager(
+        install_dir=out + "/templates", template_dir=template_path, dry_run=False
+    )
+    fm1.write(
+        "VariableType.cpp",
+        lambda: {
+            "type_derived_method_definitions": "\n\n".join(
+                [
+                    "${" + f"type_derived_method_definitions_{key}" + "}"
+                    for key in used_keys
+                ]
+            ),
+            "wrapper_registrations": wrapper_registrations(used_keys),
+        },
+    )
+
+    # Generate final VariableType_*.cpp files from the generated template
+    fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
+
+    sharded_keys = set(
+        [f"type_derived_method_definitions_{key}" for key in used_keys]
+        + [f"wrapper_registrations_{key}" for key in used_keys]
+    )
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    fm.write_sharded(
+    fm2.write_sharded(
         "VariableType.cpp",
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
@@ -716,15 +805,15 @@ def gen_variable_type(
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
-        sharded_keys={"type_derived_method_definitions", "wrapper_registrations"},
+        sharded_keys=sharded_keys,
     )
 
 
-@with_native_function
-def gen_wrapper_registration(f: NativeFunction) -> str:
+@with_native_function_and
+def gen_wrapper_registration(f: NativeFunction, key: str = "Default") -> str:
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
-        type_wrapper_name=type_wrapper_name(f),
+        type_wrapper_name=type_wrapper_name(f, key),
         class_type="VariableType",
     )
 
@@ -733,6 +822,7 @@ def gen_variable_type_func(
     fn: NativeFunctionWithDifferentiabilityInfo,
 ) -> Dict[str, List[str]]:
     f = fn.func
+    result = {}
     with native_function_manager(f):
         name = cpp.name(f.func)
         formals = gen_formals(f)
@@ -766,20 +856,42 @@ def gen_variable_type_func(
             wrapper_registration = AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
                 unqual_operator_name_with_overload=f.func.name
             )
+            result["type_derived_method_definitions_Default"] = [type_definition]
+            result["wrapper_registrations_Default"] = [wrapper_registration]
         else:
-            type_definition = METHOD_DEFINITION.substitute(
-                return_type=cpp.returns_type(f.func.returns).cpp_type(),
-                type_wrapper_name=type_wrapper_name(f),
-                type_definition_body=emit_body(fn),
-                formals=formals,
-            )
-            wrapper_registration = gen_wrapper_registration(f)
-
+            if not fn.info:
+                key = "Default"
+                type_definition = METHOD_DEFINITION.substitute(
+                    return_type=cpp.returns_type(
+                        f.func.returns, symint=True
+                    ).cpp_type(),
+                    type_wrapper_name=type_wrapper_name(f, key),
+                    type_definition_body=emit_body(fn, key),
+                    formals=formals,
+                )
+                wrapper_registration = gen_wrapper_registration(f, key)
+                result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                result[f"wrapper_registrations_{key}"] = [wrapper_registration]
+            else:
+                for key, _ in fn.info.items():
+                    type_definition = METHOD_DEFINITION.substitute(
+                        return_type=cpp.returns_type(
+                            f.func.returns, symint=True
+                        ).cpp_type(),
+                        type_wrapper_name=type_wrapper_name(f, key),
+                        type_definition_body=emit_body(fn, key),
+                        formals=formals,
+                    )
+                    wrapper_registration = gen_wrapper_registration(f, key)
+                    result[f"type_derived_method_definitions_{key}"] = [type_definition]
+                    result[f"wrapper_registrations_{key}"] = [wrapper_registration]
     # See Note [Manual Backend kernels]
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
     # If you want to register a kernel to Autograd, you must make the op abstract.
     # In other words, this op must have dispatch section in native_functions.yaml.
-    if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
+    if name in MANUAL_AUTOGRAD_AND_TRACER or (
+        fn.info and any(info.has_derivatives for info in fn.info.values())
+    ):
         msg = (
             f"There's a formula for {name}(or its functional variant) in derivatives.yaml. "
             f"It's required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA "
@@ -789,18 +901,17 @@ def gen_variable_type_func(
         )
         assert f.is_abstract, msg
 
-    return {
-        "type_derived_method_definitions": [type_definition],
-        "wrapper_registrations": [wrapper_registration],
-    }
+    return result
 
 
-@with_native_function_with_differentiability_info
-def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
+@with_native_function_with_differentiability_info_and_key
+def emit_body(
+    fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
+) -> List[str]:
     assert dispatch_strategy(fn) == "use_derived"
     f = fn.func
-    info = fn.info
-    fw_derivatives = fn.fw_derivatives
+    info = fn.info[key] if fn.info else None
+    fw_derivatives = fn.fw_derivatives.get(key, []) if fn.fw_derivatives else []
 
     name = cpp.name(f.func)
     inplace = f.func.kind() == SchemaKind.inplace
@@ -819,7 +930,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
+        cpp_type = cpp.argument_type(a, binds=a.name, symint=True).cpp_type()
 
         if not is_differentiable(a.name, a.type, info):
             return None
@@ -850,7 +961,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     differentiable_inputs = gen_differentiable_inputs(f)
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    differentiable_outputs = gen_differentiable_outputs(fn)
+    differentiable_outputs = gen_differentiable_outputs(fn, key)
 
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (
         name in DONT_REQUIRE_DERIVATIVE
@@ -873,6 +984,23 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         raise RuntimeError(
             f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
         )
+
+    if requires_derivative and not len(fw_derivatives) == 0:
+        assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
+            differentiable_outputs
+        ), (
+            "Expected the number of forward derivatives implemented to match the "
+            "number of differentiable outputs. NB: This only applies when at least "
+            "one forward derivative is implemented. Not implementing any forward "
+            "derivatives is also okay, and we would require inputs to the op to "
+            "not have associated tangents in that case."
+        )
+    try_jit_decomposition = (
+        requires_derivative
+        and len(fw_derivatives) == 0
+        and (not modifies_arguments(f))
+        and (not returns_void)
+    )
 
     def emit_save_inputs() -> List[str]:
         setup: List[str] = []
@@ -1072,6 +1200,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 name += "_"
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
+            elif type == BaseCType(symIntArrayRefT):
+                expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
@@ -1108,6 +1238,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             api_name=cpp.name(
                 f.func,
                 faithful_name_for_out_overloads=True,
+                symint_overload=f.func.has_symint(),
             ),
             unpacked_args=[dispatch_key_set] + list(unpacked_args),
         )
@@ -1189,7 +1320,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             for i, (ret, ret_name) in enumerate(
                 zip(f.func.returns, cpp.return_names(f))
             ):
-                noref_cpp_type = cpp.return_type(ret).remove_const_ref()
+                noref_cpp_type = cpp.return_type(ret, symint=True).remove_const_ref()
                 if noref_cpp_type == BaseCType(tensorT):
                     if aliased_arg_name is not None:
                         assert (
@@ -1237,7 +1368,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             )
         return call
 
-    def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
+    def emit_call(
+        f: NativeFunction, unpacked_bindings: List[Binding], try_jit_decomposition: bool
+    ) -> str:
         # We only care about adding `at::AutoDispatchBelowAutograd` guard for non-variable dispatch
         # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
@@ -1251,13 +1384,47 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         else:
             guard = "at::AutoDispatchBelowADInplaceOrView guard;"
 
+        try_jit_decomposition_bool = "true" if try_jit_decomposition else "false"
+        any_has_forward_grad = (
+            get_any_has_fw_grad_cond(derivative=None)
+            if requires_derivative
+            else "false"
+        )
+        return_types = ", ".join(
+            [cpp.return_type(a, symint=True).cpp_type() for a in f.func.returns]
+        )
+        if len(f.func.returns) > 1:
+            return_types = f"std::tuple<{return_types}>"
+
+        arg_names = [
+            a.name
+            for a in cpp.arguments(
+                f.func.arguments,
+                faithful=True,
+                symint=True,
+                method=False,
+                cpp_no_default_args=set(),
+            )
+        ]
+
         if not modifies_arguments(f) and not returns_void:
+            # Just to keep things simple here, we only care about this path
+            # and always emit the if/else for now
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call, tmp_var=TMP_VAR, guard=guard
+                base_type_call=base_type_call,
+                tmp_var=TMP_VAR,
+                guard=guard,
+                try_jit_decomposition_bool=try_jit_decomposition_bool,
+                any_has_forward_grad=any_has_forward_grad,
+                op_name=cpp.name(f.func),
+                op_overload=f.func.name.overload_name,
+                return_types=return_types,
+                arg_names=arg_names,
             )
 
             call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:
+            assert not try_jit_decomposition
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call, guard=guard
             )
@@ -1286,9 +1453,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     def emit_any_requires_grad() -> List[str]:
         extra_condition = ""
-        if fn.info and fn.info.output_differentiability_conditions:
-            assert len(fn.info.output_differentiability_conditions) == 1
-            extra_condition = f"_any_requires_grad &= ({fn.info.output_differentiability_conditions[0]});"
+        if info and info.output_differentiability_conditions:
+            assert len(info.output_differentiability_conditions) == 1
+            extra_condition = f"_any_requires_grad &= ({info.output_differentiability_conditions[0]});"
         return [
             SETUP_ANY_REQUIRES_GRAD.substitute(
                 args_with_derivatives=[arg.name for arg in args_with_derivatives],
@@ -1305,38 +1472,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     def emit_any_has_forward_grad() -> List[str]:
         content: List[str] = []
         for derivative in fw_derivatives:
-            assert derivative.required_inputs_fw_grad is not None
-            requires_fw_grad = " || ".join(
-                [
-                    FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
-                    for inp in differentiable_inputs
-                    if inp.name in derivative.required_inputs_fw_grad
-                ]
-            )
-            if not requires_fw_grad:
-                # Handle functions like stack
-                # For these, we don't unpack anything and always call the user function
-                if not (
-                    len(differentiable_inputs) == 1
-                    and is_tensor_list_type(differentiable_inputs[0].type)
-                ):
-                    raise RuntimeError(
-                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided '
-                        "forward AD formula does not use any input tangent) even though a forward gradient "
-                        "formula has been defined for it. This case should only happen for function that "
-                        "take a single TensorList as input. All other cases are not supported right now."
-                    )
-                requires_fw_grad = "true"
-
-            if fn.info and fn.info.output_differentiability_conditions:
-                assert len(fn.info.output_differentiability_conditions) == 1
-                requires_fw_grad = f"({fn.info.output_differentiability_conditions[0]}) && ({requires_fw_grad})"
-
+            requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
+            if info and info.output_differentiability_conditions:
+                assert len(info.output_differentiability_conditions) == 1
+                requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
             content.append(
                 f"auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};\n"
                 f"(void){get_any_has_forward_grad_name(derivative.var_names)};"
             )
-
         return content
 
     def emit_check_inplace() -> List[str]:
@@ -1396,6 +1539,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 is_inplace_str = "false"
 
+            requires_fw_grad = get_any_has_forward_grad_name(derivative.var_names)
+
             if all(
                 (isinstance(var_type, BaseType) and var_type.is_tensor_like())
                 for var_type in derivative.var_types
@@ -1408,6 +1553,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                             out_arg=res[0], is_inplace=is_inplace_str
                         )
                     )
+                    requires_fw_grad += f" && ({derivative.var_names[0]}.defined())"
                 else:
                     tuple_type = TupleCType(
                         [BaseCType(tensorT)] * len(derivative.var_types)
@@ -1445,9 +1591,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             content.append(
                 FW_DERIVATIVE_TEMPLATE.substitute(
                     fw_grad_opt_definition=fw_grad_opt_definition,
-                    requires_fw_grad=get_any_has_forward_grad_name(
-                        derivative.var_names
-                    ),
+                    requires_fw_grad=requires_fw_grad,
                     formula=derivative.formula,
                     out_arg="_".join(res),
                     unpacked_arguments=unpacked_arguments,
@@ -1458,46 +1602,83 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         content.append("\n".join(fw_grad_setters))
         return content
 
+    def get_any_has_fw_grad_cond(derivative: Optional[ForwardDerivative]) -> str:
+        #
+        # Produces a condition string (e.g, "isFwGradDefined(grad_output) || isFwGradDefined(output)")
+        #
+        if derivative is None:
+            # (1) If a derivative is NOT provided, cond will check fw_grad of ALL differentiable inputs
+            # - Used in the out_fn case when we want to forbid fw derivatives
+            # - Used in the case where the fw_derivative is not defined, but we want
+            #   To check if there is a decomposition registered for jvp
+            to_check: List[str] = []
+            for inp in list(
+                mapMaybe(
+                    gen_differentiable_input,
+                    f.func.arguments.non_out + list(f.func.arguments.out),  # type: ignore[operator]
+                )
+            ):
+                if is_tensor_type(inp.type):
+                    to_check.append(
+                        FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
+                    )
+                elif is_tensor_list_type(inp.type):
+                    to_check.append(
+                        FW_DERIVATIVE_TENSORLIST_CHECK_TEMPLATE.substitute(
+                            req_inp=inp.name
+                        )
+                    )
+                else:
+                    raise RuntimeError(
+                        f'Unsupported input type for "{name}" when forbidding forward AD usage.'
+                    )
+            return f'({" || ".join(to_check)})'
+        else:
+            # (2) If derivative is provided, use that information to determine which inputs
+            #     to check fw_grad for
+            assert derivative.required_inputs_fw_grad is not None
+
+            if len(derivative.required_inputs_fw_grad) == 0:
+                # Handle functions like stack
+                # For these, we don't unpack anything and always call the user function
+                if not (
+                    len(differentiable_inputs) == 1
+                    and is_tensor_list_type(differentiable_inputs[0].type)
+                ):
+                    raise RuntimeError(
+                        f'No differentiable input to "{name}" is a differentiable Tensor (as the provided '
+                        "forward AD formula does not use any input tangent) even though a forward gradient "
+                        "formula has been defined for it. This case should only happen for function that "
+                        "take a single TensorList as input. All other cases are not supported right now."
+                    )
+                any_has_fw_grad = "true"
+            else:
+                any_has_fw_grad = " || ".join(
+                    [
+                        FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
+                        for inp in differentiable_inputs
+                        if inp.name in derivative.required_inputs_fw_grad
+                    ]
+                )
+                any_has_fw_grad = f"({any_has_fw_grad})"
+
+            return any_has_fw_grad
+
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
-        def get_msg() -> str:
-            if is_out_fn:
-                msg = "because it is an out= function"
-            else:
-                msg = (
-                    "because it has not been implemented yet.\\nPlease file an issue "
-                    "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
-                    "so that we can prioritize its implementation."
-                )
-            return msg
-
-        res = ""
-        to_check: List[str] = []
-        for inp in list(
-            mapMaybe(
-                gen_differentiable_input,
-                f.func.arguments.non_out + list(f.func.arguments.out),  # type: ignore[operator]
+        if is_out_fn:
+            msg = "because it is an out= function"
+        else:
+            msg = (
+                "because it has not been implemented yet.\\nPlease file an issue "
+                "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+                "so that we can prioritize its implementation."
             )
-        ):
-            if is_tensor_type(inp.type):
-                to_check.append(
-                    FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
-                )
-            elif is_tensor_list_type(inp.type):
-                cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
-                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(
-                    arg=inp.name, cond=cond, name=name, msg=get_msg()
-                )
-            else:
-                raise RuntimeError(
-                    f'Unsupported input type for "{name}" when forbidding forward AD usage.'
-                )
-
-        if len(to_check) > 0:
-            cond = " || ".join(to_check)
-            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(
-                cond=cond, name=name, msg=get_msg()
-            )
-        return res
+        cond = get_any_has_fw_grad_cond(derivative=None)
+        return (
+            FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name, msg=msg)
+            if cond != ""
+            else ""
+        )
 
     body: List[str] = []
     unpack_args_stats, unpacked_bindings = unpack_args(f)
@@ -1511,7 +1692,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
-    body.append(emit_call(f, unpacked_bindings))
+    body.append(emit_call(f, unpacked_bindings, try_jit_decomposition))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -1521,20 +1702,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_derivative:
-            body.extend(emit_fw_derivatives())
-            if len(fw_derivatives) == 0:
-                body.append(emit_forbid_fw_derivatives())
+        if requires_derivative and not try_jit_decomposition:
+            if len(fw_derivatives) > 0:
+                body.extend(emit_fw_derivatives())
             else:
-                assert sum(
-                    len(derivative.var_names) for derivative in fw_derivatives
-                ) == len(differentiable_outputs), (
-                    "Expected the number of forward derivatives implemented to match the "
-                    "number of differentiable outputs. NB: This only applies when at least "
-                    "one forward derivative is implemented. Not implementing any forward "
-                    "derivatives is also okay, and we would require inputs to the op to "
-                    "not have associated tangents in that case."
-                )
+                body.append(emit_forbid_fw_derivatives())
 
     if requires_derivative:
         # Save only after the forward AD has been set up

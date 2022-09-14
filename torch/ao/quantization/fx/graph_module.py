@@ -28,7 +28,7 @@ class ObservedGraphModule(GraphModule):
             '_activation_post_process_indexes',
             '_patterns',
             '_qconfig_map',
-            '_prepare_custom_config_dict',
+            '_prepare_custom_config',
             '_equalization_qconfig_map',
             '_node_name_to_scope',
             '_qconfig_mapping',

@@ -47,8 +47,7 @@ enum class C10_API_ENUM RecordScope : uint8_t {
 namespace std {
 template <>
 struct hash<at::RecordScope> {
-  size_t operator()(
-      const at::RecordScope& sc) const {
+  size_t operator()(const at::RecordScope& sc) const {
     return static_cast<std::size_t>(sc);
   }
 };
@@ -59,10 +58,10 @@ namespace at {
 struct TORCH_API StringView {
   StringView() : StringView(nullptr) {}
   explicit StringView(const char* str_ptr)
-    : owned_str_ptr_(nullptr), str_ptr_(str_ptr) {}
+      : owned_str_ptr_(nullptr), str_ptr_(str_ptr) {}
   explicit StringView(std::string str)
-    : owned_str_ptr_(std::make_shared<std::string>(std::move(str))),
-      str_ptr_(owned_str_ptr_->c_str()) {}
+      : owned_str_ptr_(std::make_shared<std::string>(std::move(str))),
+        str_ptr_(owned_str_ptr_->c_str()) {}
 
   const char* str() const {
     return str_ptr_;
@@ -93,12 +92,14 @@ constexpr std::size_t kSoftLimitCallbacks = 4;
 // the RecordFunction.
 struct ObserverContext {
   virtual ~ObserverContext() {}
+
  protected:
   ObserverContext() {}
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
-typedef c10::SmallVector<std::unique_ptr<ObserverContext>, kSoftLimitCallbacks> ObserverContextList;
+typedef c10::SmallVector<std::unique_ptr<ObserverContext>, kSoftLimitCallbacks>
+    ObserverContextList;
 typedef uint64_t RecordFunctionHandle;
 struct RecordFunction;
 
@@ -112,29 +113,28 @@ struct RecordFunction;
  *   start, end - the callbacks to run when entering and exiting the scope;
  *     optionally, the start callback may return an ObserverContext which will
  *     be passed to the end callback, use appropriate constructor accordingly.
- *   needs_inputs - whether the callbacks need the inputs passed from the observed
- *     function/range; NOTE: passing the inputs incurs an additional overhead;
- *   sampling_probability - if not 1.0, then the callback is probabilistically sampled
- *     to run; NOTE: start and end callbacks always run as a pair and are sampled
- *     together;
- *   scopes - types of scopes to execute the callbacks on (see RecordScope);
- *     passing empty set means the callbacks will be executed for all possible
- *     scope types
- *   should_run - optional function that returns whether this callback should run;
- *     overwrites the effect of setting sampling_probability
+ *   needs_inputs - whether the callbacks need the inputs passed from the
+ * observed function/range; NOTE: passing the inputs incurs an additional
+ * overhead; sampling_probability - if not 1.0, then the callback is
+ * probabilistically sampled to run; NOTE: start and end callbacks always run as
+ * a pair and are sampled together; scopes - types of scopes to execute the
+ * callbacks on (see RecordScope); passing empty set means the callbacks will be
+ * executed for all possible scope types should_run - optional function that
+ * returns whether this callback should run; overwrites the effect of setting
+ * sampling_probability
  */
 class TORCH_API RecordFunctionCallback {
  public:
-  using StartCallback = std::unique_ptr<ObserverContext>(*)(const RecordFunction&);
+  using StartCallback =
+      std::unique_ptr<ObserverContext> (*)(const RecordFunction&);
   using EndCallback = void (*)(const RecordFunction&, ObserverContext*);
 
   // This interface supports observers that require passing an ObserverContext
   // between start and end callbacks.
   explicit RecordFunctionCallback(
       StartCallback start,
-      EndCallback end = nullptr) :
-      start_(start),
-      end_(end) {
+      EndCallback end = nullptr)
+      : start_(start), end_(end) {
     scopes_.fill(true);
   }
 
@@ -154,7 +154,8 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
+    TORCH_CHECK(
+        sampling_prob >= 0.0 && sampling_prob <= 1.0,
         "Invalid sampling probability");
     sampling_prob_ = sampling_prob;
     return *this;
@@ -301,7 +302,10 @@ struct TORCH_API RecordFunction {
       F fn,
       const std::vector<IValue>* args,
       int64_t current_sequence_nr = -1) {
-    before(std::move(fn), c10::ArrayRef<const c10::IValue>(args->data(), args->size()), current_sequence_nr);
+    before(
+        std::move(fn),
+        c10::ArrayRef<const c10::IValue>(args->data(), args->size()),
+        current_sequence_nr);
   }
 
   // Destructor calls end callbacks
@@ -318,7 +322,8 @@ struct TORCH_API RecordFunction {
 
   c10::ArrayRef<const IValue> inputs() const {
 #ifndef NDEBUG
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inputs_valid_, "Called inputs() outside RecordFunction start callback");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        inputs_valid_, "Called inputs() outside RecordFunction start callback");
 #endif
     return inputs_;
   }
@@ -379,10 +384,12 @@ struct TORCH_API RecordFunction {
   // Gets node ID for distributed profiling
   static int64_t getDefaultNodeId();
 
-  // Calls end callbacks. After end(), accessors will no longer provide useful results.
+  // Calls end callbacks. After end(), accessors will no longer provide useful
+  // results.
   void end();
 
-  // Internal-only, used only force async event for distributed events profiling.
+  // Internal-only, used only force async event for distributed events
+  // profiling.
   void _setAsync();
 
   // Returns whether this RecordFunction corresponds to an async event orn ot.
@@ -460,7 +467,7 @@ struct TORCH_API RecordFunction {
 
   // Unique id for this RecordFunction, used in callbacks to track start
   // and end of ranges
-  RecordFunctionHandle handle_ {0};
+  RecordFunctionHandle handle_{0};
 
   // Whether this record_function corresponds to an async event or not. Async
   // events can complete in different threads or follow a future-like pattern
@@ -480,87 +487,117 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
-TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope);
+TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+    RecordScope scope);
 
 namespace detail {
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope(RecordFunction& guard, F fn, const Inputs& inputs, Args&&... args) {
+void record_function_with_scope(
+    RecordFunction& guard,
+    F fn,
+    const Inputs& inputs,
+    Args&&... args) {
   if (guard.needsInputs()) {
-    guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
+    guard.before(
+        fn,
+        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()),
+        std::forward<Args>(args)...);
   } else {
     guard.before(fn, std::forward<Args>(args)...);
   }
 }
 
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope_and_debug_handle(RecordFunction& guard, F fn, int64_t debug_handle, const Inputs& inputs, Args&&... args) {
+void record_function_with_scope_and_debug_handle(
+    RecordFunction& guard,
+    F fn,
+    int64_t debug_handle,
+    const Inputs& inputs,
+    Args&&... args) {
   guard.setDebugHandle(debug_handle);
   if (guard.needsInputs()) {
-    guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
+    guard.before(
+        fn,
+        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()),
+        std::forward<Args>(args)...);
   } else {
     guard.before(fn, std::forward<Args>(args)...);
   }
 }
 
 template <typename F, typename... Args>
-void record_function_with_scope(RecordFunction& guard, F fn, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
-  return record_function_with_scope<c10::ArrayRef<const c10::IValue>, F, Args...>(guard, std::move(fn), inputs, std::forward<Args>(args)...);
+void record_function_with_scope(
+    RecordFunction& guard,
+    F fn,
+    c10::ArrayRef<const c10::IValue> inputs,
+    Args&&... args) {
+  return record_function_with_scope<
+      c10::ArrayRef<const c10::IValue>,
+      F,
+      Args...>(guard, std::move(fn), inputs, std::forward<Args>(args)...);
 }
 
 template <typename F, typename... Args>
-void record_function_with_scope_and_debug_handle(RecordFunction& guard, F fn, int64_t debug_handle, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
-  return record_function_with_scope_and_debug_handle<c10::ArrayRef<const c10::IValue>, F, Args...>(guard, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
+void record_function_with_scope_and_debug_handle(
+    RecordFunction& guard,
+    F fn,
+    int64_t debug_handle,
+    c10::ArrayRef<const c10::IValue> inputs,
+    Args&&... args) {
+  return record_function_with_scope_and_debug_handle<
+      c10::ArrayRef<const c10::IValue>,
+      F,
+      Args...>(
+      guard, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
 }
 
 } // namespace detail
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
-  at::RecordFunction guard(scope); \
-  if (guard.isActive()) { \
-    ::at::detail::record_function_with_scope(guard, fn, inputs, ##__VA_ARGS__); \
+  at::RecordFunction guard(scope);                         \
+  if (guard.isActive()) {                                  \
+    ::at::detail::record_function_with_scope(              \
+        guard, fn, inputs, ##__VA_ARGS__);                 \
   }
 
 #define RECORD_FUNCTION(fn, inputs, ...) \
-  RECORD_FUNCTION_WITH_SCOPE( \
-    at::RecordScope::FUNCTION, \
-    fn, inputs, ##__VA_ARGS__)
+  RECORD_FUNCTION_WITH_SCOPE(            \
+      at::RecordScope::FUNCTION, fn, inputs, ##__VA_ARGS__)
 
 #define RECORD_TORCHSCRIPT_FUNCTION(mn, inputs) \
-  RECORD_FUNCTION_WITH_SCOPE( \
-    at::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
 
 // Custom user scopes in C++; similar to Python's 'with record_function("..."):'
 #define RECORD_USER_SCOPE(fn) \
   RECORD_FUNCTION_WITH_SCOPE( \
-    at::RecordScope::USER_SCOPE, fn, c10::ArrayRef<const c10::IValue>{})
+      at::RecordScope::USER_SCOPE, fn, c10::ArrayRef<const c10::IValue>{})
 
 // RECORD_USER_SCOPE with inputs
 #define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
-  RECORD_FUNCTION_WITH_SCOPE( \
-    at::RecordScope::USER_SCOPE, fn, inputs)
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::USER_SCOPE, fn, inputs)
 
 // Helper macro to pass in debug handle that is used to
 // post process events
-#define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(  \
-    scope, fn, debug_handle, inputs, ...)           \
-  at::RecordFunction guard(scope);                  \
-  if (guard.isActive()) {                           \
-    ::at::detail::record_function_with_scope_and_debug_handle(guard, fn, debug_handle, inputs, ##__VA_ARGS__); \
+#define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(             \
+    scope, fn, debug_handle, inputs, ...)                      \
+  at::RecordFunction guard(scope);                             \
+  if (guard.isActive()) {                                      \
+    ::at::detail::record_function_with_scope_and_debug_handle( \
+        guard, fn, debug_handle, inputs, ##__VA_ARGS__);       \
   }
 
 // Helper macros to record LITE INTERPETER scope events with debug handles
-#define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(             \
-    fn, debug_handle, inputs)                                       \
-    RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                      \
-        at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
+#define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS( \
+    fn, debug_handle, inputs)                           \
+  RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \
+      at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
 
 /**
- * addThreadLocalCallback adds a thread local callback to run with RecordFunction,
- * returns handle to use with removeThreadLocalCallback
+ * addThreadLocalCallback adds a thread local callback to run with
+ * RecordFunction, returns handle to use with removeThreadLocalCallback
  */
-TORCH_API CallbackHandle addThreadLocalCallback(
-    RecordFunctionCallback cb);
+TORCH_API CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb);
 
 /**
  * hasThreadLocalCallbacks returns whether there're callbacks registered
@@ -578,8 +615,7 @@ TORCH_API void clearThreadLocalCallbacks();
  *
  * only during the program initialization
  */
-TORCH_API CallbackHandle addGlobalCallback(
-    RecordFunctionCallback cb);
+TORCH_API CallbackHandle addGlobalCallback(RecordFunctionCallback cb);
 
 /**
  * removeCallback removes a callback given the handle returned by

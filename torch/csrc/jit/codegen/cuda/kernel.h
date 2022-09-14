@@ -38,7 +38,7 @@ struct KernelSummary {
   std::vector<const kir::Allocate*> static_smem_allocations;
 
   //! Indicate the need to generate random numbers
-  bool is_stochastic = false;
+  int max_rng_offsets = -1;
 
   //! Do we have any block reductions?
   bool has_block_reductions = false;
@@ -98,6 +98,57 @@ struct KernelSummary {
   std::vector<VectorizedSetInfo> vectorized_set_info;
 };
 
+class TORCH_CUDA_CU_API KernelPerformanceProfile {
+ public:
+  //! Register an expression to profile
+  void registerExpr(const Expr* expr);
+
+  //! Query if an expression is profiled
+  bool isProfiled(const Expr* expr) const;
+
+  //! Get the number of profiled expressions
+  int getNumberOfProfileEntries() const {
+    return num_profile_entries_;
+  }
+
+  //! Set the backing buffer of profile.
+  void setBuffer(TensorView* buffer) {
+    buffer_ = buffer;
+  }
+
+  //! Get the backing buffer
+  TensorView* getBuffer() const {
+    return buffer_;
+  }
+
+  //! Get the indices of the profile of an expression in the backing buffer
+  std::array<int, 2> getIndicesInProfileBuffer(const Expr* expr) const;
+
+  std::string toString(const at::Tensor& buffer) const;
+
+ private:
+  //! Get the new profile index
+  int getNewIndex();
+
+  //! Get the profile index
+  c10::optional<int> getIndex(const Expr* expr) const;
+
+ private:
+  int num_profile_entries_ = 0;
+
+  //! Backing buffer of Nx2 integer tensor, where N is the number of profiled
+  //! regions. Each region has two integer values, one representing
+  //! the cycles spent, and another the count.
+  TensorView* buffer_ = nullptr;
+
+  //! Map profiled expressions to profile entry offsets
+  std::unordered_map<const Expr*, int> expr_entry_map_;
+
+  // TODO: Allow profiling of ForLoops
+  //! Map profiled ForLoop to profile entry offsets
+  // std::unordered_map<const kir::ForLoop*, int> loop_entry_map_;
+};
+
 class KernelInternalProxy;
 
 //! Container for a lowered Kernel IR
@@ -151,6 +202,10 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
     return warp_padded_parallel_info_;
   }
 
+  const KernelPerformanceProfile& profile() const {
+    return profile_;
+  }
+
   //! Debug dump of the Kernel IR
   void print() const;
 
@@ -178,6 +233,8 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   DataType index_type_ = DataType::Int;
 
   WarpPaddedParallelInfo warp_padded_parallel_info_;
+
+  KernelPerformanceProfile profile_;
 };
 
 //! A special debugging proxy for Kernel.

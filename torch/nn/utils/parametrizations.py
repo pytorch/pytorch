@@ -8,6 +8,8 @@ from .. import functional as F
 
 from typing import Optional
 
+__all__ = ['orthogonal', 'spectral_norm']
+
 
 def _is_orthogonal(Q, eps=None):
     n, k = Q.size(-2), Q.size(-1)
@@ -241,6 +243,7 @@ def orthogonal(module: Module,
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> orth_linear = orthogonal(nn.Linear(20, 40))
         >>> orth_linear
         ParametrizedLinear(
@@ -251,6 +254,7 @@ def orthogonal(module: Module,
             )
         )
         )
+        >>> # xdoctest: +IGNORE_WANT
         >>> Q = orth_linear.weight
         >>> torch.dist(Q.T @ Q, torch.eye(20))
         tensor(4.9332e-07)
@@ -258,7 +262,7 @@ def orthogonal(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter ot buffer with name '{}'".format(module, name)
+            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
         )
 
     # We could implement this for 1-dim tensors as the maps on the sphere
@@ -456,18 +460,20 @@ def spectral_norm(module: Module,
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> snm = spectral_norm(nn.Linear(20, 40))
         >>> snm
         ParametrizedLinear(
-        in_features=20, out_features=40, bias=True
-        (parametrizations): ModuleDict(
+          in_features=20, out_features=40, bias=True
+          (parametrizations): ModuleDict(
             (weight): ParametrizationList(
-            (0): _SpectralNorm()
+              (0): _SpectralNorm()
             )
-        )
+          )
         )
         >>> torch.linalg.matrix_norm(snm.weight, 2)
-        tensor(1.0000, grad_fn=<CopyBackwards>)
+        tensor(1.0081, grad_fn=<AmaxBackward0>)
     """
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):

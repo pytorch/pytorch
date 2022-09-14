@@ -5,20 +5,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-namespace {
-// WorkerInfo needs to be registered exactly once. Since the op registration
-// happens in libtorch_python we wrap the class registration in a helper to make
-// sure that if there's multiple copies of Python such as used in torch::deploy
-// we only ever register it once.
-static std::once_flag workerInfoFlag;
-static c10::optional<torch::class_<WorkerInfo>> workerInfo;
-} // namespace
-
 RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
-  std::call_once(workerInfoFlag, []() {
-    workerInfo = torch::class_<WorkerInfo>("dist_rpc", "WorkerInfo")
-                     .def(torch::init<std::string, int64_t>());
-  });
+  // WorkerInfo needs to be registered exactly once. Since the op registration
+  // happens in libtorch_python we wrap the class registration in a helper to
+  // make sure that if there's multiple copies of Python such as used in
+  // torch::deploy we only ever register it once.
+  static auto workerInfo = torch::class_<WorkerInfo>("dist_rpc", "WorkerInfo")
+                               .def(torch::init<std::string, int64_t>());
 }
 
 constexpr size_t WorkerInfo::MAX_NAME_LEN;

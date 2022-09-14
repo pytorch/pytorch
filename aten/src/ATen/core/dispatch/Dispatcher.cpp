@@ -4,6 +4,11 @@
 
 namespace c10 {
 
+bool show_dispatch_trace() {
+    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
+    return temp != nullptr;
+}
+
 namespace detail {
 
 class RegistrationListenerList final {
@@ -147,7 +152,7 @@ void Dispatcher::deregisterLibrary_(const std::string& ns) {
   libraries_.erase(ns);
 }
 
-RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug) {
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, std::vector<at::Tag> tags) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -157,7 +162,7 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
                                                     " Each overload's schema should only be registered with a single call to def().",
                                                     " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
-  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug));
+  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), tags);
   listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking

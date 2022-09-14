@@ -60,6 +60,7 @@ class _PartialTensor(torch.Tensor):
     Examples:
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
         >>> tensor = torch.cat([tensor, tensor + 2])
         >>> tensor
@@ -190,7 +191,10 @@ class _PartialTensor(torch.Tensor):
             # Need to re-arrange original shard_dim of output_tensor_list.
             local_shards = [local_shards[idx] for idx in indices]  # type: ignore[call-overload]
         local_result = reduce_scatter(
-            torch.empty_like(local_shards[0]), list(local_shards), op=self._reduce_op
+            torch.empty_like(local_shards[0]),
+            list(local_shards),
+            op=self._reduce_op,
+            group=self._process_group,
         )
 
         sharded_tensor_size = self._local_shard.size()

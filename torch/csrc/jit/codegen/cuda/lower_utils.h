@@ -47,6 +47,13 @@ class TVDomainGuard {
  public:
   explicit TVDomainGuard(TensorView* _tv, TensorDomain* td);
 
+  //! An utility to access the tensordomain before the temporary
+  //!  view. This is used to retrieve information, like swizzle
+  //!  information that can only be reliably kept at the original domain.
+  const TensorDomain* prevDomain() const {
+    return prev_domain;
+  }
+
   ~TVDomainGuard();
 };
 
@@ -64,19 +71,16 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& order);
 
 // Returns if Val is a TensorView or TensorIndex
-bool isTV(const Val* const);
+TORCH_CUDA_CU_API bool isTV(const Val* const);
 
 // Returns if Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
-TensorView* getTvOutput(const Expr*);
+TORCH_CUDA_CU_API TensorView* getTvOutput(const Expr*);
 
-// Returns if Expr is a reduction op
-TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
-
-// Returns if Expr is a reduction op with TensorView or TensorIndex
-TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+// Returns the first input of Expr that is a TensorView
+TORCH_CUDA_CU_API TensorView* getTvInput(const Expr*);
 
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 
@@ -110,6 +114,51 @@ kir::Allocate* allocGlobalBufferForGridComm(
     Val* buffer_size,
     DataType dtype,
     bool zero_init);
+
+//! Returns true if the expression will be lowered to
+//!  a ldmatrix intrinsic.
+bool isLdMatrixOp(const Expr* expr);
+
+//! Returns true if the expression will be lowered to
+//!  a cp.async intrinsic.
+bool isCpAsyncOp(const Expr* expr);
+
+//! Short-cut for detecting initialization for cpAsync op.
+bool isCpAsyncInit(const Expr* expr);
+
+//! Short-cut for matching a singleton expr in a if statement,
+//!  which likely becomes a predicated instruction in ptx, eg.:
+//!  if(...) {expr;}
+//! Returns the expr if it is this pattern.
+//! Returns nullptr if the pattern doesn't match.
+c10::optional<Expr*> getMaybePredicatedSingleton(Expr* expr);
+
+//! Short-cut for checking if the expression loads from global memory.
+bool isGlobalLoad(const Expr* expr);
+
+//! Short-cut for checking if the given expression initializes buffers
+//!  for global memory load.
+bool isGlobalLoadInit(const Expr* expr);
+
+//! Returns true if the given expression fills the output
+//!  tensor with a single scalar.
+bool isTensorScalarFillOp(const Expr* expr);
+
+//! Flattens all the scoped exprs, i.e. ForLoop and IfThenElse,
+//!  and returns all the exprs in all scopes in the original
+//!  linear textural order.
+TORCH_CUDA_CU_API std::vector<Expr*> flattenScopedExprs(
+    const std::vector<Expr*>& loop_nests);
+
+//! Returns the concretized iterdomain according to
+//!  the exact compute at map.
+IterDomain* caMapExactConcreteId(IterDomain* id);
+
+//! Returns all swizzle ops between the set of iterdomains
+//!  in `from` and `to`.
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to);
 
 } // namespace ir_utils
 
