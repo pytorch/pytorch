@@ -117,7 +117,10 @@ at::Tensor rearrange_weights_dw(const Tensor& weight_in, bool qconv) {
  * is that steps 3 and 4 are slightly different so that the splits are
  * interleaved.
  */
-at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv, bool qconv) {
+at::Tensor rearrange_weights_2d(
+    const Tensor& weight_in,
+    bool tconv,
+    bool qconv) {
   at::Tensor weight = weight_in.clone();
 
   // Flip values along the H and W axes for transposed convolutions
@@ -236,7 +239,8 @@ vTensor pack_weights_dw(const Tensor& weight_in, bool qconv) {
 vTensor pack_weights_2d(const Tensor& weight_in, bool tconv, bool qconv) {
   at::Tensor weight_rearranged = rearrange_weights_2d(weight_in, tconv, qconv);
 
-  vTensor v_weight{ api::context(),
+  vTensor v_weight{
+      api::context(),
       weight_rearranged.sizes(),
       weight_in.options(),
   };
