@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 from torch._six import inf
+import functorch
 
 
 class __PrinterOptions(object):
@@ -364,6 +365,9 @@ def get_summarized_data(self):
 
 
 def _str_intern(inp, *, tensor_contents=None):
+    if is_functorch_tensor_subclass(inp):
+        return functorch_tensor_subclass_str(inp, tensor_contents=tensor_contents)
+
     is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
     if inp.is_nested:
         prefix = "nested_tensor("
@@ -595,6 +599,65 @@ def _str_intern(inp, *, tensor_contents=None):
         string_repr = f"Parameter({string_repr})"
 
     return string_repr
+
+
+def prep_value(text, indent=4):
+    first_line_txt = ''
+    lines = text.split('\n')
+    lines[0] = lines[0]
+    lines[0] = ' ' * indent + first_line_txt + lines[0]
+    for i in range(1, len(lines)):
+        lines[i] = ' ' * (indent + len(first_line_txt)) + lines[i]
+    return '\n'.join(lines)
+
+
+def is_functorch_tensor_subclass(tensor):
+    level = functorch._C.maybe_get_level(tensor)
+    return level != -1
+
+
+def functorch_tensor_subclass_str(tensor, *, tensor_contents=None):
+    # Precondition: is_functorch_tensor_subclass is True
+    level = functorch._C.maybe_get_level(tensor)
+    assert level != -1
+
+    if functorch._C.is_functionaltensor(tensor):
+        # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
+        # that it's up to date first
+        torch._sync(tensor)
+
+    value = functorch._C.get_unwrapped(tensor)
+    dl_enabled = functorch._C.tls_set_is_included()
+    try:
+        # Disable temporarily FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
+        if (dl_enabled):
+            functorch._C._set_dynamic_layer_keys_included(False)
+        value_repr = repr(value)
+    finally:
+        # Reenable FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
+        if (dl_enabled):
+            functorch._C._set_dynamic_layer_keys_included(True)
+
+    if functorch._C.is_batchedtensor(tensor):
+        bdim = functorch._C.maybe_get_bdim(tensor)
+        assert bdim != -1
+        return (
+            f'BatchedTensor(lvl={level}, bdim={bdim}, value=\n'
+            f'{prep_value(value_repr)}\n'
+            f')'
+        )
+    if functorch._C.is_gradtrackingtensor(tensor):
+        return (
+            f'GradTrackingTensor(lvl={level}, value=\n'
+            f'{prep_value(value_repr)}\n'
+            f')'
+        )
+    if functorch._C.is_functionaltensor(tensor):
+        return f'FunctionalTensor(lvl={level}, value=\\\n{value_repr})'
+
+    raise ValueError("We don't know how to print this, please file us an issue")
 
 
 def _str(self, *, tensor_contents=None):

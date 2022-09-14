@@ -7,6 +7,7 @@ As of now, we only support autograd for floating point :class:`Tensor` types (
 half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
 import torch
+import functorch
 import warnings
 
 from torch.types import _TensorOrTensors, _size
@@ -165,6 +166,12 @@ def backward(
             not provided, the gradient is accumulated into all the leaf Tensors that
             were used to compute the attr::tensors.
     """
+    if functorch._C.are_transforms_active():
+        raise RuntimeError(
+            "backward() called inside a functorch transform. This is not "
+            "supported, please use functorch.grad or functorch.vjp instead "
+            "or call backward() outside of functorch transforms.")
+
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
         if grad_tensors is None:
