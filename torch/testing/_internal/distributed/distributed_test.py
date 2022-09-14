@@ -6036,11 +6036,13 @@ class DistributedTest:
                     group=pg
                 )
 
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
