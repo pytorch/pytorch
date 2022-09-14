@@ -570,7 +570,6 @@ class TestOperators(TestCase):
         # supported with memory_format torch.preserve_format
         # or torch.contiguous_format (got ChannelsLast)s
         xfail("nn.functional.max_unpool2d", "grad"),
-        xfail("nn.functional.prelu"),  # Mismatch!
         xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op

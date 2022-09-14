@@ -2976,7 +2976,10 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     }
 
     Tensor ggO;
-    if (gO.requires_grad()) {
+    // areAnyTensorSubclassLike check necessary for composite compiance:
+    // e.g. it's possible that grad_out/gO is a BatchedTensor wrapping
+    // some Tensor that does require grad
+    if (areAnyTensorSubclassLike({grad_out}) || gO.requires_grad()) {
       // expand weight as input as in ggW/ggI above
       auto weight_expanded = weight;
       for (const auto i : c10::irange(dims_to_unsqueeze)) {
