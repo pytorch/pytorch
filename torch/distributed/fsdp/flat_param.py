@@ -311,7 +311,7 @@ class FlatParamHandle:
                         )
                     )
                 else:
-                    if type(param) is FlatParameter
+                    if type(param) is FlatParameter:
                         raise ValueError("`FlatParameter` does not support nesting")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
