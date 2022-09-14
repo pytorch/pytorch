@@ -1547,6 +1547,32 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+@register_decomposition(aten.index_copy)
+def index_copy(x, dim, index, tensor):
+    return x.clone().index_copy_(dim, index, tensor)
+
+
+@register_decomposition(aten.index_add)
+def index_add(x, dim, index, tensor, *, alpha=1):
+    return x.clone().index_add_(dim, index, tensor, alpha=alpha)
+
+
+@register_decomposition(aten.index_copy_)
+def index_copy_(x, dim, index, tensor):
+    assert index.ndim <= 1
+    idx = [None] * dim + [index]
+    x[idx] = tensor
+    return x
+
+
+@register_decomposition(aten.index_add_)
+def index_add_(x, dim, index, tensor, *, alpha=1):
+    assert index.ndim <= 1
+    idx = [None] * dim + [index]
+    x[idx] += alpha * tensor
+    return x
+
+
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
