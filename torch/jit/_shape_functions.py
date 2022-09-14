@@ -362,7 +362,6 @@ def upsample_nearest2d(
         assert len(output_size) == 2
         out.append(output_size[0])
         out.append(output_size[1])
-        return out
 
     if scale_factors is not None:
         assert (
@@ -371,8 +370,8 @@ def upsample_nearest2d(
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
-        return out
     assert 0, "Either output_size or scale_factors must be presented"
+    return out
 
 
 def mm(self: List[int], mat2: List[int]):
