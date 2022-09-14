@@ -85,7 +85,7 @@ def is_available() -> bool:
         return False
     # This function never throws and returns 0 if driver is missing or can't
     # be initialized
-    return torch._C._cuda_getDeviceCount() > 0
+    return device_count() > 0
 
 def is_bf16_supported():
     r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
