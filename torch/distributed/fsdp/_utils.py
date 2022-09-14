@@ -126,7 +126,6 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     return not already_freed
 
 
-<<<<<<< HEAD
 def _set_flattened(tensor: torch.Tensor) -> None:
     """
     Sets an attribute on ``tensor`` to mark it as flattened by FSDP. This is to
@@ -138,11 +137,11 @@ def _set_flattened(tensor: torch.Tensor) -> None:
 def _is_flattened(tensor: torch.Tensor) -> bool:
     """Returns if ``tensor`` has been marked as flattened by FSDP."""
     return getattr(tensor, FSDP_FLATTENED, False)
-=======
+
+
 def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     """Returns if ``x`` and ``y`` share the same storage."""
     return x.storage().data_ptr() == y.storage().data_ptr()
->>>>>>> 9d5b7ea5105... [FSDP] Add `use_orig_params`
 
 
 def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
