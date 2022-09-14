@@ -1161,7 +1161,7 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
-    return skipIfTorchDynamo(expectedFailure('meta')(fn))
+    return skipIfTorchDynamo()(expectedFailure('meta')(fn))
 
 def expectedFailureXLA(fn):
     return expectedFailure('xla')(fn)
