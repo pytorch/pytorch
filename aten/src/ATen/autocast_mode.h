@@ -26,12 +26,14 @@ TORCH_API void set_autocast_cache_enabled(bool enabled);
 namespace {
 bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
   switch (device_type) {
-    // need to special case mkldnn (unless we decide to make it a BackendComponent)
+    // need to special case mkldnn (unless we decide to make it a
+    // BackendComponent)
     case DeviceType::CPU:
       return (tensor.is_cpu() || tensor.is_mkldnn()) &&
           tensor.is_floating_point();
     default:
-      return device_type == tensor.device().type() and tensor.is_floating_point();
+      return device_type == tensor.device().type() &&
+          tensor.is_floating_point();
   }
 }
 } // namespace
