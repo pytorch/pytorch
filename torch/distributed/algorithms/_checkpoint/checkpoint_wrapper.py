@@ -1,5 +1,4 @@
 from enum import Enum, auto
-from contextlib import suppress
 
 import torch
 from torch.autograd.graph import save_on_cpu
@@ -77,7 +76,7 @@ class CheckpointWrapper(torch.nn.Module):
             with save_on_cpu(pin_memory=True):
                 return self._checkpoint_wrapped_module(*args, **kwargs)
         else:
-            return self.checkpoint_fn(
+            return self.checkpoint_fn(  # type: ignore[misc]
                 self._checkpoint_wrapped_module,
                 *args,
                 **kwargs
