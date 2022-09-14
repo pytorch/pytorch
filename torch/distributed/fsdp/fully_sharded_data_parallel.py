@@ -1851,7 +1851,7 @@ class FullyShardedDataParallel(nn.Module):
         # transfer.
         if self.cpu_offload.offload_params:
             assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-            p._local_shard.pin_memory()  # type: ignore[attr-defined]
+            p._local_shard = p._local_shard.pin_memory()  # type: ignore[attr-defined]
             # When offloading parameters, also move the grad shard to CPU during
             # backward pass. In this case, it's important to pre-allocate the
             # CPU grad shard in pinned memory so that we can do a non-blocking
