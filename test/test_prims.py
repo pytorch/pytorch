@@ -327,7 +327,7 @@ class TestPrims(TestCase):
         # Check that all call_function nodes are prims
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         all_prims_namespace = all(
-            node.target.name().startswith("prims") for node in call_function_nodes
+            node.target.name.startswith("prims") for node in call_function_nodes
         )
         self.assertTrue(all_prims_namespace)
 
