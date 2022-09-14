@@ -13,8 +13,8 @@ ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
-      python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
+      python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()) {
   rf_tls_ = at::get_record_function_tls_();
 

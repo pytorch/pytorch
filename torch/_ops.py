@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import inspect
 import sys
 import types
 from abc import ABC
@@ -46,21 +47,38 @@ class PyOperatorABC(ABC):
         pass
 
 
+pyop_namespace = {}
+
+
 class PyOperator(PyOperatorABC):
     def __init__(self, name):
         self._name = name
         self.table = {}
+        self.python_key_mode_table = {}
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
-        self.__name__ = "pyop." + name
-        pyop_namespace.py_ops[name] = self
+        self.__name__ = name
+        pyop_namespace[name] = self
 
     def fallthrough(self, dispatch_key):
         self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
 
-    def py_impl(self, dispatch_key):
-        assert isinstance(dispatch_key, torch._C.DispatchKey)
+    def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
+            if inspect.isclass(dispatch_key_or_mode) and issubclass(
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
+            ):
+                mode = dispatch_key_or_mode
+                assert mode not in self.python_key_mode_table
+                # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
+                self.python_key_mode_table[mode] = fn
+                return fn
+
+            dispatch_key = dispatch_key_or_mode
+            assert (
+                dispatch_key != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+            ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
+            assert isinstance(dispatch_key, torch._C.DispatchKey)  # type: ignore[attr-defined]
             assert dispatch_key not in self.table
             self.table[dispatch_key] = fn
             return fn
@@ -68,13 +86,27 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
+            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+            assert (
+                curr_mode in self.python_key_mode_table
+            ), f"Current active mode {curr_mode} not registered"
+            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
+            return self.python_key_mode_table[curr_mode](*args, **kwargs)
+
         assert dispatch_key in self.table
         return self.table[dispatch_key](*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
-        if has_torch_function(flat_args):
-            return handle_torch_function(self, flat_args, *args, **kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
+            )
 
         dispatch_key_set = _compute_keyset(args, kwargs)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -98,8 +130,8 @@ class PyOperator(PyOperatorABC):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args, _ = torch.utils._pytree.tree_flatten(args)
+    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
     flat_all = flat_args + flat_kwargs
     return flat_all
 
@@ -140,10 +172,12 @@ class OpOverload(PyOperatorABC):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.py_kernels: Dict[DispatchKey, Any] = {}
+        self.py_kernels: Dict[torch._C.DispatchKey, Any] = {}  # type: ignore[name-defined]
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
+        # TODO(voz): Lots of shared logic around python_key_mode_table, maybe pull into base...
+        self.python_key_mode_table = {}
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
 
@@ -174,21 +208,48 @@ class OpOverload(PyOperatorABC):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
-        dk = torch._C.DispatchKey.CompositeImplicitAutograd
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk) or dk in self.py_kernels:
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd  # type: ignore[attr-defined]
+        if (
+            torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk)
+            or dk in self.py_kernels
+        ):
             return self.dispatch(dk, *args, **kwargs)
         else:
             return NotImplemented
 
-    def py_impl(self, k):
-        assert isinstance(k, torch._C.DispatchKey)
-        def inner(impl):
-            self.py_kernels[k] = impl
-            return impl
+    def py_impl(self, dispatch_key_or_mode):
+        def inner(fn):
+            if inspect.isclass(dispatch_key_or_mode) and issubclass(
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
+            ):
+                mode = dispatch_key_or_mode
+                assert mode not in self.python_key_mode_table
+                # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
+                self.python_key_mode_table[mode] = fn
+                return fn
+
+            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)  # type: ignore[attr-defined]
+            assert (
+                dispatch_key_or_mode != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+            ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
+
+            self.py_kernels[dispatch_key_or_mode] = fn
+            return fn
 
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
+            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+            if curr_mode not in self.python_key_mode_table:
+                return self._op_dk(dispatch_key, *args, **kwargs)
+            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
+            return self.python_key_mode_table[curr_mode](*args, **kwargs)
+
         if dispatch_key in self.py_kernels:
             return self.py_kernels[dispatch_key](*args, **kwargs)
         else:
@@ -383,11 +444,8 @@ class _OpNamespace(types.ModuleType):
 
 class _PyOpNamespace(_OpNamespace):
     def __init__(self):
-        super(_PyOpNamespace, self).__init__("torch.ops.pyop")
-        self.py_ops = {}
-
-
-pyop_namespace = _PyOpNamespace()
+        super(_PyOpNamespace, self).__init__("torch.ops")
+        self.pyop_namespace = pyop_namespace
 
 
 class _Ops(types.ModuleType):
@@ -396,8 +454,13 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super(_Ops, self).__init__("torch.ops")
         self.loaded_libraries = set()
+        self.pyops = _PyOpNamespace()
 
     def __getattr__(self, name):
+        # Check if the name is a pyop
+        if name in self.pyops.pyop_namespace:
+            return self.pyops.pyop_namespace[name]
+
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)

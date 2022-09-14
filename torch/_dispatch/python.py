@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 __all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
 
-DispatchKey = torch._C.DispatchKey # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 def has_key(op, k):
     return (
@@ -15,7 +15,7 @@ is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
 # Equivalent to computeDispatchTableEntryWithDebug
 # TODO: memoize this or something
-def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[valid-type]
+def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
     # 1. (Direct) operator registration
     if has_key(op, k):
         return k
@@ -33,13 +33,15 @@ def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey): # type: ignore[va
     )
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
-    if (k != DispatchKey.Undefined and is_included_in_alias(k, cand)) and has_key(op, cand) and not has_backend_kernel: # type: ignore[attr-defined]
+    if (
+        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))  # type: ignore[attr-defined]
+            and has_key(op, cand) and not has_backend_kernel):
         return cand
     cand = DispatchKey.CompositeImplicitAutograd
     if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends) # type: ignore[attr-defined]
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined] # noqa: B950
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:

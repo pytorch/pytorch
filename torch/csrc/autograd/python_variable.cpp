@@ -2444,7 +2444,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
   if (out == Py_None) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
-        "Cannot call sizes on a tensor with symbolic shapes/strides");
+        "Cannot call strides on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
 

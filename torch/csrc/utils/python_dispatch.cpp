@@ -357,9 +357,7 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_key_name", [](c10::DispatchKey k) {
     return c10::toString(k);
   });
-  m.def("_dispatch_key_parse", [](c10::DispatchKey k) {
-    return k;
-  });
+  m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
@@ -410,9 +408,9 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(keyset);
   });
 
-  m.def(
-      "_dispatch_get_backend_keyset_from_autograd",
-      c10::getBackendKeySetFromAutograd);
+  m.def("_dispatch_get_backend_keyset_from_autograd", [](c10::DispatchKey k) {
+    return c10::getBackendKeySetFromAutograd(k);
+  });
 
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();

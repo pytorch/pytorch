@@ -126,10 +126,12 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = torch.ops.pyop.cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);  pred_1 = true_graph_0 = false_graph_0 = None
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);
+            pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.pyop.cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);
+            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
             add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
             return add
         """
