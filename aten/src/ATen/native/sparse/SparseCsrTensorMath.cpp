@@ -163,7 +163,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
 
 template <typename F, typename... Args>
 Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "unary_op_inplace", [](){});
 
   auto self_values = self.values();
   (self_values.*op_inplace)(std::forward<Args>(args)...);
