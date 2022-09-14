@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Poisson']
 
 class Poisson(ExponentialFamily):
     r"""
@@ -17,6 +18,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +SKIP("poisson_cpu not implemented for 'Long'")
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
         tensor([ 3.])

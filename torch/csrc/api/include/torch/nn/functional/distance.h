@@ -13,25 +13,24 @@ inline Tensor cosine_similarity(
     const Tensor& x2,
     int64_t dim,
     double eps) {
-  return torch::cosine_similarity(
-      x1,
-      x2,
-      dim,
-      eps);
+  return torch::cosine_similarity(x1, x2, dim, eps);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cosine_similarity
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cosine_similarity
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::CosineSimilarityFuncOptions` class to learn what
+/// See the documentation for
+/// `torch::nn::functional::CosineSimilarityFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::cosine_similarity(input1, input2, F::CosineSimilarityFuncOptions().dim(1));
+/// F::cosine_similarity(input1, input2,
+/// F::CosineSimilarityFuncOptions().dim(1));
 /// ```
 inline Tensor cosine_similarity(
     const Tensor& x1,
@@ -50,20 +49,17 @@ inline Tensor pairwise_distance(
     double p,
     double eps,
     bool keepdim) {
-  return torch::pairwise_distance(
-      x1,
-      x2,
-      p,
-      eps,
-      keepdim);
+  return torch::pairwise_distance(x1, x2, p, eps, keepdim);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pairwise_distance
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pairwise_distance
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::PairwiseDistanceFuncOptions` class to learn what
+/// See the documentation for
+/// `torch::nn::functional::PairwiseDistanceFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
@@ -75,7 +71,8 @@ inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
     const PairwiseDistanceFuncOptions& options = {}) {
-  return detail::pairwise_distance(x1, x2, options.p(), options.eps(), options.keepdim());
+  return detail::pairwise_distance(
+      x1, x2, options.p(), options.eps(), options.keepdim());
 }
 
 // ============================================================================

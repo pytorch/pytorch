@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
@@ -17,6 +18,11 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
+// default implementation
+bool BackendImplInterface::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+  return tensor->GetIrValue()->op() != ltc_not_supported;
+}
+
 BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
@@ -27,7 +33,6 @@ const IrBuilder* getIrBuilder() {
   static const IrBuilder* builder = getBackend()->GetIrBuilder();
   return builder;
 }
-
 
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,
@@ -50,5 +55,5 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
   return getBackend()->CreateLoweringContext(name, device);
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

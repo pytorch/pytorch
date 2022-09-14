@@ -444,7 +444,7 @@ class GaussianFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(std::forward<Args>(args)...),
         mean_(this->template GetSingleArgument<float>("mean", 0)),
         std_(this->template GetSingleArgument<float>("std", 1)) {
-    DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
+    TORCH_DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
   }
 
   bool Fill(Tensor* output) override {

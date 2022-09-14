@@ -5,7 +5,7 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" &&  -z "${IS_GHA:-}" ]]; then
+  if [[ "$OSTYPE" == "msys" &&  -z "${GITHUB_ACTIONS:-}" ]]; then
     GIT_DIR="${workdir}/p/.git"
   else
     GIT_DIR="${workdir}/pytorch/.git"
@@ -162,7 +162,7 @@ if [[ "$(uname)" != Darwin ]]; then
 EOL
 fi
 
-if [[ -z "${IS_GHA:-}" ]]; then
+if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
   cat >>"$envfile" <<EOL
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"

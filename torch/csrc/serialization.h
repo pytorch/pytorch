@@ -8,10 +8,16 @@ template <class io>
 void doWrite(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-void THPStorage_writeFileRaw(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size);
+void THPStorage_writeFileRaw(
+    c10::StorageImpl* self,
+    io fd,
+    bool save_size,
+    uint64_t element_size);
 
 template <class io>
 c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
-    io fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+    io fd,
+    c10::intrusive_ptr<c10::StorageImpl> storage,
+    uint64_t element_size);
 
 #endif

@@ -1,19 +1,18 @@
-from typing import Callable
+from typing import Callable, Optional
 
-import torch
+from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
+from torch._prims.nvfuser_executor import nvfuser_execute, nvfuser_execute_partitioned
 
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.utils import getnvFuserDtype
-from torch._prims.context import TorchRefsMode
-import torch.overrides
-from torch.utils._pytree import tree_map
-
-if torch.cuda.is_available():
-    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
+from torch.fx.experimental.proxy_tensor import make_fx, wrapper_and_args_for_make_fx
 
 
-def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
+def execute(
+    gm: GraphModule,
+    *args,
+    executor: str = "aten",
+    executor_parameters: Optional[dict] = None,
+):
     """
     Prototype ATen executor.
 
@@ -21,50 +20,13 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
     """
 
     if executor == "aten":
-        return gm.forward(*args, **kwargs)
+        return gm.forward(*args)
     elif executor == "nvfuser":
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Attempting to use nvFuser trace executor but CUDA is not available!"
-            )
-
-        # PROTOTYPE nvfuser executor
-        # Everything in the graph must support nvfuser
-
-        fusion = Fusion()
-        with FusionDefinition(fusion) as fd:
-
-            class FusionInterpreter(torch.fx.Interpreter):
-                def call_function(self, target, args, kwargs):
-                    target = target.impl_nvfuser
-                    args = (fd,) + args
-                    return target(*args, **kwargs)
-
-            def to_nv(arg):
-                if isinstance(arg, torch.Tensor):
-                    x = fd.define_tensor(
-                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
-                    )
-                    fd.add_input(x)
-                    return x
-                else:
-                    return arg
-
-            # Transforms graph to call nvfuser lowerings
-            nv_args = tree_map(to_nv, args)
-            nv_kwargs = tree_map(to_nv, kwargs)
-
-            out = FusionInterpreter(gm).run(*nv_args, **nv_kwargs)
-            flat_out, unflatten_spec = torch.utils._pytree.tree_flatten(out)
-            for o in flat_out:
-                fd.add_output(o)
-
-            return torch.utils._pytree.tree_unflatten(
-                fusion.execute(
-                    tuple(arg for arg in args if isinstance(arg, torch.Tensor))
-                ),
-                unflatten_spec,
-            )
+        return nvfuser_execute_partitioned(
+            gm, *args, executor_parameters=executor_parameters
+        )
+    elif executor == "strictly_nvfuser":
+        return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
@@ -98,10 +60,12 @@ def make_traced(fn: Callable):
     Executor may be either 'aten' or 'nvfuser'.
     """
 
-    def _traced(*args, executor="aten"):
+    def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
-        with TorchRefsMode.push():
-            gm = make_fx(fn)(*args)
-        return execute(gm, *args, executor=executor)
+        wrapped, all_args = wrapper_and_args_for_make_fx(fn, args, kwargs)
+
+        with NvfuserPrimsMode(), TorchRefsMode():
+            gm = make_fx(wrapped)(all_args)
+        return execute(gm, all_args, executor=executor)
 
     return _traced

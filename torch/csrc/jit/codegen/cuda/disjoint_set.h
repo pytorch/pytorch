@@ -86,9 +86,55 @@ class VectorOfUniqueEntries {
     return vector_.empty();
   }
 
+  // Returns the number of elements in this container
+  size_t size() const {
+    return vector_.size();
+  }
+
   // Returns if entry is in this vector
   bool has(T entry) const {
     return set_.find(entry) != set_.end();
+  }
+
+  // Erase given entry from the containers if
+  //  there is a match.
+  void erase(T entry) {
+    vector_.erase(
+        std::remove_if(
+            vector_.begin(),
+            vector_.end(),
+            [entry](T val) { return val == entry; }),
+        vector_.end());
+
+    set_.erase(entry);
+  }
+
+  // Insert elements at the end of the container.
+  template <typename InputIt>
+  void insert(InputIt begin, InputIt end) {
+    for (auto it = begin; it != end; it++) {
+      pushBack(*it);
+    }
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() const {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() const {
+    return vector().end();
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() {
+    return vector().end();
   }
 
   std::string toString() {
@@ -149,6 +195,10 @@ class DisjointSets {
   //
   // TODO: Return iterator
   void initializeSet(T entry) {
+    if (disjoint_set_maps_.find(entry) != disjoint_set_maps_.end()) {
+      return;
+    }
+
     disjoint_sets_.push_back(
         std::make_shared<VectorOfUniqueEntries<T, Hash>>());
     disjoint_sets_.back()->pushBack(entry);

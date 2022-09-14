@@ -684,7 +684,7 @@ void LayerNormKernelImplInternal(
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value) &&
+  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= 1ULL << std::numeric_limits<float>::digits && N % num_vec_elems == 0 &&
   can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
@@ -850,23 +850,25 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
+  // Calling the kernel for M==0 gives a CUDA error
+  // See: https://github.com/pytorch/pytorch/pull/28614
   if (M > 0) {
     LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
-
-    const auto input_shape = input.sizes();
-    const size_t axis = input.dim() - normalized_shape.size();
-
-    std::vector<int64_t> stat_shape;
-    for (size_t idx = 0; idx < axis; ++idx) {
-      stat_shape.push_back(input_shape[idx]);
-    }
-    for (size_t idx = axis; idx < input.dim(); ++idx) {
-      stat_shape.push_back(1);
-    }
-
-    mean = mean.view(stat_shape);
-    rstd = rstd.view(stat_shape);
   }
+  const auto input_shape = input.sizes();
+  const size_t axis = input.dim() - normalized_shape.size();
+
+  std::vector<int64_t> stat_shape;
+  for (size_t idx = 0; idx < axis; ++idx) {
+    stat_shape.push_back(input_shape[idx]);
+  }
+  for (size_t idx = axis; idx < input.dim(); ++idx) {
+    stat_shape.push_back(1);
+  }
+
+  mean = mean.view(stat_shape);
+  rstd = rstd.view(stat_shape);
+
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -938,7 +940,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
                         c10::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (M > 0) {
+  if (M > 0 && N > 0) {
     LayerNormBackwardKernelImpl(
         dY, *X, mean, rstd, *gamma, M, N, &dX, &dgamma, &dbeta);
   }

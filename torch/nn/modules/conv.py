@@ -15,6 +15,10 @@ from torch._torch_docs import reproducibility_notes
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple, Union
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d',
+           'LazyConv1d', 'LazyConv2d', 'LazyConv3d', 'LazyConvTranspose1d', 'LazyConvTranspose2d',
+           'LazyConvTranspose3d']
+
 convolution_notes = \
     {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
@@ -50,7 +54,7 @@ class _ConvNd(Module):
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
         ...
 
-    _in_channels: int
+    in_channels: int
     _reversed_padding_repeated_twice: List[int]
     out_channels: int
     kernel_size: Tuple[int, ...]
@@ -228,7 +232,7 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -372,7 +376,7 @@ class Conv2d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all four sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input
@@ -514,7 +518,7 @@ class Conv3d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all six sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -1203,7 +1207,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -1272,7 +1276,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -1341,7 +1345,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1

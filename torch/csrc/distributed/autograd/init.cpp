@@ -28,7 +28,8 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_autograd", "distributed autograd bindings");
+  auto m = torch_C_m.def_submodule(
+      "_distributed_autograd", "distributed autograd bindings");
 
   auto module = py::handle(m).cast<py::module>();
 
@@ -225,10 +226,7 @@ Example::
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_dist_autograd_init",
-     dist_autograd_init,
-     METH_NOARGS,
-     nullptr},
+    {"_dist_autograd_init", dist_autograd_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

@@ -1,36 +1,5 @@
 # NVFuser - A Fusion Code Generator for NVIDIA GPUs
-_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor_
-
-## Enabling NVFuser
-_NVFuser is not currently the default fuser for NVIDIA GPUs._
-
-**Fusions will only show up during the ~3rd iteration of execution, the exact number depends on profiling executor's optimization phases**
-
-### Enable by Context Manager
-
-```
-jit_model = torch.jit.script(model)
-
-with torch.jit.fuser("fuser2") :
-    for _ in range(5) :
-        outputs = jit_model(inputs)
-```
-
-### Enable by Specific Functions
-
-1. Disable cpu/gpu fusion for native/nnc fuser
-```
-torch._C._jit_override_can_fuse_on_cpu(False)
-torch._C._jit_override_can_fuse_on_gpu(False)
-```
-2. Disable nnc fuser
-```
-torch._C._jit_set_texpr_fuser_enabled(False)
-```
-3. Enable nvfuser
-```
-torch._C._jit_set_nvfuser_enabled(True)
-```
+_NVFuser is integrated as a backend for TorchScript's Profiling Graph Executor. NVFuser is the default fuser for NVIDIA GPUs._
 
 ## Simple knobs to change fusion behavior
 
@@ -218,7 +187,7 @@ There're a few debug dump that could be turned on via environment variables. Loo
 1. `dump_eff_bandwidth`: print out effective bandwidth of each generated kernel. This naively measure the kernel time divided by I/O buffer size and is a good/simple metric of performance for bandwidth bound kernels
 2. `cuda_kernel`: print out generated cuda kernels
 3. `launch_param`: print out launch config of generated kernels
-4. `print_args`: print out input output tensors of executed codegen kernels
+4. `kernel_args`: print out input/output/buffer tensors of all executed codegen kernels, note that for buffers, we indicate whether they are zero-initialized, which hints on an extra kernel to fill the tensor before codegen kernels.
 
 ### FAQs
 
@@ -237,3 +206,19 @@ For example, `export PYTORCH_NVFUSER_DISABLE=fma,index_hoist` would disable FMA 
 2. I didn't see any speedup with nvfuser.
 
 Check if there is fusion in your script model. Run your script with `PYTORCH_JIT_LOG_LEVEL="graph_fuser"`, you should see some log dump of before/after graph regarding fusion pass. If nothing shows up in the log, that means something in TorchScript is not right and fusion pass are not executed. Check [General ideals of debug no-fusion] for more details.
+
+3. I ran into codegen issues with nvfuser, how do I disable nvfuser?
+
+There are three ways to disable nvfuser. Listed below with descending priorities:
+
+- Force using NNC instead of nvfuser for GPU fusion with env variable `export PYTORCH_JIT_USE_NNC_NOT_NVFUSER=1`.
+- Disabling nvfuser with torch API `torch._C._jit_set_nvfuser_enabled(False)`.
+- Disable nvfuser with env variable `export PYTORCH_JIT_ENABLE_NVFUSER=0`.
+
+4. Is there any more knobs to tune nvfuser fusion?
+
+Some opt-out features in nvfuser are exposed via env var `PYTORCH_NVFUSER_DISABLE`. e.g. `fallback` to disable aten fallback during compilation failure and `fma` to disable fused multiply-add, you would set `export PYTORCH_NVFUSER_DISABLE="fallback,fma"`. Note that disabling fma would usually regress on performance so we strongly encourage to not disable it.
+
+There's also opt-in features via env var `PYTORCH_NVFUSER_ENABLE`.
+- `complex` would enable complex floating type support in nvfuser (currently experimental and turned off by default to avoid functional regression);
+- `linear_decomposition` enables decomposition of the bias add in linear layer. Similarly, `conv_decomposition` enables decomposition of the bias add in conv layer. In some small benchmark models, we noticed that such decompositions added more overhead in compilation that out-weighs the benefit of faster kernel. Hence we decided to change these to be opt-in instead.

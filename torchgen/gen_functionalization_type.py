@@ -1,46 +1,46 @@
+from typing import Callable, List, Optional, Tuple, Union
+
 from torchgen.api import cpp, dispatcher
+from torchgen.api.translate import translate
 from torchgen.api.types import (
-    DispatcherSignature,
-    Binding,
-    FunctionalizationLambda,
-    ViewInverseSignature,
-    NativeSignature,
-    CType,
     BaseCType,
-    VectorCType,
+    Binding,
+    CType,
+    DispatcherSignature,
+    FunctionalizationLambda,
+    NativeSignature,
     tensorListT,
     tensorT,
+    VectorCType,
+    ViewInverseSignature,
 )
-from torchgen.api.translate import translate
 from torchgen.context import (
+    native_function_manager,
     with_native_function,
     with_native_function_and,
-    native_function_manager,
 )
 from torchgen.model import (
     Argument,
-    Return,
+    BackendIndex,
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
     NativeFunction,
     NativeFunctionsGroup,
-    BackendIndex,
-    FunctionSchema,
+    NativeFunctionsViewGroup,
+    Return,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    BaseTy,
-    NativeFunctionsViewGroup,
-    ListType,
 )
 from torchgen.native_function_generation import (
-    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
-    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
     INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
+    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
+    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
 )
 
 from torchgen.selective_build.selector import SelectiveBuilder
-
-from typing import List, Optional, Union, Tuple, Callable
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -53,6 +53,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # It will be BC-breaking, but we should fix their schemas.
         # should be inplace?
         "record_stream",
+        # See Note [resize_ in Functionalization]
+        "resize_",
     ]
 )
 
@@ -75,8 +77,29 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
     if g.view_copy is None:
         return None
+
+    # We can make view_copy work in more cases by using reshape()
+    # when a normal view call would ordinarily fail.
+    # This also makes LTC more efficient, because they don't need to include
+    # clone() calls in their graph (which is normally needed by reshape).
+    if str(g.view_copy.func.name) == "view_copy":
+        return """\
+at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
+  DimVector shape = infer_size_dv(size, self.numel());
+  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
+    return self.reshape(size);
+  } else {
+    auto output = at::_ops::view::call(self, c10::fromIntArrayRef(size));
+    return output.clone();
+  }
+}
+"""
     # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(g.view_copy.func)
+    # Functionalization always operates on symints though
+    view_copy_sig = NativeSignature(
+        g.view_copy.func, symint=False
+    )  # TODO: flag day this True
+
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
 
@@ -313,7 +336,8 @@ def emit_view_functionalization_body(
       );
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
@@ -341,12 +365,16 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-      {return_type} tmp_output;
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+      }}
+      {return_type} tmp_output;
+      {{
+        at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
           tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
@@ -553,8 +581,9 @@ def emit_inplace_functionalization_body(
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        at::AutoDispatchSkipFunctionalize guard;
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
@@ -612,7 +641,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, symint=metadata.supports_symint())
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
@@ -632,6 +661,9 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
+        # See Note [Functionalization <> torch.Tensor constructor]
+        if str(g.view.func.name) == "lift_fresh":
+            return []
         view_str = [emit_registration_helper(g.view)]
         if g.view_inplace is not None:
             assert g.view_inplace.is_view_op
