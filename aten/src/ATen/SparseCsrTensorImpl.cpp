@@ -109,7 +109,7 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
       !has_symbolic_sizes_strides_,
       "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
   TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
-  TORCH_CHECK((int64_t)size.size() >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
+  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
               sparse_dim, "), got ", size.size());
   auto batch_dim = sparse_dim - 2;
   auto batchsize = size.slice(0, batch_dim);
