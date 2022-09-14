@@ -194,8 +194,12 @@ class TestCommon(TestCase):
             self.assertEqual(len(cuda_results), len(cpu_results))
 
             for cpu_result, cuda_result in zip(cpu_results, cuda_results):
-                # TODO: Add tests and checks
-                pass
+                if isinstance(cuda_result, torch.Tensor):
+                    self.assertEqual(cpu_result.shape, cuda_result.shape)
+                else:
+                    self.assertEqual(cpu_result, cuda_result)
+                # TODO: compare equality of tensors
+
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.

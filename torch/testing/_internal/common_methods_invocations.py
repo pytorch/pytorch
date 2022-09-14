@@ -10237,6 +10237,10 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+
+               # aminmax for cpu returns ndim == 1 tensor and gpu returns ndim == 0
+               # I think this is a bug, will fix in the following commits
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
