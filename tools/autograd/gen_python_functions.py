@@ -152,6 +152,10 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
+    "_nested_tensor_strides",  # don't want to expose this to python
+    "_nested_tensor_offsets",  # don't want to expose this to python
+    "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
+    "_nested_view_from_buffer_copy",
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -400,7 +404,8 @@ def create_python_bindings(
         filename,
         filename,
         lambda: {
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
             "ops_headers": ops_headers,
             "py_forwards": py_forwards,
             "py_methods": py_methods,
@@ -438,7 +443,8 @@ def create_python_return_type_bindings(
         filename,
         filename,
         lambda: {
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
             "py_return_types": py_return_types_definition,
             "py_return_types_map": py_return_types_map,
         },
@@ -481,7 +487,8 @@ def create_python_bindings_sharded(
         filename,
         grouped.items(),
         base_env={
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
         },
         key_fn=key_func,
         env_callable=env_func,
