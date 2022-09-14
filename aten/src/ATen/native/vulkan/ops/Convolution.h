@@ -10,8 +10,8 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor rearrange_weights_dw(const Tensor& weight_in, bool qconv);
-Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv, bool qconv);
+Tensor rearrange_weights_dw(const Tensor& weight_in);
+Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
 
 enum Conv2dMethod {
   Conv2dDepthwise,
