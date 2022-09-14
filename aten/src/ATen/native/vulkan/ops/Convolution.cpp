@@ -38,7 +38,7 @@ namespace ops {
  * This is done by permuting the N and C dims and reshaping the tensor to size
  * {4,3,9}.
  */
-at::Tensor rearrange_weights_dw(const Tensor& weight_in, bool qconv) {
+at::Tensor rearrange_weights_dw(const Tensor& weight_in) {
   at::Tensor weight = weight_in.clone();
 
   uint32_t N = ops::get_dim<ops::Dim4D::Batch>(weight.sizes());
@@ -117,10 +117,7 @@ at::Tensor rearrange_weights_dw(const Tensor& weight_in, bool qconv) {
  * is that steps 3 and 4 are slightly different so that the splits are
  * interleaved.
  */
-at::Tensor rearrange_weights_2d(
-    const Tensor& weight_in,
-    bool tconv,
-    bool qconv) {
+at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv) {
   at::Tensor weight = weight_in.clone();
 
   // Flip values along the H and W axes for transposed convolutions
@@ -218,7 +215,7 @@ Conv2dMethod determine_method(
 }
 
 vTensor pack_weights_dw(const Tensor& weight_in, bool qconv) {
-  at::Tensor weight_rearranged = rearrange_weights_dw(weight_in, qconv);
+  at::Tensor weight_rearranged = rearrange_weights_dw(weight_in);
 
   vTensor v_weight{
       api::context(),
@@ -237,7 +234,7 @@ vTensor pack_weights_dw(const Tensor& weight_in, bool qconv) {
 }
 
 vTensor pack_weights_2d(const Tensor& weight_in, bool tconv, bool qconv) {
-  at::Tensor weight_rearranged = rearrange_weights_2d(weight_in, tconv, qconv);
+  at::Tensor weight_rearranged = rearrange_weights_2d(weight_in, tconv);
 
   vTensor v_weight{
       api::context(),
