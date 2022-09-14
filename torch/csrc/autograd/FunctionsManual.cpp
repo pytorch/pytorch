@@ -1245,8 +1245,10 @@ Tensor mm_mat1_sparse_backward(
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.is_sparse_csr()) {
-    return at::sparse_sampled_addmm(
-        at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
+    // zero must to have mat1 sparsity pattern:
+    auto zero = mat1.clone();
+    zero.values().zero_();
+    return at::sparse_sampled_addmm(zero, grad, mat2.mH(), 1.0, alpha);
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.layout() == c10::kStrided) {

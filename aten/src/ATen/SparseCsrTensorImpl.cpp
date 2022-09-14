@@ -104,10 +104,51 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   sizes_and_strides_.set_sizes(size);
 }
 
+void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
+  TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
+  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
+              sparse_dim, "), got ", size.size());
+  auto batch_dim = sparse_dim - 2;
+  auto batchsize = size.slice(0, batch_dim);
+  auto densesize = size.slice(batch_dim + 2, size.size() - batch_dim - 2);
+
+  auto values_size = DimVector(batchsize);
+  values_size.push_back(0); // nse
+  values_size.append(densesize.begin(), densesize.end());
+
+  auto col_indices_size = DimVector(batchsize);
+  col_indices_size.push_back(0); // nse
+
+  auto n_compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout_, "resize_and_clear_",
+                                                                        [&] () -> int64_t { return size[batch_dim]; },
+                                                                        [&] () -> int64_t { return size[batch_dim + 1]; }
+                                                                        );
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout_,
+                                              "resize_and_clear_",
+                                              [] () {},
+                                              [&] () {
+                                                auto blocksize = this->values_.sizes().slice(this->batch_dim() + 1, 2);
+                                                values_size.append(blocksize.begin(), blocksize.end());
+                                                n_compressed_indices /= blocksize[(the_layout == kSparseBsr ? 0 : 1)];
+                                              });
+  auto crow_indices_size = DimVector(batchsize);
+  crow_indices_size.push_back(n_compressed_indices + 1);
+
+  crow_indices_.resize_(crow_indices_size);
+  crow_indices_.zero_();
+  col_indices_.resize_(col_indices_size);
+  values_.resize_(values_size);
+  sizes_and_strides_.set_sizes(size);
+  refresh_numel();
+}
+
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape")
+      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
   set_layout(src.layout());
   crow_indices_ = at::empty_like(
       src.crow_indices(),
@@ -132,7 +173,7 @@ void SparseCsrTensorImpl::set_member_tensors(
     IntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "set_member_tensors called on tensor with symbolic shape")
+      "set_member_tensors called on tensor with symbolic shape");
 
   // CSR Type Invariants
   TORCH_CHECK(
