@@ -138,16 +138,6 @@ class TestSliceArgnums(TestCase):
         res = _slice_argnums(args, (1, 0))
         self.assertEqual(res, (args[1], args[0]))
 
-    def test_function_with_default_args(self):
-        args = ((0.1, 1.1, 2.1), 3.1)
-
-        res = _slice_argnums(args, -2)
-        self.assertEqual(res, args[0:1])
-
-        args = ((0.1, 1.1, 2.1), 3.1, 5.1)
-        res = _slice_argnums(args, -1)
-        self.assertEqual(res, args[-1:])
-
 
 class TestGradTransform(TestCase):
     def test_primitive(self, device):
@@ -1551,6 +1541,15 @@ class TestJac(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_default_arg(self, device, jacapi):
+        def f(x, y, z=3.):
+            return x * y * z
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
     @jacrev_and_jacfwd

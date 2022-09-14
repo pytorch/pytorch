@@ -263,9 +263,19 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     return _vjp_with_argnums(func, *primals, has_aux=has_aux)
 
 
-# only to be used with jacrev to allow for all passed variables to be wrapped correctly, even if they don't participate
-# in autograd
 def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
+    # This is the same function as vjp but also accepts an argnums argument
+    # All args are the same as vjp except for the added argument
+    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
+    #
+    # WARN: Users should NOT call this function directly and should just be calling vjp.
+    # It is only separated so that inputs passed to jacrev but not differentiated get the correct wrappers.
+    #
+    # NOTE: All error messages are produced as if vjp was being called, even if this was called by jacrev
+    #
+    # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
+    # for only the primal elements given by argnums.
     level = _grad_increment_nesting()
     try:
         # See NOTE [grad and vjp interaction with no_grad]
@@ -780,10 +790,22 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     return _jvp_with_argnums(func, primals, tangents, argnums=None, strict=strict, has_aux=has_aux)
 
 
-# only to be used with jacrev to allow for all passed variables to be wrapped correctly, even if they don't participate
-# in autograd
 def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Optional[argnums_t], *,
                       strict: bool = False, has_aux: bool):
+    # This is the same function as jvp but also accepts an argnums argument
+    # Most args are the same as jvp except for the added argument
+    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    #         If None, computes the gradients with respect to all inputs (used for jvp). Default: None
+    # Because of this, tangents must be of length argnums and matches up to the corresponding primal whose index is
+    # given by argnums
+    #
+    # WARN: Users should NOT call this function directly and should just be calling jvp.
+    # It is only separated so that inputs passed to jacfwd but not differentiated get the correct wrappers.
+    #
+    # NOTE: All error messages are produced as if jvp was being called, even if this was called by jacfwd
+    #
+    # Returns the same two elements as :func:`jvp` but the returned tuple, ``jvp_out``, only has JVPs with respect to
+    # the primals given by argnums
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
