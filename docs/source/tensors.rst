@@ -345,7 +345,6 @@ Tensor class reference
     Tensor.dot
     Tensor.double
     Tensor.dsplit
-    Tensor.eig
     Tensor.element_size
     Tensor.eq
     Tensor.eq_

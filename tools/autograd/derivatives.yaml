@@ -582,9 +582,6 @@
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
   mask: 'not_implemented("native_dropout_backward: mask")'
 
-- name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
-
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
   result: self_t.zero_()
@@ -1390,8 +1387,12 @@
   result: scatter_add(self_t, dim, index, src_t)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  self: select_backward(grad, self.sizes(), dim, index)
-  result: auto_linear
+  dispatch:
+    Default:
+      self: select_backward(grad, self.sizes(), dim, index)
+      result: auto_linear
+    AutogradNestedTensor:
+      self: _nested_select_backward(grad, self, dim, index)
 
 - name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
@@ -1781,7 +1782,11 @@
   self: not_implemented("_standard_gamma_grad")
 
 - name: values(Tensor(a) self) -> Tensor(a)
-  self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+  dispatch:
+    Default:
+      self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+    AutogradNestedTensor:
+      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
@@ -2694,16 +2699,21 @@
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
-  t: grad.to_padded_tensor(0, t.sizes())
+  t: nested_to_padded_tensor(grad, 0, t.sizes())
   mask: non_differentiable
 
 - name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
   cpu_nested_shape_example: non_differentiable
 
-- name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+- name: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
+
+- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
+  self: grad.values()
+  nested_size: non_differentiable
+  nested_strides: non_differentiable
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
