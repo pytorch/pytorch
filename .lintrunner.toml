@@ -318,6 +318,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'cmake/External/nccl.patch',
 ]
 command = [
     'python3',
@@ -347,6 +348,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
+    'cmake/External/nccl.patch',
 ]
 command = [
     'python3',
