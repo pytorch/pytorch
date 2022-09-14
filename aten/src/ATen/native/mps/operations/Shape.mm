@@ -217,7 +217,7 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
 //}
 
 TORCH_IMPL_FUNC(cat_out_mps)
-      (ITensorListRef inputs,
+      (const ITensorListRef& inputs,
        int64_t dimension,
        int64_t valid,
        bool all_contiguous,
