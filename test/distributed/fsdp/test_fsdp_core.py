@@ -88,7 +88,8 @@ class TestParityWithDDP(FSDPTest):
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
                 BackwardPrefetch.BACKWARD_POST,
-            ]
+            ],
+            "use_orig_params": [False, True]
         }
 
     @skip_if_lt_x_gpu(2)
