@@ -41,7 +41,7 @@ jobs:
           REBASE: ${{ github.event.client_payload.rebase }}
         run: |
           set -ex
-          if [ -n ${REBASE}" ]; then
+          if [ -n "${REBASE}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}"
             git checkout master
           fi
