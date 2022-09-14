@@ -1065,8 +1065,7 @@ class FullyShardedDataParallel(nn.Module):
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
-        # where a module's forward involves multiple handles. The two forward
-        # order structures are populated and finalized in the first iteration.
+        # where a module's forward involves multiple handles.
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
