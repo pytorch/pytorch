@@ -1560,8 +1560,14 @@ def index_add(x, dim, index, tensor, *, alpha=1):
 @register_decomposition(aten.index_select, disable_meta=True)
 def index_select(x, dim, index):
     dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(index.ndim <= 1, lambda: f"Index should have dimension 1 or 0 (got {index.ndim})")
-    utils.check(utils.is_integer_dtype(index.dtype), lambda: "Expected dtype int32 or int64 for index")
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    utils.check(
+        utils.is_integer_dtype(index.dtype),
+        lambda: "Expected dtype int32 or int64 for index",
+    )
     # Treat scalars as elements of \R^1
     if x.ndim == 0:
         return x.unsqueeze(0)[index].squeeze(0)
@@ -1572,8 +1578,14 @@ def index_select(x, dim, index):
 @register_decomposition(aten.index_copy_)
 def index_copy_(x, dim, index, tensor):
     dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(index.ndim <= 1, lambda: f"Index should have dimension 1 or 0 (got {index.ndim})")
-    utils.check(utils.is_integer_dtype(index.dtype), lambda: "Expected dtype int32 or int64 for index")
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    utils.check(
+        utils.is_integer_dtype(index.dtype),
+        lambda: "Expected dtype int32 or int64 for index",
+    )
     idx = (slice(None),) * dim + (index,)
     x[idx] = tensor
     return x
@@ -1582,8 +1594,14 @@ def index_copy_(x, dim, index, tensor):
 @register_decomposition(aten.index_add_)
 def index_add_(x, dim, index, tensor, *, alpha=1):
     dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(index.ndim <= 1, lambda: f"Index should have dimension 1 or 0 (got {index.ndim})")
-    utils.check(utils.is_integer_dtype(index.dtype), lambda: "Expected dtype int32 or int64 for index")
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    utils.check(
+        utils.is_integer_dtype(index.dtype),
+        lambda: "Expected dtype int32 or int64 for index",
+    )
     idx = (slice(None),) * dim + (index,)
     x[idx] += alpha * tensor
     return x
