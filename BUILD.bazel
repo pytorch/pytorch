@@ -133,6 +133,7 @@ filegroup(
     name = "aten_base_cpp",
     srcs = glob([
         "aten/src/ATen/*.cpp",
+        "aten/src/ATen/functorch/*.cpp",
         "aten/src/ATen/detail/*.cpp",
         "aten/src/ATen/cpu/*.cpp",
     ]),
