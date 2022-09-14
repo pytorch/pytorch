@@ -31,6 +31,7 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "huber_loss",
     "l1_loss",
     "margin_ranking_loss",
     "mish",
@@ -416,6 +417,32 @@ def hinge_embedding_loss(
     output_margin = refs.where(refs.ne(target, 1), margin_clamp, 0)
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
+    return _apply_loss_reduction(loss, reduction)
+
+
+# TODO: Cannot register as decomp here due to incompatible signatures between
+# the Python frontend and ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def huber_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    reduction: str = 'mean',
+    delta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.huber_loss
+    """
+    _check_reduction_value(reduction)
+    check(
+        delta > 0,
+        lambda: f"huber_loss does not support non-positive values for delta.",
+    )
+    z = (input - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
     return _apply_loss_reduction(loss, reduction)
 
 

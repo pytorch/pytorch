@@ -1603,6 +1603,7 @@ class TestRefsOpsInfo(TestCase):
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
+        '_refs.nn.functional.huber_loss',
         '_refs.nn.functional.mse_loss',
         '_refs.var',
         '_refs.rsub',
