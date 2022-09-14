@@ -247,7 +247,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_openmp",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -298,6 +297,14 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
+        }
+    if dist.is_ucc_available():
+        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+            "UCX_TLS": "tcp",
+            "UCC_TLS": "nccl,ucp",
+            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
