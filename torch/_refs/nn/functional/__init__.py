@@ -430,7 +430,7 @@ def hinge_embedding_loss(
 def huber_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    reduction: str = 'mean',
+    reduction: str = "mean",
     delta: float = 1.0,
 ) -> TensorLikeType:
     """
@@ -439,7 +439,7 @@ def huber_loss(
     _check_reduction_value(reduction)
     check(
         delta > 0,
-        lambda: f"huber_loss does not support non-positive values for delta.",
+        lambda: "huber_loss does not support non-positive values for delta.",
     )
     z = (input - target).abs()
     loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
