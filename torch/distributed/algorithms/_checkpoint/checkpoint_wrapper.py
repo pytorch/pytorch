@@ -1,5 +1,4 @@
 from enum import Enum, auto
-from contextlib import suppress
 
 import torch
 from torch.autograd.graph import save_on_cpu
@@ -18,7 +17,9 @@ class CheckpointImpl(Enum):
 
 class CheckpointWrapper(torch.nn.Module):
     """
-    An nn.Module that wraps another nn.Module with checkpointing.
+    An nn.Module that wraps another nn.Module with checkpointing. Note that this
+    module is not meant to be used directly, but instead it is to be used
+    through the ``checkpoint_wrapper`` function.
     """
     def __init__(
         self,
@@ -33,20 +34,23 @@ class CheckpointWrapper(torch.nn.Module):
         self._checkpoint_wrapped_module = mod
         self.checkpoint_impl = checkpoint_impl
         self.offload_to_cpu = offload_to_cpu
-        if checkpoint_fn is None:
-            # use torch.utils.checkpoint
-            self.checkpoint_fn = partial(
-                checkpoint,
-                use_reentrant=(
-                    self.checkpoint_impl == CheckpointImpl.REENTRANT
-                ),
-            )
+        if self.offload_to_cpu:
+            self.checkpoint_fn = None
         else:
-            self.checkpoint_fn = partial(
-                checkpoint_fn,
-                *checkpoint_fn_args,
-                **checkpoint_fn_kwargs,
-            )
+            if checkpoint_fn is None:
+                # use torch.utils.checkpoint
+                self.checkpoint_fn = partial(
+                    checkpoint,
+                    use_reentrant=(
+                        self.checkpoint_impl == CheckpointImpl.REENTRANT
+                    ),
+                )
+            else:
+                self.checkpoint_fn = partial(
+                    checkpoint_fn,
+                    *checkpoint_fn_args,
+                    **checkpoint_fn_kwargs,
+                )
         # state_dict post hook to remove prefix to allow loading into a
         # non-checkpoint wrapped module.
         self._register_state_dict_hook(self._post_state_dict_hook)
@@ -68,9 +72,11 @@ class CheckpointWrapper(torch.nn.Module):
         return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
 
     def forward(self, *args, **kwargs):
-        offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
-        with offload_mgr:  # type: ignore[attr-defined]
-            return self.checkpoint_fn(
+        if self.offload_to_cpu:
+            with save_on_cpu(pin_memory=True):
+                return self._checkpoint_wrapped_module(*args, **kwargs)
+        else:
+            return self.checkpoint_fn(  # type: ignore[misc]
                 self._checkpoint_wrapped_module,
                 *args,
                 **kwargs
@@ -148,8 +154,10 @@ def checkpoint_wrapper(
             implementation, and is ignored if a custom ``checkpoint_fn`` is
             specified.
         offload_to_cpu (Optional[bool]):
-            Whether to offload outer activations to CPU. Note that this
-            currently only works with CheckpointImpl.REENTRANT.
+            Whether to offload activations of this wrapped module to CPU. Note
+            that if this is specified, ``checkpoint_impl`` and ``checkpoint_fn``
+            arguments will be ignored in favor of the activations being
+            offloaded to CPU. Default is ``False``.
         checkpoint_fn (Optional[Callable]):
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
