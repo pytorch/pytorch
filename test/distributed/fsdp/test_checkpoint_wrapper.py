@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.common_distributed import skip_if_no_gpu
+from torch.testing._internal.common_device_type import onlyCUDA
 
 import unittest
 
@@ -191,7 +191,7 @@ class CheckpointWrapperTest(TestCase):
         for fqn, _ in lin.named_parameters():
             self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
-    @skip_if_no_gpu
+    @onlyCUDA
     def test_checkpoint_wrapper_cpu_offload(self):
         model = nn.Sequential(
             nn.Linear(10, 10),
@@ -219,6 +219,8 @@ class CheckpointWrapperTest(TestCase):
         loss = model(inp).sum()
 
         # All autograd saved tensors should be offloaded to CPU.
+        offload_verified = False
+
         def dfs(grad_fn):
             for e in dir(grad_fn):
                 if not e.startswith('_saved_'):
@@ -227,12 +229,16 @@ class CheckpointWrapperTest(TestCase):
                 saved = getattr(grad_fn, e)
                 if isinstance(saved, torch.Tensor):
                     self.assertEqual(torch.device("cpu"), saved.device)
+                    nonlocal offload_verified
+                    offload_verified = True
 
             if hasattr(grad_fn, 'next_functions'):
-                for k, _ in grad_fn.next_functions:
-                    dfs(k)
+                for grad_fn, _ in grad_fn.next_functions:
+                    dfs(grad_fn)
 
         dfs(loss.grad_fn)
+
+        self.assertTrue(offload_verified)
 
 if __name__ == "__main__":
     run_tests()
