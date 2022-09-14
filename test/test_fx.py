@@ -3984,6 +3984,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu": CONTROL_FLOW,
         "relu6": CONTROL_FLOW,
         "rrelu": CONTROL_FLOW,
+        "rrelu_": CONTROL_FLOW,
         "selu": CONTROL_FLOW,
         "silu": CONTROL_FLOW,
         "mish": CONTROL_FLOW,
