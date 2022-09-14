@@ -1872,7 +1872,7 @@ op_db: List[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_cpu_vs"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -1888,7 +1888,7 @@ op_db: List[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_cpu_vs"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -1905,7 +1905,7 @@ op_db: List[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_cpu_vs"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
