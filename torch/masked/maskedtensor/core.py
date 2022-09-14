@@ -435,16 +435,6 @@ class MaskedTensor(torch.Tensor):
         if _is_native_binary(func):
             return _apply_native_binary(func, *args, **kwargs)
 
-        from .matmul import _apply_native_matmul, _is_native_matmul
-
-        if _is_native_matmul(func):
-            return _apply_native_matmul(func, *args, **kwargs)
-
-        if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
-            _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
-            return cls.matmul(args[0], args[1], func)  # type: ignore[call-arg]
-
-        # Doesn't work for addmm where the first argument is a Tensor
         data = _get_data(args[0])
         mask = _maybe_get_mask(args[0])
         if func is torch.ops.aten.stride:
