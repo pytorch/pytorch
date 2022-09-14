@@ -28,7 +28,7 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
     # Passthrough None because some functions wrapped with type promotion
@@ -118,9 +118,11 @@ class elementwise_type_promotion_wrapper(object):
 
             result = fn(**bound.arguments)
 
-            # FIXME?: assumes result is a single tensor
-            assert isinstance(result, TensorLike)
-            return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, TensorLike):
+                return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, Sequence):
+                return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
+            raise AssertionError(f"Unhandled result type: {type(result)}")
 
         _fn.__signature__ = sig  # type: ignore[attr-defined]
         return _fn

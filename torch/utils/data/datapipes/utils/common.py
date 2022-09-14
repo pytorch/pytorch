@@ -51,7 +51,10 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Raises:
         ValueError: If the function is not compatible with the input column.
     """
-    sig = inspect.signature(fn)
+    try:
+        sig = inspect.signature(fn)
+    except ValueError:  # Signature cannot be inspected, likely it is a built-in fn or written in C
+        return
     if isinstance(input_col, (list, tuple)):
         input_col_size = len(input_col)
     else:
