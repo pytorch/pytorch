@@ -51,7 +51,7 @@ def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     return (tree_map(partial(wrap, work), result[0]), work)
 
 
-def _get_tracer(obj):
+def _get_tracer(obj: Any) -> Optional[torch.fx.Tracer]:
     slots = get_proxy_slots(obj)
     if slots is None:
         return None
@@ -130,8 +130,8 @@ class CommTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # shared states when unwrapping args
-        tracer = None
-        work = None
+        tracer: Optional[torch.fx.Tracer] = None
+        work: Optional[torch.distributed._Work] = None
 
         def check_not_eager(tracer):
             if tracer is None:
@@ -152,7 +152,7 @@ class CommTensor(torch.Tensor):
 
                 if work is not None:
                     # insert a node to the traced graph.
-                    proxy_res = tracer.create_proxy(
+                    proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
                         'call_function',
                         _wait_comm,
                         (get_proxy(e._tensor).proxy,),
@@ -204,7 +204,7 @@ class CommTensor(torch.Tensor):
             proxy_res = func(*proxy_args, **proxy_kwargs)
             # insert a node that wraps the output tuple into
             # _CommResult(tensor, work)
-            comm_result_proxy = tracer.create_proxy(
+            comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
                 'call_function',
                 _wrap_comm_result,
                 (proxy_res, ),
