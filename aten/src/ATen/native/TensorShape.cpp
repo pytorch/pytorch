@@ -2103,6 +2103,10 @@ Tensor slice(
     auto quantizer = create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
+    // NB: it is extremely important to perform a redispatch here for
+    // the MPS backend; if you call directly to as_strided_tensorimpl,
+    // the necessary metadata for MPS will not get setup and you will
+    // get silently wrong results
     result = self.as_strided(sizes, strides, storage_offset);
   }
   namedinference::propagate_names(result, self);
