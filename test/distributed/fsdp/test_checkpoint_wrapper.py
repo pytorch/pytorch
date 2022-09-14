@@ -19,6 +19,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+from torch.testing._internal.common_distributed import skip_if_no_gpu
+
 import unittest
 
 class CheckpointWrapperTest(TestCase):
@@ -253,6 +255,7 @@ class CheckpointWrapperTest(TestCase):
         for fqn, _ in lin.named_parameters():
             self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
+    @skip_if_no_gpu
     def test_checkpoint_wrapper_cpu_offload(self):
         model = nn.Sequential(
             nn.Linear(10, 10),
