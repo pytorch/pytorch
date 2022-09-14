@@ -781,7 +781,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (backendType == kLLVMCodeGen) {
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
-    parallelizeOuterLoops(l, bufOutputs_);
+    parallelizeOuterLoops(l, bufsToBeParallelized_);
     GRAPH_DEBUG("after parallelize", *l.root_stmt());
   }
 
@@ -1649,6 +1649,20 @@ void TensorExprKernel::compile() {
         if (output->hasUses()) {
           Tensor t = computeValue(output);
 
+          // If there are for-loops before ExternalCall as follows,
+          //   stmt1: for:
+          //   stmt2    for:
+          //   stmt3: ExternalCall
+          // the for-loops would not be parallelized. So we mark the
+          // buf args of ExternalCall as to be parallelized to make sure
+          // its previous loop still could be parallelized.
+          if (to<ExternalCall>(t.stmt())) {
+            auto _external_call = to<ExternalCall>(t.stmt());
+            for (const auto& _buf : _external_call->buf_args()) {
+              bufsToBeParallelized_.insert(_buf);
+            }
+          }
+
           if (output->type()->cast<TensorType>()) {
             // Value is tensor
             if (t.buf()) {
@@ -1702,6 +1716,7 @@ void TensorExprKernel::compile() {
     if (!output->type()->cast<TensorType>()) {
       // Scalar outputs are represented as 0-dim buffers.
       bufOutputs_.insert(bufs_.at(output));
+      bufsToBeParallelized_.insert(bufs_.at(output));
       bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
       tensorOutputTensorOptions_.emplace_back(
           c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
@@ -1752,6 +1767,7 @@ void TensorExprKernel::compile() {
     }
 
     bufOutputs_.insert(bufs_.at(output));
+    bufsToBeParallelized_.insert(bufs_.at(output));
     bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
