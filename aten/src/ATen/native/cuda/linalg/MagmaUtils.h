@@ -20,7 +20,6 @@ struct MAGMAQueue {
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
-    c10::cuda::device_synchronize();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     // Magma operations is numerically sensitive, so TF32 should be off
