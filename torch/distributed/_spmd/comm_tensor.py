@@ -104,7 +104,7 @@ class CommTensor(torch.Tensor):
         t = tensor._tensor if isinstance(tensor, CommTensor) else tensor
         if _get_tracer(t) is None:
             # noop for eager mode
-            return t
+            return tensor
 
         # Use non-CommTensor to avoid nested CommTensor Wrapping
         r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
