@@ -9019,7 +9019,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
     def test_batchnorm_cudnn_nhwc(self):
         def run_test(input, grad_output):
             c = input.size(1)
