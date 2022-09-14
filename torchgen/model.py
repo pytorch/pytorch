@@ -708,9 +708,14 @@ class NativeFunction:
 
         assert len(composites_in_dispatch) <= 1 or (
             len(composites_in_dispatch) == 2
-            and DispatchKey.CompositeImplicitAutograd in composites_in_dispatch
-            and DispatchKey.CompositeImplicitAutogradNestedTensor
-            in composites_in_dispatch
+            and (
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+                not in composites_in_dispatch
+            )
+            and (
+                DispatchKey.CompositeImplicitAutogradNestedTensor
+                in composites_in_dispatch
+            )
         ), (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
             "or CompositeImplicitAutograd on a single kernel; each "
