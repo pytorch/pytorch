@@ -288,7 +288,6 @@ def is_inplace(op, variant):
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
-    xfail('to_sparse'),
 }
 
 
@@ -299,6 +298,7 @@ class TestOperators(TestCase):
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('to_sparse', ''),  # Could not run 'aten::sum.dim_IntList'
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -513,17 +513,112 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
+    @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
+        skip("atleast_1d"),  # Takes too long
+        skip("atleast_2d"),  # Takes too long
+        skip("atleast_3d"),  # Takes too long
+        xfail("_masked.prod"),  # calls item
+        xfail("_masked.cumprod"),  # calls item
+        xfail("as_strided"),  # incorrect output
+        xfail("as_strided_scatter"),  # incorrect output
+        skip("bernoulli"),  # calls random op
+        xfail("bfloat16"),  # rank 4 tensor for channels_last
+        xfail("chalf"),  # rank 4 tensor for channels_last
+        xfail("cumprod"),  # calls item
+        xfail("double"),  # rank 4 tensor for channels_last
+        xfail("float"),  # rank 4 tensor for channels_last
+        xfail("half"),  # rank 4 tensor for channels_last
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("index_reduce"),
+        xfail("linalg.eig"),  # vmap over torch.allclose
+        xfail("linalg.eigvals"),  # vmap over torch.allclose
+        xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("linalg.vander"),
+        xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
+        xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.batch_norm"),
+        xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d"),
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
+        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
+        # to have 4 channels, but got 8 channels instead
+        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
+        skip("nn.functional.dropout"),  # calls random op
+        skip("nn.functional.dropout2d"),  # calls random op
+        skip("nn.functional.dropout3d"),  # calls random op
+        skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
+        skip("nn.functional.fractional_max_pool2d"),  # calls random op
+        skip("nn.functional.fractional_max_pool3d"),  # calls random op
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("nn.functional.gaussian_nll_loss"),
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.instance_norm"),
+        xfail("nn.functional.layer_norm"),  # vmap: inplace into a regular tensor
+        # RuntimeError: NYI: querying is_contiguous inside of vmap
+        # for memory_format other than torch.contiguous_formats
+        xfail("nn.functional.max_pool2d"),
+        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
+        # supported with memory_format torch.preserve_format or
+        # torch.contiguous_format (got ChannelsLast)
+        xfail("nn.functional.max_unpool2d"),
+        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
+        # supported with memory_format torch.preserve_format
+        # or torch.contiguous_format (got ChannelsLast)s
+        xfail("nn.functional.max_unpool2d", "grad"),
+        xfail("nn.functional.prelu"),  # Mismatch!
+        xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
+        xfail("normal"),  # calls random op
+        xfail("normal", "number_mean"),  # calls random op
+        xfail("pca_lowrank"),  # calls random op
+        # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
+        xfail("prod"),
+        xfail("put"),  # vmap: inplace into a regular tensor
+        xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
+        xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
+        xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail("svd_lowrank"),  # calls random op
+        xfail("take"),  # vmap: inplace into a regular tensor
+        xfail("to"),  # rank 4 tensor for channels_last
+        xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
+        xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
+        xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
+        # locally fails with `bias tensor has to be contiguous`
+        # but passes on CI, hence the skip.
+        skip("nn.functional.conv_transpose3d", device_type='cuda'),
+        # got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
+        xfail("nn.functional.batch_norm", 'without_cudnn'),
+        # view doesn't work on sparse
+        xfail("to_sparse"),
+    }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
+        tol1('linalg.svd',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('linalg.lu_factor',
+             {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
+        tol1('svd',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+    ))
     def test_vmapvjpvjp(self, device, dtype, op):
-        self.skipTest("Skipped; these tests take too long")
-        op_skip = set({
-        })
-        op_skip = op_skip.union(vjp_fail)
-        if op.name in op_skip:
-            self.skipTest("Skipped; Expected failures")
-            return
-
+        # Since, we test `vjpvjp` independently,
+        # for this test, we just verify that vmap
+        # of `vjpvjp` is correct.
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -583,6 +678,7 @@ class TestOperators(TestCase):
         xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
+        xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
@@ -591,11 +687,11 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),  # dynamic error
         xfail('_masked.prod'),  # calls aten::item
-        xfail('eig'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
+        xfail('narrow'),  # .item() call
         xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
@@ -826,9 +922,9 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('eig'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
@@ -941,6 +1037,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        skip('to_sparse', ''),  # non-dense output
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -949,6 +1046,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
+        xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
@@ -1035,6 +1133,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
+        xfail('to_sparse', ''),  # NYI
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
@@ -1043,7 +1142,6 @@ class TestOperators(TestCase):
         xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
-        xfail('eig', ''),  # NYI: forward-AD for eig
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
@@ -1158,6 +1256,166 @@ class TestOperators(TestCase):
             else:
                 expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
                 self.assertEqual(result, expected)
+
+    @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
+        # Following operatos take too long, hence skipped
+        skip('atleast_1d'),
+        skip('atleast_2d'),
+        skip('atleast_3d'),
+        skip('meshgrid', 'list_of_tensors'),
+        skip('meshgrid', 'variadic_tensors'),
+        skip('broadcast_tensors'),
+        skip('linalg.lstsq'),
+        skip('nn.functional.bilinear'),
+        skip('native_layer_norm'),
+
+        # Potential bugs/errors
+        xfail('_masked.cumprod'),  # calls item()
+        xfail('_masked.prod'),  # calls item()
+        xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
+        xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
+        xfail('bernoulli'),  # calls random op
+        xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
+        xfail('cdist'),  # Forward AD not implemented and no decomposition
+        xfail('chalf'),  # required rank 4 tensor to use channels_last format
+        xfail('cholesky'),  # Forward AD not implemented and no decomposition
+        xfail('cumprod'),  # calls item()
+        xfail('double'),  # required rank 4 tensor to use channels_last format
+        xfail('float'),  # required rank 4 tensor to use channels_last format
+        xfail('half'),  # required rank 4 tensor to use channels_last format
+        xfail('index_reduce'),  # Forward AD not implemented and no decomposition
+        xfail('linalg.eig'),  # vmap over torch.allclose isn't supported yet.
+        # AssertionError: Tensor-likes are not close!
+        # Mismatched elements: 2 / 120 (1.7%)
+        # Greatest absolute difference: 0.09438323974609375
+        # Greatest relative difference: 0.00115722746596277
+        xfail('linalg.householder_product', device_type='cuda'),
+        xfail('linalg.vander'),  # calls item()
+        xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
+        xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
+        xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
+        xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
+        xfail('nanquantile'),  # Batching rule not implemented for aten::equal
+        # RuntimeError: Batch norm got a batched tensor as input while the
+        # running_mean or running_var, which will be updated in place,
+        # were not batched.
+        xfail('nn.functional.batch_norm'),
+        xfail('nn.functional.batch_norm', 'without_cudnn'),
+        xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
+        xfail('nn.functional.dropout2d'),  # calls random op
+        xfail('nn.functional.dropout3d'),  # calls random op
+        xfail('nn.functional.dropout'),  # calls random op
+        xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
+        xfail('nn.functional.fractional_max_pool2d'),  # calls random op
+        xfail('nn.functional.fractional_max_pool3d'),  # calls random op
+        xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
+        xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
+        xfail('nn.functional.huber_loss'),  # Forward AD not implemented and no decomposition
+        # RuntimeError: Batch norm got a batched tensor as input while the
+        # running_mean or running_var, which will be updated in place,
+        # were not batched.
+        xfail('nn.functional.instance_norm'),
+        xfail('nn.functional.logsigmoid'),  # Forward AD not implemented and no decomposition
+        # NYI: Tensor.clone(memory_format) inside vmap is only supported with
+        # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
+        xfail('nn.functional.max_pool2d', device_type='cuda'),  # AssertionError: Tensor-likes are not close!
+        xfail('nn.functional.max_unpool2d'),
+        xfail('nn.functional.max_unpool2d', 'grad'),
+        xfail('nn.functional.multi_margin_loss'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.multilabel_margin_loss'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.multilabel_soft_margin_loss'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.pdist'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.rrelu'),  # vmap: we do not yet support aten::rrelu_with_noise.
+        xfail('nn.functional.soft_margin_loss'),  # Forward AD not implemented and no decomposition
+        xfail('normal'),  # calls random op
+        xfail('normal', 'number_mean'),  # calls random op
+        xfail('pca_lowrank'),  # calls random op
+        xfail('prod'),  # Dynamic shape due to aten::nonzero call
+        xfail('quantile'),  # Batching rule not implemented for aten::equal
+        xfail('renorm'),  # Forward AD not implemented and no decomposition
+        xfail('scatter_reduce', 'amax'),  # Forward AD not implemented and no decomposition
+        xfail('scatter_reduce', 'amin'),  # Forward AD not implemented and no decomposition
+        xfail('scatter_reduce', 'mean'),  # Forward AD not implemented and no decomposition
+        xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
+        xfail('scatter_reduce', 'sum'),  # Forward AD not implemented and no decomposition
+        xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
+        xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
+        xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('svd_lowrank'),  # calls random op
+        xfail('symeig'),  # Forward AD not implemented and no decomposition
+        xfail('take'),  # vmap: inplace into regular tensor
+        xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('to_sparse'),  # Forward AD not implemented and no decomposition
+        xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
+    }))
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    @opsToleranceOverride('TestOperators', 'test_vmapjvpvjp', (
+        tol1('linalg.svd',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('svd',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+    ))
+    # linalg.svd - manual tolerance
+    # svd
+    def test_vmapjvpvjp(self, device, dtype, op):
+        # Since we test `jvpvjp` seperately,
+        # in this we just check that vmap of `jvpvjp`
+        # is correct.
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        for sample in samples:
+            fn, primals = normalize_op_input_output(op, sample)
+            result = fn(*primals)
+            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+
+            primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+            cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
+
+            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
+                # typically the first primal arg is the input. If the input has no elements, we will typically run
+                # into an issue of "Expected Tensor but got None"
+                continue
+
+            def push_vjp(primals, cotangents):
+                _, vjp_fn = vjp(fn, *primals)
+                return vjp_fn(cotangents)
+
+            args, spec = tree_flatten(((primals, cotangents), (primals_tangents, cotangents_tangents)))
+
+            def jvp_of_vjp(*args):
+                (primals, tangents) = tree_unflatten(args, spec)
+                primals_out, tangents_out = jvp(push_vjp, primals, tangents)
+
+                if isinstance(primals_out, torch.Tensor):
+                    return (primals_out, tangents_out)
+                else:
+                    flat_primals_out, _ = tree_flatten(primals_out)
+                    flat_tangents_out, _ = tree_flatten(tangents_out)
+                    return tuple(flat_primals_out + flat_tangents_out)
+
+            is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
+            generator = get_fallback_and_vmap_exhaustive(
+                jvp_of_vjp, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
+
 
     def _make_extremal_inputs(self, shape, device):
         if shape is None:

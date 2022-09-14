@@ -7,7 +7,6 @@ from functools import partial
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
-from torch.overrides import enable_reentrant_dispatch
 from typing import Callable
 import re
 
@@ -197,12 +196,11 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                         'regular Tensor but the other tensors are Tensor Subclasses. '
                         'Please try to avoid this in-place operation.')
 
-            with enable_reentrant_dispatch():
-                with contextlib.nullcontext() if enable_recursive_torch_dispatch else no_dispatch():
-                    unwrapped_args = tree_map(unwrap, args)
-                    unwrapped_kwargs = tree_map(unwrap, kwargs)
-                    unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
-                    rs = tree_map(wrap, unwrapped_rs)
+            with contextlib.nullcontext() if enable_recursive_torch_dispatch else no_dispatch():
+                unwrapped_args = tree_map(unwrap, args)
+                unwrapped_kwargs = tree_map(unwrap, kwargs)
+                unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
+                rs = tree_map(wrap, unwrapped_rs)
 
             if is_view_fn(func) and autograd_view_consistency:
                 # Note [Alias Result]
@@ -210,25 +208,24 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                 # are the same. Here we try to make B alias A to avoid those asserts.
                 # See https://github.com/pytorch/pytorch/issues/65339 for more information
                 # about the issue.
-                with enable_reentrant_dispatch():
-                    with no_dispatch():
-                        # Idea: this is a weird way of getting a storage that aliases the input.
-                        # This is a workaround for #65339.
-                        # 1. under no_dispatch, all of the wrapper tensors look like regular
-                        #    tensors with special storage (the storage is nullptr and
-                        #    advertises CPU/CUDA device.
-                        # 2. we run func, which ends up running the view operation
-                        # 3. All view operations reuse the input's storage and return
-                        #    result Tensor(s) with new sizes/strides/offset that alias
-                        #    the input.
-                        # 4. we set the storage (and sizes/strides/offset) of the wrapper
-                        #    tensor results to be that of the tensors that alias the input
-                        result = func(*args, **kwargs)
-                        if isinstance(result, tuple) or isinstance(result, list):
-                            for a, b in zip(rs, result):
-                                a.set_(b)
-                        else:
-                            rs.set_(result)
+                with no_dispatch():
+                    # Idea: this is a weird way of getting a storage that aliases the input.
+                    # This is a workaround for #65339.
+                    # 1. under no_dispatch, all of the wrapper tensors look like regular
+                    #    tensors with special storage (the storage is nullptr and
+                    #    advertises CPU/CUDA device.
+                    # 2. we run func, which ends up running the view operation
+                    # 3. All view operations reuse the input's storage and return
+                    #    result Tensor(s) with new sizes/strides/offset that alias
+                    #    the input.
+                    # 4. we set the storage (and sizes/strides/offset) of the wrapper
+                    #    tensor results to be that of the tensors that alias the input
+                    result = func(*args, **kwargs)
+                    if isinstance(result, tuple) or isinstance(result, list):
+                        for a, b in zip(rs, result):
+                            a.set_(b)
+                    else:
+                        rs.set_(result)
 
             # Some operations are allowed to in-place modify the metadata of the
             # inputs. The only ones are the "inplace view functions"; when we

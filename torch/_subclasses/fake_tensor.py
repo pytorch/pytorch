@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -494,6 +495,8 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
+        # TODO: This doesn't work with sparse self
+
         # torch.Tensor.new does not go through the normal dispatcher pattern
         # so in order to use the same pattern as normal invocation of
         # returning meta device within the kernel we need to intercept
@@ -502,7 +505,7 @@ class FakeTensor(torch.Tensor):
         # when attempting to compute an output in meta, so
         # we compute the real tensor then convert to meta
         out_device = self.fake_device
-        with no_dispatch():
+        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
             real_out = super().new(*args, **kwargs)
 
         assert not isinstance(real_out, FakeTensor), real_out
@@ -658,7 +661,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
@@ -728,10 +731,12 @@ class FakeTensorMode(TorchDispatchMode):
                 if symbolic_shapes.is_symbolic_op(func):
                     return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
-                    raise RuntimeError(
+                    sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
 
             with self.restore():
                 if func in meta_table:
@@ -865,7 +870,11 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap), r)
 
     def may_turn_const(self, t):
-        return t.numel() <= CONSTANT_NUMEL_LIMIT and not t.is_sparse
+        return (
+            t.numel() <= CONSTANT_NUMEL_LIMIT
+            and not t.is_sparse
+            and not isinstance(t, FakeTensor)
+        )
 
     def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
         any_constant = any(e.constant is not None for e in flat_arg_tensors)
