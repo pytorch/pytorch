@@ -3594,16 +3594,6 @@
     MkldnnCPU: mkldnn_mul_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Tensor
 
-- func: _mul_sparse_sparse(Tensor x, Tensor y) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  dispatch:
-    SparseCPU, SparseCUDA: mul_sparse
-
-- func: _mul_sparse_sparse.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  dispatch:
-    SparseCUDA: _mul_sparse_sparse_out_cuda
-
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True

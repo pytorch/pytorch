@@ -22,7 +22,7 @@ struct MulOp {
   }
 };
 
-void mul_sparse_sparse_cpu_kernel(
+void mul_sparse_sparse_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y) {
@@ -33,10 +33,10 @@ void mul_sparse_sparse_cpu_kernel(
 
 }
 
-REGISTER_ARCH_DISPATCH(mul_sparse_sparse_stub, DEFAULT, &mul_sparse_sparse_cpu_kernel);
-REGISTER_AVX512_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
-REGISTER_AVX2_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
-REGISTER_VSX_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
-REGISTER_ZVECTOR_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
+REGISTER_ARCH_DISPATCH(mul_sparse_sparse_out_stub, DEFAULT, &mul_sparse_sparse_out_cpu_kernel);
+REGISTER_AVX512_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
+REGISTER_AVX2_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
+REGISTER_VSX_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
 
 }}

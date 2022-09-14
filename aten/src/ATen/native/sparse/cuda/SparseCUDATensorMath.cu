@@ -6,7 +6,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
-#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
@@ -23,7 +22,6 @@
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_sum_native.h>
-#include <ATen/ops/_mul_sparse_sparse.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/bmm_native.h>
@@ -461,8 +459,6 @@ struct TensorMulOp {
   }
 };
 
-DEFINE_DISPATCH(mul_sparse_sparse_stub);
-
 SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTensor& r_) {
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
 
@@ -496,9 +492,7 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
     r_.resize_as_(t_);
     return r_.zero_();
   }
-  return at::_mul_sparse_sparse_out(r_, t_, src_);
-  //mul_sparse_sparse_stub(DeviceType::CUDA, r_, t_, src_);
-  //return r_;
+  return _mul_sparse_sparse_out(t_, src_, r_);
 }
 
 // --------------------------------------------------------------------

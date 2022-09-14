@@ -31,7 +31,6 @@
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
-#include <ATen/ops/_mul_sparse_sparse.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -1089,7 +1088,12 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
-DEFINE_DISPATCH(mul_sparse_sparse_stub);
+DEFINE_DISPATCH(mul_sparse_sparse_out_stub);
+
+Tensor& _mul_sparse_sparse_out(const Tensor& x, const Tensor& y, Tensor& res) {
+  mul_sparse_sparse_out_stub(res.device().type(), res, x, y);
+  return res;
+}
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
@@ -1117,7 +1121,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
 
   // mul(sparse, sparse) with inputs which broadcast only in dense dims
   if (!is_equal_size_inputs) {
-    mul_sparse_sparse_stub(DeviceType::CPU, r, t_, src_);
+    _mul_sparse_sparse_out(t_, src_, r);
     return r;
   }
 
@@ -1135,7 +1139,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   // _mul_sparse_sparse_out is faster for large inputs
   // and when either of the inputs is uncoalesced.
   if (!t_.is_coalesced() || !src_.is_coalesced()) {
-    mul_sparse_sparse_stub(DeviceType::CPU, r, t_, src_);
+    _mul_sparse_sparse_out(t_, src_, r);
     return r;
   }
 

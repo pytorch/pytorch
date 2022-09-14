@@ -21,7 +21,7 @@ struct MulOp {
   }
 };
 
-void mul_sparse_sparse_cuda_kernel(
+void mul_sparse_sparse_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y) {
@@ -32,16 +32,6 @@ void mul_sparse_sparse_cuda_kernel(
 
 }
 
-Tensor& _mul_sparse_sparse_out_cuda(
-    const Tensor& x,
-    const Tensor& y,
-    Tensor& result) {
-  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, MulOp>(
-      result, x, y
-  );
-  return result;
-}
-
-REGISTER_CUDA_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cuda_kernel);
+REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
 
 }}
