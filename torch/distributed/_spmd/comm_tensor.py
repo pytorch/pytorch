@@ -182,7 +182,7 @@ class CommTensor(torch.Tensor):
         def set_work(work: torch.distributed._Work, e: Any):
             assert not isinstance(e, torch.Tensor), (
                 "Type of output tensors from collective communication during "
-                "tracing should always be CommTensor instead of torch.Tensor".
+                "tracing should always be CommTensor instead of torch.Tensor"
             )
             if isinstance(e, CommTensor):
                 e._work = work  # type: ignore[attr-defined]
