@@ -19,8 +19,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.common_device_type import onlyCUDA
-
 import unittest
 
 class CheckpointWrapperTest(TestCase):
@@ -255,7 +253,7 @@ class CheckpointWrapperTest(TestCase):
         for fqn, _ in lin.named_parameters():
             self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_cpu_offload(self):
         model = nn.Sequential(
             nn.Linear(10, 10),
