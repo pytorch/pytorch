@@ -89,27 +89,23 @@ def test_balance_by_size_latent():
     sample = torch.rand(10, 100, 100)
 
     model = nn.Sequential(*[Expand(i) for i in [1, 2, 3, 4, 5, 6]])
-    model(sample) # call model first to initialize cuBLAS workspaces
     balance = balance_by_size(2, model, sample)
     assert balance == [4, 2]
 
     model = nn.Sequential(*[Expand(i) for i in [6, 5, 4, 3, 2, 1]])
-    model(sample)
     balance = balance_by_size(2, model, sample)
     assert balance == [2, 4]
 
 
 @skip_if_no_cuda
 def test_balance_by_size_param():
-    model = nn.Sequential(*[nn.Linear(i + 1, i + 2) for i in range(6)])
-    sample = torch.rand(7, 1)
-    model(sample) # call model first to initialize cuBLAS workspaces
+    model = nn.Sequential(*[nn.Linear((i + 1) * 1000, (i + 2) * 1000) for i in range(6)])
+    sample = torch.rand(7, 1000)
     balance = balance_by_size(2, model, sample, param_scale=100)
     assert balance == [4, 2]
 
-    model = nn.Sequential(*[nn.Linear(i + 2, i + 1) for i in reversed(range(6))])
-    sample = torch.rand(1, 7)
-    model(sample)
+    model = nn.Sequential(*[nn.Linear((i + 2) * 1000, (i + 1) * 1000) for i in reversed(range(6))])
+    sample = torch.rand(1, 7000)
     balance = balance_by_size(2, model, sample, param_scale=100)
     assert balance == [2, 4]
 
@@ -128,17 +124,16 @@ def test_balance_by_size_param_scale():
             return x
 
     model = nn.Sequential(
-        Tradeoff(param_size=1, latent_size=6),
-        Tradeoff(param_size=2, latent_size=5),
-        Tradeoff(param_size=3, latent_size=4),
-        Tradeoff(param_size=4, latent_size=3),
-        Tradeoff(param_size=5, latent_size=2),
-        Tradeoff(param_size=6, latent_size=1),
+        Tradeoff(param_size=1000, latent_size=6),
+        Tradeoff(param_size=2000, latent_size=5),
+        Tradeoff(param_size=3000, latent_size=4),
+        Tradeoff(param_size=4000, latent_size=3),
+        Tradeoff(param_size=5000, latent_size=2),
+        Tradeoff(param_size=6000, latent_size=1),
     )
 
-    sample = torch.rand(1, requires_grad=True)
+    sample = torch.rand(1000, requires_grad=True)
 
-    model(sample) # call model first to initialize cuBLAS workspaces
     balance = balance_by_size(2, model, sample, param_scale=0)
     assert balance == [2, 4]
 
