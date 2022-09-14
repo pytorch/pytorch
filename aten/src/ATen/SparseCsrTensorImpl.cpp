@@ -113,8 +113,8 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
               sparse_dim, "), got ", size.size());
   auto batch_dim = sparse_dim - 2;
   auto batchsize = size.slice(0, batch_dim);
-  auto sparsesize = size.slice(batch_dim, 2);
   auto densesize = size.slice(batch_dim + 2, size.size() - batch_dim - 2);
+
   auto values_size = DimVector(batchsize);
   values_size.push_back(0); // nse
   values_size.append(densesize.begin(), densesize.end());
