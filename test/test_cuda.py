@@ -3332,9 +3332,9 @@ torch.cuda.synchronize()
                     dummy = getattr(torch, op)(*args, **kwargs)
                 else:
                     getattr(dummy, op)(*args)
+
                 t1.copy_(alloc)
                 t2.copy_(alloc)
-
                 # Runs RNG ops that fill t1 and t2.
                 g.replay()
 
