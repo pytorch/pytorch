@@ -1,6 +1,5 @@
 import torch
 from torch import Tensor
-import contextlib
 import itertools
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
@@ -100,20 +99,9 @@ def is_inplace(func):
     return name[-1] == '_'
 
 
-def generate_cct(enable_recursive_torch_dispatch=False,
-                 autograd_view_consistency=True):
+def generate_cct(autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
-
-    # enable_recursive_torch_dispatch:
-    #   If True, enable __torch_dispatch__ before calling the func in
-    #   CCT's __torch_dispatch__ implementation else call
-    #   the func under `no_dispatch`.
-    #   NOTE: We need to disable dispatch under Torch Dispatch Mode,
-    #   to avoid infinite recursion.
-    #   Also, we need to enable dispatch for checking
-    #   forward_AD composite compliance
-    #   Refer: https://github.com/pytorch/pytorch/issues/75652
 
     # autograd_view_consistency:
     #   If True, alias result using `set_` if func returns a view
@@ -196,11 +184,10 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                         'regular Tensor but the other tensors are Tensor Subclasses. '
                         'Please try to avoid this in-place operation.')
 
-            with contextlib.nullcontext() if enable_recursive_torch_dispatch else no_dispatch():
-                unwrapped_args = tree_map(unwrap, args)
-                unwrapped_kwargs = tree_map(unwrap, kwargs)
-                unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
-                rs = tree_map(wrap, unwrapped_rs)
+            unwrapped_args = tree_map(unwrap, args)
+            unwrapped_kwargs = tree_map(unwrap, kwargs)
+            unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
+            rs = tree_map(wrap, unwrapped_rs)
 
             if is_view_fn(func) and autograd_view_consistency:
                 # Note [Alias Result]
@@ -499,7 +486,7 @@ def check_backward_formula(op: Callable, args, kwargs,
 # this means we can apply check_forward_ad_formula to things that aren't OpInfos
 # while debugging.
 def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None, assert_equal_fn=None):
-    CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
+    CCT = generate_cct(autograd_view_consistency=False)
 
     def maybe_tangent(t):
         assert type(t) is not CCT
