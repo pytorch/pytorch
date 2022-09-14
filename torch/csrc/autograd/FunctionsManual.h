@@ -225,6 +225,10 @@ std::vector<at::Tensor> cat_tensors_backward(
     const std::vector<std::vector<int64_t>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim);
+std::vector<at::Tensor> stack_tensors_backward(
+    const at::Tensor& grad,
+    int64_t dim,
+    const std::vector<ScalarType>& dtypes);
 std::vector<at::Tensor> block_diag_backward(
     const at::Tensor& grad,
     const std::vector<std::vector<int64_t>>& sizes,
