@@ -491,10 +491,6 @@ class TestTensorCreation(TestCase):
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    'non-empty list of Tensors'):
-            torch.cat([], dim=1)
-
     def test_cat_empty(self, device):
         dtype = torch.float32
 
@@ -508,38 +504,9 @@ class TestTensorCreation(TestCase):
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
-        # check non-legacy-behavior (sizes don't match)
-        empty = torch.randn((4, 0, 31, 32), dtype=dtype, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
-        self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
-
-        # check non-legacy-behavior (dimensions don't match)
-        empty = torch.randn((4, 0), dtype=dtype, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
-        self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
-
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
         y = torch.randn((4, 6), device=device)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([x, y], dim=0, out=x)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([x, y], dim=0, out=y)
-
-        z = torch.zeros((4, 6), device=device)
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([y, z], out=z[:2, :])
 
         w = y.view(-1).clone()
         a = torch.cat([w[:2], w[4:6]])
@@ -662,30 +629,9 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res3_cuda.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCUDA
-    @deviceCountAtLeast(2)
-    def test_cat_different_devices(self, devices):
-        cuda0 = torch.randn((3, 3), device=devices[0])
-        cuda1 = torch.randn((3, 3), device=devices[1])
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda0, cuda1))
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda0, cuda0), out=cuda1)
-
-    @onlyCUDA
     def test_cat_stack_cross_devices(self, device):
         cuda = torch.randn((3, 3), device=device)
         cpu = torch.randn((3, 3), device='cpu')
-
-        # cat
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda, cpu))
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cpu, cuda))
 
         # Stack
         with self.assertRaisesRegex(RuntimeError,
@@ -1060,18 +1006,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     @onlyCPU
-    def test_cat_bad_input_sizes(self, device):
-        x = torch.randn(2, 1, device=device)
-        y = torch.randn(2, 1, 1, device=device)
-        z = torch.randn(2, 1, 1, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z]))
-
-        x = torch.randn(2, 1, 2, device=device)
-        y = torch.randn(2, 1, 1, device=device)
-        z = torch.randn(2, 2, 1, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
-
-    @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)
     def test_cat2(self, device, dtype):
         SIZE = 10
@@ -1093,20 +1027,6 @@ class TestTensorCreation(TestCase):
         y = torch.randint(low=-100, high=100, size=(1, SIZE, SIZE), device=device).to(dtype)
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
-
-        self.assertRaises(RuntimeError, lambda: torch.cat([]))
-        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
-
-    @onlyCPU
-    def test_cat_scalars(self, device):
-        x = torch.tensor(0, device=device)
-        y = torch.tensor(1, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'zero-dimensional.*cannot be concatenated'):
-            torch.cat([x, y])
-
-    def test_zeros_dtype_out_match(self, device):
-        d = torch.tensor((2, 3), device=device, dtype=torch.double)
-        self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
