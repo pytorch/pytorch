@@ -201,7 +201,7 @@ class TestFunctionSchema(TestCase):
         # fake type of Layout? is int?
         self.assertEqual(schema.arguments[2].type.str(), "int?")
         # fake type of Device? is Device?
-        self.assertEqual(schema.arguments[2].type.str(), "Device?")
+        self.assertEqual(schema.arguments[3].type.str(), "Device?")
         # print real types in FunctionSchema
         self.assertEqual(str(schema), schema_str)
 
