@@ -708,9 +708,14 @@ class NativeFunction:
 
         assert len(composites_in_dispatch) <= 1 or (
             len(composites_in_dispatch) == 2
-            and DispatchKey.CompositeImplicitAutograd in composites_in_dispatch
-            and DispatchKey.CompositeImplicitAutogradNestedTensor
-            in composites_in_dispatch
+            and (
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+                not in composites_in_dispatch
+            )
+            and (
+                DispatchKey.CompositeImplicitAutogradNestedTensor
+                in composites_in_dispatch
+            )
         ), (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
             "or CompositeImplicitAutograd on a single kernel; each "
@@ -1098,6 +1103,9 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    def supports_symint(self) -> bool:
+        return "_symint" in self.kernel
+
 
 @dataclass(frozen=True)
 class UfuncInnerLoop:
@@ -1141,8 +1149,6 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
-    # Whether or not this backend handles symbolic ints or not
-    symint: bool
 
     @staticmethod
     def grow_index(

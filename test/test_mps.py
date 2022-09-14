@@ -3208,11 +3208,18 @@ class TestNLLLoss(TestCase):
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
-            for dtype in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
+                cpu_x = None
+                cpu_y = None
+                if(dtype in [torch.float32, torch.float16]):
+                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                else:
+                    cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+
                 mps_x = cpu_x.detach().clone().to('mps')
                 # clamp to avoid division by 0
-                cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_y = cpu_y.detach().clone().to('mps')
 
                 result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
@@ -3836,6 +3843,29 @@ class TestNLLLoss(TestCase):
         # Test empty shape too
         for shape in [[], (2, 3), (2, 8, 4, 5)]:
             helper(shape)
+
+    def test_cast_mps_to_cpu(self):
+        def helper(src_dtype, dst_dtype):
+            input = torch.rand((1, 3, 128, 128), dtype=src_dtype)
+            input_cast_mps = input.to('mps')
+            input_cast_cpu = input_cast_mps.to('cpu', dtype=dst_dtype)
+
+            # needs to match the initial Tensor
+            self.assertEqual(input_cast_cpu, input.to(dtype=dst_dtype))
+        helper(torch.half, torch.float)
+        helper(torch.float, torch.half)
+
+    def test_cast_mps_to_mps(self):
+        def helper(src_dtype, dst_dtype):
+            input_cpu = torch.rand((1, 3, 128, 128), dtype=src_dtype)
+            input_mps = input_cpu.to('mps')
+            output_mps = input_mps.to(dtype=dst_dtype)
+            output_cpu = input_cpu.to(dtype=dst_dtype)
+            self.assertEqual(output_mps.cpu(), output_cpu)
+        helper(torch.half, torch.float)
+        helper(torch.float, torch.half)
+        helper(torch.half, torch.long)
+        helper(torch.float, torch.int)
 
     # Test adaptive avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
@@ -5064,6 +5094,24 @@ class TestGatherScatter(TestCase):
 
         self.assertEqual(x_cpu, x_mps)
 
+    def test_cast_gather_scatter(self):
+        for _ in range(0, 50):
+            input = np.random.randint(0, 255, size=(5, 5, 4), dtype=np.uint8)
+            with torch.no_grad():
+                s = torch.tensor(input, dtype=torch.uint8, device="mps").unsqueeze(0)
+                s_cpu = torch.tensor(input, dtype=torch.uint8, device="cpu").unsqueeze(0)
+                s = s.long()
+                s_cpu = s_cpu.long()
+                self.assertEqual(s.cpu(), s_cpu)
+
+                s = s.float()
+                s_cpu = s_cpu.float()
+                self.assertEqual(s.cpu(), s_cpu)
+
+                s /= 255
+                s_cpu /= 255
+                self.assertEqual(s.cpu(), s_cpu)
+
     def test_slicing_replace_column(self):
         # https://github.com/pytorch/pytorch/issues/78074
         def _helper(tensor_data):
@@ -6272,7 +6320,7 @@ class TestFallbackWarning(TestCase):
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
 
-        with self.assertRaisesRegex(NotImplementedError, "not current implemented for the MPS device"):
+        with self.assertRaisesRegex(NotImplementedError, "not currently implemented for the MPS device"):
             fn(*args, **kwargs)
 
     def test_warn_on_not_implemented_with_fallback(self):
