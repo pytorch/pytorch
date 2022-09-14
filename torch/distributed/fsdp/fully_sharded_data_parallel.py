@@ -1522,7 +1522,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not handles:
             return
-        assert len(handles) == len(free_unsharded_flat_params), (
+        p_assert(
+            len(handles) == len(free_unsharded_flat_params),
             "Expects both lists to have equal length but got "
             f"{len(handles)} and {len(free_unsharded_flat_params)}"
         )
