@@ -67,9 +67,8 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 };
 
 void PyInterpreter::disarm() noexcept {
-  // Intentionally leaked
-  static PyInterpreterVTable* noop_vtable = new NoopPyInterpreterVTable();
-  vtable_ = noop_vtable;
+  static NoopPyInterpreterVTable noop_vtable;
+  vtable_ = &noop_vtable;
 }
 
 } // namespace impl

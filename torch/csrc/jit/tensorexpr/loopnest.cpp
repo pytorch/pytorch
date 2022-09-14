@@ -1500,7 +1500,7 @@ void LoopNest::vectorizeInnerLoops() {
     static const int kBodyVectorWidth = 8;
     splitWithTail(loop, kBodyVectorWidth, &split1, &tail1);
 
-    if (loop->is_reduction_axis()) {
+    if (loop->is_reduction_axis() && canBeRFactored(loop, split1)) {
       // Take sum as an example.
       //   torch.sum(torch.randn(4, 10), -1)
       //
@@ -1555,7 +1555,13 @@ void LoopNest::vectorizeInnerLoops() {
       //       }
       //     }
       //   }
+      GRAPH_DEBUG(
+          "\nTo vectorize the reduction statement:\n\n",
+          std::to_string(parent_stmt));
       reorderAxis(reordeded_loops.first, reordeded_loops.second);
+      GRAPH_DEBUG(
+          "\n1st reordered the reduction statement to :\n\n",
+          std::to_string(parent_stmt));
 
       reordeded_loops = _get_outer_inner_loop(parent_stmt);
       // IR after rfactor:
@@ -1578,8 +1584,18 @@ void LoopNest::vectorizeInnerLoops() {
       //       }
       //     }
       //   }
+
+      GRAPH_DEBUG(
+          "\nTo be rfactored loops - index 0 :\n\n",
+          std::to_string(reordeded_loops.first));
+      GRAPH_DEBUG(
+          "\nTo be rfactored loops - index 1 :\n\n",
+          std::to_string(reordeded_loops.second));
       rfactor(
           *(reordeded_loops.second->body()->begin()), reordeded_loops.first);
+      GRAPH_DEBUG(
+          "\nRFactored the reduction statement to :\n\n",
+          std::to_string(parent_stmt));
 
       reordeded_loops = _get_outer_inner_loop(parent_stmt);
       // IR after reorderAxis:
@@ -1607,6 +1623,9 @@ void LoopNest::vectorizeInnerLoops() {
       //     }
       //   }
       reorderAxis(reordeded_loops.first, reordeded_loops.second);
+      GRAPH_DEBUG(
+          "\n2nd rerodered the reduction statement to :\n\n",
+          std::to_string(parent_stmt));
 
       auto loops = NodeFinder<For>::find(parent_stmt);
       TORCH_INTERNAL_ASSERT(loops.size() >= 3);
@@ -1619,7 +1638,14 @@ void LoopNest::vectorizeInnerLoops() {
       auto reduce_main_loop_innder = _inner_loops[0];
 
       vectorize(acc_buf_init_loop);
+      GRAPH_DEBUG(
+          "\nVectorized the accumulation buffer to :\n\n",
+          std::to_string(parent_stmt));
+
       vectorize(reduce_main_loop_innder);
+      GRAPH_DEBUG(
+          "\nVectorized the most reduction inner loop to :\n\n",
+          std::to_string(parent_stmt));
     } else {
       vectorize(split1);
     }
@@ -3493,6 +3519,46 @@ class RfactorStoreRewriter : public IRMutator {
 bool LoopNest::rfactor(StmtPtr st, ForPtr target_for) {
   BufPtr tmp_buf = nullptr;
   return rfactor(st, target_for, &tmp_buf);
+}
+
+bool LoopNest::canBeRFactored(ForPtr outer, ForPtr inner) {
+  if (!outer->is_reduction_axis())
+    return false;
+  if (!inner->is_reduction_axis())
+    return false;
+  if (outer->body()->nstmts() != 1)
+    return false;
+  if (inner->body()->nstmts() != 1)
+    return false;
+  StmtPtr outer_body = outer->body()->stmts().front();
+  if (to<For>(outer_body) != inner)
+    return false;
+
+  StmtPtr inner_body = inner->body()->stmts().front();
+  StorePtr reduction_store = to<Store>(inner_body);
+  if (!reduction_store)
+    return false;
+  ReduceOpPtr reduce_op = to<ReduceOp>(reduction_store->value());
+  if (!reduce_op)
+    return false;
+
+  std::set<VarPtr> reduce_args = {
+      reduce_op->reduce_args().begin(), reduce_op->reduce_args().end()};
+  if (reduce_args.size() < 2)
+    return false;
+
+  if (!reduce_args.count(outer->var()))
+    return false;
+  reduce_args.erase(outer->var());
+
+  if (!reduce_args.count(inner->var()))
+    return false;
+  reduce_args.erase(inner->var());
+
+  if (!reduce_args.empty())
+    return false;
+
+  return true;
 }
 
 bool LoopNest::rfactor(

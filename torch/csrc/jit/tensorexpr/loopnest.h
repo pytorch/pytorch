@@ -574,6 +574,8 @@ class TORCH_API LoopNest {
       const std::vector<Tensor>& output_tensors,
       const std::vector<Tensor>& tensors_to_compute);
 
+  bool canBeRFactored(ForPtr outer, ForPtr inner);
+
   StmtPtr root_stmt_;
 
   std::unordered_set<BufPtr> output_bufs_;

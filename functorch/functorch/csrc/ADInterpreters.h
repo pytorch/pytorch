@@ -3,6 +3,10 @@
 
 namespace at { namespace functorch {
 
+// These are the interpreters for our AD transforms
+// (grad, vjp and jvp).
+// See NOTE: [functorch interpreter stack] for more details.
+
 struct GradInterpreterPtr {
   explicit GradInterpreterPtr(const Interpreter* base): base_(base) { TORCH_INTERNAL_ASSERT(base->key() == TransformType::Grad); }
   TransformType key() const { return base_->key(); }
