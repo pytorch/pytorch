@@ -14501,6 +14501,24 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    def test_rrelu_bounds(self, device):
+        def test(inplace, module, input, lower, upper):
+            with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than the upper bound"):
+                if inplace is None:
+                    module(input, lower, upper)
+                elif input is None:
+                    module(lower, upper, inplace)
+                module(input, lower, upper, inplace)
+
+        input = torch.rand((3, 3), device=device, dtype=torch.float32)
+        lower, upper = 0.4, 0.1
+
+        test(False, nn.RReLU, None, lower, upper)
+        test(True, nn.RReLU, None, lower, upper)
+        test(False, nn.functional.rrelu, input, lower, upper)
+        test(True, nn.functional.rrelu, input, lower, upper)
+        test(None, nn.functional.rrelu_, input, lower, upper)
+
     def test_upsamplingNearest1d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
