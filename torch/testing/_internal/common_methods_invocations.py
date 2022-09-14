@@ -10238,8 +10238,9 @@ op_db: List[OpInfo] = [
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
 
-               # aminmax for cpu returns ndim == 1 tensor and gpu returns ndim == 0
-               # I think this is a bug, will fix in the following commits
+               # It looks like there is a bug in the cpu implementation
+               # >>> assert torch.aminmax(torch.tensor(5, device='cpu'), dim=0, keepdim=True).min.ndim == 0
+               # the ndim shoud be kept at 0
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
            )),
     OpInfo('as_strided',
