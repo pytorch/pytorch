@@ -291,8 +291,8 @@ TorchVision
 TorchText
 ~~~~~~~~~
 
--  Parmeet Singh Bhatia (`parmeet <https://github.com/parmeet>`__)
--  Steven Liu (`hudeven <https://github.com/hudeven>`__)
+-  Nayef Ahmed (`Nayef211 <https://github.com/Nayef211>`__)
+-  (emeritus) Parmeet Singh Bhatia (`parmeet <https://github.com/parmeet>`__)
 -  (emeritus) Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 
