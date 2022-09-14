@@ -866,8 +866,22 @@ class NoOpScheduler : public SchedulerEntry {
   //! Check if the no-op heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Check there're no non-trivial reduction ops.
-    if (!ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
-      return false;
+    for (auto reduction :
+         ir_utils::getReductionOps(fusion, true /* ignore_trivial */)) {
+      for (auto input :
+           ir_utils::filterByType<TensorView>(reduction->inputs())) {
+        auto root_dom = input->getRootDomain();
+        auto all_nonzero =
+            std::none_of(root_dom.begin(), root_dom.end(), [](IterDomain* id) {
+              return id->extent()->isZeroInt();
+            });
+        if (all_nonzero) {
+          scheduler_debug_utils::canScheduleRejectReason(
+              ScheduleHeuristic::NoOp,
+              "reduction of non-zero elements is not supported");
+          return false;
+        }
+      }
     }
 
     // Check that all outputs are either broadcast or ignored reduction.
@@ -893,6 +907,8 @@ class NoOpScheduler : public SchedulerEntry {
               [](IterDomain* id) { return id->extent()->isZeroInt(); })) {
         // We have found a out_tv with a dimension that NoOp scheduler couldn't
         //  handle and therefore reject this fusion.
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::NoOp, "output has a concrete dimension");
         return false;
       }
     }

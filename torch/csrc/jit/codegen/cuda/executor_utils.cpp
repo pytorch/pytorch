@@ -825,11 +825,6 @@ void bindInputForExprEvaluation(
 
         const auto value =
             root_domain[dim]->hasExpandedExtent() ? 1 : tensor_arg_size;
-        if (value == 0 && cg_tensor->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
-        }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);

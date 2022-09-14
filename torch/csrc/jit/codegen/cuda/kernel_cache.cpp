@@ -663,6 +663,12 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const auto iter = output_holder.find(output);
     if (iter != output_holder.end()) {
       fusion_outputs.push_back(iter->second);
+    } else if (output->isFusionInput()) {
+      const auto iter = tensor_map.find(output);
+      TORCH_INTERNAL_ASSERT(
+          iter != tensor_map.end(), "Can not find output as aliased intput");
+      auto arg = dynamic_cast<const TensorArgAbstract*>(iter->second);
+      fusion_outputs.push_back(arg->getTensor());
     } else {
       bool empty_type_check = output->getDataType().has_value() &&
           output->getDataType().value() == DataType::Float;
