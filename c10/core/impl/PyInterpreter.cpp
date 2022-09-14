@@ -27,13 +27,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
-  void python_dispatcher(
-      const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
-      torch::jit::Stack* stack) const override {
-    PANIC(python_dispatcher);
-  }
-
   bool is_contiguous(const TensorImpl* self) const override {
     PANIC(is_contiguous);
   }

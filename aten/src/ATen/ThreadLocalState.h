@@ -10,7 +10,6 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/record_function.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace at {
@@ -57,9 +56,6 @@ class TORCH_API ThreadLocalState {
 
   // TLS for enable_torch_dispatch_mode
   std::shared_ptr<SafePyObject> torch_dispatch_mode_state_;
-
-  // TLS for enable_python_dispatcher
-  SafePyHandle python_dispatcher_state_;
 
   // TLS for __torch_function__ (mode and disable_torch_function)
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;

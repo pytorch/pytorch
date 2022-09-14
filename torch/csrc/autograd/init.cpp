@@ -7,7 +7,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
@@ -51,19 +50,6 @@ struct EnableTorchFunction {
     at::impl::PythonTorchFunctionTLS::set_disabled(old_);
   }
   bool old_;
-};
-
-PyObject* globalPythonDispatcher = nullptr;
-
-struct EnablePythonDispatcher {
-  EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
-    c10::impl::PythonDispatcherTLS::set_state(
-        {globalPythonDispatcher, getPyInterpreter()});
-  }
-  ~EnablePythonDispatcher() {
-    c10::impl::PythonDispatcherTLS::set_state(old_);
-  }
-  c10::SafePyHandle old_;
 };
 
 } // namespace
@@ -342,18 +328,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(py::init<>());
   py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
       .def(py::init<>());
-  py::class_<EnablePythonDispatcher>(_C_m, "_EnablePythonDispatcher")
-      .def(py::init<>());
-  py::class_<c10::impl::DisablePythonDispatcher>(
-      _C_m, "_DisablePythonDispatcher")
-      .def(py::init<>());
-  _C_m.def("_set_python_dispatcher", [](py::object dispatcher) {
-    TORCH_CHECK(
-        !globalPythonDispatcher,
-        "overwriting the global python dispatcher is not supported; if you need this file an issue");
-    // NB: intentionally leak
-    globalPythonDispatcher = dispatcher.release().ptr();
-  });
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")

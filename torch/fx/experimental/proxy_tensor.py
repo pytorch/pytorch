@@ -10,7 +10,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
@@ -580,10 +579,6 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic":
-            python_dispatcher_mode = enable_python_dispatcher()
-
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
         def wrap_fake_concrete(x):
@@ -622,7 +617,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
