@@ -1,6 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/runtime/decomposition_registry.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/jit_decomp_interface.h>
 
 // This is the set of helpers in VariableTypeUtils have a dependency on
 // native_functions.yaml meaning the file will need to be re-compiled every time
@@ -12,6 +14,19 @@ namespace torch {
 namespace autograd {
 namespace impl {
 
+class MyFunctor final : public c10::OperatorKernel {
+ public:
+  MyFunctor(JitDecompInterface* fns) : fns_(fns){};
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet ks,
+      torch::jit::Stack* stack) {
+    fns_->run_jit_decomposition_(op, stack);
+  }
+  JitDecompInterface* fns_;
+};
+
 // Depends on torch/csrc/jit/ir/ir.h -> aten/src/ATen/core/interned_strings.h
 template <class Return, class... Args>
 Return run_jit_decomposition_with_args_for_jvp(
@@ -19,7 +34,8 @@ Return run_jit_decomposition_with_args_for_jvp(
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
     Args&&... args) {
-  bool has_decomp = jit::has_jit_decomposition(opHandle.schema());
+  JitDecompInterface* fns = getJitDecomp();
+  bool has_decomp = fns->has_jit_decomposition_(opHandle.schema());
 
   TORCH_CHECK_NOT_IMPLEMENTED(
       has_decomp,
@@ -33,7 +49,8 @@ Return run_jit_decomposition_with_args_for_jvp(
       "PYTORCH_JIT=0 is set, some operators may no longer be used with forward AD.");
 
   return c10::KernelFunction::makeFromBoxedKernel(
-             c10::BoxedKernel::makeFromFunction<&jit::run_jit_decomposition>())
+             c10::BoxedKernel::makeFromFunctor(
+                 std::make_unique<MyFunctor>(fns)))
       .call<Return, Args...>(
           opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }

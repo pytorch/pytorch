@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit_decomp_interface.h>
 #include <memory>
 #include <unordered_map>
 
@@ -158,6 +159,26 @@ void RegisterDecomposition(
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;
+}
+
+struct JitDecomp final : torch::autograd::impl::JitDecompInterface {
+  bool has_jit_decomposition_(const c10::FunctionSchema& schema) const override;
+  void run_jit_decomposition_(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const override;
+};
+
+JitDecomp jitDecomp;
+torch::autograd::impl::JitDecompRegisterer registerJitDecomp(&jitDecomp);
+
+void JitDecomp::run_jit_decomposition_(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) const {
+  run_jit_decomposition(op, stack);
+}
+
+bool JitDecomp::has_jit_decomposition_(const FunctionSchema& schema) const {
+  return has_jit_decomposition(schema);
 }
 
 void run_jit_decomposition(
