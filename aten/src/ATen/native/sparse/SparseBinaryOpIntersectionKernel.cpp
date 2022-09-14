@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 #include <ATen/native/cpu/Loops.h>
 
@@ -21,17 +22,21 @@ struct MulOp {
   }
 };
 
-}
-
-
-Tensor& _mul_sparse_sparse_out_cpu(
+void mul_sparse_sparse_cpu_kernel(
+    Tensor& result,
     const Tensor& x,
-    const Tensor& y,
-    Tensor& result) {
+    const Tensor& y) {
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, MulOp>(
       result, x, y
   );
-  return result;
 }
+
+}
+
+REGISTER_ARCH_DISPATCH(mul_sparse_sparse_stub, DEFAULT, &mul_sparse_sparse_cpu_kernel);
+REGISTER_AVX512_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
+REGISTER_AVX2_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
+REGISTER_VSX_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(mul_sparse_sparse_stub, &mul_sparse_sparse_cpu_kernel);
 
 }}

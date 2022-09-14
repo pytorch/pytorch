@@ -3602,7 +3602,6 @@
 - func: _mul_sparse_sparse.out(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    SparseCPU: _mul_sparse_sparse_out_cpu
     SparseCUDA: _mul_sparse_sparse_out_cuda
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)

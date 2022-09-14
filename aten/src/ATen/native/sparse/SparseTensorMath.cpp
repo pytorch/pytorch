@@ -7,6 +7,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
@@ -1088,6 +1089,8 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
+DEFINE_DISPATCH(mul_sparse_sparse_stub);
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -1114,7 +1117,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
 
   // mul(sparse, sparse) with inputs which broadcast only in dense dims
   if (!is_equal_size_inputs) {
-    return at::_mul_sparse_sparse_out(r, t_, src_);
+    mul_sparse_sparse_stub(DeviceType::CPU, r, t_, src_);
+    return r;
   }
 
   TORCH_CHECK(is_equal_size_inputs, "mul: expected 'self' and 'other' to have same sizes when both are sparse"
@@ -1131,7 +1135,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
   // _mul_sparse_sparse_out is faster for large inputs
   // and when either of the inputs is uncoalesced.
   if (!t_.is_coalesced() || !src_.is_coalesced()) {
-    return at::_mul_sparse_sparse_out(r, t_, src_);
+    mul_sparse_sparse_stub(DeviceType::CPU, r, t_, src_);
+    return r;
   }
 
   // Otherwise _mul_sparse_sparse_out might be slower
