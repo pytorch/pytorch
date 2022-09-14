@@ -133,13 +133,6 @@ class CommTensor(torch.Tensor):
         tracer: Optional[torch.fx.Tracer] = None
         work: Optional[torch.distributed._Work] = None
 
-        def check_not_eager(tracer):
-            if tracer is None:
-                raise RuntimeError(
-                    "CommTensor should not be used in eager mode. "
-                    "Only use it during tracing."
-                )
-
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
         # if communication has been launched on this tensor.
         def unwrap(e: Any):
@@ -148,19 +141,20 @@ class CommTensor(torch.Tensor):
 
                 work = e._work
                 tracer = _get_tracer(e._tensor)
-                check_not_eager(tracer)
 
                 if work is not None:
-                    # insert a node to the traced graph.
-                    proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
-                        'call_function',
-                        _wait_comm,
-                        (get_proxy(e._tensor).proxy,),
-                        {},
-                        name="wait_comm"
-                    )
-                    # HACK: update the proxy for the inplace output
-                    set_proxy_slot(e._tensor, tracer, proxy_res)
+                    if tracer is not None:
+                        # insert a node to the traced graph.
+                        proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
+                            'call_function',
+                            _wait_comm,
+                            (get_proxy(e._tensor).proxy,),
+                            {},
+                            name="wait_comm"
+                        )
+                        # HACK: update the proxy for the inplace output
+                        set_proxy_slot(e._tensor, tracer, proxy_res)
+                    # For eager mode, simply wait.
                     # During tracing, still need to wait here, to make sure the
                     # execution during tracing is correct.
                     work.wait()
@@ -187,53 +181,57 @@ class CommTensor(torch.Tensor):
         unwrapped_kwargs = tree_map(unwrap, kwargs)
 
         if cls._is_supported(func.__name__):
-            check_not_eager(tracer)
+            if tracer is not None:
+                # in tracing mode, get proxies for args
+                proxy_args, proxy_kwargs = tree_map_only(
+                    _ProxyTensor,
+                    lambda e: e.proxy,
+                    tree_map_only(
+                        torch.Tensor,
+                        fetch_tensor_proxy(tracer),
+                        (unwrapped_args, unwrapped_kwargs)
+                    ),
+                )
 
-            # in tracing mode, get proxies for args
-            proxy_args, proxy_kwargs = tree_map_only(
-                _ProxyTensor,
-                lambda e: e.proxy,
-                tree_map_only(
-                    torch.Tensor,
-                    fetch_tensor_proxy(tracer),
-                    (unwrapped_args, unwrapped_kwargs)
-                ),
-            )
+                # get proxy for output tuple
+                proxy_res = func(*proxy_args, **proxy_kwargs)
+                # insert a node that wraps the output tuple into
+                # _CommResult(tensor, work)
+                comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
+                    'call_function',
+                    _wrap_comm_result,
+                    (proxy_res, ),
+                    {},
+                    name="comm_result"
+                )
 
-            # get proxy for output tuple
-            proxy_res = func(*proxy_args, **proxy_kwargs)
-            # insert a node that wraps the output tuple into
-            # _CommResult(tensor, work)
-            comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
-                'call_function',
-                _wrap_comm_result,
-                (proxy_res, ),
-                {},
-                name="comm_result"
-            )
+                with no_dispatch():
+                    # disable dispatch to avoid trigger ProxyTorchDispatchMode logic
+                    out = func(*unwrapped_args, **unwrapped_kwargs)
 
-            with no_dispatch():
-                # disable dispatch to avoid trigger ProxyTorchDispatchMode logic
+                # wrap output with the proxy of _CommResult, so that subsequent
+                # ops and link to it.
+                track_tensor_tree(out, comm_result_proxy, constant=None, tracer=tracer)
+
+                # N.B.: we still need to remember the work handle here, and wait
+                # for it later to make sure the execution during tracing is
+                # correct. Also, remember comm is already launched
+                # args[0] is always the collection of output tensors
+                tree_map(partial(set_work, out[1]), args[0])
+
+                # HACK: update the proxy on the input argument as this is an
+                # inplace collective communication.
+                flat_args, args_spec = tree_flatten(unwrapped_args[0])
+                flat_out, out_spec = tree_flatten(out[0])
+                for a, o in zip(flat_args, flat_out):
+                    set_proxy_slot(a, tracer, get_proxy(o))
+
+                return out
+            else:
+                # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **unwrapped_kwargs)
-
-            # wrap output with the proxy of _CommResult, so that subsequent
-            # ops and link to it.
-            track_tensor_tree(out, comm_result_proxy, constant=None, tracer=tracer)
-
-            # N.B.: we still need to remember the work handle here, and wait
-            # for it later to make sure the execution during tracing is
-            # correct. Also, remember comm is already launched
-            # args[0] is always the collection of output tensors
-            tree_map(partial(set_work, out[1]), args[0])
-
-            # HACK: update the proxy on the input argument as this is an
-            # inplace collective communication.
-            flat_args, args_spec = tree_flatten(unwrapped_args[0])
-            flat_out, out_spec = tree_flatten(out[0])
-            for a, o in zip(flat_args, flat_out):
-                set_proxy_slot(a, tracer, get_proxy(o))
-
-            return out
+                tree_map(partial(set_work, out[1]), args[0])
+                return out
         else:
             if work is not None:
                 return func(*unwrapped_args, **unwrapped_kwargs)
