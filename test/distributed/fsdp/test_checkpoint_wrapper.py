@@ -297,8 +297,8 @@ class CheckpointWrapperTest(TestCase):
                     offload_verified = True
 
             if hasattr(grad_fn, 'next_functions'):
-                for grad_fn, _ in grad_fn.next_functions:
-                    dfs(grad_fn)
+                for next_grad_fn, _ in grad_fn.next_functions:
+                    dfs(next_grad_fn)
 
         dfs(loss.grad_fn)
 
