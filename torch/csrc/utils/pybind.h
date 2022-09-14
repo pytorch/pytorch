@@ -136,33 +136,6 @@ struct type_caster<at::Device> {
   }
 };
 
-template <>
-struct type_caster<c10::DispatchKey>
-    : public type_caster_base<c10::DispatchKey> {
-  using base = type_caster_base<c10::DispatchKey>;
-  c10::DispatchKey tmp;
-
- public:
-  bool load(handle src, bool convert) {
-    if (base::load(src, convert)) {
-      return true;
-    } else if (py::isinstance(
-                   src, py::module_::import("builtins").attr("str"))) {
-      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
-      value = &tmp;
-      return true;
-    }
-    return false;
-  }
-
-  static handle cast(
-      c10::DispatchKey src,
-      return_value_policy policy,
-      handle parent) {
-    return base::cast(src, policy, parent);
-  }
-};
-
 // Pybind11 bindings for our optional and variant types.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
