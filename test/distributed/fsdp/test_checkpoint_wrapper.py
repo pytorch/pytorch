@@ -68,22 +68,43 @@ class CheckpointWrapperTest(TestCase):
                     self.lin(d)
                 )
 
+
         for wrapper in [
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT),
+            partial(checkpoint_wrapper, offload_to_cpu=True),
         ]:
-            model = wrapper(MyModel())
-            self.assertTrue(isinstance(model, CheckpointWrapper))
-            # Verify kwargs can be passed in
-            inp = torch.ones(4, 10, requires_grad=True)
-            out = model(inp, inp, c=inp, d=inp, e=inp, f=inp)
-            self.assertTrue(isinstance(out, tuple))
-            self.assertEqual(4, len(out))
-            # Without kwargs should have equivalent gradient requirements.
-            out_no_kwarg = model(inp, inp, inp, inp)
-            for t1, t2 in zip(out_no_kwarg, out):
-                self.assertEqual(t1, t2)
-                self.assertEqual(t1.requires_grad, t2.requires_grad)
+            with self.subTest(wrapper=wrapper):
+                model = wrapper(MyModel())
+                self.assertTrue(isinstance(model, CheckpointWrapper))
+                # Verify kwargs can be passed in
+                inp = torch.ones(4, 10, requires_grad=True)
+                out = model(inp, inp, c=inp, d=inp, e=inp, f=inp)
+                self.assertTrue(isinstance(out, tuple))
+                self.assertEqual(4, len(out))
+                # Without kwargs should have equivalent gradient requirements.
+                out_no_kwarg = model(inp, inp, inp, inp)
+                for t1, t2 in zip(out_no_kwarg, out):
+                    self.assertEqual(t1, t2)
+                    self.assertEqual(t1.requires_grad, t2.requires_grad)
+
+        # Test model that enforces kwarg inputs
+        class ModelEnforceKwarg(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+            def forward(self, *, a=None, b=None):
+                return (self.lin(a), self.lin(b))
+
+        model = checkpoint_wrapper(
+            ModelEnforceKwarg(), checkpoint_impl=CheckpointImpl.REENTRANT
+        )
+
+        inp = torch.ones(4, 10, requires_grad=True)
+        out = model(a=inp, b=inp)
+        self.assertEqual(2, len(out))
+
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_parity(self):
@@ -231,6 +252,48 @@ class CheckpointWrapperTest(TestCase):
         state_dict = lin.state_dict()
         for fqn, _ in lin.named_parameters():
             self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
+
+    def test_checkpoint_wrapper_cpu_offload(self):
+        model = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.Linear(10, 10),
+            nn.Linear(10, 10),
+        ).cuda()
+
+        # Patch saved_tensor_hooks to make the unpack keep the tensor on CPU for
+        # testing, otherwise the tensor access during the DFS will cause orig
+        # unpack to run, transferring the tensor back to GPU.
+        def patched_init(saved_tensor_hook_obj, pack_hook, _):
+            saved_tensor_hook_obj.pack_hook = pack_hook
+
+            def testing_cpu_offload_unpack_hook(packed):
+                _, tensor = packed
+                return tensor
+
+            saved_tensor_hook_obj.unpack_hook = testing_cpu_offload_unpack_hook
+
+        torch.autograd.graph.saved_tensors_hooks.__init__ = patched_init
+
+        model = checkpoint_wrapper(model, offload_to_cpu=True)
+
+        inp = torch.randn(3, 10, device='cuda')
+        loss = model(inp).sum()
+
+        # All autograd saved tensors should be offloaded to CPU.
+        def dfs(grad_fn):
+            for e in dir(grad_fn):
+                if not e.startswith('_saved_'):
+                    continue
+
+                saved = getattr(grad_fn, e)
+                if isinstance(saved, torch.Tensor):
+                    self.assertEqual(torch.device("cpu"), saved.device)
+
+            if hasattr(grad_fn, 'next_functions'):
+                for k, _ in grad_fn.next_functions:
+                    dfs(k)
+
+        dfs(loss.grad_fn)
 
 if __name__ == "__main__":
     run_tests()

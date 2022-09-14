@@ -1,4 +1,3 @@
-from contextlib import suppress
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Dict, Iterator, Tuple
@@ -80,8 +79,7 @@ class CheckpointWrapper(torch.nn.Module):
             # Support keyword arguments for reentrant checkpoint. Note that this
             # only works if user has specified self.checkpoint_impl and is not
             # using their own custom checkpoint_fn.
-
-            if self.checkpoint_impl == CheckpointImpl.REENTRANT:
+            if self.checkpoint_impl == CheckpointImpl.REENTRANT and kwargs != {}:
                 # Pack the args and kwargs
                 kwarg_keys, flat_args = _pack_kwargs(*args, **kwargs)
 
@@ -89,19 +87,23 @@ class CheckpointWrapper(torch.nn.Module):
                 # into the original args and kwargs for the checkpointed
                 # function, and runs that function.
                 def my_function(*inputs):
-                    # unpack
-                    print("FOO")
-                    unpacked_args, unpacked_kwargs = _unpack_kwargs(kwarg_keys, inputs)
-                    return self._checkpoint_wrapped_module(*unpacked_args, **unpacked_kwargs)
+                    # unpack back into args and kwargs
+                    unpacked_args, unpacked_kwargs = _unpack_kwargs(
+                        kwarg_keys, inputs
+                    )
+                    # run original module
+                    return self._checkpoint_wrapped_module(
+                        *unpacked_args, **unpacked_kwargs
+                    )
 
                 # Pass the function that only takes packed args into reentrant
                 # checkpoint API.
-                return self.checkpoint_fn(
+                return self.checkpoint_fn(  # type: ignore[misc]
                     my_function,
                     *flat_args,
                 )
             else:
-                return self.checkpoint_fn(
+                return self.checkpoint_fn(  # type: ignore[misc]
                     self._checkpoint_wrapped_module,
                     *args,
                     **kwargs
@@ -173,16 +175,20 @@ def checkpoint_wrapper(
         module (nn.Module):
             The module to be wrapped
         checkpoint_impl (Optional[CheckpointImpl]):
-            The checkpointing implementation to use. Currently only
-            CheckpointImpl.REENTRANT is supported. Note that this will only
+            The checkpointing implementation to use. Note that this will only
             be passed into the ``torch.utils.checkpoint.checkpoint``
             implementation, and is ignored if a custom ``checkpoint_fn`` is
-            specified.
+            specified. Note that for implementations using reentrant checkpoint
+            from ``torch.utils.checkpoint``, keyword arguments will only be
+            supported if ``checkpoint_impl`` is passed as ``CheckpointImpl.REENTRANT`.
         offload_to_cpu (Optional[bool]):
             Whether to offload activations of this wrapped module to CPU. Note
             that if this is specified, ``checkpoint_impl`` and ``checkpoint_fn``
             arguments will be ignored in favor of the activations being
-            offloaded to CPU. Default is ``False``.
+            offloaded to CPU. Default is ``False``. Wrappers with activation
+            offload can be composed with ones that do recomputation-based
+            checkpoint to trade off increased compute versus CPU memory usage
+            and H2D transfer.
         checkpoint_fn (Optional[Callable]):
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
