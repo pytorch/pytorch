@@ -1391,12 +1391,9 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                if isinstance(primals_out, torch.Tensor):
-                    return (primals_out, tangents_out)
-                else:
-                    flat_primals_out, _ = tree_flatten(primals_out)
-                    flat_tangents_out, _ = tree_flatten(tangents_out)
-                    return tuple(flat_primals_out + flat_tangents_out)
+                flat_primals_out, _ = tree_flatten(primals_out)
+                flat_tangents_out, _ = tree_flatten(tangents_out)
+                return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
