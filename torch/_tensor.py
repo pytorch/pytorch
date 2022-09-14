@@ -638,6 +638,11 @@ class Tensor(torch._C._TensorBase):
 
         return solve(self, other)
 
+    def eig(self, eigenvectors=False):
+        from ._linalg_utils import eig
+
+        return eig(self, eigenvectors=eigenvectors)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -763,16 +768,16 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.split, (self,), self, split_size, dim=dim
             )
-        if isinstance(split_size, int):
-            return super(Tensor, self).split(split_size, dim)
-        elif isinstance(split_size, Tensor):
+        if isinstance(split_size, Tensor):
             try:
                 split_size = int(split_size)
-                return super(Tensor, self).split(split_size, dim)
             except ValueError:
-                return super(Tensor, self).split_with_sizes(split_size, dim)
+                pass
+
+        if isinstance(split_size, int):
+            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return super(Tensor, self).split_with_sizes(split_size, dim)
+            return torch._VF.split_with_sizes(self, split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.

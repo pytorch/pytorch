@@ -18,6 +18,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/moduledict.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/nested.cpp
   ${TORCH_API_TEST_DIR}/parameterdict.cpp
   ${TORCH_API_TEST_DIR}/parameterlist.cpp
   ${TORCH_API_TEST_DIR}/namespace.cpp
@@ -55,7 +56,6 @@ target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
 if(NOT MSVC)
   target_compile_options_if_supported(test_api -Wno-unused-variable)
-  target_compile_options_if_supported(test_api -Wno-unused-local-typedefs)
 endif()
 
 if(USE_CUDA)

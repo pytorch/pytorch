@@ -8,7 +8,7 @@ import torch.autograd
 class _SnapshotState(Enum):
     r"""
     These are the snapshotting-related states that IterDataPipes can be in.
-    `NotStarted` - allows you to restore a snapshot and create an iterator without reset
+    `NotStarted` - allows you to restore a snapshot and create an iterator with reset
     `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
     `Iterating` - can restore, will reset if you create a new iterator
     """
@@ -193,7 +193,7 @@ def hook_iterator(namespace, profile_name):
                 single_iterator_msg = "single iterator per IterDataPipe constraint"
                 if hasattr(e.args, '__len__'):
                     full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
-                    if len(e.args) == 0:  # If an exception message doesn't exist
+                    if len(e.args) == 0 or not isinstance(e.args[0], str):  # If an exception message doesn't exist
                         e.args = (f'\nThis exception is {full_msg}',)
                     elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
                         e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]

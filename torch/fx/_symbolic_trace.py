@@ -363,8 +363,9 @@ class Tracer(TracerBase):
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
         """
-        return m.__module__.startswith("torch.nn") and not isinstance(
-            m, torch.nn.Sequential
+        return (
+            (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
+            and not isinstance(m, torch.nn.Sequential)
         )
 
     @compatibility(is_backward_compatible=True)
@@ -991,9 +992,9 @@ def wrap(fn_or_name: Union[str, Callable]):
             "string name"
         )
 
-    if hasattr(fn_or_name, "__code__"):
+    if callable(fn_or_name):
         assert not isinstance(fn_or_name, str)  # to make mypy happy
-        fn_name = fn_or_name.__code__.co_name
+        fn_name = fn_or_name.__name__
     else:
         assert isinstance(
             fn_or_name, str
