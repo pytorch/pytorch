@@ -209,6 +209,7 @@ class CheckpointWrapperTest(TestCase):
 
             saved_tensor_hook_obj.unpack_hook = testing_cpu_offload_unpack_hook
 
+        orig_init = torch.autograd.graph.saved_tensors_hooks.__init__
         torch.autograd.graph.saved_tensors_hooks.__init__ = patched_init
 
         model = checkpoint_wrapper(model, offload_to_cpu=True)
@@ -237,6 +238,8 @@ class CheckpointWrapperTest(TestCase):
         dfs(loss.grad_fn)
 
         self.assertTrue(offload_verified)
+
+        torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
 if __name__ == "__main__":
     run_tests()
