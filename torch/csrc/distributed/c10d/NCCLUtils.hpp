@@ -15,7 +15,7 @@
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
-const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
+std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
   if (processGroupFailureReason != c10::nullopt) {
@@ -46,7 +46,7 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
     default:
       interpret = "Unknown NCCL error!";
   }
-  return (interpret + err).c_str();
+  return interpret + err;
 }
 } // namespace
 

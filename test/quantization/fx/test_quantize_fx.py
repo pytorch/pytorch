@@ -13,7 +13,6 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
-from torch.ao.quantization import is_activation_post_process
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -53,6 +52,7 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_mapping,
     get_default_qat_qconfig_mapping,
+    is_activation_post_process,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -5924,7 +5924,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model,
             (torch.rand(5, 5),),
             QuantType.STATIC,
-            expected_node_occurrence=expected_occurrence
+            expected_node_occurrence=expected_occurrence,
+            custom_qconfig_dict=get_default_qconfig_mapping().to_dict()
         )
 
     def _test_default_node_quant_handler_ops(
@@ -6223,6 +6224,31 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_mapping,
             expected_node_occurrence=node_occurrence, is_reference=True)
+
+    def test_fixed_qparams_ops_qconfig_error(self):
+        """ Test that a proper error message is shown when user don't specify the correct
+        qconfig for fixed qaprams ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        m = M().eval()
+        with self.assertRaisesRegex(ValueError, "get_default_qconfig_mapping"):
+            m = prepare_fx(m, qconfig_mapping, data)
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
