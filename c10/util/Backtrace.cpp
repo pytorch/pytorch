@@ -1,8 +1,8 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Type.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <functional>
 #include <memory>
@@ -22,8 +22,8 @@
 #include <dlfcn.h>
 #include <unwind.h>
 #else
-#include <execinfo.h>
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <link.h>
 #endif
 #endif
@@ -263,7 +263,7 @@ std::string rstrip(const std::string& s) {
 
 bool use_addr2line() {
   static bool _use_addr2line = []() {
-    return torch::get_cpp_stacktraces_enabled() &&
+    return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES") == true &&
         !system("which addr2line > /dev/null 2>&1");
   }();
   return _use_addr2line;
