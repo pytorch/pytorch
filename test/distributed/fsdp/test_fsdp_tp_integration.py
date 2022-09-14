@@ -18,7 +18,6 @@ from torch.distributed.fsdp._utils import _set_flattened
 from torch.distributed.fsdp.flat_param import _set_tensor_flattener, TensorFlattener
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
-    FlatParameter,
     FullyShardedDataParallel as FSDP,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
