@@ -662,50 +662,6 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             masked_tensor(d, m, requires_grad=True)
 
-class TestMatMul(TestCase):
-    def test_bmm(self):
-        x = torch.rand(3, 2, 1)
-        key_padding_mask = torch.tensor(
-            [
-                [False, False, False],
-                [False, True, True],
-            ]
-        )
-        x_mt = masked_tensor(x, ~(key_padding_mask.transpose(0, 1).unsqueeze(-1)))
-        x = x.masked_fill(~x_mt.get_mask(), 0)
-        attn = torch.bmm(x, x.transpose(-2, -1))
-        attn_mt = torch.bmm(x_mt, x_mt.transpose(-2, -1))
-        _compare_mt_t(attn_mt, attn)
-
-    def test_masked_bmm(self):
-        key_padding_mask = torch.tensor(
-            [
-                [False, False, False, True],
-                [False, True, True, True],
-                [False, True, False, True],
-            ]
-        )
-        x = torch.arange(4 * 3 * 2).reshape(4, 3, 2).float()
-        key_padding_mask = ~(key_padding_mask.transpose(0, 1).unsqueeze(-1).expand_as(x))
-        x_mt = masked_tensor(x, key_padding_mask, requires_grad=True)
-
-        attn_mask_bool = torch.tensor(
-            [
-                [False, True, True],
-                [False, False, True],
-                [True, False, False],
-            ]
-        )
-        attn_mask = attn_mask_bool.float().masked_fill_(attn_mask_bool, float("-inf"))
-
-        mt_res = masked_bmm(x, x_mt.transpose(1, 2), attn_mask)
-        mt_res.sum().backward()  # make sure this runs
-
-        x_masked = x.masked_fill(~x_mt.get_mask(), 0)
-        t_res = torch.bmm(x, x_masked.transpose(1, 2))
-
-        _compare_mt_t(mt_res, t_res)
-
 
 def is_unary(op):
     return op.name in UNARY_NAMES
@@ -848,7 +804,6 @@ instantiate_parametrized_tests(TestBasics)
 instantiate_parametrized_tests(TestUnary)
 instantiate_parametrized_tests(TestBinary)
 instantiate_parametrized_tests(TestReductions)
-instantiate_parametrized_tests(TestMatMul)
 
 if __name__ == '__main__':
     run_tests()
