@@ -4,6 +4,7 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     cast,
+    Any,
     Dict,
     Generator,
     Iterator,
@@ -34,6 +35,30 @@ __all__ = [
     "HandleShardingStrategy",
     "HandleTrainingState",
 ]
+
+
+class TensorFlattener:
+    """
+    This enables a pre-flatten and post-unflatten transform to be applied per
+    parameter. To do so, use :func:`_set_tensor_flattener` to set a custom
+    :class:`TensorFlattener` that implements the two transforms.
+    """
+
+    def pre_flatten_transform(self, tensor: torch.Tensor) -> Tuple[Optional[Any], torch.Tensor]:
+        # E.g. Converting `ShardedTensor` to local tensor
+        ...
+
+    def post_unflatten_transform(self, tensor: torch.Tensor, param_extension: Any) -> torch.Tensor:
+        # E.g. Converting local tensor to `ShardedTensor`
+        ...
+
+
+_flattener: Optional[TensorFlattener] = None
+
+
+def _set_tensor_flattener(flattener: TensorFlattener) -> None:
+    global _flattener
+    _flattener = flattener
 
 
 class ParamInfo(NamedTuple):
@@ -151,6 +176,9 @@ class FlatParameter(nn.Parameter):
             ``_numels``, ``_shapes``, and ``_prefixed_param_names``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
+        _param_extensions (Tuple[Optional[Any], ...]): Parameter extensions
+            (i.e. some per-parameter state) used for the tensor flattener to
+            customize pre-flatten and post-unflatten behavior.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -196,6 +224,7 @@ class FlatParameter(nn.Parameter):
         shapes: List[torch.Size],
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
+        param_extensions: List[Any],
     ) -> None:
         """
         Initializes attributes holding metadata about the original parameters
@@ -215,12 +244,14 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(numels)
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(prefixed_param_names)
+        assert len(param_infos) == len(param_extensions)
         self._num_params = len(param_infos)
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
+        self._param_extensions = tuple(param_extensions)
         self._unpadded_unsharded_size = self.size()
         _set_flattened(self)
 
@@ -290,6 +321,7 @@ class FlatParamHandle:
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
         params_to_flatten: List[nn.Parameter] = []
+        param_extensions: List[Any] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
         for submodule_name, submodule in module.named_modules():
@@ -311,15 +343,20 @@ class FlatParamHandle:
                         )
                     )
                 else:
-                    if type(param) is FlatParameter
+                    if type(param) is FlatParameter:
                         raise ValueError("`FlatParameter` does not support nesting")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
                             "`FlatParameter` requires uniform dtype but got "
                             f"{dtype} and {param.dtype}"
                         )
-                    if dtype is None and not param.is_floating_point():
-                        raise ValueError("Integer parameters are unsupported")
+                    if dtype is None:
+                        try:
+                            is_floating_point = param.is_floating_point()
+                        except RuntimeError:
+                            is_floating_point = True
+                        if not is_floating_point:
+                            raise ValueError("Integer parameters are unsupported")
                     if (
                         requires_grad is not None
                         and param.requires_grad != requires_grad
@@ -327,6 +364,12 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
+                    extension = None
+                    if _flattener is not None:
+                        extension, new_param = _flattener.pre_flatten_transform(param)
+                        if extension is not None:
+                            param = new_param
+                    param_extensions.append(extension)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
@@ -350,6 +393,7 @@ class FlatParamHandle:
             shapes,
             prefixed_param_names,
             shared_param_infos,
+            param_extensions,
         )
 
     @staticmethod
@@ -952,7 +996,11 @@ class FlatParamHandle:
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
         views = self._get_unflat_views(self.flat_param)
-        for view, (param_name, module, _) in zip(views, self.flat_param._param_infos):
+        for i, (view, (param_name, module, _)) in enumerate(zip(views, self.flat_param._param_infos)):
+            if _flattener is not None:
+                param_extension = self.flat_param._param_extensions[i]
+                if param_extension is not None:
+                    view = _flattener.post_unflatten_transform(view, param_extension)
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if as_params:

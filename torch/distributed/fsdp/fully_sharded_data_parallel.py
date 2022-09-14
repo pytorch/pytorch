@@ -1299,12 +1299,16 @@ class FullyShardedDataParallel(nn.Module):
         ``reset_parameters()``, and for torchdistX fake tensors, this calls
         ``deferred_init.materialize_module()``.
         """
-        is_meta_module = any(p.is_meta for p in module.parameters())
-        is_torchdistX_deferred_init = (
-            not is_meta_module
-            and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
-        )
+        try:
+            is_meta_module = any(p.is_meta for p in module.parameters())
+            is_torchdistX_deferred_init = (
+                not is_meta_module
+                and _TORCHDISTX_AVAIL
+                and any(fake.is_fake(p) for p in module.parameters())
+            )
+        except RuntimeError:
+            is_meta_module = False
+            is_torchdistX_deferred_init = False
         if (
             is_meta_module or is_torchdistX_deferred_init
         ) and param_init_fn is not None:
