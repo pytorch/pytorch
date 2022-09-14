@@ -732,17 +732,6 @@ class TestFakeProxyTensor(TestCase):
         x, y = torch.randn(2), torch.randn(2)
         self.assertEqual(g(x, y), f(x, y))
 
-    def test_alias(self):
-        def f(x):
-            return torch.ops.aten.alias(x)
-
-        r = str(make_fx(f, tracing_mode="fake")(torch.randn(2)).code).strip()
-        # NB: this should not have a detach call
-        self.assertExpectedInline(r, """\
-def forward(self, x_1):
-    alias = torch.ops.aten.alias.default(x_1);  x_1 = None
-    return alias""")
-
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):

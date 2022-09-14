@@ -2102,7 +2102,7 @@ Tensor slice(
     auto quantizer = create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
-    result = as_strided_tensorimpl(self, sizes, strides, storage_offset);
+    result = self.as_strided(sizes, strides, storage_offset);
   }
   namedinference::propagate_names(result, self);
   return result;
