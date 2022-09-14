@@ -2252,7 +2252,7 @@ def error_inputs_gradient(op_info, device, **kwargs):
 
 def error_inputs_rrelu(op_info, device, **kwargs):
     input = make_tensor((S, S), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(input, kwargs={'lower': 0.3, 'upper': 0.1}),
+    yield ErrorInput(SampleInput(input, kwargs={'lower': 0.3, 'upper': 0.1}), error_type=AssertionError,
                      error_regex='Lower bound should be less than the upper bound')
 
 def error_inputs_masked_select(op_info, device, **kwargs):

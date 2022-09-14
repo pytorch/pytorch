@@ -14503,7 +14503,7 @@ class TestNNDeviceType(NNTestCase):
 
     def test_rrelu_bounds(self, device):
         def test(inplace, module, input, lower, upper):
-            with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than the upper bound"):
+            with self.assertRaisesRegex(AssertionError, "Lower bound should be less than the upper bound"):
                 if inplace is None:
                     module(input, lower, upper)
                 elif input is None:
