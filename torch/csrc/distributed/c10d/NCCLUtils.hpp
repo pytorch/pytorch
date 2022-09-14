@@ -50,7 +50,7 @@ std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string>
 }
 } // namespace
 
-// GetLastError is enabled only for NCCL versions 2.13+
+// ncclGetLastError() is enabled only for NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 13)
 #define ENABLE_NCCL_GET_LAST_ERROR
