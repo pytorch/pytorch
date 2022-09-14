@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_UBSAN, dtype_abbrs)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
 from functools import partial
@@ -1577,6 +1577,13 @@ class TestMPS(TestCase):
         y_mps = torch.full((2, 2), 247, device='mps', dtype=torch.uint8)
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
+
+    # See https://github.com/pytorch/pytorch/issues/84995
+    def test_div_bugs(self):
+        for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
+            x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
+            y = torch.div(x, 101, rounding_mode=mode)
+            self.assertEqual(y.sum(), 0)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):
