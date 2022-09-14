@@ -12,6 +12,7 @@
 #include <iostream>
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -1439,12 +1440,15 @@ py::object getname(PyCodeObject* code, _Py_CODEUNIT c) {
         case STORE_GLOBAL:
           names = code->co_names;
           break;
+#if PY_VERSION_HEX < 0x030b0000
+        // TODO: Re-enable this for Python-3.11
         case STORE_FAST:
           names = code->co_varnames;
           break;
         case STORE_DEREF:
           names = code->co_cellvars;
           break;
+#endif
         default:
             return py::object();
     }
@@ -1475,6 +1479,13 @@ py::object create_dimlist(py::object name, py::handle size) {
     return std::move(d);
 }
 
+
+
+// Python wrappers that make new reflection primitives available for older runtimes
+#if PY_VERSION_HEX < 0x030b0000
+#define _PyCode_CODE(CO) ((_Py_CODEUNIT*)PyBytes_AS_STRING((CO)->co_code))
+#endif
+
 template<py::object (*create_object)(py::object, py::handle)>
 static PyObject* _dims(PyObject *self,
                       PyObject *const *args,
@@ -1500,13 +1511,15 @@ static PyObject* _dims(PyObject *self,
     }
 
     PyThreadState* state = PyThreadState_GET();
-    PyFrameObject* f = state->frame;
-    auto code = (_Py_CODEUNIT*)PyBytes_AS_STRING(f->f_code->co_code);
+    PyFrameObject* f = PyThreadState_GetFrame(state);
+    PyCodeObject* c = PyFrame_GetCode(f);
+    auto code = _PyCode_CODE(c);
 #if PY_VERSION_HEX >= 0x030a00f0
-    int first = f->f_lasti + 1;
+    int first = PyFrame_GetLasti(f) + 1;
 #else
-    int first = f->f_lasti /  2 + 1;
+    int first = PyFrame_GetLasti(f) /  2 + 1;
 #endif
+    Py_DECREF(f);
     auto unpack = code[first];
     int names_start = first;
     if (relevant_op(unpack)) {
@@ -1518,6 +1531,7 @@ static PyObject* _dims(PyObject *self,
 
     if (specified_ndims == -1) {
         if (found_ndims == 0) {
+            Py_DECREF(c);
             py::raise_error(PyExc_SyntaxError, "dims() must be assigned to a sequence of variable names or have argument n specified");
         }
         specified_ndims = found_ndims;
@@ -1529,7 +1543,7 @@ static PyObject* _dims(PyObject *self,
     auto genobject = [&](int i) -> py::object {
         py::object name;
         if (i < found_ndims) {
-            name = getname(f->f_code, code[names_start + i]);
+            name = getname(c, code[names_start + i]);
         }
         if (!name.ptr()) {
             name = py::unicode_from_format("d%d", i);
@@ -1538,6 +1552,7 @@ static PyObject* _dims(PyObject *self,
         return create_object(std::move(name), sizes != -1 ? py::sequence_view(py_sizes)[i] : py::handle(Py_None));
     };
     if (sizes != -1 && sizes != specified_ndims) {
+        Py_DECREF(c);
         py::raise_error(PyExc_ValueError, "expected %d sizes but found %d", int(specified_ndims), int(sizes));
     }
     if (specified_ndims == 1) {
@@ -1547,6 +1562,7 @@ static PyObject* _dims(PyObject *self,
     for (int i = 0; i < specified_ndims; ++i) {
         result.set(i, genobject(i));
     }
+    Py_DECREF(c);
     return result.release();
     PY_END(nullptr)
 }
