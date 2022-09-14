@@ -8,6 +8,7 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
     fetch_tensor_proxy,
+    get_proxy,
     get_proxy_slots,
     set_proxy_slot,
     track_tensor_tree,
@@ -48,6 +49,15 @@ def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     # allgather_ returns ([[tensor1, tensor2]], work)
     work = result[1]
     return (tree_map(partial(wrap, work), result[0]), work)
+
+
+def _get_tracer(obj):
+    slots = get_proxy_slots(obj)
+    if slots is None:
+        return None
+    keys = tuple(slots.keys())
+    assert len(keys) == 1
+    return keys[0]
 
 
 class CommTensor(torch.Tensor):
@@ -92,7 +102,7 @@ class CommTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
         t = tensor._tensor if isinstance(tensor, CommTensor) else tensor
-        if get_tracer(t) is None:
+        if _get_tracer(t) is None:
             # noop for eager mode
             return tensor
 
@@ -130,22 +140,6 @@ class CommTensor(torch.Tensor):
                     "Only use it during tracing."
                 )
 
-        def get_tracer(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            keys = tuple(slots.keys())
-            assert len(keys) == 1
-            return keys[0]
-
-        def get_proxy(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            vals = tuple(slots.values())
-            assert len(vals) == 1
-            return vals[0]
-
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
         # if communication has been launched on this tensor.
         def unwrap(e: Any):
@@ -153,7 +147,7 @@ class CommTensor(torch.Tensor):
                 nonlocal tracer, work
 
                 work = e._work
-                tracer = get_tracer(e._tensor)
+                tracer = _get_tracer(e._tensor)
                 check_not_eager(tracer)
 
                 if work is not None:
@@ -180,13 +174,13 @@ class CommTensor(torch.Tensor):
             return CommTensor(e) if isinstance(e, torch.Tensor) else e
 
         def set_work(work: torch.distributed._Work, e: Any):
-            assert not isinstance(e, torch.Tensor), (
-                "Type of output tensors from collective communication during "
-                "tracing should always be CommTensor instead of torch.Tensor"
-            )
             if isinstance(e, CommTensor):
                 e._work = work  # type: ignore[attr-defined]
-
+            elif isinstance(e, torch.Tensor):
+                raise RuntimeError(
+                    "Type of output tensors from collective communication during "
+                    "tracing should always be CommTensor instead of torch.Tensor"
+                )
             return e
 
         unwrapped_args = tree_map(unwrap, args)
