@@ -85,7 +85,7 @@ class DispatchKey(Enum):
     AutogradFunctionality = auto()
     AutogradNestedTensor = auto()
     Tracer = auto()
-    Autocast = auto()
+    AutocastFunctionality = auto()
     Batched = auto()
     VmapMode = auto()
     TESTING_ONLY_GenericWrapper = auto()

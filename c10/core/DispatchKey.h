@@ -51,7 +51,8 @@ namespace c10 {
   _(Quantized, Quantized)                \
   _(Sparse, Sparse)                      \
   _(NestedTensor, NestedTensor)          \
-  _(AutogradFunctionality, Autograd)
+  _(AutogradFunctionality, Autograd)     \
+  _(AutocastFunctionality, Autocast)
 
 enum class BackendComponent : uint8_t {
 
@@ -345,14 +346,7 @@ enum class DispatchKey : uint16_t {
 
   Tracer,
 
-  // TODO: make Autocast a functionality key
-  // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
-  // and inputs are saved for backward in the post-autocast type.
-  AutocastCPU,
-  AutocastXPU,
-  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
-  // it probably should get its own Autocast key
-  AutocastCUDA,
+  AutocastFunctionality,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -421,7 +415,7 @@ enum class DispatchKey : uint16_t {
 #undef DEFINE_PER_BACKEND_KEYS
 #undef DEFINE_PER_BACKEND_KEYS_FOR_BACKEND
 
-      EndOfRuntimeBackendKeys = EndOfAutogradFunctionalityBackends,
+      EndOfRuntimeBackendKeys = EndOfAutocastFunctionalityBackends,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Note [Alias Dispatch Keys]
@@ -435,6 +429,8 @@ enum class DispatchKey : uint16_t {
   // keys always have precedence over alias keys).
   // Alias keys won't be directly called during runtime.
 
+  // See Note [Alias Dispatch Key : Autocast]
+  Autocast,
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
   CompositeImplicitAutograd, // registered at
@@ -449,7 +445,7 @@ enum class DispatchKey : uint16_t {
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  StartOfAliasKeys = Autograd,
+  StartOfAliasKeys = Autocast,
   EndOfAliasKeys = CompositeExplicitAutogradNonFunctional, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -461,7 +457,6 @@ enum class DispatchKey : uint16_t {
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
-  Autocast = AutocastCUDA,
 };
 
 // Note [Private use DispatchKey]
@@ -515,7 +510,7 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
       k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality ||
-      k == DispatchKey::NestedTensor) {
+      k == DispatchKey::NestedTensor || k == DispatchKey::AutocastFunctionality) {
     return true;
   } else {
     return false;
@@ -614,6 +609,13 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(
             DispatchKey::StartOfAutogradFunctionalityBackends));
+  } else if (
+      k >= DispatchKey::StartOfAutocastFunctionalityBackends &&
+      k <= DispatchKey::EndOfAutocastFunctionalityBackends) {
+    return static_cast<BackendComponent>(
+        static_cast<uint8_t>(k) -
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutocastFunctionalityBackends));
   } else {
     return BackendComponent::InvalidBit;
   }
@@ -632,6 +634,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::NestedTensor;
   } else if (k <= DispatchKey::EndOfAutogradFunctionalityBackends) {
     return DispatchKey::AutogradFunctionality;
+  } else if (k <= DispatchKey::EndOfAutocastFunctionalityBackends) {
+    return DispatchKey::AutocastFunctionality;
   } else {
     return DispatchKey::Undefined;
   }
@@ -672,6 +676,12 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
     return static_cast<DispatchKey>(
         static_cast<uint8_t>(
             DispatchKey::StartOfAutogradFunctionalityBackends) +
+        static_cast<uint8_t>(backend_k));
+  }
+  if (functionality_k == DispatchKey::AutocastFunctionality) {
+    return static_cast<DispatchKey>(
+        static_cast<uint8_t>(
+            DispatchKey::StartOfAutocastFunctionalityBackends) +
         static_cast<uint8_t>(backend_k));
   }
   return DispatchKey::Undefined;

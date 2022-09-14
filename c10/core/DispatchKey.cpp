@@ -132,12 +132,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Tracer:
       return "Tracer";
 
-    case DispatchKey::AutocastCPU:
-      return "AutocastCPU";
-    case DispatchKey::AutocastXPU:
-      return "AutocastXPU";
-    case DispatchKey::AutocastCUDA:
-      return "AutocastCUDA";
+    case DispatchKey::AutocastFunctionality:
+      return "AutocastFunctionality";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
@@ -174,6 +170,8 @@ const char* toString(DispatchKey t) {
 
       // Aliases
 
+    case DispatchKey::Autocast:
+      return "Autocast";
     case DispatchKey::Autograd:
       return "Autograd";
     case DispatchKey::CompositeImplicitAutograd:
@@ -267,11 +265,9 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
+      {"AutocastFunctionality", c10::DispatchKey::AutocastFunctionality},
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
-      {"AutocastCPU", c10::DispatchKey::AutocastCPU},
-      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
-      {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
       {"Batched", c10::DispatchKey::Batched},

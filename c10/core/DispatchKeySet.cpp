@@ -60,6 +60,9 @@ constexpr DispatchKeySet nested_dispatch_keyset =
         {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
+constexpr DispatchKeySet autocast_alias_ks =
+    DispatchKeySet({DispatchKey::AutocastCUDA, DispatchKey::AutocastXLA});
+
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
@@ -78,6 +81,12 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return non_functional_backend_dispatch_keyset;
+    case DispatchKey::Autocast:
+      // Note [Alias Dispatch Key : Autocast]
+      // XLA currently re-uses the autocast kernels from CUDA.
+      // This is represented by an Autocast alias key, that maps to both
+      // CUDA and XLA.
+      return autocast_alias_ks;
     default:
       return DispatchKeySet(t);
   }
@@ -101,6 +110,9 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor &&
           non_functional_backend_dispatch_keyset.has(k);
+    // See Note [Alias Dispatch Key : Autocast]
+    case DispatchKey::Autocast:
+      return autocast_alias_ks.has(k);
     default:
       return t == k;
   }

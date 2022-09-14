@@ -259,6 +259,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
+  //    (2.0) Use kernel from DispatchKey::Autocast if available.
+  //          This alias key should be completely disjoint from all other alias keys,
+  //          (but it's given highest priority just to be safe).
+  //          See Note [Alias Dispatch Key : Autocast]
   //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutogradNonFunctional if available.
   //          This is used to register a kernel that works for all backends in inference, except "functional" backends
   //          like LazyTensor/XLA. But it requires separate registration for Autograd keys to support training.
@@ -290,6 +294,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
     return {*direct_registration, "kernel"};
+  }
+
+  // 2.0 Use Autograd kernel if available.
+  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Autocast)) {
+    if (auto autocast_registration = getKernelForDispatchKey(DispatchKey::Autocast)) {
+      return {*autocast_registration, "default backend kernel"};
+    }
   }
 
   // 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available.
