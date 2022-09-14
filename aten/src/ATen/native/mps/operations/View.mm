@@ -285,8 +285,12 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayR
   setStrided(result, size, stride, storage_offset);
 
   // 0 sizes won't result in any change in the shape of the Tensor so we can skip it.
-  if (size.size() > 0)
-    mps::createViewGraph(self, size, stride, storage_offset, /*needsScatter*/ false);
+  if (size.size() > 0) {
+    Tensor realSelf = self;
+    if (self.is_complex())
+      realSelf = at::view_as_real(self);
+    mps::createViewGraph(realSelf, size, stride, storage_offset, /*needsScatter*/ false);
+  }
 
   return result;
 }
