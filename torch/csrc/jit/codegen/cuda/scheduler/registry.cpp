@@ -1501,6 +1501,9 @@ bool checkCanSchedule(
     if (!isConnectedFusionGraph(fusion)) {
       return false;
     }
+    if (IterDomainGraph(fusion, /*allow_self_mapping=*/true).hasSelfMapping()) {
+      return false;
+    }
     if (!SchedulerType::canScheduleCompileTime(fusion)) {
       return false;
     }

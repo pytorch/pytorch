@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
@@ -794,6 +795,61 @@ TEST_F(NVFuserTest, FusionViewNoTranspose_CUDA) {
 
   TORCH_CHECK(!hasAtLeastTwoValidGroups(&fusion));
 }
+
+TEST_F(NVFuserTest, FusionTransposeSelfMapping_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = transpose(tv0, 0, 1);
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  EXPECT_THAT(
+      [&]() { IterDomainGraph(fusion_ptr.get()); },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("Unsupported domain mapping detected")));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({5, 5}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  auto ref = t0.transpose(0, 1) + t0;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+#if 0
+// silent wrong result
+TEST_F(NVFuserTest, FusionTransposeViewSelfMapping_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = transpose(tv0, 0, 1);
+  auto tv2 = view(tv0, {2, 3}, {3, 2});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 3}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  auto ref = t0.transpose(0, 1) + t0.view({3, 2});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+#endif
 
 // t0------------.
 // t2->broadcast->sub->mul->relu->t6
