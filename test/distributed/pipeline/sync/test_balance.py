@@ -89,10 +89,12 @@ def test_balance_by_size_latent():
     sample = torch.rand(10, 100, 100)
 
     model = nn.Sequential(*[Expand(i) for i in [1, 2, 3, 4, 5, 6]])
+    model(sample) # call model first to initialize cuBLAS workspaces
     balance = balance_by_size(2, model, sample)
     assert balance == [4, 2]
 
     model = nn.Sequential(*[Expand(i) for i in [6, 5, 4, 3, 2, 1]])
+    model(sample)
     balance = balance_by_size(2, model, sample)
     assert balance == [2, 4]
 
@@ -101,11 +103,13 @@ def test_balance_by_size_latent():
 def test_balance_by_size_param():
     model = nn.Sequential(*[nn.Linear(i + 1, i + 2) for i in range(6)])
     sample = torch.rand(7, 1)
+    model(sample) # call model first to initialize cuBLAS workspaces
     balance = balance_by_size(2, model, sample, param_scale=100)
     assert balance == [4, 2]
 
     model = nn.Sequential(*[nn.Linear(i + 2, i + 1) for i in reversed(range(6))])
     sample = torch.rand(1, 7)
+    model(sample)
     balance = balance_by_size(2, model, sample, param_scale=100)
     assert balance == [2, 4]
 
@@ -134,6 +138,7 @@ def test_balance_by_size_param_scale():
 
     sample = torch.rand(1, requires_grad=True)
 
+    model(sample) # call model first to initialize cuBLAS workspaces
     balance = balance_by_size(2, model, sample, param_scale=0)
     assert balance == [2, 4]
 
