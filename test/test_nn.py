@@ -15551,11 +15551,11 @@ class TestNNDeviceType(NNTestCase):
             rtol = torch.testing._comparison._DTYPE_PRECISIONS[dtype][0]
             atol = torch.testing._comparison._DTYPE_PRECISIONS[dtype][1]
             atol = 0.001 if dtype is torch.half else atol
-            assert torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol)
+            self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
-            assert torch.allclose(x.grad.cpu(), xx.grad,
-                                  rtol=torch.testing._comparison._DTYPE_PRECISIONS[torch.half][0],
-                                  atol=0.001)
+            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad,
+                                           rtol=torch.testing._comparison._DTYPE_PRECISIONS[torch.half][0],
+                                           atol=0.001))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
