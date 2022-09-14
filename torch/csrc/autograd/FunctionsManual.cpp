@@ -727,13 +727,13 @@ Tensor prod_backward(
     return prod_safe_zeros_backward(grad, input, dim).view_as(input);
   }
 
-  Tensor zero_mask = (input == 0);
-  Tensor slice_zero_count = zero_mask.sum(dim, true);
-  auto total_zeros = slice_zero_count.sum();
-  if (isTensorSubclassLike(total_zeros)) {
+  if (isTensorSubclassLike(input)) {
     // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim).view_as(input);
   } else {
+    Tensor zero_mask = (input == 0);
+    Tensor slice_zero_count = zero_mask.sum(dim, true);
+    auto total_zeros = slice_zero_count.sum();
     if (total_zeros.item<int64_t>() == 0) {
       return grad * (result / input).conj();
     } else {
