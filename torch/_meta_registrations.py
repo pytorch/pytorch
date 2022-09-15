@@ -744,7 +744,7 @@ def meta_repeat(self, repeats):
 
 @register_meta(aten.alias.default)
 def meta_alias(self):
-    return self.new_empty(self.shape)
+    return self.view(self.shape)
 
 
 # We must also trigger meta registrations from PrimTorch ref

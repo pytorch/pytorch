@@ -1277,7 +1277,7 @@ def std_decomposition(
 # Note that this decomposition causes issues with in-place ops
 @register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
 def nop_decomposition(x):
-    return x.alias()
+    return aten.alias(x)
 
 
 @register_decomposition(aten.cudnn_batch_norm)
