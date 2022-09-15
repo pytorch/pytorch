@@ -3582,10 +3582,7 @@ class TestSparse(TestSparseBase):
         test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
 
-    @coalescedonoff
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
-    def test_sparse_dense_mul(self, device, dtype, coalesced):
+    def _test_mul_skips(self, device, dtype, coalesced):
         skipTestIfUncoalesced = False
         # This case always coalesce inputs and that could lead to loss of precision,
         # hence it is inhibited for float16/bfloat16 by providing already coalesced tensors.
@@ -3598,6 +3595,51 @@ class TestSparse(TestSparseBase):
 
         if skipTestIfUncoalesced:
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
+
+    @coalescedonoff
+    # NOTE: addcmul_out is not implemented for bool and half.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    def test_sparse_sparse_mul(self, device, dtype, coalesced):
+        self._test_mul_skips(device, dtype, coalesced)
+
+        shape = (2, 3, 4, 10)
+        nnz = 10
+
+        def check(self, x, y):
+            res_sparse = x * y
+            res_dense = x.to_dense() * y.to_dense()
+            self.assertEqual(res_sparse.to_dense(), res_dense)
+
+        def check_empty(sparse_shape, nnz, dense_shape, coalesce):
+            from itertools import product
+            for nnz_val, shape_suffix in product((nnz, 0), ((), (0,))):
+                empty_sparse_shape = sparse_shape + shape_suffix
+                empty_dense_shape = dense_shape + shape_suffix
+                x = self._gen_sparse(sparse_dim, nnz_val, empty_sparse_shape, dtype, device, coalesce)[0]
+                check(self, x, x)
+
+        for dim in range(len(shape) + 1):
+            sub_shape = shape[dim:]
+            sparse_dim = len(sub_shape) // 2
+
+            check_empty(sub_shape, nnz, shape, coalesced)
+
+            x = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            y = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
+            check(self, x, y)
+
+            # check broadcasting in dense dims
+            for d in range(sparse_dim, len(sub_shape)):
+                new_shape = sub_shape[:d] + (1,) + sub_shape[d + 1:]
+                y = self._gen_sparse(sparse_dim, nnz, new_shape, dtype, device, coalesced)[0]
+                check(self, x, y)
+
+    @coalescedonoff
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    def test_sparse_dense_mul(self, device, dtype, coalesced):
+        self._test_mul_skips(device, dtype, coalesced)
 
         shape = (2, 3, 4, 10)
         nnz = 10
