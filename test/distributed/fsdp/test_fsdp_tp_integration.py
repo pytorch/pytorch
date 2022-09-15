@@ -14,7 +14,7 @@ from torch.distributed._shard.sharded_optim import (
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed.fsdp._utils import _set_flattened
+from torch.distributed.fsdp._utils import _set_fsdp_flattened
 from torch.distributed.fsdp.flat_param import _set_tensor_flattener, TensorFlattener
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
@@ -82,7 +82,7 @@ class ShardedTensorFlattener(TensorFlattener):
             sharding_info.global_size,
             process_group=sharding_info.process_group,
         )
-        _set_flattened(sharded_tensor)
+        _set_fsdp_flattened(sharded_tensor)
         return sharded_tensor
 
 

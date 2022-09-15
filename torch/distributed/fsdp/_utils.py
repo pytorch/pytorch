@@ -126,7 +126,7 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     return not already_freed
 
 
-def _set_flattened(tensor: torch.Tensor) -> None:
+def _set_fsdp_flattened(tensor: torch.Tensor) -> None:
     """
     Sets an attribute on ``tensor`` to mark it as flattened by FSDP. This is to
     avoid re-flattening it during nested construction.
@@ -134,7 +134,7 @@ def _set_flattened(tensor: torch.Tensor) -> None:
     setattr(tensor, FSDP_FLATTENED, True)
 
 
-def _is_flattened(tensor: torch.Tensor) -> bool:
+def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     """Returns if ``tensor`` has been marked as flattened by FSDP."""
     return getattr(tensor, FSDP_FLATTENED, False)
 
