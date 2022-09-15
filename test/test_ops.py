@@ -163,7 +163,7 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
     @suppress_warnings
-    @ops(_ops_and_refs)
+    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
     def test_compare_cpu(self, device, dtype, op):
 
         if dtype not in op.dtypes:
@@ -194,8 +194,7 @@ class TestCommon(TestCase):
             self.assertEqual(len(cuda_results), len(cpu_results))
 
             for cpu_result, cuda_result in zip(cpu_results, cuda_results):
-                # TODO: Add tests and checks
-                pass
+                self.assertEqual(cpu_result, cuda_result)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
