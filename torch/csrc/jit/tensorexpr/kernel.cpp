@@ -621,7 +621,7 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-void fuseAllLoops(StmtPtr st) {
+void fuseAllLoopsImpl(StmtPtr st) {
   if (auto block = to<tensorexpr::Block>(st)) {
     std::vector<ForPtr> loopsToFuse;
     for (auto stmt : *block) {
@@ -645,7 +645,46 @@ void fuseAllLoops(StmtPtr st) {
     if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
       return;
     }
-    fuseAllLoops(fusedLoop->body());
+    fuseAllLoopsImpl(fusedLoop->body());
+  }
+}
+
+// An block could contain multiple most-outer statements as follows.
+//
+void fuseAllLoops(StmtPtr st) {
+  auto block = to<tensorexpr::Block>(st);
+  if (block == nullptr) {
+    return;
+  }
+
+  std::vector<std::vector<ForPtr>> all_outer_loops;
+  all_outer_loops.reserve(block->nstmts());
+  int cur_idx = 0;
+  for (const auto& stmt : *block) {
+    auto loop = to<For>(stmt);
+    if (!loop) {
+      cur_idx += 1;
+    } else {
+      all_outer_loops[cur_idx].push_back(loop);
+    }
+  }
+
+  for (const auto& outer_loops : all_outer_loops) {
+    if (outer_loops.empty()) {
+      continue;
+    }
+
+    if (!loopBoundsAllEqual(outer_loops)) {
+      continue;
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    ForPtr fusedLoop;
+    if (!LoopNest::fuseLoops(outer_loops, &fusedLoop)) {
+      continue;
+    }
+
+    fuseAllLoopsImpl(fusedLoop->body());
   }
 }
 
