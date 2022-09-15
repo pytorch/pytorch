@@ -41,6 +41,7 @@ from torch.onnx import (  # noqa: F401
     _constants,
     _exporter_states,
     _patch_torch,
+    diagnostic,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -177,6 +178,18 @@ def setup_onnx_logging(verbose: bool):
 
 @contextlib.contextmanager
 @_beartype.beartype
+def setup_onnx_diagnostic(verbose: bool):
+    engine = diagnostic.engine
+    engine.options.verbose = verbose
+    engine.start_new_run()
+    try:
+        yield
+    finally:
+        engine.end_current_run()
+
+
+@contextlib.contextmanager
+@_beartype.beartype
 def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     with select_model_mode_for_export(
         model, mode
@@ -184,8 +197,10 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         model
     ) as apex_ctx, setup_onnx_logging(
         verbose
-    ) as log_ctx:
-        yield (mode_ctx, apex_ctx, log_ctx)
+    ) as log_ctx, setup_onnx_diagnostic(
+        verbose
+    ) as diagnostic_ctx:
+        yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
 @_beartype.beartype
@@ -639,11 +654,6 @@ def _optimize_graph(
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
 
-    _C._jit_pass_onnx_scalar_type_analysis(
-        graph, True, GLOBALS.export_onnx_opset_version
-    )
-    _C._jit_pass_lint(graph)
-
     _C._jit_pass_onnx_peephole(
         graph, GLOBALS.export_onnx_opset_version, fixed_batch_size
     )
@@ -837,7 +847,11 @@ def _trace(func, args, operator_export_type, return_outs=False):
         args = (args,)
 
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        func, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        func,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     warn_on_static_input_change(inputs_states)
 
@@ -861,7 +875,11 @@ def _trace_and_get_graph_from_model(model, args):
     # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        model, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        model,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
 
@@ -916,7 +934,8 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 
 def _create_jit_graph(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction],
+    args: Sequence[Any],
 ) -> Tuple[
     _C.Graph,
     List[_C.IValue],
@@ -1449,7 +1468,9 @@ def _export(
         symbolic_helper._set_operator_export_type(operator_export_type)
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
-                keep_initializers_as_inputs, operator_export_type, opset_version
+                keep_initializers_as_inputs,
+                operator_export_type,
+                opset_version,
             )
             val_add_node_names = _decide_add_node_names(
                 add_node_names, operator_export_type
@@ -1834,7 +1855,10 @@ def _run_symbolic_function(
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
             return g.at(  # type: ignore[attr-defined]
-                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+                op_name,
+                *inputs,
+                overload_name=_get_aten_op_overload_name(n),
+                **attrs,
             )
         else:
             raise errors.UnsupportedOperatorError(
@@ -1858,7 +1882,10 @@ def _run_symbolic_function(
                 for k in n.attributeNames()
             }
             return g.at(  # type: ignore[attr-defined]
-                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+                op_name,
+                *inputs,
+                overload_name=_get_aten_op_overload_name(n),
+                **attrs,
             )
         raise
     except TypeError as e:

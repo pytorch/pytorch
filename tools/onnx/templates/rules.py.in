@@ -1,0 +1,12 @@
+"""
+${generated_comment}
+"""
+
+from torch.onnx import diagnostic
+
+
+class _Rules:
+${rules}
+
+
+rules = _Rules()

@@ -12,6 +12,7 @@ from torch._C._onnx import (
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
+    diagnostic,
     errors,
     symbolic_caffe2,
     symbolic_helper,

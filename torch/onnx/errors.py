@@ -5,7 +5,7 @@ import textwrap
 from typing import Optional
 
 from torch import _C
-from torch.onnx import _constants
+from torch.onnx import _constants, diagnostic
 
 __all__ = [
     "OnnxExporterError",
@@ -45,7 +45,11 @@ class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
     def __init__(
-        self, domain: str, op_name: str, version: int, supported_version: Optional[int]
+        self,
+        domain: str,
+        op_name: str,
+        version: int,
+        supported_version: Optional[int],
     ):
         if domain in {"", "aten", "prim", "quantized"}:
             msg = f"Exporting the operator '{domain}::{op_name}' to ONNX opset version {version} is not supported. "
@@ -54,14 +58,37 @@ class UnsupportedOperatorError(OnnxExporterError):
                     f"Support for this operator was added in version {supported_version}, "
                     "try exporting with this version."
                 )
+                diagnostic.engine.diagnose(
+                    diagnostic.rules.OperatorSupportedInNewerOpsetVersion,
+                    diagnostic.Level.ERROR,
+                    message_args=(
+                        f"{domain}::{op_name}",
+                        version,
+                        supported_version,
+                    ),
+                )
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
                 msg += _constants.PYTORCH_GITHUB_ISSUES_URL
+                diagnostic.engine.diagnose(
+                    diagnostic.rules.MissingStandardSymbolicFunction,
+                    diagnostic.Level.ERROR,
+                    message_args=(
+                        f"{domain}::{op_name}",
+                        version,
+                        _constants.PYTORCH_GITHUB_ISSUES_URL,
+                    ),
+                )
         else:
             msg = (
                 f"ONNX export failed on an operator with unrecognized namespace '{domain}::{op_name}'. "
                 "If you are trying to export a custom operator, make sure you registered "
                 "it with the right domain and version."
+            )
+            diagnostic.engine.diagnose(
+                diagnostic.rules.MissingCustomSymbolicFunction,
+                diagnostic.Level.ERROR,
+                message_args=(f"{domain}::{op_name}",),
             )
         super().__init__(msg)
 
