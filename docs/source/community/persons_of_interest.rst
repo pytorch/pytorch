@@ -54,14 +54,13 @@ Autograd (torch.autograd)
 -  Jeffrey Wan (`soulitzer <https://github.com/soulitzer>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
-Compilers (JIT / TorchScript / FX / TorchDynamo)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+JIT / TorchScript / FX
+~~~~~~~~~~~~~~~~~~~~~~
 
 -  Elias Ellison (`eellison <https://github.com/eellison>`__)
 -  Michael Suo (`suo <https://github.com/suo>`__)
 -  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
--  Jason Ansel (`jansel <https://github.com/jansel>`__)
 -  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
 
 
@@ -84,10 +83,9 @@ Distributed
 -  Junjie Wang (`fduwjj <https://github.com/fduwjj>`__)
 -  Howard Huang (`H-Huang <https://github.com/H-Huang>`__)
 -  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
+-  Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
 -  Alisson Azzolini (`aazzolini <https://github.com/aazzolini>`__)
 -  Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
--  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
--  (emeritus) Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
 -  (emeritus) Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  (emeritus) Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
 -  (emeritus) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)
@@ -107,14 +105,6 @@ Linear Algebra (torch.linalg)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
-Sparse (torch.sparse)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  Pearu Peterson (`pearu <https://github.com/pearu>`__)
--  Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
--  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
--  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
-
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -125,7 +115,6 @@ CPU Performance / SIMD
 ~~~~~~~~~~~~~~~~~~~~~~
 
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
--  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
@@ -137,8 +126,6 @@ NVIDIA / CUDA
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
--  Christian Sarofeen (`csarofeen <https://github.com/csarofeen>`__)
--  Andrew Tulloch (`ajtulloch <https://github.com/ajtulloch>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
 NVFuser
@@ -154,7 +141,6 @@ Intel / MKLDNN
 
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
--  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 -  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
@@ -291,8 +277,8 @@ TorchVision
 TorchText
 ~~~~~~~~~
 
--  Nayef Ahmed (`Nayef211 <https://github.com/Nayef211>`__)
--  (emeritus) Parmeet Singh Bhatia (`parmeet <https://github.com/parmeet>`__)
+-  Parmeet Singh Bhatia (`parmeet <https://github.com/parmeet>`__)
+-  Steven Liu (`hudeven <https://github.com/hudeven>`__)
 -  (emeritus) Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 
@@ -302,19 +288,13 @@ TorchAudio
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 
-TorchRec
-~~~~~~~~
-
--  Dmytro Ivchenko (`divchenko <https://github.com/divchenko>`__)
--  Colin Taylor (`colin2328 <https://github.com/colin2328>`__)
-
 TorchX
 ~~~~~~
 
 -  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
 -  Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
 
-TorchData / TorchArrow
-~~~~~~~~~~~~~~~~~~~~~~
+TorchData
+~~~~~~~~~
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Wenlei Xie (`wenleix <https://github.com/wenleix>`__)

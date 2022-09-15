@@ -609,19 +609,19 @@ class MixtureOfExperts(NestedWrappedModule):
         if self.delay_before_free_ms > 0:
             expert = self.module[2]
             if isinstance(expert, FSDP):
-                orig_reshard = self.module[2]._reshard
+                orig_free_full_params = self.module[2]._free_full_params
 
                 def _free_full_params_with_delay(*args):
                     torch.cuda._sleep(
                         int(self.delay_before_free_ms * get_cycles_per_ms())
                     )
-                    return orig_reshard(*args)
+                    return orig_free_full_params(*args)
 
                 assert hasattr(
-                    expert, "_reshard"
-                ), "expert FSDP module should have a `_reshard()` method"
+                    expert, "_free_full_params"
+                ), "expert FSDP module should has _free_full_params attribute."
                 with mock.patch.object(
-                    expert, "_reshard", _free_full_params_with_delay
+                    expert, "_free_full_params", _free_full_params_with_delay
                 ):
                     return self.module(x)
 
@@ -712,6 +712,9 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
         self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
+
+    def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
+        self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
 
     def run_subtests(
         self,
@@ -820,7 +823,8 @@ class FSDPTest(MultiProcessTestCase):
                 # Post-forward, if CPU offloading model param should be on CPU.
                 if cpu_offload_params and isinstance(model, FSDP):
                     for p in model.parameters():
-                        # Params should always be on CPU
+                        # Params should always be on CPU, even if
+                        # p._is_sharded=False
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
@@ -856,7 +860,8 @@ class FSDPTest(MultiProcessTestCase):
             # Post-backward, if CPU offloading model params should be on CPU.
             if cpu_offload_params and isinstance(model, FSDP):
                 for p in model.parameters():
-                    # Params should always be on CPU
+                    # Params should always be on CPU, even if
+                    # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
             # Unscale the gradients and step
             sharded_grad_scaler.step(optim)
@@ -884,6 +889,7 @@ class FSDPTest(MultiProcessTestCase):
         save_model: bool = True,
         cpu_offload: CPUOffload = CPUOffload(),
         backward_prefetch: Optional[BackwardPrefetch] = None,
+        forward_prefetch: bool = False,
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         enable_sharded_grad_scaler: bool = False,
@@ -942,6 +948,7 @@ class FSDPTest(MultiProcessTestCase):
             {
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
+                "forward_prefetch": forward_prefetch,
                 "sharding_strategy": sharding_strategy,
                 "mixed_precision": mixed_precision,
             }

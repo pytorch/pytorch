@@ -1,9 +1,5 @@
 #pragma once
 
-#include <set>
-#include <string>
-#include <vector>
-
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/CustomClassTracer.h>
@@ -28,16 +24,7 @@ struct TracerResult {
   std::set<std::string> enabled_backends;
 };
 
-/**
- * Trace a single model and return the TracerResult.
- */
 TracerResult trace_run(const std::string& input_module_path);
-
-/**
- * Trace multiple models and return the TracerResult.
- */
-TracerResult trace_run(const std::vector<std::string>& input_module_paths);
-
 } // namespace mobile
 } // namespace jit
 } // namespace torch

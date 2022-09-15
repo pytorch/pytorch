@@ -5062,7 +5062,10 @@ class TestJit(DistributionsTestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                VonMises  # Variance is not Euclidean
+                VonMises,  # Variance is not Euclidean
+                Exponential,  # mkl implementation path on intel cpu will produce diffrent results from jit.trace
+                Pareto,  # base_distribution is Exponential
+                Weibull  # base_distribution is Exponential
             ]
             if Dist in xfail:
                 continue
@@ -5093,6 +5096,9 @@ class TestJit(DistributionsTestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                Exponential,  # mkl implementation path on intel cpu will produce diffrent results from jit.trace
+                Pareto,  # base_distribution is Exponential
+                Weibull  # base_distribution is Exponential
             ]
             if Dist in xfail:
                 continue

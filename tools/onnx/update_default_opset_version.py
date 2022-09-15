@@ -84,7 +84,7 @@ def main(args: Any) -> None:
 
     read_sub_write(
         os.path.join("torch", "onnx", "_constants.py"),
-        r"(ONNX_DEFAULT_OPSET = )\d+",
+        r"(onnx_default_opset = )\d+",
         new_default,
     )
     read_sub_write(

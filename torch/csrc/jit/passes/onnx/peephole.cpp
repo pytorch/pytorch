@@ -56,11 +56,11 @@ bool isNopTranspose(const std::vector<int64_t>& perm) {
 std::vector<int64_t> composeTransposes(
     const std::vector<int64_t>& t1,
     const std::vector<int64_t>& t2) {
-  TORCH_INTERNAL_ASSERT(t1.size() == t2.size());
+  AT_ASSERT(t1.size() == t2.size());
   std::vector<int64_t> ret;
   ret.reserve(t1.size());
   for (const auto& i : t2) {
-    TORCH_INTERNAL_ASSERT(i < int64_t(t1.size()));
+    AT_ASSERT(i < int64_t(t1.size()));
     ret.push_back(t1[i]);
   }
   return ret;
@@ -131,7 +131,7 @@ void fuseBroadcast(Block* b) {
 
     auto broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
-      TORCH_INTERNAL_ASSERT(!n->hasAttribute(attr::axis));
+      AT_ASSERT(!n->hasAttribute(attr::axis));
     }
 
     for (size_t position : broadcast_positions) {
@@ -627,7 +627,7 @@ static void speculateOps(Block* block) {
 static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
   node->removeInput(i);
   for (auto* to_val : to) {
-    TORCH_INTERNAL_ASSERT(to_val->owningGraph() == node->owningGraph());
+    AT_ASSERT(to_val->owningGraph() == node->owningGraph());
     node->insertInput(i++, to_val);
   }
 }

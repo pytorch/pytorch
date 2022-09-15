@@ -142,11 +142,14 @@ nested_tensor([
 
 Note that nt.unbind()[0] is not a, but rather a slice of the underlying memory, which represents the first entry or constituent of the NestedTensor.
 
-Nested tensor functions
+Nested tensor methods
 +++++++++++++++++++++++++
 
-The following functions are related to nested tensors:
+The following Tensor methods are related to nested tensors:
 
-.. currentmodule:: torch.nested
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: to_padded_tensor
+    Tensor.to_padded_tensor

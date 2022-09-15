@@ -175,13 +175,9 @@ class LinearMixedPrecision(nn.Module):
                 # local shard. This supports both FULL_SHARD and SHARD_GRAD_OP
                 # cases. In FULL_SHARD, we have the additional property that
                 # param._full_param_padded has not been freed.
-                param_is_sharded = (
-                    fsdp_module.sharding_strategy != ShardingStrategy.NO_SHARD
-                    and fsdp_module.world_size > 1
-                )
                 is_fsdp_unit_active = (
-                    param_is_sharded
-                    and param.data.data_ptr() != param._local_shard.data_ptr()
+                    param._is_sharded and
+                    (param.data.data_ptr() != param._local_shard.data_ptr())
                 )
                 if is_fsdp_unit_active:
                     num_active_fsdp += 1
@@ -194,7 +190,7 @@ class LinearMixedPrecision(nn.Module):
                         cls.assertEqual(0, param._mp_shard.storage().size())
                     else:
                         cls.assertFalse(hasattr(param, '_mp_shard'))
-                elif param_is_sharded:
+                elif param._is_sharded:
                     # This FSDP unit is not active as full param has been
                     # freed or not yet allocated. Ensure param points to full
                     # precision param.
@@ -295,6 +291,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         mp_config,
         cpu_offload,
         backward_prefetch,
+        forward_prefetch,
         full_precision_param_dtype,
         sharding_strategy,
         enable_sharded_grad_scaler,
@@ -307,6 +304,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
@@ -314,6 +312,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
+                forward_prefetch=forward_prefetch
             ),
         ]
         for model in fsdp_models:
@@ -343,11 +342,15 @@ class TestFSDPMixedPrecision(FSDPTest):
                         else:
                             self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
                     # p._mp_shard should be freed.
-                    if mp_config.param_dtype is not None:
-                        self._validate_mp_shard_freed(model)
-                    else:
-                        # We never should have allocated an _mp_shard.
-                        self._validate_no_mp_shard(model)
+                    if model.params[0]._is_sharded:  # i.e. world_size > 1
+                        # TODO: free the mixed precision shard after forward
+                        # when world_size == 1 as well, currently when
+                        # world_size == 1 it is only freed after backward.
+                        if mp_config.param_dtype is not None:
+                            self._validate_mp_shard_freed(model)
+                        else:
+                            # We never should have allocated an _mp_shard.
+                            self._validate_no_mp_shard(model)
 
                     loss = act.sum()
                     loss = scaler.scale(loss)
@@ -436,6 +439,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         """Returns a subtest configuration that subtests prefetching settings
         together."""
         return {
+            "forward_prefetch": [False, True],
             "backward_prefetch": [
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
@@ -452,6 +456,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             enable_sharded_grad_scaler=False,
@@ -650,6 +655,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             enable_sharded_grad_scaler=False,
@@ -662,6 +668,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
             mp_config=mp,
             cpu_offload=CPUOffload(offload_params=True),
             backward_prefetch=None,
+            forward_prefetch=False,
             full_precision_param_dtype=torch.float64,
             sharding_strategy=ShardingStrategy.FULL_SHARD,
             enable_sharded_grad_scaler=False,

@@ -75,7 +75,7 @@ static NSString* gModelCacheDirectory = @"";
   if (@available(iOS 12.0, macOS 10.14, *)) {
     MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
     MLComputeUnits computeUnits = MLComputeUnitsCPUOnly;
-    if (backend == "cpuAndGPU") {
+    if (backend == "cpuandgpu") {
       computeUnits = MLComputeUnitsCPUAndGPU;
     } else if (backend == "all") {
       computeUnits = MLComputeUnitsAll;
