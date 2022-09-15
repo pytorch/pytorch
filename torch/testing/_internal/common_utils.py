@@ -1972,7 +1972,7 @@ class TestCase(expecttest.TestCase):
 
 
         if TEST_WITH_TORCHDYNAMO:
-            with torchdynamo.optimize("eager"):
+            with torchdynamo.optimize("inductor"):
                 super().run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.

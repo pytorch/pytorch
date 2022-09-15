@@ -202,6 +202,7 @@ test_dynamo_shard() {
       test_package \
       test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
+    --continue-through-error \
     --verbose
   assert_git_not_dirty
 }
