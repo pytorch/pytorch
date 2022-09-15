@@ -5,8 +5,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
-#include <memory>
-#include <mutex>
 
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
@@ -90,26 +88,40 @@ struct LinearPrimitiveCache : PrimitiveCache {
 struct ConvPrimitiveCache : PrimitiveCache {
   ConvPrimitiveCache() {}
 
-  ConvPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const ConvParams& params,
-      const ideep::tensor& bias) {
+  ConvPrimitiveCache(const PrimitiveCacheKey& key,
+                     const ConvDesc& conv_desc,
+                     const ideep::tensor& bias,
+                     const ideep::attr_t bias_attr) {
     this->key = key;
-    this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
+    this->primitive_desc = conv_desc;
+    this->primitive = Conv(this->primitive_desc);
+    // Construct tensor of input zero point
+    ideep::tensor::desc input_zp_desc = {{1}, ideep::data_type::s32, {1}};
+    this->input_zp_tensor.init(input_zp_desc, ideep::engine::cpu_engine());
+    auto zp_data_ptr = reinterpret_cast<int32_t *>(this->input_zp_tensor.get_data_handle());
+    zp_data_ptr[0] = std::get<InputZeroPoint>(key);
+    // Construct expected bias
+    this->expected_bias = bias.reorder_if_differ_in(conv_desc.bias_desc(), bias_attr);
   }
 
+  ConvDesc primitive_desc;
+  Conv primitive;
+  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
-  ConvParams params;
 
-  ConvParams& get_params() {
-    return params;
+  inline ConvDesc& get_primitive_desc() {
+    return primitive_desc;
   }
 
-  ideep::tensor& get_bias() {
+  inline Conv& get_primitive() {
+    return primitive;
+  }
+
+  inline ideep::tensor& get_src_zp_tensor() {
+    return input_zp_tensor;
+  }
+
+  inline ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -117,26 +129,37 @@ struct ConvPrimitiveCache : PrimitiveCache {
 struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvPrimitiveCache() {}
 
-  DeconvPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const DeconvParams& params,
-      const ideep::tensor& bias) {
+  DeconvPrimitiveCache(const PrimitiveCacheKey& key,
+                       const DeconvDesc& deconv_desc,
+                       const ideep::tensor& bias,
+                       const ideep::attr_t bias_attr,
+                       const ideep::tensor& input_zero_point) {
     this->key = key;
-    this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
+    this->primitive_desc = deconv_desc;
+    this->primitive = Deconv(this->primitive_desc);
+    this->input_zp_tensor = std::move(input_zero_point);
+    // Construct expected bias
+    this->expected_bias = bias.reorder_if_differ_in(deconv_desc.bias_desc(), bias_attr);
   }
 
-  DeconvParams params;
+  DeconvDesc primitive_desc;
+  Deconv primitive;
+  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
 
-  DeconvParams& get_params() {
-    return params;
+  inline DeconvDesc& get_primitive_desc() {
+    return primitive_desc;
   }
 
-  ideep::tensor& get_bias() {
+  inline Deconv& get_primitive() {
+    return primitive;
+  }
+
+  inline ideep::tensor& get_src_zp_tensor() {
+    return input_zp_tensor;
+  }
+
+  inline ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -151,7 +174,7 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
         bias_(std::move(bias)),
         orig_weight_(std::move(orig_weight)),
         orig_bias_(std::move(orig_bias)) {
-    cache_initialized_flag = std::make_unique<std::once_flag>();
+    cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
   std::unique_ptr<ideep::tensor> weight_;
   c10::optional<ideep::tensor> bias_;
@@ -182,7 +205,7 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
 
  private:
   LinearPrimitiveCache prim_cache;
-  std::unique_ptr<std::once_flag> cache_initialized_flag;
+  std::unique_ptr<c10::once_flag> cache_initialized_flag;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
@@ -221,7 +244,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose) {
-    cache_initialized_flag = std::make_unique<std::once_flag>();
+    cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
 
   std::unique_ptr<ideep::tensor> weight_;
@@ -288,7 +311,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
  private:
   ConvPrimitiveCache conv_prim_cache;
   DeconvPrimitiveCache deconv_prim_cache;
-  std::unique_ptr<std::once_flag> cache_initialized_flag;
+  std::unique_ptr<c10::once_flag> cache_initialized_flag;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
@@ -306,5 +329,26 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
     return deconv_prim_cache;
   }
 };
+
+namespace onednn_utils {
+
+// Try to reorder tensor to expected desc at runtime
+// Do it in a `try...catch...` manner to avoid oneDNN's errors
+// TODO: Move it to third_party/ideep
+static void try_reorder(
+    ideep::tensor& t,
+    const ideep::tensor::desc&& desc,
+    ideep::scale_t scales) {
+  if (t.get_desc() != desc) {
+    try {
+      t = t.reorder_if_differ_in(desc);
+    } catch (...) {
+      ideep::tensor&& plain = t.to_public(nullptr, t.get_data_type());
+      t = plain.reorder_if_differ_in(desc);
+    }
+    t.set_scale(scales);
+  }
+}
+}
 
 #endif // #if AT_MKLDNN_ENABLED()

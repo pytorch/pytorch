@@ -556,22 +556,25 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   int num_threads = at::get_num_threads();
   PrimitiveCacheKey cache_key = std::make_tuple(
       q_params.scale, q_params.zero_point, input_dims, 1.0, 0, num_threads);
-  std::call_once(*cache_initialized_flag, [&](){
+  c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/true>(
-          params, x, w, b, y, src_scales, weights_scales, ideep::IDEEP_EMPTY_SCALE,
-          src_zero_point, ideep::IDEEP_EMPTY_ZP, 1.0f, 1.0f, op_attr);
+          params, x, w, b, y, 1.0f, 1.0f,
+          src_scales, weights_scales, ideep::scale_t(),
+          src_zero_point, ideep::zero_point_t(), op_attr);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      w = w.reorder_if_differ_in(params.pd.weights_desc());
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
   });
   if (get_cache().hit_dynamic(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute</*reorder_weight=*/false>(
-        params, x, w, b, y, src_scales, src_zero_point);
+    ideep::matmul_forward::compute_dynamic(
+        params, x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+        ideep::scale_t(), src_zero_point, ideep::zero_point_t());
   } else {
-    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
-                                   ideep::IDEEP_EMPTY_SCALE, src_zero_point,
-                                   ideep::IDEEP_EMPTY_ZP, 1.0f, 1.0f, op_attr);
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f,
+                                      src_scales, weights_scales, ideep::scale_t(),
+                                      src_zero_point, ideep::zero_point_t(), op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = w.get_dim(1);

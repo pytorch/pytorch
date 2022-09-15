@@ -1252,7 +1252,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     // and won't be updated afterwards.
     PrimitiveCacheKey cache_key = std::make_tuple(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
-    std::call_once(*cache_initialized_flag, [&](){
+    c10::call_once(*cache_initialized_flag, [&](){
         DeconvParams params;
         ideep::convolution_transpose_forward::prepare(
             params, src, weights, b, dst_dims, dst,
@@ -1262,16 +1262,20 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params, b);
-        weights = weights.reorder_if_differ_in(params.pd.weights_desc());
+        get_deconv_cache() = DeconvPrimitiveCache(
+            cache_key, params.pd, b, params.bias_attr, params.input_zero_point);
+        onednn_utils::try_reorder(
+            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
     });
     if (get_deconv_cache().hit(cache_key)) {
-      DeconvParams& params = get_deconv_cache().get_params();
+      Deconv& primitive = get_deconv_cache().get_primitive();
+      DeconvDesc& pd = get_deconv_cache().get_primitive_desc();
+      auto& src_zp_tensor = get_deconv_cache().get_src_zp_tensor();
       auto& expected_bias = get_deconv_cache().get_bias();
-      ideep::convolution_transpose_forward::compute<false, false>(
-          params, src, weights, expected_bias, dst);
-    } else {
       ideep::convolution_transpose_forward::compute(
+          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
+    } else {
+      ideep::convolution_transpose_forward::compute_v2(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
           groups(), src_scales, weights_scales,
@@ -1284,26 +1288,31 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
-    std::call_once(*cache_initialized_flag, [&](){
+    c10::call_once(*cache_initialized_flag, [&](){
+        src.set_zero_point(src_zero_points);
+        dst.set_zero_point(dst_zero_points);
         ConvParams params;
         ideep::convolution_forward::prepare(
             params, src, weights, b, dst_dims, dst,
             strides, dilates, padding_l, padding_r, groups(),
             src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
-            src_zero_points, dst_zero_points,
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_conv_cache() = ConvPrimitiveCache(cache_key, params, b);
-        weights = weights.reorder_if_differ_in(params.pd.weights_desc());
+        get_conv_cache() = ConvPrimitiveCache(cache_key, params.pd, b, params.bias_attr);
+        onednn_utils::try_reorder(
+            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
     });
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
-      auto& params = get_conv_cache().get_params();
+      ConvDesc& pd = get_conv_cache().get_primitive_desc();
+      Conv& primitive = get_conv_cache().get_primitive();
+      auto& src_zp_tensor = get_conv_cache().get_src_zp_tensor();
       auto& expected_bias = get_conv_cache().get_bias();
-      ideep::convolution_forward::compute<false, false>(params, src, weights, expected_bias, dst);
-    } else {
       ideep::convolution_forward::compute(
+          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
+    } else {
+      ideep::convolution_forward::compute_v2(
           src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
           src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),

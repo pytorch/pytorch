@@ -647,7 +647,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8,
+                   {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
   if (with_bias) {
@@ -663,21 +664,22 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   int num_threads = at::get_num_threads();
   PrimitiveCacheKey cache_key = std::make_tuple(
       input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads);
-  std::call_once(*cache_initialized_flag, [&](){
+  c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
-          params, x, w, b, y, src_scales, weights_scales,
-          dst_scales, src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
-      get_cache() = LinearPrimitiveCache(cache_key, params, b);
-      w = w.reorder_if_differ_in(params.pd.weights_desc());
+          params, x, w, b, y, 1.0f, 1.0f,
+          src_scales, weights_scales, dst_scales,
+          src_zero_point, dst_zero_point, op_attr);
+      get_cache() = LinearPrimitiveCache(cache_key, params);
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::tensor& expected_bias = get_cache().get_expected_bias();
-    ideep::matmul_forward::compute<false, false>(params, x, w, expected_bias, y);
+    ideep::matmul_forward::compute(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales, dst_scales,
-                                   src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+                                      dst_scales, src_zero_point, dst_zero_point, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
