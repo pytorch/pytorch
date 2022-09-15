@@ -85,11 +85,14 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
+function install_jinja2 {
+  pip_install jinja2
+}
+
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
 }
-
 
 function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
