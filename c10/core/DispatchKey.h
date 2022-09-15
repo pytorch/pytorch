@@ -401,6 +401,10 @@ enum class DispatchKey : uint16_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
+  // This is a bypass that allows you to skip running the C++ dispatcher
+  // entirely
+  PythonDispatcher,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
 

@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable
+from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
 import builtins
 
 __all__ = [
@@ -962,3 +962,5 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
+
+from ._dispatch import python
