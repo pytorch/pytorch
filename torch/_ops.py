@@ -59,9 +59,6 @@ class OpOverload:
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
 
-    def __getattr__(self, key):
-        return getattr(self._op, key)
-
     def __hash__(self):
         return hash(self._op)
 
