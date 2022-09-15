@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._utils import _alloc_storage, _free_storage, _set_flattened, p_assert
+from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
 __all__ = [
     "FlatParameter",
@@ -222,7 +222,7 @@ class FlatParameter(nn.Parameter):
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._unpadded_unsharded_size = self.size()
-        _set_flattened(self)
+        _set_fsdp_flattened(self)
 
 
 class FlatParamHandle:
