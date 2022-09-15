@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Type
 import operator
 import functools
 from functools import lru_cache
+import traceback
 
 try:
     import sympy  # type: ignore[import]
@@ -254,6 +255,7 @@ def _lru_cache(fn, maxsize=None):
             fn_cache.cache_clear()
         return fn_cache(self, *args, **kwargs)
 
+    wrapper.cache_info = fn_cache.cache_info
     return wrapper
 
 
@@ -358,35 +360,35 @@ class ShapeEnv(object):
         return a
 
     def evaluate_eq(self, expr: sympy.Eq):
-        concrete_val = self.size_hint(expr)
-        self.guards.append((expr, concrete_val))
-        if not concrete_val:
-            return concrete_val
+        concrete_bool = bool(self.size_hint(expr))
+        if not concrete_bool:
+            return
         free = list(expr.free_symbols)
 
         assert len(free) > 0, "The expression should not be static by this point"
         if len(free) in (1, 2, 3):
             free = sorted(free, key=lambda x: (-self.size_hint(x), x.name))
-            try:
-                lhs = expr.lhs
-                rhs = expr.rhs
-                solutions = sympy.solve(lhs - rhs, free[0])
-                if len(solutions) == 1 and solutions[0] and "/" not in str(solutions[0]):
-                    new_var = solutions[0]
-                    new_var = self.find(solutions[0])
-                    self.replacements[free[0]] = new_var
-            except NotImplementedError as e:
+            lhs = expr.lhs
+            rhs = expr.rhs
+            solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
+            if not solutions.is_finite_set:
                 if len(expr.atoms(sympy.Mod)) == 1:
                     mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                    try:
-                        solutions = sympy.solve(lhs - rhs, mod_expr)
-                        if len(solutions) == 1 and solutions[0] == 0:
-                            self.divisible.add(FloorDiv(mod_expr.args[0], mod_expr.args[1]))
-                    except NotImplementedError as e:
-                        pass
-                pass
+                    solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
+                    if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
+                        self.divisible.add(FloorDiv(mod_expr.args[0], mod_expr.args[1]))
+                return
 
-        return concrete_val
+            if len(solutions) != 1:
+                return
+
+            solutions = tuple(solutions)
+            if len(solutions) == 1 and "/" not in str(solutions[0]):
+                new_var = solutions[0]
+                new_var = self.find(solutions[0])
+                self.replacements[free[0]] = new_var
+
+        return
 
     @lru_cache(256)
     def evaluate_expr(self, expr):
@@ -400,16 +402,14 @@ class ShapeEnv(object):
                 return static_expr
 
             if isinstance(expr, sympy.Eq):
-                return self.evaluate_eq(expr)
+                self.evaluate_eq(expr)
             concrete_val = self.size_hint(expr)
 
             # Uncomment this to see what code triggered this guard.
             # TODO: Save this to the guard representation so you can look
             # at it later
-            # import traceback
-            # traceback.print_stack()
-
-            self.guards.append((expr, concrete_val))
+            stack = ''.join(traceback.format_stack())
+            self.guards.append((expr, concrete_val, stack))
             return concrete_val
         except Exception as e:
             print(e)
