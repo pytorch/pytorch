@@ -100,7 +100,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
-  void capture_prologue(int64_t* offset_extragraph);
+  void capture_prologue(int64_t* seed_extragraph, int64_t* offset_extragraph);
   uint64_t capture_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
 
@@ -114,6 +114,7 @@ private:
   CUDAGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;
+  int64_t* seed_extragraph_{};
   int64_t* offset_extragraph_{};
   uint32_t offset_intragraph_ = 0;
   bool graph_expects_this_gen_ = false;
