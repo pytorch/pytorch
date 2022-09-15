@@ -550,7 +550,10 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  auto type = arg.type();
+  // real_type versus fake_type: in order to be compatible with FunctionSchema
+  // parser, printing an argument with either MemoryFormat or Layout type should
+  // give us the original schema string, hence printing out real_type.
+  auto type = arg.real_type();
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
