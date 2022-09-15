@@ -621,36 +621,6 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-void fuseAllLoopsImpl(StmtPtr st) {
-  if (auto block = to<tensorexpr::Block>(st)) {
-    std::vector<ForPtr> loopsToFuse;
-    for (auto stmt : *block) {
-      auto loop = to<For>(stmt);
-      if (!loop) {
-        // Block contains something that's not a loop.  Quit.
-        return;
-      }
-      loopsToFuse.push_back(loop);
-    }
-    if (loopsToFuse.empty()) {
-      return;
-    }
-    // TODO: Support fusing some of the loops in a block.
-    // Currently, we only fuse all the loops in a block, which is restrictive.
-    if (!loopBoundsAllEqual(loopsToFuse)) {
-      return;
-    }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ForPtr fusedLoop;
-    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
-      return;
-    }
-    fuseAllLoopsImpl(fusedLoop->body());
-  }
-}
-
-// An block could contain multiple most-outer statements as follows.
-//
 void fuseAllLoops(StmtPtr st) {
   auto block = to<tensorexpr::Block>(st);
   if (block == nullptr) {
@@ -658,16 +628,17 @@ void fuseAllLoops(StmtPtr st) {
   }
 
   std::vector<std::vector<ForPtr>> all_outer_loops;
-  all_outer_loops.reserve(block->nstmts());
-  int cur_idx = 0;
+  std::vector<ForPtr> outer_loops;
   for (const auto& stmt : *block) {
     auto loop = to<For>(stmt);
     if (!loop) {
-      cur_idx += 1;
+      all_outer_loops.push_back(outer_loops);
+      outer_loops.clear();
     } else {
-      all_outer_loops[cur_idx].push_back(loop);
+      outer_loops.push_back(loop);
     }
   }
+  all_outer_loops.push_back(outer_loops);
 
   for (const auto& outer_loops : all_outer_loops) {
     if (outer_loops.empty()) {
@@ -684,7 +655,7 @@ void fuseAllLoops(StmtPtr st) {
       continue;
     }
 
-    fuseAllLoopsImpl(fusedLoop->body());
+    fuseAllLoops(fusedLoop->body());
   }
 }
 
