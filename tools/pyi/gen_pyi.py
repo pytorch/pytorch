@@ -136,6 +136,9 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
+    "to",
+    "_to_copy",
+    "copy_",
 ]
 
 binary_ops = (
