@@ -16,6 +16,7 @@ from torchgen.api.types import (
     BaseCType,
     Binding,
     boolT,
+    ConstRefCType,
     CType,
     DispatcherSignature,
     intArrayRefT,
@@ -23,6 +24,8 @@ from torchgen.api.types import (
     OptionalCType,
     symIntArrayRefT,
     SymIntT,
+    # See Note [Nested Arg Types]
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -56,6 +59,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
+    "_nested_view_from_buffer",
 ]
 
 VIEW_FUNCTIONS = {
@@ -327,6 +331,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
+        ConstRefCType(BaseCType(tensorT)),
     ]
     for unpacked_binding in unpacked_bindings:
         arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
@@ -341,7 +346,6 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 "over by value, also add a test in pytorch/xla/test/test_operations.py where this code "
                 "is exercised."
             )
-
         if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(
             symIntArrayRefT
         ):
@@ -357,6 +361,13 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 arg=arg, val=arg_value, default="0"
             )
             updated_unpacked_args.append(arg_value)
+        elif (
+            arg == "nested_size_" or arg == "nested_strides_"
+        ) and arg_type == ConstRefCType(BaseCType(tensorT)):
+            # [NOTE] [Nested Arg Types]
+            # This is temporary. Nested tensors will be migrating to use SymInts and
+            # nested_size and nested_strides will no longer be tensors.
+            updated_unpacked_args.append(arg[:-1])
         else:
             updated_unpacked_args.append(arg)
 

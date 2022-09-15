@@ -189,7 +189,7 @@ template<CastPolicy policy, DeviceType device_type, class Redispatch, Redispatch
 template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::lower_precision_fp, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::AutocastFunctionality);
     return (*F)(cached_cast(get_lower_precision_fp_from_device_type(device_type), args, device_type)...);
   }
 };
@@ -198,7 +198,7 @@ struct WrapFunction_<CastPolicy::lower_precision_fp, device_type, Redispatch, F,
 template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::AutocastFunctionality);
     return (*F)(cached_cast(at::kFloat, args, device_type)...);
   }
 };
@@ -232,7 +232,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, DeviceType::CUDA, Redispatch
 template<DeviceType device_type, class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, device_type, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::DispatchKey::AutocastFunctionality);
     auto to_type = promote_type(get_lower_precision_fp_from_device_type(device_type), device_type, args...);
     return (*F)(cached_cast(to_type, args, device_type)...);
   }

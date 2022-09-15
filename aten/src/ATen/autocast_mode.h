@@ -38,21 +38,6 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
 }
 } // namespace
 
-inline DispatchKey get_autocast_dispatch_key_from_device_type(
-    DeviceType device_type) {
-  switch (device_type) {
-    case DeviceType::CUDA:
-      return DispatchKey::AutocastCUDA;
-    case DeviceType::CPU:
-      return DispatchKey::AutocastCPU;
-    case DeviceType::XPU:
-      return DispatchKey::AutocastXPU;
-    default:
-      throw std::runtime_error(
-          "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
-  }
-}
-
 inline at::ScalarType get_lower_precision_fp_from_device_type(
     DeviceType device_type) {
   switch (device_type) {

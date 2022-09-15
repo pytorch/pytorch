@@ -259,10 +259,6 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.0) Use kernel from DispatchKey::Autocast if available.
-  //          This alias key should be completely disjoint from all other alias keys,
-  //          (but it's given highest priority just to be safe).
-  //          See Note [Alias Dispatch Key : Autocast]
   //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutogradNonFunctional if available.
   //          This is used to register a kernel that works for all backends in inference, except "functional" backends
   //          like LazyTensor/XLA. But it requires separate registration for Autograd keys to support training.
@@ -279,6 +275,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.4) Use kernel from DispatchKey::Autograd if available
+  //    (2.5) Use kernel from DispatchKey::Autocast if available.
+  //          This alias key should be completely disjoint from all other alias keys,
+  //          so priority shouldn't really matter.
+  //          See Note [Alias Dispatch Key : Autocast]
   //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
@@ -294,14 +294,6 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
     return {*direct_registration, "kernel"};
-  }
-
-  // 2.0 Use Autograd kernel if available.
-  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Autocast)) {
-    if (auto autocast_registration = getKernelForDispatchKey(DispatchKey::Autocast)) {
-      return {*autocast_registration, "default backend kernel"};
-    }
   }
 
   // 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available.
@@ -341,10 +333,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // to let the original CompositeImplicitAutograd handle Undefined
   if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
     if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
-      if (!has_backend_kernel) {
-        return {*nested_registration, "nested kernel"};
+      return {*nested_registration, "nested kernel"};
       }
-    }
   }
 
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
@@ -362,6 +352,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration, "autograd kernel"};
+    }
+  }
+
+  // 2.5 Use Autograd kernel if available.
+  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Autocast)) {
+    if (auto autocast_registration = getKernelForDispatchKey(DispatchKey::Autocast)) {
+      return {*autocast_registration, "default backend kernel"};
     }
   }
 
