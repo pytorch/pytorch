@@ -10,10 +10,6 @@ import torch._C
 
 import torch.jit
 from torch import _utils_internal
-from torch._C import DispatchKey  # type: ignore[attr-defined]
-from torch.overrides import handle_torch_function, has_torch_function
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -48,6 +44,9 @@ class PyOperatorABC(ABC):
         pass
 
 
+pyop_namespace = {}
+
+
 class PyOperator(PyOperatorABC):
     def __init__(self, name):
         self._name = name
@@ -55,8 +54,8 @@ class PyOperator(PyOperatorABC):
         self.python_key_mode_table = {}
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
-        self.__name__ = "pyop." + name
-        pyop_namespace.py_ops[name] = self
+        self.__name__ = name
+        pyop_namespace[name] = self
 
     def fallthrough(self, dispatch_key):
         self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
@@ -64,7 +63,7 @@ class PyOperator(PyOperatorABC):
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode) and issubclass(
-                dispatch_key_or_mode, TorchDispatchMode
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
             ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
@@ -101,8 +100,10 @@ class PyOperator(PyOperatorABC):
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
-        if has_torch_function(flat_args):
-            return handle_torch_function(self, flat_args, *args, **kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
+            )
 
         dispatch_key_set = _compute_keyset(args, kwargs)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -126,8 +127,8 @@ class PyOperator(PyOperatorABC):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args, _ = torch.utils._pytree.tree_flatten(args)
+    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
     flat_all = flat_args + flat_kwargs
     return flat_all
 
@@ -168,7 +169,7 @@ class OpOverload(PyOperatorABC):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.py_kernels: Dict[DispatchKey, Any] = {}
+        self.py_kernels: Dict[torch._C.DispatchKey, Any] = {}  # type: ignore[name-defined]
         self.__name__ = "{}.{}".format(
             self._schema.name.split("::")[1], self._overloadname
         )
@@ -212,7 +213,7 @@ class OpOverload(PyOperatorABC):
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode) and issubclass(
-                dispatch_key_or_mode, TorchDispatchMode
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
             ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
@@ -392,15 +393,8 @@ class _OpNamespace(types.ModuleType):
     def __init__(self, name):
         super(_OpNamespace, self).__init__("torch.ops." + name)
         self.name = name
-        if self.name == "pyop":
-            self.pyops = pyop_namespace
-        else:
-            self.pyops = None  # type: ignore[assignment]
 
     def __getattr__(self, op_name):
-        pyops = object.__getattribute__(self, "pyops")
-        if pyops is not None:
-            return pyops.py_ops[op_name]
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
@@ -436,11 +430,8 @@ class _OpNamespace(types.ModuleType):
 
 class _PyOpNamespace(_OpNamespace):
     def __init__(self):
-        super(_PyOpNamespace, self).__init__("torch.ops.pyop")
-        self.py_ops = {}
-
-
-pyop_namespace = _PyOpNamespace()
+        super(_PyOpNamespace, self).__init__("torch.ops")
+        self.pyop_namespace = pyop_namespace
 
 
 class _Ops(types.ModuleType):
@@ -449,8 +440,13 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super(_Ops, self).__init__("torch.ops")
         self.loaded_libraries = set()
+        self.pyops = _PyOpNamespace()
 
     def __getattr__(self, name):
+        # Check if the name is a pyop
+        if name in self.pyops.pyop_namespace:
+            return self.pyops.pyop_namespace[name]
+
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)
