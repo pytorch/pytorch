@@ -29,7 +29,7 @@ TORCH_API SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     SymInt itemsize,
-    size_t storage_offset = 0);
+    SymInt storage_offset = 0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
