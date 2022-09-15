@@ -40,7 +40,7 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
 }
 
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
-allgather_(
+allgather_cpu_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -177,8 +177,7 @@ TORCH_LIBRARY(c10d, m) {
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
   m.def(
-      "allgather_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
+      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
@@ -410,6 +409,13 @@ c10::intrusive_ptr<Work> recv(
                            int64_t)>();
   return op.call(tensors, process_group, srcRank, tag);
 }
+
+namespace {
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("allgather_", allgather_cpu_);
+}
+
+} // namespace
 
 } // namespace ops
 } // namespace c10d
