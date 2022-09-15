@@ -164,8 +164,8 @@ __global__ void nll_loss_forward_no_reduce_cuda_kernel(
     index_t* target,
     scalar_t* output,
     scalar_t* weights,
-    int n_classes,
-    int ignore_index) {
+    int64_t n_classes,
+    int64_t ignore_index) {
   CUDA_KERNEL_LOOP(index, batch_size) {
     int cur_target = target[index];
     if (cur_target == ignore_index) {
@@ -187,11 +187,11 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     index_t* target,
     scalar_t* weights,
     bool size_average,
-    int n_classes,
+    int64_t n_classes,
     int64_t ignore_index) {
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
-  int t = static_cast<int>(*target);
+  int64_t t = static_cast<int64_t>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
@@ -225,7 +225,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     bool size_average,
     int nframe,
     int ndim,
-    int n_classes,
+    int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
@@ -234,7 +234,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    int t = target[i];
+    int64_t t = target[i];
     if (t != static_cast<int>(ignore_index)) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
@@ -400,11 +400,11 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
   PackedTensorAccessor64<scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
   scalar_t *weights,
-  int n_classes,
-  int ignore_index) {
+  int64_t n_classes,
+  int64_t ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index];
+    int64_t cur_target = target[index];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -422,7 +422,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   index_t *target,
   scalar_t *total_weight,
   bool size_average,
-  int n_classes,
+  int64_t n_classes,
   int64_t ignore_index
 ) {
   int t = static_cast<int>(*target);
@@ -445,14 +445,14 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     bool size_average,
     int nframe,
     int ndim,
-    int n_classes,
+    int64_t n_classes,
     int64_t ignore_index) {
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    int t = target[i];
-    if (t != static_cast<int>(ignore_index)) {
+    const int64_t t = target[i];
+    if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       grad_input[i * ndim + t] = weights != nullptr ? weights[t] * grad
                                                     : grad;
