@@ -88,7 +88,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
@@ -162,7 +162,7 @@ c10::intrusive_ptr<Work> allreduce(
 c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const at::TensorList& input_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
@@ -170,7 +170,7 @@ c10::intrusive_ptr<Work> allgather(
                            std::vector<std::vector<at::Tensor>>,
                            c10::intrusive_ptr<Work>>(
                            const std::vector<std::vector<at::Tensor>>&,
-                           const at::TensorList&,
+                           const std::vector<at::Tensor>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
   return std::get<1>(op.call(
