@@ -802,6 +802,9 @@ class OpInfo(object):
 
     is_factory_function: bool = False
 
+    # Is the output of the op expected to be deterministic?
+    deterministic: bool = True
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 

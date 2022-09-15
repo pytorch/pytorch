@@ -194,7 +194,11 @@ class TestCommon(TestCase):
             self.assertEqual(len(cuda_results), len(cpu_results))
 
             for cpu_result, cuda_result in zip(cpu_results, cuda_results):
-                self.assertEqual(cpu_result, cuda_result)
+                if not op.deterministic and isinstance(cpu_result, torch.Tensor):
+                    self.assertEqual(cpu_result.dtype, cuda_result.dtype)
+                    self.assertEqual(cpu_result.shape, cuda_result.shape)
+                else:
+                    self.assertEqual(cpu_result, cuda_result)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
