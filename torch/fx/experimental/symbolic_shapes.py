@@ -161,7 +161,7 @@ class PySymInt(object):
         return PySymFloat(self.expr, self.shape_env)
 
     def __bool__(self):
-        return bool(self.shape_env.evaluate_expr(self.expr))
+        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
 class PySymFloat:
     def __init__(self, expr, shape_env, constant=None):
@@ -228,9 +228,14 @@ for method, _func in magic_methods.items():
             if isinstance(other, PySymInt):
                 other = other.expr
             # TODO: consider constant prop here
-            return PySymInt(func(self.expr, other), self.shape_env)
+            expr = self.shape_env.replace(self.expr)
+            other = self.shape_env.replace(other)
+            out = func(expr, other)
+            out = self.shape_env.replace(out)
+            return PySymInt(out, self.shape_env)
         return magic_impl
 
+    _func = lru_cache(256)(_func)
     # this should be wrapped transparently into torch.SymIntNode
     setattr(PySymInt, method, _create_magic_impl(_func))
     setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
@@ -312,9 +317,10 @@ class ShapeEnv(object):
             return new_expr
         return None
 
+    @_lru_cache
     def replace(self, expr):
         replacements = {s: self.find(s) for s in expr.free_symbols}
-        return expr.xreplace(replacements)
+        return sympy.expand(expr.xreplace(replacements))
 
     @_lru_cache
     def update_divisible(self):
@@ -382,7 +388,7 @@ class ShapeEnv(object):
 
         return concrete_val
 
-
+    @lru_cache(256)
     def evaluate_expr(self, expr):
         try:
             if len(list(expr.free_symbols)) == 0:
