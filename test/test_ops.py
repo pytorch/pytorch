@@ -247,7 +247,7 @@ class TestCommon(TestCase):
                     if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
                         self.assertEqual(a._is_view(), b._is_view())
 
-            # Computes the dtype the more precise computatino would occur in
+            # Computes the dtype the more precise computation would occur in
             precise_dtype = torch.bool
             if prims.utils.is_integer_dtype(dtype):
                 # Note: bool and integer dtypes do not have more
@@ -443,6 +443,16 @@ class TestCommon(TestCase):
                 sample_input.args,
                 sample_input.kwargs,
             )
+
+            # This test requires that the input be a tensor or sequence of 1+ tensors
+            if not isinstance(t_inp, torch.Tensor):
+                if isinstance(t_inp, Sequence):
+                    if not len(t_inp) > 0 or not isinstance(t_inp[0], torch.Tensor):
+                        continue
+                else:
+                    continue
+
+
             noncontig_sample = sample_input.noncontiguous()
             n_inp, n_args, n_kwargs = (
                 noncontig_sample.input,
