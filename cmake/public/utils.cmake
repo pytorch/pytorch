@@ -415,72 +415,70 @@ function(torch_compile_options libname)
     list(APPEND private_compile_options -Werror)
   endif()
 
-  if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-    # until they can be unified, keep these lists synced with setup.py
-    if(MSVC)
+  # until they can be unified, keep these lists synced with setup.py
+  if(MSVC)
 
-      if(MSVC_Z7_OVERRIDE)
-        set(MSVC_DEBINFO_OPTION "/Z7")
-      else()
-        set(MSVC_DEBINFO_OPTION "/Zi")
-      endif()
+    if(MSVC_Z7_OVERRIDE)
+      set(MSVC_DEBINFO_OPTION "/Z7")
+    else()
+      set(MSVC_DEBINFO_OPTION "/Zi")
+    endif()
 
-      target_compile_options(${libname} PUBLIC
-        $<$<COMPILE_LANGUAGE:CXX>:
-          ${MSVC_RUNTIME_LIBRARY_OPTION}
-          $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
-          /EHsc
-          /DNOMINMAX
-          /wd4267
-          /wd4251
-          /wd4522
-          /wd4522
-          /wd4838
-          /wd4305
-          /wd4244
-          /wd4190
-          /wd4101
-          /wd4996
-          /wd4275
-          /bigobj>
-        )
+    target_compile_options(${libname} PUBLIC
+      $<$<COMPILE_LANGUAGE:CXX>:
+        ${MSVC_RUNTIME_LIBRARY_OPTION}
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
+        /EHsc
+        /DNOMINMAX
+        /wd4267
+        /wd4251
+        /wd4522
+        /wd4522
+        /wd4838
+        /wd4305
+        /wd4244
+        /wd4190
+        /wd4101
+        /wd4996
+        /wd4275
+        /bigobj>
+      )
+  else()
+    list(APPEND private_compile_options
+      -Wall
+      -Wextra
+      -Wno-unused-parameter
+      -Wno-unused-function
+      -Wno-unused-result
+      -Wno-missing-field-initializers
+      -Wno-write-strings
+      -Wno-unknown-pragmas
+      -Wno-type-limits
+      -Wno-array-bounds
+      -Wno-unknown-pragmas
+      -Wno-sign-compare
+      -Wno-strict-overflow
+      -Wno-strict-aliasing
+      -Wno-error=deprecated-declarations
+      # Clang has an unfixed bug leading to spurious missing braces
+      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+      -Wno-missing-braces
+      )
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+      list(APPEND private_compile_options
+        -Wno-range-loop-analysis)
     else()
       list(APPEND private_compile_options
-        -Wall
-        -Wextra
-        -Wno-unused-parameter
-        -Wno-unused-function
-        -Wno-unused-result
-        -Wno-missing-field-initializers
-        -Wno-write-strings
-        -Wno-unknown-pragmas
-        -Wno-type-limits
-        -Wno-array-bounds
-        -Wno-unknown-pragmas
-        -Wno-sign-compare
-        -Wno-strict-overflow
-        -Wno-strict-aliasing
-        -Wno-error=deprecated-declarations
-        # Clang has an unfixed bug leading to spurious missing braces
-        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-        -Wno-missing-braces
-        )
-      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-        list(APPEND private_compile_options
-          -Wno-range-loop-analysis)
-      else()
-        list(APPEND private_compile_options
-          # Considered to be flaky.  See the discussion at
-          # https://github.com/pytorch/pytorch/pull/9608
-          -Wno-maybe-uninitialized)
-      endif()
-
+        # Considered to be flaky.  See the discussion at
+        # https://github.com/pytorch/pytorch/pull/9608
+        -Wno-maybe-uninitialized)
     endif()
 
-    if(MSVC)
-    elseif(WERROR)
-      list(APPEND private_compile_options -Wno-strict-overflow)
-    endif()
+  endif()
+
+  if(MSVC)
+  elseif(WERROR)
+    list(APPEND private_compile_options -Wno-strict-overflow)
   endif()
 
   target_compile_options(${libname} PRIVATE

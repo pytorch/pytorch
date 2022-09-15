@@ -229,13 +229,11 @@ class TestFSDPWrap(FSDPTest):
         "backward_prefetch",
         [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
     )
-    @parametrize("forward_prefetch", [True, False])
     @parametrize(
         "cuda_init_mode",
         [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE]
     )
-    def test_main_wrap_api(self, cpu_offload, backward_prefetch, forward_prefetch, cuda_init_mode):
-
+    def test_main_wrap_api(self, cpu_offload, backward_prefetch, cuda_init_mode):
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
             # they don't work together, expected
             return
@@ -270,7 +268,6 @@ class TestFSDPWrap(FSDPTest):
             ),
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
-            forward_prefetch=forward_prefetch,
         )
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()
@@ -288,7 +285,6 @@ class TestFSDPWrap(FSDPTest):
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
             self._check_backward_prefetch(module, backward_prefetch)
-            self._check_forward_prefetch(module, forward_prefetch)
 
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
@@ -298,14 +294,6 @@ class TestFSDPWrap(FSDPTest):
             loss = wrapped_model(inp).sum()
             loss.backward()
             optim.step()
-
-        # Since we ran with backward prefetch, verify backward prefetch related
-        # data.
-        for i, module in enumerate(modules_in_fsdp_graph_order):
-            self.assertEqual(i, module._my_fsdp_idx_in_graph)
-            self.assertTrue(
-                module._fsdp_graph_order == modules_in_fsdp_graph_order
-            )
 
 
 class TestAutoWrap(TestCase):

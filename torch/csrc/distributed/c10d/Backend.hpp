@@ -11,6 +11,7 @@
 #include <c10/macros/Macros.h>
 
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/Work.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/debug.h>
@@ -48,7 +49,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
   };
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
@@ -56,7 +57,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support broadcast"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  virtual c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
@@ -64,7 +65,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support allreduce"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  virtual c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ =
           AllreduceCoalescedOptions()) {
@@ -76,7 +77,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "does not support allreduce_coalesced"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  virtual c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& /* tensors */,
       const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
@@ -84,7 +85,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support reduce"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  virtual c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -97,7 +98,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
+  virtual c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -111,7 +112,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // * do not add dependencies on this function,
   // * do not implement it in your Backend, implement _allgather_base
   //   instead.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+  virtual c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
@@ -123,7 +124,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "does not support allgather_coalesced"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
+  virtual c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const GatherOptions& /* opts */ = GatherOptions()) {
@@ -132,7 +133,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support gather"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  virtual c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ScatterOptions& /* opts */ = ScatterOptions()) {
@@ -141,7 +142,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support scatter"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  virtual c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
@@ -151,7 +152,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), "does not support reduce_scatter"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
@@ -163,7 +164,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "does not support _reduce_scatter_base"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  virtual c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& /* outputBuffer */,
       at::Tensor& /* inputBuffer */,
       std::vector<int64_t>& /* outputSplitSizes */,
@@ -175,7 +176,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), "does not support alltoall_base"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+  virtual c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) {
@@ -222,7 +223,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not yet support sequence numbers."));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> send(
+  virtual c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& /* tensors */,
       int /* dstRank */,
       int /* tag */) {
@@ -230,7 +231,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         false, c10::str("Backend ", getBackendName(), "does not support send"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
+  virtual c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& /* tensors */,
       int /* srcRank */,
       int /* tag */) {
@@ -238,7 +239,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         false, c10::str("Backend ", getBackendName(), "does not support recv"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  virtual c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& /* tensors */,
       int /* tag */) {
     TORCH_CHECK(
@@ -247,7 +248,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), "does not support recvAnysource"));
   }
 
-  virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) {
     TORCH_CHECK(
         false,
