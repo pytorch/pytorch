@@ -410,6 +410,7 @@ def create_aot_dispatcher_function(
                 seen_args = set()
 
                 def convert(x):
+                    # HACK HACK HACK
                     # preserve the same behavior of the non-fake tensor branch
                     # of creating a unique tensor impl for each input,
                     # instead of memoizing the conversion. this has the same
@@ -419,7 +420,7 @@ def create_aot_dispatcher_function(
                     if id(x) in seen_args:
                         with torch.utils._mode_utils.no_dispatch():
                             x = x.detach().requires_grad_(x.requires_grad)
-                    seen_args.add(x)
+                    seen_args.add(id(x))
                     return mode.from_tensor(x)
 
                 fake_flat_tensor_args = pytree.tree_map_only(Tensor, convert, flat_args)
