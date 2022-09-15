@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.onnx_main_opset
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
 
 def _init_test_generalized_rcnn_transform():
