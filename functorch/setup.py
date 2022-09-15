@@ -8,6 +8,7 @@
 import os
 import subprocess
 from setuptools import setup
+import warnings
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 version_txt = os.path.join(cwd, 'version.txt')
@@ -55,3 +56,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)
+
+    warnings.warn(
+        'Installing PyTorch from source or from a nightly binary already '
+        'installs functorch (as of 9/14/2022), so there is no need to cd '
+        'into functorch and run `python setup.py {install, develop}` anymore. '
+        'We will soon remove this method of installing functorch.',
+        DeprecationWarning)
