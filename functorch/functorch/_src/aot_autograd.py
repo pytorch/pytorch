@@ -422,9 +422,7 @@ def create_aot_dispatcher_function(
                     seen_args.add(x)
                     return mode.from_tensor(x)
 
-                fake_flat_tensor_args = pytree.tree_map_only(
-                    Tensor, convert, flat_args
-                )
+                fake_flat_tensor_args = pytree.tree_map_only(Tensor, convert, flat_args)
             else:
                 # The detach().requires_grad_() pattern can cause some subtle bugs.
                 # These will be fixed once FakeTensor is always-on for AOTAutograd.
