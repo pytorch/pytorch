@@ -409,7 +409,7 @@ def create_aot_dispatcher_function(
             if mode:
                 seen_args = set()
 
-                def conv(x):
+                def convert(x):
                     # preserve the same behavior of the non-fake tensor branch
                     # of creating a unique tensor impl for each input,
                     # instead of memoizing the conversion. this has the same
@@ -423,7 +423,7 @@ def create_aot_dispatcher_function(
                     return mode.from_tensor(x)
 
                 fake_flat_tensor_args = pytree.tree_map_only(
-                    Tensor, mode.from_tensor, flat_args
+                    Tensor, convert, flat_args
                 )
             else:
                 # The detach().requires_grad_() pattern can cause some subtle bugs.
