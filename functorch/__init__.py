@@ -32,7 +32,4 @@ from ._src.make_functional import (
     FunctionalModuleWithBuffers,
 )
 
-try:
-    from .version import __version__  # noqa: F401
-except ImportError:
-    pass
+__version__ = torch.__version__
