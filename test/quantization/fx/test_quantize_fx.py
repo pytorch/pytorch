@@ -4082,6 +4082,57 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
 
+    def test_static_lstm(self):
+        """
+        Test FX static quantization for LSTM.
+        """
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                return self.lstm(inputs, (h0, c0))
+
+        m = MyModel()
+        qconfig_mapping = get_default_qconfig_mapping()
+        prepare_custom_config = PrepareCustomConfig() \
+            .set_float_to_observed_mapping(torch.nn.LSTM, torch.ao.nn.quantizable.LSTM)
+        convert_custom_config = ConvertCustomConfig() \
+            .set_observed_to_quantized_mapping(torch.ao.nn.quantizable.LSTM, torch.ao.nn.quantized.LSTM)
+        example_inputs = (torch.rand(5, 3, 50), torch.rand(1, 3, 50), torch.randn(1, 3, 50))
+
+        # prepare
+        m = prepare_fx(m, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
+        node_occurrence = {
+            ns.call_module(torch.ao.nn.quantizable.LSTM): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        m(*example_inputs)
+
+        # convert
+        m = convert_fx(m, convert_custom_config=convert_custom_config)
+        node_occurrence = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_method("dequantize"): 3,
+            # result = lstm_output[0]
+            # hidden = lstm_output[1]
+            # hidden0 = hidden[0]
+            # hidden1 = hidden[1]
+            ns.call_function(operator.getitem): 4,
+            # hidden_dq = (hidden0_dq, hidden1_dq)
+            # lstm_output_dq = (result_dq, hidden_dq)
+            ns.call_function(tuple): 2,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        (result, (hidden0, hidden1)) = m(*example_inputs)
+
+        # output tensors should be dequantized
+        assert not result.is_quantized
+        assert not hidden0.is_quantized
+        assert not hidden1.is_quantized
+
     def test_relu_lowering(self):
         class M(torch.nn.Module):
             def forward(self, x):
