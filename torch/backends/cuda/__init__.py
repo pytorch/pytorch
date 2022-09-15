@@ -3,6 +3,8 @@ import torch
 
 from typing import Union
 
+__all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul"]
 
 def is_built():
     r"""Returns whether PyTorch is built with CUDA support.  Note that this
