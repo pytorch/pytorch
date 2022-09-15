@@ -1178,11 +1178,6 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
-
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1350,8 +1345,6 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
-    # linalg.svd - manual tolerance
-    # svd
     def test_vmapjvpvjp(self, device, dtype, op):
         # Since we test `jvpvjp` seperately,
         # in this we just check that vmap of `jvpvjp`
@@ -1375,11 +1368,6 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
-
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1390,12 +1378,9 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                if isinstance(primals_out, torch.Tensor):
-                    return (primals_out, tangents_out)
-                else:
-                    flat_primals_out, _ = tree_flatten(primals_out)
-                    flat_tangents_out, _ = tree_flatten(tangents_out)
-                    return tuple(flat_primals_out + flat_tangents_out)
+                flat_primals_out, _ = tree_flatten(primals_out)
+                flat_tangents_out, _ = tree_flatten(tangents_out)
+                return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(

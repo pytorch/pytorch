@@ -1285,7 +1285,6 @@ def insert_observers_for_model(
 
                             is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
 
-                        if maybe_output_obs_node is not None or _is_custom_module_lstm(node, modules):
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
@@ -1294,6 +1293,7 @@ def insert_observers_for_model(
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
+                        if maybe_output_obs_node is not None or _is_custom_module_lstm(node, modules):
                             if qhandler is not None and qhandler.is_custom_module():
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
 
