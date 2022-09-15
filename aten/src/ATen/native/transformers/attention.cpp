@@ -685,22 +685,35 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-    auto attn_mask = attn_mask_;
-    TORCH_CHECK(!attn_mask.has_value() || attn_mask->dtype() == at::kBool,
-            "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
-            attn_mask->dtype())
-    // Naive, composite implementation defined here.
-    const auto embed_size = query_.size(-1);
-    const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
-    if (is_causal) {
-        TORCH_CHECK(!attn_mask.has_value(),
-                "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
-        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
-                "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
+  if (query_.is_nested()) {
+    return std::make_tuple(
+        flash_attention_helper(query_, key, value, dropout_p, is_causal),
+        Tensor{});
+  }
+  return std::make_tuple(
+      flash_attention_helper_dense(query_, key, value, dropout_p, is_causal),
+      Tensor{});
 
-        // Replace attn_mask with causal mask; lower triangular elements take part in attention.
-        const auto L = query.size(-2), S = key.size(-2);
-        attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
+  auto attn_mask = attn_mask_;
+  TORCH_CHECK(
+      !attn_mask.has_value() || attn_mask->dtype() == at::kBool,
+      "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
+      attn_mask->dtype())
+  // Naive, composite implementation defined here.
+  const auto embed_size = query_.size(-1);
+  const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
+  if (is_causal) {
+    TORCH_CHECK(
+        !attn_mask.has_value(),
+        "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+    TORCH_CHECK(
+        !query.is_nested() && !key.is_nested(),
+        "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
+
+    // Replace attn_mask with causal mask; lower triangular elements take part
+    // in attention.
+    const auto L = query.size(-2), S = key.size(-2);
+    attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
     }
     if (attn_mask.has_value()) {
         TORCH_CHECK(!query.is_nested() && !key.is_nested(),
