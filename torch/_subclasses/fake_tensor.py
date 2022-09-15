@@ -17,7 +17,8 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map
+from torch._C._pytree import tree_flatten, tree_map
+from torch.utils._pytree import PyTree
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
