@@ -1,0 +1,248 @@
+import torch
+import torch.nn as nn
+from ._common_operator_config_utils import (
+    _get_binary_op_configs,
+    _get_bn_configs,
+    _get_cat_config,
+    _get_conv_configs,
+    _get_default_op_configs,
+    _get_embedding_op_configs,
+    _get_fixed_qparams_op_configs,
+    _get_linear_configs,
+    _get_rnn_op_configs,
+    _get_share_qparams_op_configs,
+)
+from .backend_config import BackendConfig, DTypeConfig
+
+
+# ===================
+# |  DTYPE CONFIGS  |
+# ===================
+
+# Based on fbgemm's configs
+
+onednn_weighted_op_int8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
+    weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
+)
+
+onednn_default_op_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
+)
+
+onednn_default_op_fp16_dtype_config = DTypeConfig(
+    input_dtype=torch.float16,
+    output_dtype=torch.float16,
+    weight_dtype=torch.float16,
+    bias_dtype=torch.float16,
+)
+
+onednn_default_dynamic_int8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.float,
+    weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
+    is_dynamic=True,
+)
+
+onednn_default_dynamic_float16_dtype_config = DTypeConfig(
+    input_dtype=torch.float16,
+    output_dtype=torch.float,
+    weight_dtype=torch.float16,
+    bias_dtype=torch.float,
+    is_dynamic=True,
+)
+
+onednn_weight_only_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint8,
+)
+
+onednn_weight_only_quint4x2_dtype_config = DTypeConfig(
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint4x2,
+)
+
+# ===================
+# |  FUSER METHODS  |
+# ===================
+
+def fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
+    r"""Given the linear, bn and leaky_relu modules, fuses them and returns the fused module
+    Args:
+        is_qat: a flag for whether we are using quantization aware training fusion
+                or post training quantization fusion
+        linear: Module instance of type Linear
+        bn: BatchNorm1d instance that needs to be fused with the linear layer
+        leaky_relu: LeakyReLU instance that needs to be fused with the linear layer
+    Examples::
+        >>> m1 = nn.Linear(20, 10)
+        >>> b1 = nn.BatchNorm1d(10)
+        >>> lr = nn.LeakyReLU(0.01)
+        >>> m2 = fuse_linear_bn_leaky_relu(m1, b1, lr)
+    """
+    assert(linear.training == bn.training and bn.training == leaky_relu.training),\
+        "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
+
+    if is_qat:
+        raise NotImplementedError("Cannot fuse train modules: {}".format((linear, bn, leaky_relu)))
+    else:
+        map_to_fused_module_eval = {
+            nn.Linear: nni.LinearLeakyReLU,
+        }
+        fused_module = map_to_fused_module_eval.get(type(linear), None)
+        if fused_module is not None:
+            fused_linear = nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
+            fm = fused_module(fused_linear, leaky_relu)
+            return fm
+        else:
+            raise NotImplementedError("Cannot fuse eval modules: {}".format((linear, bn, leaky_relu)))
+
+# ======================
+# |  CONFIGS FOR CONV  |
+# ======================
+
+conv_configs = _get_conv_configs(conv_dtype_configs)
+
+
+# ========================
+# |  CONFIGS FOR LINEAR  |
+# ========================
+
+linear_configs = _get_linear_configs(linear_dtype_configs)
+
+# (1) Linear + leaky_relu
+# -------------------
+# 1.1 linear module + leaky_relu fusion config
+# linear leaky_relu, linear module + leaky_relu module
+linear_configs.append({
+    "pattern": (torch.nn.LeakyReLU, torch.nn.Linear),
+    "dtype_configs": dtype_configs,
+    "fuser_method": reverse_sequential_wrapper2(nni.LinearLeakyReLU),
+    "fused_module": nni.LinearLeakyReLU,
+})
+# linear leaky_relu, linear module + functional leaky_relu
+linear_configs.append({
+    "pattern": (torch.nn.functional.leaky_relu, torch.nn.Linear),
+    "dtype_configs": dtype_configs,
+    "fuser_method": reverse_sequential_wrapper2(nni.LinearLeakyReLU),
+    "fused_module": nni.LinearLeakyReLU,
+})
+# linear leaky_relu, linear module + BN + leaky_relu
+linear_configs.append({
+    "pattern": (nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)),
+    "dtype_configs": dtype_configs,
+    "fuser_method": reverse3(fuse_linear_bn_leaky_relu),
+    "fused_module": nni.LinearLeakyReLU,
+})
+# 1.2 linear module + leaky_relu, fused module configs
+# linear leaky_relu, fused module
+linear_configs.append({
+    "pattern": nni.LinearLeakyReLU,
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+    "root_module": torch.nn.Linear,
+    "reference_quantized_module_for_root": nnqr.Linear,
+})
+# 1.3 functional linear + leaky_relu configs
+# linear leaky_relu, functional linear + leaky_relu module
+linear_configs.append({
+    "pattern": (torch.nn.LeakyReLU, F.linear),
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+})
+# linear leaky_relu, functional linear + functional leaky_relu
+linear_configs.append({
+    "pattern": (F.leaky_relu, F.linear),
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+})
+
+# (2) Linear + tanh
+# -------------------
+# 2.1 linear module + tanh fusion config
+# linear tanh, linear module + tanh module
+linear_configs.append({
+    "pattern": (torch.nn.Tanh, torch.nn.Linear),
+    "dtype_configs": dtype_configs,
+    "fuser_method": reverse_sequential_wrapper2(nni.LinearTanh),
+    "fused_module": nni.LinearTanh,
+})
+# linear tanh, linear module + functional tanh
+linear_configs.append({
+    "pattern": (torch.nn.functional.tanh, torch.nn.Linear),
+    "dtype_configs": dtype_configs,
+    "fuser_method": reverse_sequential_wrapper2(nni.LinearTanh),
+    "fused_module": nni.LinearTanh,
+})
+
+# 2.2 linear module + tanh, fused module configs
+# linear tanh, fused module
+linear_configs.append({
+    "pattern": nni.LinearTanh,
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+    "root_module": torch.nn.Linear,
+    "reference_quantized_module_for_root": nnqr.Linear,
+    # "qat_module": nniqat.LinearLeakyReLU,
+})
+# 2.3 functional linear + tanh configs
+# linear tanh, functional linear + tanh module
+linear_configs.append({
+    "pattern": (torch.nn.Tanh, F.linear),
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+})
+# linear tanh, functional linear + functional tanh
+linear_configs.append({
+    "pattern": (F.tanh, F.linear),
+    "observation_type": observation_type,
+    "dtype_configs": dtype_configs,
+})
+
+# =====================
+# |  BACKEND CONFIGS  |
+# =====================
+
+def get_onednn_backend_config() -> BackendConfig:
+    """
+    Return the `BackendConfig` for PyTorch's native ONEDNN backend.
+    """
+    conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+    linear_dtype_configs = [
+        onednn_weighted_op_int8_dtype_config,
+        onednn_default_dynamic_int8_dtype_config,
+        onednn_default_dynamic_float16_dtype_config,
+    ]
+    binary_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+    default_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
+    fixed_qparams_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+    share_qparams_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
+    rnn_op_dtype_configs = [
+        onednn_default_dynamic_int8_dtype_config,
+        onednn_default_dynamic_float16_dtype_config,
+    ]
+    embedding_op_dtype_configs = [
+        onednn_weight_only_quint8_dtype_config,
+        onednn_weight_only_quint4x2_dtype_config,
+    ]
+    return BackendConfig("onednn") \
+        .set_backend_pattern_configs(conv_configs) \
+        .set_backend_pattern_configs(linear_configs) \
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
+
+__all__ = [
+    "get_onednn_backend_config",
+]
