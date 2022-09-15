@@ -407,9 +407,23 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             if mode:
-                fake_flat_tensor_args = pytree.tree_map_only(
-                    Tensor, mode.from_tensor, flat_args
-                )
+                seen_args = set()
+
+                def convert(x):
+                    # HACK HACK HACK
+                    # preserve the same behavior of the non-fake tensor branch
+                    # of creating a unique tensor impl for each input,
+                    # instead of memoizing the conversion. this has the same
+                    # problem of models that resize their inputs described below,
+                    # but fixes an issue with tied parameters.
+                    # TODO: more full fix
+                    if id(x) in seen_args:
+                        with torch.utils._mode_utils.no_dispatch():
+                            x = x.detach().requires_grad_(x.requires_grad)
+                    seen_args.add(id(x))
+                    return mode.from_tensor(x)
+
+                fake_flat_tensor_args = pytree.tree_map_only(Tensor, convert, flat_args)
             else:
                 # The detach().requires_grad_() pattern can cause some subtle bugs.
                 # These will be fixed once FakeTensor is always-on for AOTAutograd.
