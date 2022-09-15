@@ -2232,6 +2232,11 @@ class ReducerTest(TestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    @property
+    def device(self):
+        return "cpu"
+
+
     def setUp(self):
         super(CommTest, self).setUp()
         self._spawn_processes()
@@ -2343,6 +2348,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_rank_membership(self):
         self._test_rank_membership(backend="gloo")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="gloo")
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
