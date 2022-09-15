@@ -161,9 +161,10 @@ void RegisterDecomposition(
   schema_to_decomposition[&schema] = g;
 }
 
+// see NOTE: [Jit Decomposition Interface]
 struct JitDecomp final : torch::autograd::impl::JitDecompInterface {
-  bool has_jit_decomposition_(const c10::FunctionSchema& schema) const override;
-  void run_jit_decomposition_(
+  bool has_jit_decomposition(const c10::FunctionSchema& schema) const override;
+  void run_jit_decomposition(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const override;
 };
@@ -171,14 +172,14 @@ struct JitDecomp final : torch::autograd::impl::JitDecompInterface {
 JitDecomp jitDecomp;
 torch::autograd::impl::JitDecompRegisterer registerJitDecomp(&jitDecomp);
 
-void JitDecomp::run_jit_decomposition_(
+void JitDecomp::run_jit_decomposition(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
-  run_jit_decomposition(op, stack);
+  ::torch::jit::run_jit_decomposition(op, stack);
 }
 
-bool JitDecomp::has_jit_decomposition_(const FunctionSchema& schema) const {
-  return has_jit_decomposition(schema);
+bool JitDecomp::has_jit_decomposition(const FunctionSchema& schema) const {
+  return ::torch::jit::has_jit_decomposition(schema);
 }
 
 void run_jit_decomposition(

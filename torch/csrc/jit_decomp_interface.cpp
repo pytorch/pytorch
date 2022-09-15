@@ -5,17 +5,15 @@ namespace autograd {
 namespace impl {
 
 namespace {
-JitDecompInterface* fns = nullptr;
+JitDecompInterface* impl = nullptr;
 }
 
-void setJitDecompInterface(JitDecompInterface* f) {
-  fns = f;
+void setJitDecompImpl(JitDecompInterface* impl_) {
+  impl = impl_;
 }
-JitDecompInterface* getJitDecomp() {
-  TORCH_CHECK(
-      fns,
-      "Support for JIT decompositions has not been loaded; have you linked against TBD?")
-  return fns;
+
+JitDecompInterface* getJitDecompImpl(c10::string_view name) {
+  return impl;
 }
 
 } // namespace impl
