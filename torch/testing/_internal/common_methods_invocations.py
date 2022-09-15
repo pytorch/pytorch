@@ -3095,6 +3095,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
         ((1, 4, 5, 5), (4, 8, 3, 3), None,
          {})
     )
@@ -10794,7 +10795,7 @@ op_db: List[OpInfo] = [
            aten_name='im2col',
            aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,

@@ -545,15 +545,6 @@ class TestOperators(TestCase):
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d"),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -579,7 +570,6 @@ class TestOperators(TestCase):
         # supported with memory_format torch.preserve_format
         # or torch.contiguous_format (got ChannelsLast)s
         xfail("nn.functional.max_unpool2d", "grad"),
-        xfail("nn.functional.prelu"),  # Mismatch!
         xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
@@ -596,9 +586,6 @@ class TestOperators(TestCase):
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
-        # locally fails with `bias tensor has to be contiguous`
-        # but passes on CI, hence the skip.
-        skip("nn.functional.conv_transpose3d", device_type='cuda'),
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -1191,11 +1178,6 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
-
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1363,8 +1345,6 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
-    # linalg.svd - manual tolerance
-    # svd
     def test_vmapjvpvjp(self, device, dtype, op):
         # Since we test `jvpvjp` seperately,
         # in this we just check that vmap of `jvpvjp`
@@ -1388,11 +1368,6 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
-
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1403,12 +1378,9 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                if isinstance(primals_out, torch.Tensor):
-                    return (primals_out, tangents_out)
-                else:
-                    flat_primals_out, _ = tree_flatten(primals_out)
-                    flat_tangents_out, _ = tree_flatten(tangents_out)
-                    return tuple(flat_primals_out + flat_tangents_out)
+                flat_primals_out, _ = tree_flatten(primals_out)
+                flat_tangents_out, _ = tree_flatten(tangents_out)
+                return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
