@@ -844,9 +844,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, c10::SymIntArrayRef sym_size, bool /*unused*/) {
-  // TODO: properly support SymInt expand
-  auto size = asIntArrayRefSlow(sym_size);
+Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
@@ -882,6 +880,7 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+  TORCH_INTERNAL_ASSERT(!self.is_mps(), "as_strided_tensorimpl does not work with MPS; call self.as_strided(...) instead");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -925,9 +924,8 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
-  // TODO: properly support SymInt narrow_copy
-  return self.narrow(dim, start.expect_int(), length.expect_int()).clone(at::MemoryFormat::Contiguous);
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -2105,6 +2103,10 @@ Tensor slice(
     auto quantizer = create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
+    // NB: it is extremely important to perform a redispatch here for
+    // the MPS backend; if you call directly to as_strided_tensorimpl,
+    // the necessary metadata for MPS will not get setup and you will
+    // get silently wrong results
     result = self.as_strided(sizes, strides, storage_offset);
   }
   namedinference::propagate_names(result, self);
@@ -2644,13 +2646,13 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_compressed_transpose(self, dim0, dim1);
   }
 
-  // Transpose of a tensor is a view operation.
-  if (dim0 == dim1) {
-    return self;
-  }
-
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose(self, dim0, dim1);
+  }
+
+  // Transpose of a tensor is a view operation.
+  if (dim0 == dim1) {
+    return self.alias();
   }
 
   DimVector sizes(self.sizes().begin(), self.sizes().end());
@@ -3204,19 +3206,13 @@ Tensor adjoint(const Tensor &self) {
   return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
-Tensor view_meta(const Tensor& self,
-            at::SymIntArrayRef size) {
-  // TODO: Properly support SymInt view
-  return view_impl(self, c10::asIntArrayRefSlow(size));
-}
-
 Tensor view(const Tensor& self,
             at::IntArrayRef size) {
   return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {
-    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
 Tensor detach(const Tensor& self) {
@@ -3592,7 +3588,7 @@ at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef 
 }
 
 
-at::Tensor& expand_copy_out(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+at::Tensor& expand_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, bool implicit, at::Tensor & out) {
   auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
@@ -3748,7 +3744,7 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
 }
 
 
-at::Tensor& view_copy_out(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
+at::Tensor& view_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::Tensor & out) {
   auto tmp = self.view_symint(size);
   out.copy_(tmp);
   return out;
