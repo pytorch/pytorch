@@ -398,6 +398,11 @@ public:
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }
 
+  template <typename F>
+  PyObject* getPythonOp(c10::impl::PyInterpreter* self_interpreter, F slow_accessor) const {
+    return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorDef_(&*operatorIterator), operatorIterator_(operatorIterator)  {}

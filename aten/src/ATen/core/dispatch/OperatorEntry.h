@@ -6,6 +6,7 @@
 #include <c10/util/either.h>
 #include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/PyHandleCache.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
@@ -211,6 +212,11 @@ public:
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
 
+  template <typename F>
+  PyObject* getPythonOp(PyInterpreter* self_interpreter, F slow_accessor) const {
+    return py_cache_.ptr_or(self_interpreter, slow_accessor);
+  }
+
 private:
 
   OperatorName name_;
@@ -220,6 +226,8 @@ private:
   #endif
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
+  // Pointer to the torch.ops.ns.op.overload object for speed
+  c10::PyHandleCache py_cache_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
