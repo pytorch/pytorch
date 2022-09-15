@@ -199,6 +199,7 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
+    keep_casted_gradients: Optional[bool] = False
 
 
 @dataclass
@@ -1278,6 +1279,12 @@ class FullyShardedDataParallel(nn.Module):
         return (
             self.mixed_precision is not None
             and self.mixed_precision.reduce_dtype is not None
+        )
+
+    def _mixed_precision_keep_low_precision_grads(self) -> bool:
+        return (
+            self.mixed_precision is not None
+            and self.mixed_precision.keep_casted_gradients
         )
 
     def _low_precision_hook_enabled(self) -> bool:
@@ -2929,7 +2936,13 @@ class FullyShardedDataParallel(nn.Module):
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
                         self._communication_hook(self._communication_hook_state, param.grad)
 
-                    self._cast_grad_to_param_dtype(param.grad, param)
+                    # For NO_SHARD keeping grads in the reduced precision, we
+                    # can simply omit the cast as needed, we can't do this for
+                    # other sharding strategies because grad field is assigned
+                    # in _finalize_params. TODO (rvarm1) this divergence in
+                    # logic is not ideal.
+                    if not self._mixed_precision_keep_low_precision_grads():
+                        self._cast_grad_to_param_dtype(param.grad, param)
 
                 # Regardless of sharding or not, offload the grad to CPU if we are
                 # offloading params. This is so param and grad reside on same device
@@ -3089,6 +3102,11 @@ class FullyShardedDataParallel(nn.Module):
                         # lands. If it was not called, there is no new gradient to accumulate
                         if p._post_backward_called:
                             p.grad = p._saved_grad_shard
+
+                            if fsdp_module._mixed_precision_keep_low_precision_grads():
+                                p.grad.data = p.grad.data.to(
+                                    fsdp_module.mixed_precision.param_dtype
+                                )
                     else:
                         p_assert(
                             not p._is_sharded or not p._post_backward_called,
@@ -3422,6 +3440,20 @@ class FullyShardedDataParallel(nn.Module):
                     # warning in the class's docstring).
                     if not offloaded:
                         p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
+                        # If we're using mixed precision with keeping grads
+                        # casted, gradient here might still be of the reduced
+                        # dtype if we didn't clear / set the gradients to None
+                        # after previous forward. In that case, make sure
+                        # p._saved_grad_shard is cast to the full precision type
+                        # so that we can accumulate in full precision in
+                        # _post_backward_hook and assign back in full precision
+                        # in _wait_for_post_backward.
+                        if (
+                            self._mixed_precision_keep_low_precision_grads() and
+                            p._saved_grad_shard.dtype != p._local_shard.dtype
+                        ):
+                            p._saved_grad_shard = p._saved_grad_shard.to(p._local_shard.dtype)
+
                 p.grad = None
 
     def _should_free_full_params(self):
