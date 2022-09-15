@@ -133,20 +133,6 @@ void vmapIncompatibleInplaceError(const char* schema_name) {
     "please file a bug report instead.");
 }
 
-void run_jit_decomposition(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  const auto& schema = op.schema();
-  // TODO: templatize based on op and keep static trace_exec
-  auto * trace_exec = torch::jit::GetDecompositionExecutor(schema);
-  trace_exec->run((*stack));
-  if (stack->back().isTuple()) {
-    IValue tup = stack->back();
-    stack->pop_back();
-    for (const auto& elem: tup.toTuple()->elements()) {
-      stack->push_back(elem);
-    }
-  }
-}
-
 static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
   auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
   if (logical_scalar_tensor.scalar_type() != result_type) {
