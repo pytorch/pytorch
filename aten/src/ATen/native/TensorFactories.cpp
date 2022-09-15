@@ -398,10 +398,10 @@ Tensor new_empty_symint(
   return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-Tensor new_empty_strided(
+Tensor new_empty_strided_symint(
     const Tensor& self,
-    IntArrayRef size,
-    IntArrayRef stride,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -410,7 +410,7 @@ Tensor new_empty_strided(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::empty_strided(size, stride, self.options().merge_in(options));
+  return at::empty_strided_symint(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1479,7 +1479,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides, this is marginally faster than calling empty_like
-      self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self = at::empty_strided_symint(src.sym_sizes(), src.sym_strides(), src.options());
     } else {
       self = at::empty_like(src);
     }
