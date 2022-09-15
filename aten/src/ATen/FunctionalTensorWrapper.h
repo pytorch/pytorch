@@ -134,7 +134,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   ~FunctionalTensorWrapper() override = default;
 
   // FunctionalTensorWrapper overrides all custom size/stride function,
-  // so that if the inner tensor has a custo implementation
+  // so that if the inner tensor has a custom implementation
   // we make sure to call that implementation.
   at::IntArrayRef sizes_custom() const override;
   at::IntArrayRef strides_custom() const override;
@@ -143,6 +143,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_strides_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
