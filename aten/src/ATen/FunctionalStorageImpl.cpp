@@ -98,9 +98,10 @@ c10::SymInt get_nbytes(const Tensor& value) {
     // LTC hasn't implemented SymInt support yet though (torch::lazy::SymIntNodeImpl).
     // Once it does, we should remove this check.
     if (value.key_set().has(c10::DispatchKey::Python)) {
-      return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.storage_offset());
+      return value.storage().sym_nbytes();
     }
   }
+  // XLA storage objects also do not properly track nbytes.
   return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
 }
 
