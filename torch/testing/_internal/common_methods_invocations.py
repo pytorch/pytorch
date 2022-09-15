@@ -12092,8 +12092,8 @@ op_db: List[OpInfo] = [
            decorators=[
                skipCUDAIfNoCusolver,
                skipCPUIfNoLapack,
-               # Resulting values are large therefore atol is increased and rely on rtol
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=20, rtol=1e-06)}),
+               # Resulting values are very large therefore atol is increased and rely on rtol
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5000, rtol=1e-05)}),
                             'TestCommon', 'test_compare_cpu')],
            skips=(
                # ormqr does not support forward when complex inputs require grad

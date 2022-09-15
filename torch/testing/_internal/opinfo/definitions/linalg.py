@@ -1451,7 +1451,7 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float32],
             ),
             # This appears to be a different algorithm on cpu vs gpu
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.skip("eig on cpu is sometimes different than cuda"), "TestCommon", "test_compare_cpu"),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
