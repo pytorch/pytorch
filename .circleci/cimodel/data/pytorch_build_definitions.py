@@ -268,7 +268,6 @@ def instantiate_configs(only_slow_gradcheck):
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")
-            # TODO: do we need clang to compile host binaries like protoc?
             parms_list.append("clang5")
             parms_list.append("android-ndk-" + android_ndk_version)
             android_abi = fc.find_prop("android_abi")
