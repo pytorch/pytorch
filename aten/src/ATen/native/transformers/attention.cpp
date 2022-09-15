@@ -717,7 +717,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-        at::dropout_(attn, dropout_p, true);
+      attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
     return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, at::zeros_like(attn)));

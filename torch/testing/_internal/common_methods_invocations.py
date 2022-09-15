@@ -7281,7 +7281,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
     shapes_and_kwargs = []
     for qkv_shapes, is_causal, need_attn_weights, dropout_p in product(
-            qkv_shapes, [True, False], [True, False], [0.0]):
+            qkv_shapes, [True, False], [True, False], [0.0, 0.5]):
         shapes_and_kwargs.append((qkv_shapes[0], qkv_shapes[1],
                                   dict(is_causal=is_causal,
                                        need_attn_weights=need_attn_weights,
@@ -11664,6 +11664,8 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'nn.functional._scaled_dot_product_attention',
+        op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, inp, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
