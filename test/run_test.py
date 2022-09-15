@@ -723,8 +723,6 @@ def run_test_ops(test_module, test_directory, options):
                         extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
                         )
 
-    subprocess.run(["python", "-m", "pip", "install", "pytest-shard"])
-
     file_names = []
     return_codes = []
     num_procs = 3
