@@ -1713,13 +1713,11 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true);
                   });
-              auto func_dk =
-                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
-                                       const std::string& str_dk,
-                                       py::args args,
-                                       py::kwargs kwargs) {
+              auto func_dk = py::cpp_function(
+                  [op, symbol, allow_numbers_as_tensors](
+                      c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
                     c10::optional<c10::DispatchKey> dk =
-                        c10::make_optional(c10::parseDispatchKey(str_dk));
+                        c10::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
