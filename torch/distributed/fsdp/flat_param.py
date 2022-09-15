@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._utils import _alloc_storage, _free_storage, p_assert
+from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
 __all__ = [
     "FlatParameter",
@@ -222,6 +222,7 @@ class FlatParameter(nn.Parameter):
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._unpadded_unsharded_size = self.size()
+        _set_fsdp_flattened(self)
 
 
 class FlatParamHandle:
@@ -310,7 +311,7 @@ class FlatParamHandle:
                         )
                     )
                 else:
-                    if isinstance(param, FlatParameter):
+                    if type(param) is FlatParameter:
                         raise ValueError("`FlatParameter` does not support nesting")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
@@ -931,8 +932,8 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            tensor.view(shape)
-            for (tensor, shape) in zip(
+            subtensor.view(shape)
+            for (subtensor, shape) in zip(
                 torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes  # type: ignore[arg-type]
             )
         )

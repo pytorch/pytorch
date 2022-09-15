@@ -70,6 +70,7 @@ from ._utils import (
     _apply_to_tensors,
     _contains_batchnorm,
     _free_storage,
+    _is_fsdp_flattened,
     _override_batchnorm_mixed_precision,
     p_assert,
 )
@@ -1151,7 +1152,7 @@ class FullyShardedDataParallel(nn.Module):
             p
             for m in ignored_modules
             for p in m.parameters()
-            if not isinstance(p, FlatParameter)
+            if not _is_fsdp_flattened(p)
         )
         # Conservatively include all shared parameters' names
         param_to_unflat_param_names = _get_param_to_unflat_param_names(
@@ -1456,7 +1457,7 @@ class FullyShardedDataParallel(nn.Module):
         try:
             while True:
                 param = next(param_gen)
-                if param not in ignored_params and not isinstance(param, FlatParameter):
+                if param not in ignored_params and not _is_fsdp_flattened(param):
                     yield param
         except StopIteration:
             pass
@@ -1468,7 +1469,7 @@ class FullyShardedDataParallel(nn.Module):
         check after flattening the wrapped module's parameters.
         """
         for param_name, param in self.named_parameters():
-            if param not in ignored_params and not isinstance(param, FlatParameter):
+            if param not in ignored_params and not _is_fsdp_flattened(param):
                 raise RuntimeError(
                     f"Found an unflattened parameter: {param_name}; "
                     f"{param.size()} {param.__class__}"
@@ -4208,7 +4209,7 @@ def _get_param_to_unflat_param_names(
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 module_prefixed_param_names = (
-                    param._prefixed_param_names if isinstance(param, FlatParameter)
+                    param._prefixed_param_names if type(param) is FlatParameter
                     else [param_name]
                 )  # prefixed from `module`
                 fully_prefixed_param_names = [
