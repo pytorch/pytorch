@@ -69,7 +69,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   int capture_dev_;
 
   // RNG state trackers
-  at::Tensor seed_extragraph_;
   at::Tensor offset_extragraph_;
   uint64_t wholegraph_increment_;
 };

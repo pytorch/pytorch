@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
+from typing import Set, Type, TYPE_CHECKING, Union, Callable
 import builtins
 
 __all__ = [
@@ -841,7 +841,6 @@ from torch.autograd import (
 )
 from torch import fft as fft
 from torch import futures as futures
-from torch import nested as nested
 from torch import nn as nn
 from torch import optim as optim
 import torch.optim._multi_tensor
@@ -930,7 +929,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from . import _masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import eig, solve
+from ._linalg_utils import solve
 
 
 def _register_device_module(device_type, module):
@@ -962,5 +961,3 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
-
-from ._dispatch import python

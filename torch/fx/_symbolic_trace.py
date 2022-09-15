@@ -992,9 +992,9 @@ def wrap(fn_or_name: Union[str, Callable]):
             "string name"
         )
 
-    if callable(fn_or_name):
+    if hasattr(fn_or_name, "__code__"):
         assert not isinstance(fn_or_name, str)  # to make mypy happy
-        fn_name = fn_or_name.__name__
+        fn_name = fn_or_name.__code__.co_name
     else:
         assert isinstance(
             fn_or_name, str

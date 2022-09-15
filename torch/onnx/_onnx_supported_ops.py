@@ -4,8 +4,9 @@ from typing import Dict, List, Union
 from torch import _C
 from torch.onnx import _constants, symbolic_registry
 
-for v in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
+for v in _constants.onnx_stable_opsets:
     symbolic_registry.register_version("", v)
+symbolic_registry.register_version("", _constants.onnx_main_opset)
 
 
 class _TorchSchema:

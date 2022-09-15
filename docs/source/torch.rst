@@ -558,6 +558,7 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
+    eig
     geqrf
     ger
     inner

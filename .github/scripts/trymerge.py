@@ -912,8 +912,6 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            if land_check_commit:
-                self.delete_land_time_check_branch(repo)
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
     def merge_changes(self,
@@ -963,11 +961,6 @@ class GitHubPR:
         if repo.current_branch() != orig_branch:
             repo.checkout(orig_branch)
         return commit
-
-    def delete_land_time_check_branch(self,
-                                      repo: GitRepo) -> None:
-        land_check_branch = f'landchecks/{self.pr_num}'
-        repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
 class MandatoryChecksMissingError(Exception):
@@ -1351,7 +1344,7 @@ def merge(pr_num: int, repo: GitRepo,
     # here to stop the merge process right away
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
-    if land_checks and not dry_run:
+    if land_checks:
         land_check_commit = pr.create_land_time_check_branch(
             repo,
             'viable/strict',
@@ -1361,8 +1354,6 @@ def merge(pr_num: int, repo: GitRepo,
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        if land_checks and not dry_run:
-            pr.delete_land_time_check_branch(repo)
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
@@ -1375,8 +1366,6 @@ def merge(pr_num: int, repo: GitRepo,
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         if initial_commit_sha != pr.last_commit()['oid']:
-            if land_checks and not dry_run:
-                pr.delete_land_time_check_branch(repo)
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
@@ -1411,16 +1400,10 @@ def merge(pr_num: int, repo: GitRepo,
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
             time.sleep(5 * 60)
-        except RuntimeError:
-            if land_checks and not dry_run:
-                pr.delete_land_time_check_branch(repo)
-            raise
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
-        if land_checks:
-            pr.delete_land_time_check_branch(repo)
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
 

@@ -12,7 +12,7 @@
 namespace at {
 namespace native {
 
-Tensor empty_meta_symint(
+Tensor empty_meta(
   SymIntArrayRef size,
   c10::optional<ScalarType> dtype_opt,
   c10::optional<Layout> layout_opt,
