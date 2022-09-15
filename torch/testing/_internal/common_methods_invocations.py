@@ -9347,8 +9347,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
-               # TODO: is this a bug?
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+               # Some inputs are non deterministic, eg when mat1 and mat2 are size 0
+               DecorateInfo(unittest.skip('some inputs are non deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
