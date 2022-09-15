@@ -507,6 +507,7 @@ class IListRef {
 
   using iterator = IListRefIterator<T>;
   using const_iterator = IListRefIterator<T>;
+  using reverse_iterator = std::reverse_iterator<iterator>;
   using value_type = typename iterator::value_type;
 
   IListRef() : tag_(IListRefTag::None) {}
@@ -551,11 +552,11 @@ class IListRef {
     TORCH_ILISTREF_UNWRAP(tag_, { return this_.end(); });
   }
 
-  iterator rbegin() const {
+  reverse_iterator rbegin() const {
     TORCH_ILISTREF_UNWRAP(tag_, { return this_.rbegin(); });
   }
 
-  iterator rend() const {
+  reverse_iterator rend() const {
     TORCH_ILISTREF_UNWRAP(tag_, { return this_.rend(); });
   }
 
