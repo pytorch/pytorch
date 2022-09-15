@@ -175,7 +175,7 @@ enum class DispatchKey : uint16_t {
   // TODO: put this in BackendComponents
 
   DML, // DirectML support lives out of tree at
-  // https://github.com/microsoft/directml 
+  // https://github.com/microsoft/directml
 
   // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
   // https://github.com/microsoft/onnxruntime, and is also used to test general

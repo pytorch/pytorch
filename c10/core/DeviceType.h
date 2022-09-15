@@ -51,7 +51,7 @@ enum class DeviceType : int8_t {
   IPU = 18, // Graphcore IPU
   PrivateUse1 = 19, // PrivateUse1 device
   DML = 20, // DirectML / Microsoft
-  
+
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp

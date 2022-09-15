@@ -12,8 +12,8 @@ namespace detail {
 // See getCUDAHooks for some more commentary
 const DMLHooksInterface& getDMLHooks() {
   static std::unique_ptr<DMLHooksInterface> dml_hooks;
-  static std::once_flag once;
-  std::call_once(once, [] {
+  static c10::once_flag once;
+  c10::call_once(once, [] {
     dml_hooks = DMLHooksRegistry()->Create("DMLHooks", {});
     if (!dml_hooks) {
       dml_hooks =
