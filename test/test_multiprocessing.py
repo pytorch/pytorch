@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOW
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-
 load_tests = load_tests
 
 TEST_REPEATS = 30
@@ -167,7 +166,6 @@ def mixed_type_producer(queue, event):
         queue.put(byte_tensor)
         event.wait()
         event.clear()
-
 
 def simple_autograd_function(a=1):
     torch.rand(3).requires_grad_(True).mean().backward()
@@ -400,7 +398,6 @@ class TestMultiprocessing(TestCase):
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
-
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
