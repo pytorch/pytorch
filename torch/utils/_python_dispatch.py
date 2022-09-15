@@ -5,6 +5,7 @@ from torch.utils._mode_utils import _ModeInfo
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 from typing import List
+import threading
 
 
 @dataclass
@@ -87,23 +88,29 @@ class TorchDispatchMode:
 
 # WARNING: If you access this list to see all the active modes in order, do not update the list in place
 # since it alters the actual mode stack
-_cur_torch_dispatch_mode: List[TorchDispatchMode] = []
+threadLocal = threading.local()
+def _get_cur_mode_stack():
+    mode_stack = getattr(threadLocal, 'dispatch_mode_stack', None)
+    if not mode_stack:
+        mode_stack = []
+        threadLocal.dispatch_mode_stack = mode_stack
+    return mode_stack
 
 
 def get_current_dispatch_mode():
-    return _cur_torch_dispatch_mode[-1] if len(_cur_torch_dispatch_mode) > 0 else None
+    return _get_cur_mode_stack()[-1] if len(_get_cur_mode_stack()) > 0 else None
 
 
 def _push_mode(mode):
-    if len(_cur_torch_dispatch_mode) == 0:
+    if len(_get_cur_mode_stack()) == 0:
         _set_torch_dispatch_mode(_TorchDispatchStackMode())
-    _cur_torch_dispatch_mode.append(mode)
+    _get_cur_mode_stack().append(mode)
 
 
 def _pop_mode():
-    assert len(_cur_torch_dispatch_mode) > 0
-    old = _cur_torch_dispatch_mode.pop()
-    if len(_cur_torch_dispatch_mode) == 0:
+    assert len(_get_cur_mode_stack()) > 0
+    old = _get_cur_mode_stack().pop()
+    if len(_get_cur_mode_stack()) == 0:
         _set_torch_dispatch_mode(None)
     return old
 
@@ -121,7 +128,7 @@ def _pop_mode_temporarily():
 class _TorchDispatchStackMode:
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
-            if len(_cur_torch_dispatch_mode) > 0:
+            if len(_get_cur_mode_stack()) > 0:
                 _set_torch_dispatch_mode(self)
             # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
             if old.__torch_dispatch__.__self__ is type(old):

@@ -19,6 +19,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOW
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
+from torch.utils._python_dispatch import BaseTorchDispatchMode
+
 load_tests = load_tests
 
 TEST_REPEATS = 30
@@ -166,6 +168,16 @@ def mixed_type_producer(queue, event):
         queue.put(byte_tensor)
         event.wait()
         event.clear()
+
+
+def simple_mode(i):
+    mode = BaseTorchDispatchMode()
+    before_len = len(torch.utils._python_dispatch._get_cur_mode_stack())
+    with mode:
+        during_len = len(torch.utils._python_dispatch._get_cur_mode_stack())
+        time.sleep(0.5)
+    after_len = len(torch.utils._python_dispatch._get_cur_mode_stack())
+    return before_len, during_len, after_len
 
 def simple_autograd_function(a=1):
     torch.rand(3).requires_grad_(True).mean().backward()
@@ -398,6 +410,18 @@ class TestMultiprocessing(TestCase):
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
+
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing")
+    def test_mode_with_spawn(self):
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(5) as pool:
+            out = pool.map(simple_mode, range(5))
+
+        # simple_mode fn saved size of the mode stack before(0), during(1), and after(0)
+        # if it's not thread safe, we might see a mode stack of 2 during or 1 after
+        self.assertEqual(out, [(0, 1, 0)] * 5)
+
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")

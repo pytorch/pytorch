@@ -629,9 +629,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
     return wrapped
 
 
-def get_torch_dispatch_modes():
-    # WARNING: Do not update the list in place since it alters the actual mode stack
-    return torch.utils._python_dispatch._cur_torch_dispatch_mode
+# WARNING: Do not update the list in place since it alters the actual mode stack
+get_torch_dispatch_modes = torch.utils._python_dispatch._get_cur_mode_stack
 
 
 @contextlib.contextmanager

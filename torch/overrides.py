@@ -26,6 +26,7 @@ import collections
 import functools
 import types
 import warnings
+import threading
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator, Tuple
 import contextlib
 
@@ -1832,23 +1833,29 @@ class TorchFunctionMode():
 
 # WARNING: If you access this list to see all the active modes in order, do not update the list in place
 # since it alters the actual mode stack
-_cur_torch_function_mode: List[TorchFunctionMode] = []
+threadLocal = threading.local()
+def _get_cur_mode_stack():
+    mode_stack = getattr(threadLocal, 'function_mode_stack', None)
+    if not mode_stack:
+        mode_stack = []
+        threadLocal.function_mode_stack = mode_stack
+    return mode_stack
 
 
 def _get_current_function_mode():
-    return _cur_torch_function_mode[-1] if len(_cur_torch_function_mode) > 0 else None
+    return _get_cur_mode_stack[-1] if len(_get_cur_mode_stack) > 0 else None
 
 
 def _push_mode(mode):
-    if len(_cur_torch_function_mode) == 0:
+    if len(_get_cur_mode_stack) == 0:
         _set_torch_function_mode(_TorchFunctionStackMode())
-    _cur_torch_function_mode.append(mode)
+    _get_cur_mode_stack.append(mode)
 
 
 def _pop_mode():
-    assert len(_cur_torch_function_mode) > 0
-    old = _cur_torch_function_mode.pop()
-    if len(_cur_torch_function_mode) == 0:
+    assert len(_get_cur_mode_stack) > 0
+    old = _get_cur_mode_stack.pop()
+    if len(_get_cur_mode_stack) == 0:
         _set_torch_function_mode(None)
     return old
 
