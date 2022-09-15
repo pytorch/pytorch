@@ -1472,6 +1472,22 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_nested_comm_tensor_wrapping(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(CommTensor(tensor), group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_consecutive_comm_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work1 = dist.all_reduce(tensor, group=group, async_op=True)
+            work1.wait()
+            work2 = dist.all_reduce(tensor, group=group, async_op=True)
+            return work2, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
 
 if __name__ == "__main__":
     assert (
