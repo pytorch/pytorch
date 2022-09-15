@@ -14,7 +14,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <torch/csrc/autograd/functions/utils.h>
-#include <torch/csrc/jit_decomp_interface.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <array>
@@ -450,11 +450,13 @@ namespace impl {
 
 namespace {
 
-// if run_jit_decomposition were not a member function, we wouldn't have to
-// use a functor
-class MyFunctor final : public c10::OperatorKernel {
+// If run_jit_decomposition were not a member function, we would be able
+// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// However, member functions cannot be passed this way - instead we wrap our
+// call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
+class WrapperFunctor final : public c10::OperatorKernel {
  public:
-  MyFunctor(JitDecompInterface* impl) : impl_(impl){};
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -474,7 +476,7 @@ Return run_jit_decomposition_with_args_for_jvp(
     c10::DispatchKeySet dispatchKeySet,
     Args&&... args) {
   // see NOTE: [Jit Decomposition Interface]
-  JitDecompInterface* impl = getJitDecompImpl(name);
+  JitDecompInterface* impl = getJitDecompImpl();
 
   TORCH_CHECK_NOT_IMPLEMENTED(
       impl && impl->has_jit_decomposition(opHandle.schema()),
@@ -490,7 +492,7 @@ Return run_jit_decomposition_with_args_for_jvp(
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunctor(
-                 std::make_unique<MyFunctor>(impl)))
+                 std::make_unique<WrapperFunctor>(impl)))
       .call<Return, Args...>(
           opHandle, dispatchKeySet, std::forward<Args>(args)...);
 }

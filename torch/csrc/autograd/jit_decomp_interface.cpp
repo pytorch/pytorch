@@ -1,4 +1,4 @@
-#include <torch/csrc/jit_decomp_interface.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 
 namespace torch {
 namespace autograd {
@@ -12,7 +12,7 @@ void setJitDecompImpl(JitDecompInterface* impl_) {
   impl = impl_;
 }
 
-JitDecompInterface* getJitDecompImpl(c10::string_view name) {
+JitDecompInterface* getJitDecompImpl() {
   return impl;
 }
 

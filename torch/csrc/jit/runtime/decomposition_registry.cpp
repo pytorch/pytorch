@@ -8,12 +8,12 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit_decomp_interface.h>
 #include <memory>
 #include <unordered_map>
 

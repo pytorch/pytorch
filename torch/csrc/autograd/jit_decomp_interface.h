@@ -7,7 +7,7 @@
 // NOTE: [Jit Decomposition Interface]
 //
 // For some context of why we need this at all, see NOTE: [forward-mode AD
-// decompositions hack]
+// decompositions mechanism]
 //
 // Introducing that mechanism from the NOTE is problematic because:
 // - it relies on TorchScript, so now VariableTypeX.cpp depends on TorchScript.
@@ -41,7 +41,7 @@ struct TORCH_API JitDecompInterface {
 };
 
 TORCH_API void setJitDecompImpl(JitDecompInterface* impl);
-TORCH_API JitDecompInterface* getJitDecompImpl(c10::string_view name);
+TORCH_API JitDecompInterface* getJitDecompImpl();
 
 struct TORCH_API JitDecompRegisterer {
   explicit JitDecompRegisterer(JitDecompInterface* impl) {
