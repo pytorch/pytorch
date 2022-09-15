@@ -27,7 +27,7 @@ from ._utils import (
     _alloc_storage,
     _free_storage,
     _same_storage,
-    _set_flattened,
+    _set_fsdp_flattened,
     p_assert,
 )
 
@@ -282,7 +282,7 @@ class FlatParameter(nn.Parameter):
             self._params = None
             self._shared_params = None
         self._unpadded_unsharded_size = self.size()
-        _set_flattened(self)
+        _set_fsdp_flattened(self)
 
 
 class FlatParamHandle:
