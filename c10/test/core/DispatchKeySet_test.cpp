@@ -225,13 +225,15 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
           tid1 == DispatchKey::StartOfSparseBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
           tid1 == DispatchKey::StartOfNestedTensorBackends ||
-          tid1 == DispatchKey::StartOfAutogradFunctionalityBackends)
+          tid1 == DispatchKey::StartOfAutogradFunctionalityBackends ||
+          tid1 == DispatchKey::StartOfAutocastFunctionalityBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
           tid2 == DispatchKey::StartOfNestedTensorBackends ||
-          tid2 == DispatchKey::StartOfAutogradFunctionalityBackends)
+          tid2 == DispatchKey::StartOfAutogradFunctionalityBackends ||
+          tid2 == DispatchKey::StartOfAutocastFunctionalityBackends)
         continue;
 
       auto backend1 = toBackendComponent(tid1);
@@ -418,7 +420,8 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfQuantizedBackends ||
         k == DispatchKey::StartOfSparseBackends ||
         k == DispatchKey::StartOfNestedTensorBackends ||
-        k == DispatchKey::StartOfAutogradFunctionalityBackends)
+        k == DispatchKey::StartOfAutogradFunctionalityBackends ||
+        k == DispatchKey::StartOfAutocastFunctionalityBackends)
       continue;
     auto res = std::string(toString(k));
     ASSERT_TRUE(res.find("Unknown") == std::string::npos)
