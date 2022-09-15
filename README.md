@@ -91,7 +91,7 @@ from several research papers on this topic, as well as current and past work suc
 [Chainer](https://chainer.org), etc.
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+You get the best speed and flexibility for your crazy research.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/dynamic_graph.gif)
 
