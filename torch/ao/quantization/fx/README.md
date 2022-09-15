@@ -42,13 +42,13 @@ m = convert_fx(m, backend_config=backend_config)
 
 ## High Level Flow with Simple Example
 
-Floating Point Model — (1.1 _fuse_fx) —> Fused Model —-- (1.2 QAT Module Swap) —--> Model with QAT modules —-- (1.3 Insert Observers) —---> Prepared Model     
-—-- (2.1 convert_to_reference) —----> Reference Quantized Model —---- (2.2 Lower to Native Backend) —-----> Quantized Model
+Floating Point Model — (1.1 `_fuse_fx`) —> Fused Model —-- (1.2 QAT Module Swap) —--> Model with QAT modules —-- (1.3 Insert Observers) —---> Prepared Model
+---- (2.1 `convert_to_reference`) —----> Reference Quantized Model —---- (2.2 Lower to Native Backend) —-----> Quantized Model
 
-prepare_fx: Step 1.1 to 1.3
-convert_fx: Step 2.1 to 2.2
+`prepare_fx`: Step 1.1 to 1.3
+`convert_fx`: Step 2.1 to 2.2
 
-In the following, I’ll first have a detailed description for each step, and then talk about the corresponding keys in BackendConfig. We’ll follow the terminologies defined in (draft) README.md of quantization syntax transforms in this doc. 
+In the following, I’ll first have a detailed description for each step, and then talk about the corresponding settings in BackendConfig. We’ll follow the terminologies defined in (draft) README.md of quantization syntax transforms in this doc. 
 
 ### 0. Original Model
 
@@ -80,9 +80,9 @@ def forward(self, x):
 In eager mode quantization, users need to call `fuse_modules` or `fuse_modules_qat` and provide a list of fully qualified names for the submodules that need to be fused. We will get the same result as the eager mode fusion.
 What we did in this example is 
 Identify (Linear - ReLU) subgraph by searching through the model graph
-For each of the identified subgraph, we replace the root_node (typically the weighted module in the pattern, like Linear), with a fused module by calling the fuser_method for this pattern, a fused module is a sequential of a few modules, e.g. nni.LinearReLU is a sequential of linear and relu module
+For each of the identified subgraph, we replace the `root_node` (typically the weighted module in the pattern, like Linear), with a fused module by calling the fuser_method for this pattern, a fused module is a sequential of a few modules, e.g. nni.LinearReLU is a sequential of linear and relu module
 
-backend_config configurations relevant to this step are:
+`backend_config` configurations relevant to this step are:
 
 ```
 BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear)) 
