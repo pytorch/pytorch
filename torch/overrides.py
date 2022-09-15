@@ -1868,7 +1868,7 @@ def _pop_mode_temporarily():
     finally:
         _push_mode(old)
 
-# a helper "mode" used by the torch dispatch push helper method. This is the only mode that will ever
+# a helper "mode" used by the torch_function push helper method. This is the only mode that will ever
 # be active at the C++ level and it will run the current mode
 class _TorchFunctionStackMode:
     def __torch_function__(self, func, types, args=(), kwargs=None):

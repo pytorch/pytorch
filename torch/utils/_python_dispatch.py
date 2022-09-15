@@ -130,9 +130,9 @@ class _TorchDispatchStackMode:
         with _pop_mode_temporarily() as old:
             if len(_get_cur_mode_stack()) > 0:
                 _set_torch_dispatch_mode(self)
-            # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
+            # we can't check the type of __torch_dispatch__ here but this is sufficient for checking it's a classmethod
             if old.__torch_dispatch__.__self__ is type(old):
-                raise RuntimeError("TorchFunctionMode's torch_function function " +
+                raise RuntimeError(f"{type(old)}'s torch_dispatch function " +
                                    "should be a normal method not a class method")
             return old.__torch_dispatch__(func, types, args, kwargs)
 
