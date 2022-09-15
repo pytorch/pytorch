@@ -2671,17 +2671,16 @@ class FullyShardedDataParallel(nn.Module):
             module (nn.Module): Unused; expected by the hook signature.
             input (Any): Unused; expected by the hook signature.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self.training_state = TrainingState_.FORWARD
-            self._exec_order_data.record_pre_forward(handles, self.training)
-            for handle in handles:
-                handle._training_state = HandleTrainingState.FORWARD
-            if unshard_fn is not None:
-                unshard_fn()
-            # Register post-backward hooks to reshard the parameters and
-            # reduce-scatter their gradients. They must be re-registered every
-            # forward pass in case the `grad_fn` is mutated.
-            self._register_post_backward_hooks(handles)
+        self.training_state = TrainingState_.FORWARD
+        self._exec_order_data.record_pre_forward(handles, self.training)
+        for handle in handles:
+            handle._training_state = HandleTrainingState.FORWARD
+        if unshard_fn is not None:
+            unshard_fn()
+        # Register post-backward hooks to reshard the parameters and
+        # reduce-scatter their gradients. They must be re-registered every
+        # forward pass in case the `grad_fn` is mutated.
+        self._register_post_backward_hooks(handles)
 
     def _pre_forward_unshard(
         self,
@@ -2719,17 +2718,16 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each ``FlatParameter`` 's data points to the sharded
         flattened parameter.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self._exec_order_data.record_post_forward(handles)
-            if reshard_fn is not None:
-                reshard_fn()
-            # Register pre-backward hooks to unshard the flattened parameters
-            # for the gradient computation (if needed)
-            output = self._register_pre_backward_hooks(output, handles)
-            self.training_state = TrainingState_.IDLE
-            for handle in handles:
-                handle._training_state = HandleTrainingState.IDLE
-            return output
+        self._exec_order_data.record_post_forward(handles)
+        if reshard_fn is not None:
+            reshard_fn()
+        # Register pre-backward hooks to unshard the flattened parameters
+        # for the gradient computation (if needed)
+        output = self._register_pre_backward_hooks(output, handles)
+        self.training_state = TrainingState_.IDLE
+        for handle in handles:
+            handle._training_state = HandleTrainingState.IDLE
+        return output
 
     def _cast_forward_inputs(self, *args, **kwargs):
         """Moves the forward inputs to the compute device and casts them to the
