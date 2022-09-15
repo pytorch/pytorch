@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import json
-import multiprocessing as mp
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -28,7 +27,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from torch.multiprocessing import Pool
+from torch.multiprocessing import Pool, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -48,6 +47,9 @@ except ImportError:
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
 
+# mac has 3 CPUs and also received the best speedup with 3 processes. Setting this any larger
+# will also force use further restrict the amount of memory per process for cuda
+NUM_PROCS = 3
 
 def discover_tests(
         base_dir: Optional[pathlib.Path] = None,
@@ -397,7 +399,6 @@ def run_test(
     launcher_cmd=None,
     extra_unittest_args=None,
     env=None,
-    log_file=None,
 ) -> int:
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
@@ -426,12 +427,16 @@ def run_test(
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
 
+    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                        prefix=test_module.replace("\\", "-").replace("/", "-"))
+    os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    if log_file is not None:
-        with open(log_file, "w") as f:
-            return shell(command, test_directory, stdout=f, stderr=f, env=env)
-    return shell(command, test_directory, env=env)
+    with open(log_path, "w") as f:
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
+    print_log_file(test_module, log_path)
+    os.remove(log_path)
+    return ret_code
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
@@ -703,16 +708,15 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
-def print_log_file(test, file_path):
+def print_log_file(test: str, file_path: str) -> None:
     with open(file_path, "r") as f:
         print_to_stderr("")
-        print_to_stderr(f'PRINT LOG FILE of {test} ({file_path})')
-        print_to_stderr(f'##[group]PRINT LOG FILE of {test} ({file_path})')
+        print_to_stderr(f"PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr(f"##[group]PRINT LOG FILE of {test} ({file_path})")
         print_to_stderr(f.read())
-        print_to_stderr('##[endgroup]')
+        print_to_stderr("##[endgroup]")
         print_to_stderr(f"FINISHED PRINT LOG FILE of {test} ({file_path})")
         print_to_stderr("")
-    os.remove(file_path)
 
 
 def run_test_ops(test_module, test_directory, options):
@@ -723,29 +727,19 @@ def run_test_ops(test_module, test_directory, options):
                         extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
                         )
 
-    file_names = []
     return_codes = []
-    num_procs = 3
     os.environ["PARALLEL_TESTING"] = "1"
-    pool = mp.Pool(num_procs)
-    for i in range(num_procs):
-        log_fd, file_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                             prefix=test_module.replace("\\", "-").replace("/", "-"))
+    pool = Pool(NUM_PROCS)
+    for i in range(NUM_PROCS):
         return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
                                        kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                                     f'--shard-id={i}', f'--num-shards={num_procs}',
+                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
                                                                      "-k=not _linalg_cholesky_"],
-                                             "log_file": file_path
                                              })
-        file_names.append(file_path)
         return_codes.append(return_code)
-        os.close(log_fd)
     pool.close()
     pool.join()
     del os.environ['PARALLEL_TESTING']
-
-    for log_file in file_names:
-        print_log_file(test_module, log_file)
 
     for return_code in return_codes:
         if return_code.get() != 0:
@@ -1128,16 +1122,13 @@ def get_selected_tests(options):
     return selected_tests
 
 
-def run_test_module(test: str, test_directory: str, options, log_file=None) -> Optional[str]:
+def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     test_module = parse_test_module(test)
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr("Running {} ... [{}]".format(test, datetime.now()))
     handler = CUSTOM_HANDLERS.get(test_module, run_test)
-    if log_file is not None and handler == run_test:
-        return_code = handler(test_module, test_directory, options, log_file=log_file)
-    else:
-        return_code = handler(test_module, test_directory, options)
+    return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
     ), f"While running {test} got non integer return code {return_code}"
@@ -1151,14 +1142,6 @@ def run_test_module(test: str, test_directory: str, options, log_file=None) -> O
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
     return message
-
-
-def mp_run_test_module(test, test_directory, options):
-    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix=test.replace("\\", "-").replace("/", "-"))
-    os.close(log_fd)
-    message = run_test_module(test, test_directory, options, log_file=log_path)
-    return test, message, log_path
 
 
 def main():
@@ -1188,13 +1171,10 @@ def main():
     print_to_stderr("parallel tests:\n {}".format("\n ".join(selected_tests_parallel)))
     print_to_stderr("serial tests:\n {}".format("\n ".join(selected_tests_serial)))
 
-    proc_limit = 3
-    pool = mp.get_context("spawn").Pool(proc_limit, maxtasksperchild=1)
+    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=1)
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    def success_callback(res):
-        test, err_message, log_file_path = res
-        print_log_file(test, log_file_path)
+    def success_callback(err_message):
         if err_message is None:
             return True
         failure_messages.append(err_message)
@@ -1206,7 +1186,7 @@ def main():
     try:
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
-            pool.apply_async(mp_run_test_module, args=(test, test_directory,
+            pool.apply_async(run_test_module, args=(test, test_directory,
                              copy.deepcopy(options)), callback=success_callback)
         pool.close()
         pool.join()
