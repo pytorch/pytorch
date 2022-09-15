@@ -15,6 +15,7 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - third_party/onnx
   approved_by:
   - BowenBao
   - abock
