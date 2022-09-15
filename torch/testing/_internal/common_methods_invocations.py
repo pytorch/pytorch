@@ -11314,13 +11314,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                # Sparse XYZ Tensors Do not have strides
-               DecorateInfo(unittest.expectedFailure,"TestCompositeCompliance", "test_operator"),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                # Sparse XYZ Tensors Do not have strides
-               DecorateInfo(unittest.expectedFailure,"TestTags", "test_tags"),
+               DecorateInfo(unittest.expectedFailure, 'TestTags', 'test_tags'),
                # RuntimeError: Expected all tensors to be on the same device...
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_multiple_devices"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_multiple_devices'),
                # Unsupported Memory format option, Preserve, float32 only?
-               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32, ))
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, ))
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
