@@ -5,6 +5,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#include <cpuinfo.h>
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
@@ -184,8 +185,7 @@ static bool preferred(
     bool is_transposed_conv,
     int groups,
     torch::List<int64_t> output_padding) {
-  bool vnni_available =
-      cpuinfo_has_x86_avx512vnni() || cpuinfo_has_x86_avx512_4vnniw();
+  bool vnni_available = cpuinfo_has_x86_avx512vnni();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
