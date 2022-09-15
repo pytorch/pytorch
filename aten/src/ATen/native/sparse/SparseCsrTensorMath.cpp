@@ -556,7 +556,14 @@ Tensor& _sparse_csr_mm_out(
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
+  TORCH_CHECK(
+      (mat1.layout() == kStrided ||
+       (at::sparse_csr::numBatchDimensions(mat1) + 2 == mat1.dim())) &&
+          (mat2.layout() == kStrided ||
+           (at::sparse_csr::numBatchDimensions(mat2) + 2 == mat2.dim())),
+      "Sparse compressed matrix multiply does not support sparse arguments with dense dimensions");
+
+  if (mat1.layout() == kSparseCsr && mat2.layout() == kSparseCsr) {
     // Return sparse
     // TODO: replace with at::zeros when it's implemented for sparse csr
     return at::addmm(
@@ -579,7 +586,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
     // native support for CSC.
     return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
   }
-  if ((mat1.is_sparse_csr() || (mat1.layout() == kSparseBsr)) &&
+  if ((mat1.layout() == kSparseCsr || mat1.layout() == kSparseBsr) &&
       mat2.layout() == c10::kStrided) {
     // Return dense
     return at::addmm(
@@ -604,11 +611,11 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
     //  perform (mat2^T x mat1^T)^T
     return at::addmm(
                at::zeros({mat2.size(1), mat1.size(0)}, mat1.options()),
-               mat2.t(),
-               mat1.t(),
+               mat2.transpose(-2, -1),
+               mat1.transpose(-2, -1),
                0.0,
                1.0)
-        .t();
+        .transpose(-2, -1);
   }
   AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
 }

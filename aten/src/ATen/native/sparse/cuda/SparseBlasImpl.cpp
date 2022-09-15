@@ -844,11 +844,21 @@ void addmm_out_sparse_csr(
   }
   if (mat1.layout() == kStrided && mat2.layout() == kSparseCsc &&
       result.layout() == kStrided) {
-    return spmm(mat2.t(), mat1.t(), beta, alpha, result.t());
+    return spmm(
+        mat2.transpose(-2, -1),
+        mat1.transpose(-2, -1),
+        beta,
+        alpha,
+        result.transpose(-2, -1));
   }
   if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
     // TODO: Add native CSC support via cuSPARSE if supported.
-    return spmm(mat2.transpose(0, 1).to_sparse_csr(), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+    return spmm(
+        mat2.transpose(-2, -1).to_sparse_csr(),
+        mat1.transpose(-2, -1),
+        beta,
+        alpha,
+        result.transpose(-2, -1));
   }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);

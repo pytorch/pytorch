@@ -361,20 +361,20 @@ void addmm_out_sparse_csr(
     // TODO: Use MKL's transposition flags instead of this costly conversion to
     // CSR
     return addmm_dense_result(
-        mat2.transpose(0, 1).to_sparse_csr(),
-        mat1.transpose(0, 1),
+        mat2.transpose(-2, -1).to_sparse_csr(),
+        mat1.transpose(-2, -1),
         beta,
         alpha,
-        result.transpose(0, 1));
+        result.transpose(-2, -1));
   }
   if (mat1.layout() == kStrided &&
       (mat2.layout() == kSparseCsc || mat2.layout() == kSparseBsc)) {
     return addmm_dense_result(
-        mat2.transpose(0, 1),
-        mat1.transpose(0, 1),
+        mat2.transpose(-2, -1),
+        mat1.transpose(-2, -1),
         beta,
         alpha,
-        result.transpose(0, 1));
+        result.transpose(-2, -1));
   }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
     return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);

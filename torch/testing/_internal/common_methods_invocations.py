@@ -3442,7 +3442,8 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
                requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
     return tensors
 
-def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
+
+def sample_inputs_linear(self, device, dtype, requires_grad, sparse_weights=False, **kwargs):
     features_options = [[3, 4], [8, 8]]
     batch_options: List[List[int]] = [
         [],  # no batch
@@ -3453,50 +3454,59 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     create_tensor = partial(make_tensor, device=device, dtype=dtype,
                             requires_grad=requires_grad, low=-2, high=2)
 
-    generate_csr_samples = not (dtype in integral_types() or requires_grad)
-    generate_bsr_samples = generate_csr_samples and (dtype not in (torch.float16, torch.bfloat16))
+    def shallow_copy(tensor, layout=torch.strided, blocksize=(1, 1)):
+        tensor = tensor.detach()
+        if layout == torch.sparse_csr:
+            tensor = tensor.to_sparse_csr()
+        elif layout == torch.sparse_bsr:
+            tensor = tensor.to_sparse_bsr(*blocksize)
+        elif layout == torch.sparse_csc:
+            tensor = tensor.to_sparse_csc()
+        elif tensor == torch.sparse_bsc:
+            tensor = tensor.to_sparse_bsc(*blocksize)
+        return tensor.requires_grad_(requires_grad)
 
-    sample_inputs = []
-    for has_bias, (in_feat, out_feat), batch_shape in \
-            itertools.product([True, False], features_options, batch_options):
+    for (in_feat, out_feat), batch_shape in itertools.product(features_options, batch_options):
+
         input_tensor = create_tensor(batch_shape + [in_feat])
         weight = create_tensor([out_feat, in_feat])
-        if not has_bias:
-            sample_inputs.append(SampleInput(input_tensor, args=(weight,)))
-            continue
-
         bias = create_tensor([out_feat])
-        sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
 
-    if generate_csr_samples:
-        for has_bias, (in_feat, out_feat), batch_shape in \
-                itertools.product([True, False], features_options, batch_options):
-            input_tensor = create_tensor(batch_shape + [in_feat])
-            weight = create_tensor([out_feat, in_feat]).to_sparse_csr()
-            if not has_bias:
-                sample_inputs.append(SampleInput(input_tensor, args=(weight,)))
-                continue
+        # sparse weights flag is exclusive not inclusive
+        if sparse_weights:
+            # TODO: introduce zeros
+            yield SampleInput(shallow_copy(input_tensor), args=(shallow_copy(weight, layout=torch.sparse_csr), ))
+            yield SampleInput(shallow_copy(input_tensor),
+                              args=(shallow_copy(weight, layout=torch.sparse_csr), shallow_copy(bias)))
+            yield SampleInput(shallow_copy(input_tensor), args=(shallow_copy(weight, layout=torch.sparse_csc), ))
+            yield SampleInput(shallow_copy(input_tensor),
+                              args=(shallow_copy(weight, layout=torch.sparse_csc), shallow_copy(bias)))
 
-            bias = create_tensor([out_feat])
-            sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
-
-    if generate_bsr_samples:
-        for has_bias, (in_feat, out_feat), batch_shape in \
-                itertools.product([True, False], features_options, batch_options):
-            # for bsr multiply sizes by factor to ensure block-shapes are valid
-            out_feat = out_feat * 16
+            # make in/out_feat compatible with blocksize options
             in_feat = in_feat * 16
+            out_feat = out_feat * 16
+            # generate larger samples
             input_tensor = create_tensor(batch_shape + [in_feat])
-            for block_size in (2, 4, 8):
-                weight = create_tensor([out_feat, in_feat]).to_sparse_bsr(block_size, block_size)
-                if not has_bias:
-                    sample_inputs.append(SampleInput(input_tensor, args=(weight,)))
-                    continue
+            # TODO: ensure some blocks are not materialized
+            weight = create_tensor([out_feat, in_feat])
+            bias = create_tensor([out_feat])
+            for blocksize in (2, 4, 8):
+                yield SampleInput(shallow_copy(input_tensor),
+                                  args=(shallow_copy(weight, layout=torch.sparse_bsr,
+                                                     blocksize=(blocksize, blocksize)), ))
+                yield SampleInput(shallow_copy(input_tensor),
+                                  args=(shallow_copy(weight, layout=torch.sparse_bsr,
+                                                     blocksize=(blocksize, blocksize)), shallow_copy(bias)))
+                yield SampleInput(shallow_copy(input_tensor),
+                                  args=(shallow_copy(weight, layout=torch.sparse_bsc,
+                                                     blocksize=(blocksize, blocksize)), ))
+                yield SampleInput(shallow_copy(input_tensor),
+                                  args=(shallow_copy(weight, layout=torch.sparse_bsc,
+                                                     blocksize=(blocksize, blocksize)), shallow_copy(bias)))
 
-                bias = create_tensor([out_feat])
-                sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
-
-    return sample_inputs
+        else:
+            yield SampleInput(shallow_copy(input_tensor), args=(shallow_copy(weight), ))
+            yield SampleInput(shallow_copy(input_tensor), args=(shallow_copy(weight), shallow_copy(bias)))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -11280,6 +11290,37 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+           )),
+    OpInfo('nn.functional.linear',
+           variant_test_name='sparse_weights',
+           aten_name='linear',
+           # TODO: support for sparse autograd
+           supports_autograd=False,
+           sample_inputs_func=partial(sample_inputs_linear, sparse_weights=True),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16]
+                                                       if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           # TODO: support for sparse autograd
+           supports_forward_ad=False,
+           # TODO: support for sparse autograd
+           supports_fwgrad_bwgrad=False,
+           # See https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
+           supports_expanded_weight=True,
+           decorators=(
+               # Strides are not the same!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                            'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               # Sparse XYZ Tensors Do not have strides
+               DecorateInfo(unittest.expectedFailure,"TestCompositeCompliance", "test_operator"),
+               # Sparse XYZ Tensors Do not have strides
+               DecorateInfo(unittest.expectedFailure,"TestTags", "test_tags"),
+               # RuntimeError: Expected all tensors to be on the same device...
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_multiple_devices"),
+               # Unsupported Memory format option, Preserve, float32 only?
+               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32, ))
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
