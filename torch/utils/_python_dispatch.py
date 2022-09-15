@@ -4,7 +4,6 @@ import warnings
 from torch.utils._mode_utils import _ModeInfo
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
-from typing import List
 import threading
 
 
