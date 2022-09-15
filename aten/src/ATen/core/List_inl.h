@@ -221,6 +221,16 @@ typename List<T>::iterator List<T>::end() const {
 }
 
 template<class T>
+typename List<T>::iterator List<T>::rbegin() const {
+  return iterator(impl_->list.rbegin());
+}
+
+template<class T>
+typename List<T>::iterator List<T>::rend() const {
+  return iterator(impl_->list.rend());
+}
+
+template<class T>
 bool List<T>::empty() const {
   return impl_->list.empty();
 }
