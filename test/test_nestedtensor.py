@@ -689,7 +689,6 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NestedTensor always requires keepdim=True for now."):
             torch.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(-1)
 
-
     @dtypes(torch.float, torch.float16)
     @skipMeta
     def test_clone(self, device, dtype):
@@ -1641,7 +1640,48 @@ class TestNestedTensorAutograd(TestCase):
         assert b.grad is None
         assert c.grad is None
 
+    def test_values_grad_with_broadcast(self):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64)
 
+        def grad_test_func(a, b, c):
+            nt = torch.nested_tensor([a, b, c])
+            buffer = nt.values()
+            return buffer.sum()
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_to_buffer_series_ops_grad_with_broadcast(self):
+        a = torch.randn(1, 1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(1, 1, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(1, 1, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested_tensor([a, b, c])
+            buffer = nt.values()
+            buffer = buffer * 2
+            return buffer.exp()
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_unbind_flow_through(self):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested_tensor([a, b, c])
+            ntT = nt.transpose(-1, -2)
+            unbound = ntT.unbind()
+            d = unbound[0]
+            d = torch.pow(d, 2)
+            return d
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
