@@ -300,20 +300,15 @@ at::Tensor LazyNativeFunctions::empty_symint(
 }
 
 at::Tensor LazyNativeFunctions::empty_strided_symint(
-    c10::SymIntArrayRef sym_size,
-    c10::SymIntArrayRef sym_stride,
+    at::SymIntArrayRef sym_size,
+    at::SymIntArrayRef sym_stride,
     c10::optional<at::ScalarType> dtype,
     c10::optional<at::Layout> layout,
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
-  at::Tensor t = empty_symint(
-      sym_size,
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      c10::nullopt);
+  at::Tensor t =
+      empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
   auto size = c10::asIntArrayRefSlow(sym_size);
   auto stride = c10::asIntArrayRefSlow(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);

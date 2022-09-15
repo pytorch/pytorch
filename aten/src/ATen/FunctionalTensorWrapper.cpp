@@ -349,6 +349,9 @@ bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_forma
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
 }
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_strides();
+}
 
 namespace functionalization {
 namespace impl {

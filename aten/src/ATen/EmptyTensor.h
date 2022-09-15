@@ -4,7 +4,8 @@
 namespace at {
 namespace detail {
 
-inline void check_size_nonnegative(IntArrayRef size) {
+template <class ArrayRefType>
+inline void check_size_nonnegative(ArrayRefType size) {
   for (auto x : size) {
     TORCH_CHECK(
         x >= 0,
