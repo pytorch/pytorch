@@ -2311,6 +2311,15 @@ Alias of :func:`torch.cat`.
 )
 
 add_docstr(
+    torch.concatenate,
+    r"""
+concatenate(tensors, axis=0, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""",
+)
+
+add_docstr(
     torch.ceil,
     r"""
 ceil(input, *, out=None) -> Tensor
