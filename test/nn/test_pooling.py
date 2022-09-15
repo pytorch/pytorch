@@ -1088,22 +1088,22 @@ torch.cuda.synchronize()
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim):
             if dim == 1:
-                return torch.tensor([1, 3], dtype=torch.double).repeat(2, 2, 1)
+                return torch.tensor([1, 3], dtype=torch.long).repeat(2, 2, 1)
             if dim == 2:
-                return torch.tensor([[5, 7], [13, 15]], dtype=torch.double).repeat(2, 2, 1, 1)
+                return torch.tensor([[5, 7], [13, 15]], dtype=torch.long).repeat(2, 2, 1, 1)
 
         def expected_grad(dim):
             if dim == 1:
-                return torch.tensor([0, 1, 0, 1], dtype=torch.double).repeat(2, 2, 1)
+                return torch.tensor([0, 1, 0, 1], dtype=torch.float).repeat(2, 2, 1)
             grad = expected_grad(dim - 1)
             zero = torch.zeros(grad.size())
             return torch.stack((zero, grad, zero, grad), 2)
 
         def expected_output(dim):
             if dim == 1:
-                return torch.arange(2, 17, 2).view(2, 2, 2)
+                return torch.arange(2, 17, 2, dtype=torch.float).view(2, 2, 2)
             if dim == 2:
-                col = torch.arange(6, 63, 8)
+                col = torch.arange(6, 63, 8, dtype=torch.float)
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
@@ -1122,10 +1122,8 @@ torch.cuda.synchronize()
             expected_indices = expected_indices(num_dim)
             expected_output = expected_output(num_dim)
             self.assertEqual(indices.dim(), input.dim())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(indices.data.squeeze(), expected_indices)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(output.data.squeeze(), expected_output)
+            self.assertEqual(indices.data.squeeze(), expected_indices)
+            self.assertEqual(output.data.squeeze(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
 
@@ -1133,8 +1131,7 @@ torch.cuda.synchronize()
         grad_output = torch.ones(output.size(), device=device, dtype=dtype)
         output.backward(grad_output, retain_graph=True)
         expected_grad = expected_grad(num_dim)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(input_var.grad.data, expected_grad.view_as(input))
+        self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
         indices.add_(1)
