@@ -2958,7 +2958,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 # The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s
+# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
+# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
@@ -2976,19 +2977,21 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def index_fill(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
-    return x.clone().index_fill_(dim, index, value)
+    return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
 
 
 # The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s
+# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
+# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
 def index_fill_(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
     if isinstance(value, TensorLike):
         utils.check(
             value.ndim == 0,
-            lambda: f"Only supports 0-dimensional value tensor. Got a tensor with {value.ndim} dimensions.",
-        )
+            lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
+            f"Got a tensor with {value.ndim} dimensions.",
+        )  # type: ignore[arg-type]
         return x.clone().index_copy_(dim, index, value)
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
@@ -2998,7 +3001,7 @@ def index_fill_(
     idx = (slice(None),) * dim + (index,)
     # Treat scalars as elements of \R^1
     y = x.unsqueeze(0) if x.ndim == 0 else x
-    y[idx] = value
+    y[idx] = value  # type: ignore[assignment]
     return x
 
 
@@ -3011,7 +3014,8 @@ def index_add(
 
 
 # The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s
+# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
+# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
 def index_add_(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: float = 1
 ):
@@ -3022,8 +3026,10 @@ def index_add_(
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
-        utils.check(utils.is_weakly_lesser_type(type(alpha), python_type),
-                    lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!")
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
         tensor = prims.mul(tensor, alpha)
     # Treat scalars as elements of \R^1
     y = x.unsqueeze(0) if x.ndim == 0 else x
