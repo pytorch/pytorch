@@ -141,6 +141,19 @@ class HashStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+class PrefixStoreTest(TestCase):
+    def setUp(self):
+        # delete is false as FileStore will automatically clean up the file
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+
+    def test_get_underlying_store(self):
+        tcp_store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=1, is_master=True)
+        hash_store = dist.HashStore()
+        file_store = dist.FileStore(self.file.name, world_size=1)
+        for store in [tcp_store, hash_store, file_store]:
+            with self.subTest(f"Testing getting underlying_store for {type(store)}"):
+                prefix_store = dist.PrefixStore("prefix", store)
+                self.assertEqual(prefix_store.underlying_store, store)
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):

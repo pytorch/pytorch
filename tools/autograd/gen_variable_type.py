@@ -160,6 +160,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_or",
     # This function returns nested_tensor shape as a tensor that is non-differentiable
     "_nested_tensor_size",
+    "_nested_tensor_strides",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -538,6 +539,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
+    "_nested_tensor_strides",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -601,7 +603,7 @@ auto ${tmp_var} = ([&]() {
   if (${try_jit_decomposition_bool} && ${any_has_forward_grad}) {
     static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
     static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
-    return impl::run_jit_decomposition_with_args_for_jvp<${returns_and_args}>("${op_name}", *opt_op, ks, ${arg_names});
+    return impl::run_jit_decomposition_with_args_for_jvp<${return_types}>("${op_name}", *opt_op, ks, ${arg_names});
   } else {
     ${guard}
     return ${base_type_call};
@@ -747,7 +749,8 @@ def gen_variable_type(
     fm.write(
         "VariableType.h",
         lambda: {
-            "generated_comment": "@" f"generated from {template_path}/VariableType.h"
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/VariableType.h"
         },
     )
 
@@ -801,7 +804,8 @@ def gen_variable_type(
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
-            "generated_comment": "@" f"generated from {template_path}/VariableType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
@@ -1396,10 +1400,6 @@ def emit_body(
         if len(f.func.returns) > 1:
             return_types = f"std::tuple<{return_types}>"
 
-        arg_types = [
-            cpp.argument_type(a, binds="", symint=True).cpp_type()
-            for a in f.func.arguments.flat_all
-        ]
         arg_names = [
             a.name
             for a in cpp.arguments(
@@ -1422,7 +1422,7 @@ def emit_body(
                 any_has_forward_grad=any_has_forward_grad,
                 op_name=cpp.name(f.func),
                 op_overload=f.func.name.overload_name,
-                returns_and_args=return_types + ", " + ", ".join(arg_types),
+                return_types=return_types,
                 arg_names=arg_names,
             )
 

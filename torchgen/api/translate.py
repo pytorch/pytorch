@@ -339,7 +339,7 @@ Check this module for more information.
         elif goal.type == BaseCType(symIntArrayRefT):
             try:
                 r = direct_solve(NamedCType(goal.name, BaseCType(intArrayRefT)))
-                return f"c10::SymIntArrayRef::fromIntArrayRef({r})"
+                return f"c10::fromIntArrayRef({r})"
             except UnsatError:
                 return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(SymIntT):
