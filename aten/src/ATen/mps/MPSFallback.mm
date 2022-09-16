@@ -14,7 +14,7 @@ void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 
 void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
 {
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "The operator '", op.schema().operator_name(), "' is not current implemented ",
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "The operator '", op.schema().operator_name(), "' is not currently implemented ",
     "for the MPS device. If you want this op to be added in priority during the prototype ",
     "phase of this feature, please comment on https://github.com/pytorch/pytorch/issues/77764. ",
     "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
