@@ -905,9 +905,10 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 
-if TEST_CUDA and 'PARALLEL_TESTING' in os.environ:
-    # we usually run 3 processes and other libraries take up about 11% of space -> .33 - .11 = .22
-    torch.cuda.set_per_process_memory_fraction(0.22)
+if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
+    from tools.testing.test_selections import NUM_PROCS
+    # other libraries take up about 11% of space per process
+    torch.cuda.set_per_process_memory_fraction(round(1 / NUM_PROCS - .11, 2))
 
 
 def skipIfCrossRef(fn):

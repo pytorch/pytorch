@@ -39,6 +39,7 @@ try:
         get_reordered_tests,
         get_test_case_configs,
         calculate_shards,
+        NUM_PROCS
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -47,9 +48,6 @@ except ImportError:
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
 
-# mac has 3 CPUs and also received the best speedup with 3 processes. Setting this any larger
-# will also force use further restrict the amount of memory per process for cuda
-NUM_PROCS = 3
 
 def discover_tests(
         base_dir: Optional[pathlib.Path] = None,

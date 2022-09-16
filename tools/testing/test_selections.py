@@ -5,6 +5,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
+# mac has 3 CPUs and also received the best speedup with 3 processes. Setting this any larger
+# will also force use further restrict the amount of memory per process for cuda
+NUM_PROCS = 3
 
 def calculate_shards(
     num_shards: int,
@@ -12,7 +15,7 @@ def calculate_shards(
     job_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
 ) -> List[Tuple[float, List[str]]]:
-    must_serial = must_serial if must_serial is not None else lambda x: True
+    must_serial = must_serial if callable(must_serial) else lambda x: True
 
     filtered_job_times: Dict[str, float] = dict()
     unknown_jobs: List[str] = []
