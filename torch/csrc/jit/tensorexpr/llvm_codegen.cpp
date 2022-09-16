@@ -1081,7 +1081,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     auto lans = v->src_value()->dtype().lanes();
     auto shift_len = llvm::ConstantInt::get(IntTy_, 16);
     auto one = llvm::ConstantInt::get(ShortTy_, 1);
-    auto rounding_bias = llvm::ConstantInt::get(ShortTy_, 32767);
+    auto rounding_bias = llvm::ConstantInt::get(ShortTy_, 0x7FFF);
     auto bf16_nan = llvm::ConstantInt::get(ShortTy_, 0xFFFF);
 
     auto mask = irb_.CreateFCmpOEQ(value_, value_);
