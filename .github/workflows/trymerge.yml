@@ -42,7 +42,7 @@ jobs:
         run: |
           set -ex
           if [ -n "${REBASE}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" -b "${REBASE}"
+            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
             git checkout master
           fi
           if [ -n "${FORCE}" ]; then
