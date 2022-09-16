@@ -3396,15 +3396,14 @@ def new_empty_strided(
 @register_decomposition(torch.ops.aten.zeros)
 @out_wrapper()
 def zeros(
-    *size,
+    size: ShapeType,
+    *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    size = utils.extract_shape_from_varargs(size)
-
     if dtype is None:
         dtype = torch.get_default_dtype()
 
@@ -3446,17 +3445,15 @@ def new_zeros(
 
 
 @register_decomposition(torch.ops.aten.ones)
-@out_wrapper()
 def ones(
-    *size,
+    size: ShapeType,
+    *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    size = utils.extract_shape_from_varargs(size)
-
     if dtype is None:
         dtype = torch.get_default_dtype()
 
