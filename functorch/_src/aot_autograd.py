@@ -283,7 +283,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     shape_env = fw_module.shape_env
     guards = [shape_env.simplify(guard) for guard, _, _ in fw_module.shape_env.guards]
     print("Guards: ", set(guards))
-    shape_env.update_divisible()
+    shape_env._update_divisible()
     print("Divisibility: ", shape_env.divisible)
     shape_groups = collections.defaultdict(list)
     for k, v in shape_env.replacements.items():
