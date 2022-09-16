@@ -655,11 +655,13 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
+  install_jinja2
   install_torchvision
   install_torchdynamo
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_jinja2
   install_torchvision
   checkout_install_torchdynamo
   test_dynamo_shard 2
@@ -696,7 +698,6 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
 else
   install_torchvision
   install_torchdynamo
-  install_jinja2
   install_monkeytype
   test_python
   test_aten
