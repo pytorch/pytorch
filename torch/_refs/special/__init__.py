@@ -61,7 +61,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
 
 
 zeta = _make_elementwise_binary_reference(
-    prims.zeta,
+    prims.zeta,  # type: ignore[has-type]
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_zeta,
 )
