@@ -2,7 +2,6 @@
 
 import numpy as np
 import torch
-from torch._C import memory_format
 import torch.nn.functional as F
 from torch import nn
 import unittest
@@ -1000,6 +999,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat(self):
         for device in self.devices:
             _dim = 1
+
             def foo(*args):
                 args_2 = [v + i for i, v in enumerate(args)]
                 v = torch.cat(args_2, dim=_dim)
