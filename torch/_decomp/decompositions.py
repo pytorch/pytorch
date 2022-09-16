@@ -1289,11 +1289,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(
-    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
-)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
 def nop_decomposition(x):
-    return x
+    return aten.alias(x)
 
 
 @register_decomposition(aten.cudnn_batch_norm)
