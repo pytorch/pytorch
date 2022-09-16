@@ -86,7 +86,9 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
     ):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(
+                op.name(), torch._C._dispatch_autogradother_backends
+            )
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
@@ -292,6 +294,7 @@ class OpOverload(PyOperatorABC):
 
         return inner
 
+    # This implements the pre-computation logic for the Python dispatcher.
     def __getattr__(self, attr):
         if len(attr) == 0 or not attr[0].isupper():
             raise AttributeError()
@@ -299,9 +302,6 @@ class OpOverload(PyOperatorABC):
         try:
             key = torch._C._dispatch_key_parse(attr)
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
             raise AttributeError()
 
         if key == torch._C.DispatchKey.Python:
