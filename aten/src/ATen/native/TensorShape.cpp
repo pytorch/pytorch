@@ -32,37 +32,6 @@
 
 namespace at {
 
-namespace {
-
-inline void setStrided_symint(
-    const Tensor& self,
-    c10::SymIntArrayRef size,
-    c10::SymIntArrayRef stride,
-    c10::SymInt storage_offset) {
-  TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
-#if 0
-  for (auto val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
-  }
-#endif
-
-  auto* self_ = self.unsafeGetTensorImpl();
-
-#if 0
-  checkInBoundsForStorage(
-      size, stride, storage_offset, self_->dtype(), self_->storage());
-
-  /* storage offset */
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
-#endif
-  /* size and stride */
-  self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
-}
-
-} // anonymous namespace
-
 namespace meta {
 inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
   size_t i = 0;
@@ -72,7 +41,7 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
         "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
     i++;
   }
-} // anonymous namespace}
+}
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   c10::optional<c10::MemoryFormat> format = c10::nullopt;
@@ -949,7 +918,7 @@ Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_
   auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  setStrided_symint(result, sym_size, sym_stride, sym_storage_offset);
+  setStrided(result, sym_size, sym_stride, sym_storage_offset);
   return result;
 }
 

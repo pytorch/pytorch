@@ -26,7 +26,6 @@ at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
 }
 
-// TODO: this print is bad
 std::ostream& operator<<(std::ostream& os, SymInt s) {
   if (s.is_symbolic()) {
     os << "SymInt(" << s.toSymIntNodeImpl()->str() << ")";
