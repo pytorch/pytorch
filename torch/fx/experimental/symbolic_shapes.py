@@ -274,7 +274,7 @@ class ShapeEnv(object):
         return shape_groups
 
     @_lru_cache
-    def _maybe_evaluate_static(self, expr: sympy.Expr) -> Optional[sympy.Expr]:
+    def _maybe_evaluate_static(self, expr: "sympy.Expr") -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
         """
@@ -306,7 +306,7 @@ class ShapeEnv(object):
         self.divisible = new_divisible
 
     @_lru_cache
-    def simplify(self, expr: sympy.Expr) -> sympy.Expr:
+    def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
         if len(expr.atoms(sympy.Mod)) > 0:
             self._update_divisible()
@@ -315,7 +315,7 @@ class ShapeEnv(object):
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: sympy.Expr):
+    def size_hint(self, expr: "sympy.Expr"):
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
         assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
         return result_expr
@@ -332,7 +332,7 @@ class ShapeEnv(object):
             self.replacements[acopy], acopy = a, self.replacements[acopy]
         return a
 
-    def _maybe_guard_eq(self, expr: sympy.Eq) -> None:
+    def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
@@ -348,28 +348,31 @@ class ShapeEnv(object):
             free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
             lhs = expr.lhs
             rhs = expr.rhs
-            solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
-            if not solutions.is_finite_set:
-                if len(expr.atoms(sympy.Mod)) == 1:
-                    mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                    solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
-                    if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
-                        self.divisible[mod_expr] = 0
-                return
+            try:
+                solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
+                if not solutions.is_finite_set:
+                    if len(expr.atoms(sympy.Mod)) == 1:
+                        mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                        solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
+                        if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
+                            self.divisible[mod_expr] = 0
+                    return
 
-            if not isinstance(solutions, sympy.FiniteSet):
-                return
+                if not isinstance(solutions, sympy.FiniteSet):
+                    return
 
-            solutions = tuple(solutions)
-            if len(solutions) == 1 and "/" not in str(solutions[0]):
-                new_var = solutions[0]
-                new_var = self._find(solutions[0])
-                self.replacements[free[0]] = new_var
+                solutions = tuple(solutions)
+                if len(solutions) == 1 and "/" not in str(solutions[0]):
+                    new_var = solutions[0]
+                    new_var = self._find(solutions[0])
+                    self.replacements[free[0]] = new_var
+            except ZeroDivisionError:
+                pass
 
         return
 
     @lru_cache(256)
-    def evaluate_expr(self, expr: sympy.Expr):
+    def evaluate_expr(self, expr: "sympy.Expr"):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
