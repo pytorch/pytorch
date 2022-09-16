@@ -2,7 +2,6 @@
 
 import importlib
 import inspect
-import itertools
 import warnings
 from typing import Callable, Collection, Dict, Generic, Optional, Set, TypeVar
 
@@ -207,10 +206,11 @@ class SymbolicRegistry:
         """Registers a symbolic function.
 
         Args:
-            name: the qualified name of the function to register.
-            opset: the opset version of the function to register.
-            func: the symbolic function to register.
-            custom: whether the function is a custom function that overrides existing ones.
+            name: The qualified name of the function to register. In the form of 'domain::op'.
+                E.g. 'aten::add'.
+            opset: The opset version of the function to register.
+            func: The symbolic function to register.
+            custom: Whether the function is a custom function that overrides existing ones.
         """
         if "::" not in name:
             raise ValueError(
@@ -228,8 +228,8 @@ class SymbolicRegistry:
         """Unregisters a symbolic function.
 
         Args:
-            name: the qualified name of the function to unregister.
-            opset: the opset version of the function to unregister.
+            name: The qualified name of the function to unregister.
+            opset: The opset version of the function to unregister.
         """
         if name not in self._registry:
             return
@@ -278,8 +278,8 @@ def _register_module(module, opset: OpsetVersion) -> None:
     """Registers all functions in the given module.
 
     Args:
-        module: the module to register.
-        opset: the opset version to register.
+        module: The module to register.
+        opset: The opset version to register.
     """
     global registry
     members = inspect.getmembers(module)
