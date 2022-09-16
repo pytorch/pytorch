@@ -277,7 +277,7 @@ class FlatParameter(nn.Parameter):
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
-                _set_flattened(param)
+                _set_fsdp_flattened(param)
         else:
             self._params = None
             self._shared_params = None
