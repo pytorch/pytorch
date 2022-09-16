@@ -677,6 +677,18 @@ Tensor prod_safe_zeros_backward(
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
+// checking the storage also encompasses FakeTensors, which report device and
+// dispatch keys as non-meta when not in an composite explicit kernel
+// invocation. because these backwards are implicit kernels fake tensors do not
+// appear as meta.
+bool is_meta_in_composite_kernels(const Tensor& t) {
+  if (t.is_meta()) {
+    return true;
+  }
+  return t.has_storage() &&
+      t.storage().data_ptr().device() == c10::DeviceType::Meta;
+}
+
 // note that the gradient for prod is equivalent to:
 // cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
 // input:                        [    a,     b,     c]
@@ -691,7 +703,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta()) {
+  if (is_meta_in_composite_kernels(input)) {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -720,7 +732,7 @@ Tensor prod_backward(
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta()) {
+  if (is_meta_in_composite_kernels(input)) {
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
