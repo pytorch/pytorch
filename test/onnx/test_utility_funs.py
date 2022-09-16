@@ -22,11 +22,8 @@ from torch.onnx import (
     unregister_custom_op_symbolic,
     utils,
 )
-from torch.onnx.symbolic_helper import (
-    _unpack_list,
-    parse_args,
-)
 from torch.onnx._globals import GLOBALS
+from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
