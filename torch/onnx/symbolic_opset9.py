@@ -3368,8 +3368,22 @@ def eye(g, *args):
         )
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
-
-    return symbolic_helper._unimplemented("aten::eye", f"with {len(args)} arguments")
+    elif len(args) == 7:
+        # aten::eye(n, m, k, dtype, layout, device, pin_memory)
+        n, m, k, dtype, layout, device, pin_memory = args
+        shape = g.op(
+            "Concat",
+            symbolic_helper._unsqueeze_helper(g, n, [0]),
+            symbolic_helper._unsqueeze_helper(g, m, [0]),
+            axis_i=0,
+        )
+        tensor = zeros(g, shape, dtype, layout, device)
+        k_val = symbolic_helper._parse_arg(k, "i")
+        return g.op("EyeLike", tensor, k_i=k_val)
+    else:
+        return symbolic_helper._unimplemented(
+            "aten::eye", f"with {len(args)} arguments"
+        )
 
 
 @_beartype.beartype

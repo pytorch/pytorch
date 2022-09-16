@@ -2299,6 +2299,15 @@
   dispatch:
     CompositeExplicitAutograd: eye
 
+# These are basically overloads for NumPy compatibility
+- func: eye.nk(int n, *, int? k, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
+
+- func: eye.nmk(int n, int m, int k, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
+
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
@@ -2310,6 +2319,16 @@
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
+
+- func: eye.nk_out(int n, *, int? k, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: eye_out_cpu_nk
+    CUDA: eye_out_cuda_nk
+
+- func: eye.nmk_out(int n, int m, int k, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: eye_out_cpu
+    CUDA: eye_out_cuda
 
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   variants: function, method
