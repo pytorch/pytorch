@@ -685,7 +685,8 @@ bool is_meta_in_composite_kernels(const Tensor& t) {
   if (t.is_meta()) {
     return true;
   }
-  return t.has_storage() && t.storage().data_ptr().device() == c10::DeviceType::Meta;
+  return t.has_storage() &&
+      t.storage().data_ptr().device() == c10::DeviceType::Meta;
 }
 
 // note that the gradient for prod is equivalent to:
