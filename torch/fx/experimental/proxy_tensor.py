@@ -630,7 +630,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
 
 # WARNING: Do not update the list in place since it alters the actual mode stack
-get_torch_dispatch_modes = torch.utils._python_dispatch._get_cur_mode_stack
+def get_torch_dispatch_modes():
+    return torch.utils._python_dispatch._cur_mode_stack
 
 
 @contextlib.contextmanager

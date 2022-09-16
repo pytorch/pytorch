@@ -1833,29 +1833,23 @@ class TorchFunctionMode():
 
 # WARNING: If you access this list to see all the active modes in order, do not update the list in place
 # since it alters the actual mode stack
-threadLocal = threading.local()
-def _get_cur_mode_stack():
-    mode_stack = getattr(threadLocal, 'function_mode_stack', None)
-    if not mode_stack:
-        mode_stack = []
-        threadLocal.function_mode_stack = mode_stack
-    return mode_stack
+_cur_mode_stack = []
 
 
 def _get_current_function_mode():
-    return _get_cur_mode_stack()[-1] if len(_get_cur_mode_stack()) > 0 else None
+    return _cur_mode_stack[-1] if len(_cur_mode_stack) > 0 else None
 
 
 def _push_mode(mode):
-    if len(_get_cur_mode_stack()) == 0:
+    if len(_cur_mode_stack) == 0:
         _set_torch_function_mode(_TorchFunctionStackMode())
-    _get_cur_mode_stack().append(mode)
+    _cur_mode_stack.append(mode)
 
 
 def _pop_mode():
-    assert len(_get_cur_mode_stack()) > 0
-    old = _get_cur_mode_stack().pop()
-    if len(_get_cur_mode_stack()) == 0:
+    assert len(_cur_mode_stack) > 0
+    old = _cur_mode_stack.pop()
+    if len(_cur_mode_stack) == 0:
         _set_torch_function_mode(None)
     return old
 
@@ -1873,7 +1867,7 @@ def _pop_mode_temporarily():
 class _TorchFunctionStackMode:
     def __torch_function__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
-            if len(_get_cur_mode_stack()) > 0:
+            if len(_cur_mode_stack) > 0:
                 _set_torch_function_mode(self)
             # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
             if old.__torch_function__.__self__ is type(old):
