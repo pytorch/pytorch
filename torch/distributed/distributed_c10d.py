@@ -1,3 +1,5 @@
+import itertools
+import collections.abc
 import contextlib
 import io
 import logging
@@ -455,6 +457,26 @@ def _check_tensor_list(param, param_name):
             "Invalid function argument. Expected parameter `{}` "
             "to be of type List[torch.Tensor].".format(param_name)
         )
+
+def _as_iterable(obj) -> collections.abc.Iterable:
+    return obj if isinstance(obj, list) else (obj,)
+
+def _ensure_all_tensors_same_dtype(*tensors) -> None:
+    last_dtype = None
+    for tensor in itertools.chain(*map(_as_iterable, tensors)):
+        tensor_dtype = tensor.dtype
+        # Mixing complex and its element type is allowed
+        if tensor_dtype.is_complex:
+            tensor_dtype = torch.float32 if tensor_dtype == torch.complex64 else torch.complex128
+
+        if last_dtype is None:
+            last_dtype = tensor_dtype
+        else:
+            if last_dtype != tensor_dtype:
+                raise RuntimeError(
+                    "Invalid usage of tensors with different dtypes"
+                    f"Found {last_dtype} and  {tensor.dtype}"
+                )
 
 
 def _check_op(op):
@@ -1507,6 +1529,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     """
     _check_tensor_list(tensors, "tensor")
+    _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce_coalesced")
         return
@@ -2174,6 +2197,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
+    _ensure_all_tensors_same_dtype(tensor_list, tensor)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather")
         return
@@ -2314,12 +2338,14 @@ def all_gather_coalesced(
         _warn_not_in_group("all_gather_coalesced")
         return
     _check_tensor_list(input_tensor_list, "tensor_list")
+    _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
             "Invalid function argument: " "output_tensor_lists should be a list"
         )
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
+        _ensure_all_tensors_same_dtype(output_tensor_list)
 
     output_tensor_lists = [
         [t if not t.is_complex() else torch.view_as_real(t) for t in l]
@@ -2380,6 +2406,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         _check_tensor_list(gather_list, "gather_list")
     else:
         gather_list = []
+    _ensure_all_tensors_same_dtype(tensor, gather_list)
 
     if _rank_not_in_group(group):
         _warn_not_in_group("gather")
@@ -2437,6 +2464,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         _check_tensor_list(scatter_list, "scatter_list")
     else:
         scatter_list = []
+    _ensure_all_tensors_same_dtype(tensor, scatter_list)
 
     if _rank_not_in_group(group):
         _warn_not_in_group("scatter")
@@ -2550,6 +2578,9 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
     Args:
         output (Tensor): Output tensor.
         input_list (list[Tensor]): List of tensors to reduce and scatter.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
@@ -2561,6 +2592,7 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
     """
     _check_single_tensor(output, "output")
     _check_tensor_list(input_list, "input_list")
+    _ensure_all_tensors_same_dtype(output, input_list)
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce_scatter")
         return
@@ -2722,6 +2754,7 @@ def all_to_all_single(
     opts = AllToAllOptions()
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
+    _ensure_all_tensors_same_dtype(output, input)
 
     if input.is_complex():
         input = torch.view_as_real(input)
@@ -2845,6 +2878,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     opts = AllToAllOptions()
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
+    _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list)
 
     input_tensor_list = [
         t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
