@@ -27,6 +27,13 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
+  void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_dispatcher);
+  }
+
   bool is_contiguous(const TensorImpl* self) const override {
     PANIC(is_contiguous);
   }
@@ -73,8 +80,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 };
 
 void PyInterpreter::disarm() noexcept {
-  static NoopPyInterpreterVTable noop_vtable;
-  vtable_ = &noop_vtable;
+  // Intentionally leaked
+  static PyInterpreterVTable* noop_vtable = new NoopPyInterpreterVTable();
+  vtable_ = noop_vtable;
 }
 
 } // namespace impl

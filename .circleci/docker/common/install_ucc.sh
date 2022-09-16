@@ -36,7 +36,7 @@ function install_ucc() {
   git submodule update --init --recursive
 
   ./autogen.sh
-  ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-nccl=no --with-cuda=$with_cuda
+  ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-cuda=$with_cuda
   time make -j
   sudo make install
 
