@@ -825,10 +825,7 @@ class TestOperators(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
-        xfail('linalg.det'),
-        xfail('linalg.det', 'singular'),
         xfail('cumprod'),
-        xfail('lu_solve'),
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),

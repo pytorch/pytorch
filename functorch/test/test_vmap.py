@@ -3306,7 +3306,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
