@@ -13050,6 +13050,8 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
+               # need to add pin_memory support to primTorch
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -13074,6 +13076,8 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
+               # need to add pin_memory support to primTorch
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -13700,9 +13704,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_randn,
            supports_autograd=False,
            skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.skip, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                # Reference doesn't support the pin_memory parameter
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
-               # randn generates different values based on the strides of out tensor
+               # CPU randn generates different values based on the strides of out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                # randn fails to warn when resizing its out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -13715,9 +13723,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # aten.uniform_.default - couldn't find symbolic meta function/decomposition
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
-               # aten.uniform was not decomposed
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('randn_like',
@@ -14214,7 +14219,15 @@ op_db: List[OpInfo] = [
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
-           error_inputs_func=error_inputs_renorm),
+           error_inputs_func=error_inputs_renorm,
+           skips=(
+               # RuntimeError: Difference from float64 is larger with decomposition
+               # linalg_vector_norm.default than original on output 0.
+               # Original max diff: 2.560596747969157e-07,
+               # Decomp max diff: 1.8187482915266173e-06
+               DecorateInfo(unittest.skip, 'TestDecomp', 'test_comprehensive',
+                            device_type='cpu', dtypes=(torch.float16,)),
+           )),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
@@ -17311,6 +17324,7 @@ python_ref_db = [
                          'TestCommon',
                          'test_python_ref_executor'),
             # These tests expect the input to be a tensor or a sequence of tensors
+            DecorateInfo(unittest.skip, "TestCommon", "test_noncontiguous_samples"),
             DecorateInfo(unittest.skip, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip, 'TestMathBits', 'test_neg_conj_view'),
