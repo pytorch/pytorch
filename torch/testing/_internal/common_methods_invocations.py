@@ -9347,8 +9347,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
-               # Some inputs are non deterministic, eg when mat1 and mat2 are size 0
-               DecorateInfo(unittest.skip('some inputs are non deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # https://github.com/pytorch/pytorch/issues/85169
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
@@ -14880,8 +14880,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     BinaryUfuncInfo(
@@ -14908,8 +14907,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     OpInfo(
@@ -14935,8 +14933,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     BinaryUfuncInfo(
@@ -14966,8 +14963,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
@@ -14999,8 +14995,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            # RuntimeError: t == DeviceType::CUDA INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
