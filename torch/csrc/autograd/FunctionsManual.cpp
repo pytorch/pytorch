@@ -682,7 +682,10 @@ Tensor prod_safe_zeros_backward(
 // invocation. because these backwards are implicit kernels fake tensors do not
 // appear as meta.
 bool is_meta_in_composite_kernels(const Tensor& t) {
-  return t.storage().data_ptr().device() == c10::DeviceType::Meta;
+  if (t.is_meta()) {
+    return true;
+  }
+  return t.has_storage() && t.storage().data_ptr().device() == c10::DeviceType::Meta;
 }
 
 // note that the gradient for prod is equivalent to:
