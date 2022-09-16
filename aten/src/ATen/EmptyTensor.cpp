@@ -112,7 +112,7 @@ SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     SymInt itemsize_bytes,
-    size_t storage_offset
+    SymInt storage_offset
   ) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
