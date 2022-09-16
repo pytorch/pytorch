@@ -13,7 +13,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten  # type: ignore[has-type]
+aten = torch.ops.aten
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "PySymInt", "ShapeEnv",
@@ -66,7 +66,6 @@ def has_symbolic_sizes_strides(elem):
     return (
         any([isinstance(i, torch.SymIntNode) for i in elem.shape])
         or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.numel(), torch.SymIntNode)
         or isinstance(elem.storage_offset(), torch.SymIntNode)
     )
 
@@ -180,7 +179,7 @@ for method, _func in magic_methods.items():
             expr = self.shape_env.replace(self.expr)
             other = self.shape_env.replace(other)
             out = func(expr, other)
-            out = self.shape_env.replace(out)
+            out = sympy.expand(out)
             return PySymInt(out, self.shape_env)
         return magic_impl
 
@@ -377,7 +376,7 @@ class ShapeEnv(object):
         Given an expression, evaluates it, adding guards if necessary
         """
         try:
-            if len(list(expr.free_symbols)) == 0:
+            if len(expr.free_symbols) == 0:
                 return expr
             expr = self.simplify(expr)
 
