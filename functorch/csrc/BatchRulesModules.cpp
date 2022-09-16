@@ -52,9 +52,11 @@ std::tuple<Tensor,optional<int64_t>>
 embedding_dense_backward_batch_rule(
     const Tensor& grad_, optional<int64_t> grad_bdim,
     const Tensor& indices_, optional<int64_t> indices_bdim,
-    int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+    c10::SymInt sym_num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
+  // TODO: symintify
+  int64_t num_weights = sym_num_weights.expect_int();
   if (!indices_bdim && grad_bdim) {
     const auto bdim_size = grad.size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
