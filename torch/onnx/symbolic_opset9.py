@@ -6297,7 +6297,7 @@ def prim_device(g: GraphContext, *inputs, **kwargs) -> None:
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(g: GraphContext, *inputs, **attrs):
+def prim_loop(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
     node = g.original_node
     env = g.env
     params_dict = g.params_dict
@@ -6306,9 +6306,12 @@ def prim_loop(g: GraphContext, *inputs, **attrs):
     opset_version = GLOBALS.export_onnx_opset_version
 
     new_op_outputs = g.op("Loop", *inputs, outputs=node.outputsSize())
-    new_node = (
-        new_op_outputs[0].node() if node.outputsSize() > 1 else new_op_outputs.node()
-    )
+
+    if isinstance(new_op_outputs, Sequence):
+        new_node = new_op_outputs[0].node()
+    else:
+        new_node = new_op_outputs.node()
+
     for block in node.blocks():
         new_block = new_node.addBlock()
         # Copy input metadata to subblock
@@ -6409,9 +6412,12 @@ def prim_if(g: GraphContext, *inputs, **attrs):
         return final_b_list
     else:
         new_op_outputs = g.op("If", *inputs, outputs=n.outputsSize())
-        new_node = (
-            new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
-        )
+
+        if isinstance(new_op_outputs, Sequence):
+            new_node = new_op_outputs[0].node()
+        else:
+            new_node = new_op_outputs.node()
+
         for b in n.blocks():
             new_block = new_node.addBlock()
             torch._C._jit_pass_onnx_block(
