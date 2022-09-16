@@ -552,14 +552,6 @@ class IListRef {
     TORCH_ILISTREF_UNWRAP(tag_, { return this_.end(); });
   }
 
-  reverse_iterator rbegin() const {
-    TORCH_ILISTREF_UNWRAP(tag_, { return this_.rbegin(); });
-  }
-
-  reverse_iterator rend() const {
-    TORCH_ILISTREF_UNWRAP(tag_, { return this_.rend(); });
-  }
-
   detail::IListRefConstRef<T> front() const {
     TORCH_ILISTREF_UNWRAP(tag_, { return ImplT::front(this_); });
   }

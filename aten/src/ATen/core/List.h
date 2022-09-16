@@ -332,18 +332,6 @@ public:
   iterator end() const;
 
   /**
-   * Returns a reverse iterator to the first element of the container.
-   * If the container is empty, the returned iterator will be equal to end().
-   */
-  reverse_iterator rbegin() const;
-
-  /**
-   * Returns a reverse iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
-   */
-  reverse_iterator rend() const;
-
-  /**
    * Checks if the container has no elements.
    */
   bool empty() const;
