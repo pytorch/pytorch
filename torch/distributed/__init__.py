@@ -68,7 +68,9 @@ if is_available():
     )
 
     from .rendezvous import (
+        rendezvous,
         _create_store_from_options,
+        register_rendezvous_handler,
     )
 
     from .remote_device import _remote_device
