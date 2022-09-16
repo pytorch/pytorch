@@ -7432,8 +7432,8 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'ceil',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -7456,8 +7456,8 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'floor',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -7468,8 +7468,8 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'round',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -7492,8 +7492,8 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'trunc',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
 
     ForeachFuncInfo(
@@ -8664,8 +8664,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -9339,8 +9339,8 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -12295,8 +12295,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('round',
                    ref=np.round,
                    aliases=('special.round',),
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -12824,8 +12824,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   dtypes=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
