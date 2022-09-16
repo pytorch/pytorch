@@ -16,7 +16,23 @@ The only constraint on the input Tensors is that their dimension must match.
 
 This enables more efficient metadata representations and access to purpose built kernels.
 
-Construction is straightforward and involves passing a list of Tensors to the constructor.
+One application of NestedTensors is to express sequential data in various domains.
+While the conventional approach is to pad variable length sequences, NestedTensor
+enables users to bypass padding. The API for calling operations on a nested tensor is no different
+from that of a regular `torch.Tensor`, which should allow seamless integration with existing models,
+with the main difference being :ref:`construction of the inputs <construction>` of the inputs.
+
+As this is a prototype feature, the :ref:`operations supported <supported operations>` are still
+limited. However, we welcome issues and contributions. More information on contributing can be found
+`on this wiki <https://github.com/pytorch/pytorch/wiki/NestedTensor-Backend>`_.
+
+.. _construction:
+
+Construction
+++++++++++++
+
+Construction is straightforward and involves passing a list of Tensors to the `torch.nested_tensor`
+constructor.
 
 >>> a, b = torch.arange(3), torch.arange(5) + 3
 >>> a
@@ -38,6 +54,15 @@ nested_tensor([
   tensor([0., 1., 2.], device='cuda:0'),
   tensor([3., 4., 5., 6., 7.], device='cuda:0')
 ])
+
+Autograd support is available by setting the `requires_grad` attribute. There is
+a subtlety here where the usual `requires_grad` kwarg for constructors is not supported for
+the `nested_tensor` constructor.
+
+>>> nt.requires_grad_(True)
+
+The tensors passed to the constructor can also require gradients, and autograd will
+behave as expected.
 
 In order to form a valid NestedTensor the passed Tensors also all need to match in dimension, but none of the other attributes need to.
 
@@ -140,13 +165,30 @@ nested_tensor([
           [ 0.4074,  2.4855,  0.0733,  0.8285]])
 ])
 
-Note that nt.unbind()[0] is not a, but rather a slice of the underlying memory, which represents the first entry or constituent of the NestedTensor.
+Note that nt.unbind()[0] is not a copy, but rather a slice of the underlying memory, which represents the first entry or constituent of the NestedTensor.
 
-Nested tensor functions
-+++++++++++++++++++++++++
+Nested tensor constructor and conversion functions
+++++++++++++++++++++++++++++++++++++++++++++++++++
 
 The following functions are related to nested tensors:
 
 .. currentmodule:: torch.nested
 
 .. autofunction:: to_padded_tensor
+
+.. _supported operations:
+
+[wip] Supported operations
+++++++++++++++++++++++++++
+
+The following table summarizes operations that are currently supported on NestedTensor
+and any constraints they have.
+
+.. csv-table::
+   :header: "PyTorch operation",  "Constraints"
+   :widths: 20, 65
+   :delim: ;
+
+   :func:`torch.matmul`;  ``no broadcasting support``
+   :func:`torch.nn.Linear`;  ``-``
+   :func:`torch.nn.functional.softmax`; ``-``
