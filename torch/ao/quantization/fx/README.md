@@ -22,33 +22,27 @@ float_model            QConfigMapping           BackendConfig
                               |
                        Quantized Model
 
-Please refer to TODO: link [(draft) README.md of quantization syntax transforms] for definitions of terminologies.
+Please refer to [TODO: link] for definitions of terminologies.
 
 ## Overview
 The FX graph representation is pretty close to python/eager mode, it preserves many python/eager mode constructs like modules, functionals, torch ops, so overall the implementation reuses some of building blocks and utilities from eager mode quantization, this includes the QConfig, QConfig propagation (might be removed), fused modules, QAT module, quantized modules, QAT module swapping utility. Also the overall flow exactly matches eager mode quantization, the only difference is that the transformations like fusion, inserting stubs are fully automated and controlled by QConfigMapping and BackendConfig.
 
-### Quantization Flow Code Example
-```
-m = M().eval()
-qconfig = ...
-qconfig_mapping = get_default_qconfig_mapping(“fbgemm”)
-backend_config = get_default_backend_config(“fbgemm”)
-m = prepare_fx(m, qconfig_mapping, backend_config=backend_config)
-# or m = prepare_qat_fx(m, qconfig_mapping, backend_config=backend_config)
-# calibration/training
-...
-m = convert_fx(m, backend_config=backend_config)
-```
-
 ## High Level Flow with Simple Example
 
-Floating Point Model — (1.1 `_fuse_fx`) —> Fused Model —-- (1.2 QAT Module Swap) —--> Model with QAT modules —-- (1.3 Insert Observers) —---> Prepared Model
----- (2.1 `convert_to_reference`) —----> Reference Quantized Model —---- (2.2 Lower to Native Backend) —-----> Quantized Model
+`prepare_fx`:
+```
+Floating Point Model --> (1.1 `_fuse_fx`) --> Fused Model 
+                     --> (1.2 QAT Module Swap) --> Model with QAT modules 
+                     --> (1.3 Insert Observers) --> Prepared Model
+```
 
-`prepare_fx`: Step 1.1 to 1.3
-`convert_fx`: Step 2.1 to 2.2
+`convert_fx`:
+```
+Prepared Model --> (2.1 `convert_to_reference`) --> Reference Quantized Model 
+               --> (2.2 Lower to Native Backend) --> Quantized Model
+```
 
-In the following, I’ll first have a detailed description for each step, and then talk about the corresponding settings in BackendConfig. We’ll follow the terminologies defined in (draft) README.md of quantization syntax transforms in this doc. 
+In the following, I’ll first have a detailed description for each step, and then talk about the corresponding settings in BackendConfig. We’ll follow the terminologies defined in (draft) README.md of quantization syntax transforms in this doc.
 
 ### 0. Original Model
 
@@ -58,7 +52,7 @@ class LinearReLUModule(torch.nn.Module):
        super().__init__()
        self.linear = torch.nn.Linear(5, 10).float()
        self.relu = torch.nn.ReLU()
- 
+
    def forward(self, x):
        return self.relu(self.linear(x))
 ```
@@ -77,15 +71,15 @@ def forward(self, x):
     return linear
 ```
 
-In eager mode quantization, users need to call `fuse_modules` or `fuse_modules_qat` and provide a list of fully qualified names for the submodules that need to be fused. We will get the same result as the eager mode fusion.
-What we did in this example is 
-Identify (Linear - ReLU) subgraph by searching through the model graph
-For each of the identified subgraph, we replace the `root_node` (typically the weighted module in the pattern, like Linear), with a fused module by calling the fuser_method for this pattern, a fused module is a sequential of a few modules, e.g. nni.LinearReLU is a sequential of linear and relu module
+What we did in this example is:
+
+* Identify (Linear - ReLU) subgraph by searching through the model graph
+* For each of the identified subgraph, we replace the `root_node` (typically the weighted module in the pattern, like Linear), with a fused module by calling the fuser_method for this pattern, a fused module is a sequential of a few modules, e.g. nni.LinearReLU is a sequential of linear and relu module
 
 `backend_config` configurations relevant to this step are:
 
 ```
-BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear)) 
+BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
     .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
     ._set_root_node_getter(my_root_node_getter)
     ._set_extra_inputs_getter(my_extra_inputs_getter)
@@ -99,7 +93,7 @@ BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
 `_set_root_node_getter`: sets a function that takes a node pattern and returns the root node in the pattern
 `_set_extra_inputs_getter`: all input args of root node will be copied over to fused module, if there are extra inputs, this function will return a list of extra inputs given the pattern
 
-Example usage of `root_node_getter` and `extra_input_getter`: https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6 
+Example usage of `root_node_getter` and `extra_input_getter`: https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6
 
 ### 1.2 QAT Module Swap
 ```
@@ -120,8 +114,7 @@ For modules that has corresponding QAT modules we’ll call eager mode `convert`
 
 `backend_config` configurations relevant in this step are:
 ```
-BackendPatternConfig(nni.LinearReLU) 
-    … # unrelated set calls omitted
+BackendPatternConfig(nni.LinearReLU)
     .set_qat_module(nniqat.LinearReLU)
 ```
 
@@ -159,7 +152,7 @@ Note: We could also insert QStub and DQStub in this step when users request to c
 # graph 1:
 input - qat_linear_relu - output
               |
-          FakeQuantize 
+          FakeQuantize
 (need to be updated with QDQStub + FakeQuantize)
               |
            weight
@@ -187,7 +180,7 @@ input - qat_linear_relu - output
 # graph 2:
 input - QDQStub1 (FakeQuantize) - qat_linear_relu - QDQStub2 (FakeQuantize) - output
                                       |
-                                FakeQuantize 
+                                FakeQuantize
                   (need to be updated with QDQStub + FakeQuantize)
                                       |
                                     weight
@@ -195,7 +188,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 
 # The overall logic to insert QDQStub1 and QDQStub2 inplace is the following:
 # 0. For each node in the original graph, we compute the target_dtype for input and output for it based on qconfig, for graph1, configured with qconfig_dict, we have:
-# node_name_to_target_dtype = 
+# node_name_to_target_dtype =
 # {
 #     # this is placeholder node in FX Graph
 #     “input” : {“input_activation”: torch.float32, “output_activation”: torch.float32},
@@ -204,7 +197,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 #     “output”: {“input_activation”: torch.float32, “output_activation”: torch.float32}
 # }
 # Note: this map is generated before we insert qdqstub to graph1, and will not change in the process.
-# 
+#
 # 1. Inserting QDQStub1 (for input of qat_linear_relu)
 #    We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a 
 #    QDQStub at this edge, which could serve as an input argument for `qat_linear_relu` Node (and also output for `input` Node)
