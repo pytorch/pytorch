@@ -1,6 +1,7 @@
 #include <ATen/detail/DMLHooksInterface.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/CallOnce.h>
 
 #include <cstddef>
 #include <memory>
