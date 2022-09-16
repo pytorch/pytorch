@@ -70,6 +70,11 @@ if [[ "$TEST_CONFIG" == *dynamo* ]]; then
   export PYTORCH_TEST_WITH_DYNAMO=1
 fi
 
+# Add CPU inductor tests later
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" == *inductor* ]]; then
+  export PYTORCH_TEST_WITH_INDUCTOR=1
+fi
+
 # TODO: this condition is never true, need to fix this.
 if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
   # skip expensive checks when on PR and CI_MASTER flag is not set
@@ -202,6 +207,7 @@ test_dynamo_shard() {
       test_package \
       test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
+    --continue-through-error \
     --verbose
   assert_git_not_dirty
 }
@@ -652,13 +658,15 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
+  install_jinja2
   install_torchvision
   install_torchdynamo
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_jinja2
   install_torchvision
   checkout_install_torchdynamo
   test_dynamo_shard 2
