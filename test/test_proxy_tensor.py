@@ -800,9 +800,7 @@ def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    sym_size_1 = torch.ops.aten.sym_size(empty, 0)
     detach = torch.ops.aten.detach.default(empty);  empty = None
-    sym_size_2 = torch.ops.aten.sym_size(detach, 0)
     return detach""")
 
     def test_symint_to_tensor(self):
@@ -814,7 +812,6 @@ def forward(self, a_1):
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
     div = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
-    sym_size_1 = torch.ops.aten.sym_size(div, 0)
     return div""")
 
         r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
@@ -825,7 +822,6 @@ def forward(self, a_1):
     lt = sym_size < 0
     eq = sym_size == sym_size;  sym_size = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
-    sym_size_1 = torch.ops.aten.sym_size(div, 0)
     return div""")
 
     def test_cat(self):

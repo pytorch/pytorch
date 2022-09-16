@@ -2209,7 +2209,8 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
     const char* ns = ns_str.c_str();
     const char* func_name = qualified_name.c_str() + pos + strlen("::");
 
-    py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
     if (overload_name == "") {
       return torch_api_function.attr("default").ptr();
     } else {

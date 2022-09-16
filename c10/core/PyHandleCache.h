@@ -35,7 +35,7 @@ namespace c10 {
 // library (although in many cases, this is not convenient, as there may
 // not be a way to conveniently index based on the object.)
 class PyHandleCache {
-public:
+ public:
   PyHandleCache() : pyinterpreter_(nullptr), data_(nullptr) {}
 
   // Attempt to fetch the pointer from the cache, if the PyInterpreter
@@ -44,8 +44,8 @@ public:
   // (possibly writing it to the cache, if the cache entry is
   // available.)
   template <typename F>
-  PyObject* ptr_or(
-      impl::PyInterpreter* self_interpreter, F slow_accessor) const {
+  PyObject* ptr_or(impl::PyInterpreter* self_interpreter, F slow_accessor)
+      const {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyinterpreter_.load(std::memory_order_acquire);
@@ -55,7 +55,8 @@ public:
       auto* r = slow_accessor();
       impl::PyInterpreter* expected = nullptr;
       // attempt to claim this cache entry with the specified interpreter tag
-      if (pyinterpreter_.compare_exchange_strong(expected, self_interpreter, std::memory_order_acq_rel)) {
+      if (pyinterpreter_.compare_exchange_strong(
+              expected, self_interpreter, std::memory_order_acq_rel)) {
         data_ = r;
       }
       // This shouldn't be possible, as you should be GIL protected
@@ -66,7 +67,7 @@ public:
     }
   }
 
-private:
+ private:
   mutable std::atomic<impl::PyInterpreter*> pyinterpreter_;
   mutable PyObject* data_;
 };
