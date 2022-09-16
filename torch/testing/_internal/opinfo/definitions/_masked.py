@@ -990,6 +990,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1017,6 +1018,7 @@ op_db: List[OpInfo] = [
         ],
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1037,6 +1039,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
