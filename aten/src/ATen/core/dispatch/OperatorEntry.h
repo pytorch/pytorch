@@ -163,14 +163,10 @@ public:
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   inline void assertSignatureIsCorrect() {
-    assertSignatureIsCorrect(CppSignature::make<FuncType>());
+    assertSignatureIsCorrect(CppSignature::make<FuncType>(), fn_has_symint<FuncType>::value);
   }
 
-  void assertSignatureIsCorrect(const CppSignature call_signature) {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
-      reportSignatureError(call_signature);
-    }
-  }
+  void assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const;
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
@@ -280,11 +276,12 @@ private:
     c10::optional<DispatchKey> dispatch_key;
   };
   c10::optional<CppSignatureWithDebug> cpp_signature_;
+  c10::optional<CppSignatureWithDebug> sym_cpp_signature_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
-  [[noreturn]] void reportSignatureError(CppSignature call_signature) const;
+  [[noreturn]] void reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
