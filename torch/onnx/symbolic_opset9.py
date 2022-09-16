@@ -6335,7 +6335,7 @@ def prim_loop(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
         torch._C._jit_pass_onnx_block(
             block, new_block, operator_export_type, env, False
         )
-    new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+    fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
     )
     # Run shape type inference for Loop after subblock is converted.
@@ -6343,12 +6343,12 @@ def prim_loop(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
         torch._C._jit_pass_onnx_node_shape_type_inference(
             new_node, params_dict, opset_version
         )
-    return new_op_outputs
+    return fixed_outputs
 
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(g: GraphContext, *inputs, **attrs):
+def prim_if(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
     block = g.onnx_block
     env = g.env
@@ -6427,7 +6427,7 @@ def prim_if(g: GraphContext, *inputs, **attrs):
                 env,
                 False,
             )
-        new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+        fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
             new_node, opset_version
         )
         # Run shape type inference for If after subblock is converted.
@@ -6435,7 +6435,7 @@ def prim_if(g: GraphContext, *inputs, **attrs):
             torch._C._jit_pass_onnx_node_shape_type_inference(
                 new_node, params_dict, opset_version
             )
-        return new_op_outputs
+        return fixed_outputs
 
 
 @_onnx_symbolic("prim::Constant")
