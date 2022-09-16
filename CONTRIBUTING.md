@@ -1246,13 +1246,6 @@ In 2018, we merged Caffe2 into the PyTorch source repository. While the
 steady state aspiration is that Caffe2 and PyTorch share code freely,
 in the meantime there will be some separation.
 
-If you submit a PR to only PyTorch or only Caffe2 code, CI will only
-run for the project you edited. The logic for this is implemented
-in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
-can look at this to see what path prefixes constitute changes.
-This also means if you ADD a new top-level path, or you start
-sharing code between projects, you need to modify these files.
-
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:
 
