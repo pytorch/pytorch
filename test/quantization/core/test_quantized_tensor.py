@@ -1071,13 +1071,20 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q_masked_fill.int_repr(), ref.int_repr())
             self.assertEqual(q_masked_fill.dequantize(), ref.dequantize())
 
-    def test_qtensor_index_put(self):
+    def test_qtensor_index_put_cpu(self):
+        self._test_qtensor_index_put('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_qtensor_index_put_cuda(self):
+        self._test_qtensor_index_put('cuda')
+
+    def _test_qtensor_index_put(self, device):
         n = 10
         m = 10
-        x_orig = torch.rand(n, m)
-        indices = tuple(torch.tensor([[0, 0], [1, 1], [5, 5], [7, 3], [0, 5], [6, 9], [-1, -1]]).t())
+        x_orig = torch.rand(n, m, device=device)
+        indices = tuple(torch.tensor([[0, 0], [1, 1], [5, 5], [7, 3], [0, 5], [6, 9], [-1, -1]], device=device).t())
         # for the scalar tensor case, index_put routes to masked_fill
-        values_list = [torch.tensor(2.5), torch.rand(len(indices[0])) * 1000]
+        values_list = [torch.tensor(2.5, device=device), torch.rand(len(indices[0]), device=device) * 1000]
         scale = 0.5
         zero_point = 10
         types = [torch.qint8, torch.quint8, torch.qint32]

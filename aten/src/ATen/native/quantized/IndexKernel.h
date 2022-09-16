@@ -8,6 +8,5 @@ using index_put_kernel_quantized_fn = void(*)(TensorIterator& iter, IntArrayRef 
 DECLARE_DISPATCH(masked_fill_kernel_quantized_fn, masked_fill_kernel_quantized_stub);
 DECLARE_DISPATCH(index_put_kernel_quantized_fn, index_put_kernel_quantized_stub);
 
-// TODO: implement index_put_kernel_quantized_cuda in cuda/IndexKernel.cu and put CUDA kernel in a stub
 } // native
 } // at
