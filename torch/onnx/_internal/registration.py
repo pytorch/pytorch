@@ -74,6 +74,15 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
         self._overrides: Dict[_K, _V] = {}
         self._merged: Dict[_K, _V] = {}
 
+    def set_base(self, key: _K, value: _V) -> None:
+        self._base[key] = value
+        if key not in self._overrides:
+            self._merged[key] = value
+
+    def in_base(self, key: _K) -> bool:
+        """Checks if a key is in the base dictionary."""
+        return key in self._base
+
     def override(self, key: _K, value: _V) -> None:
         """Overrides a base key-value with a new pair."""
         self._overrides[key] = value
@@ -90,17 +99,8 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
         """Checks if a key-value pair is overridden."""
         return key in self._overrides
 
-    def in_base(self, key: _K) -> bool:
-        """Checks if a key is in the base dictionary."""
-        return key in self._base
-
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
-
-    def set_base(self, key: _K, value: _V) -> None:
-        self._base[key] = value
-        if key not in self._overrides:
-            self._merged[key] = value
 
     def get(self, key: _K, default: Optional[_V] = None):
         return self._merged.get(key, default)
@@ -222,6 +222,9 @@ class SymbolicRegistry:
             opset: The opset version of the function to register.
             func: The symbolic function to register.
             custom: Whether the function is a custom function that overrides existing ones.
+
+        Raises:
+            ValueError: If the separator '::' is not in the name.
         """
         if "::" not in name:
             raise ValueError(
@@ -324,10 +327,14 @@ def onnx_symbolic(
     ```
 
     Args:
-        name: The qualified name of the function.
+        name: The qualified name of the function in the form of 'domain::op'.
+            E.g. 'aten::add'.
         opset: The opset versions of the function to register at.
         decorate: A sequence of decorators to apply to the function.
         custom: Whether the function is a custom symbolic function.
+
+    Raises:
+        ValueError: If the separator '::' is not in the name.
     """
 
     def wrapper(func: Callable) -> Callable:
@@ -365,6 +372,9 @@ def custom_onnx_symbolic(
 
     Returns:
         The decorator.
+
+    Raises:
+        ValueError: If the separator '::' is not in the name.
     """
     return onnx_symbolic(name, opset, decorate, custom=True)
 
