@@ -206,6 +206,9 @@ symint:
   - narrow_copy
   - view
   - view_copy
+  - slice_backward
+  - slice_copy.Tensor
+  - slice_scatter
   - empty_strided
   - new_empty_strided
   - embedding_dense_backward

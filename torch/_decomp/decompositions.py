@@ -594,6 +594,50 @@ def slice_backward(
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 
+@register_decomposition(aten.slice.Tensor)
+def slice(
+    # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: Optional[int] = 1,
+):
+    new_size = list(self.size())
+    new_stride = list(self.stride())
+    new_offset = self.storage_offset()
+    dimsize = self.size()[dim]
+    if not start:
+        start = 0
+    if not end:
+        end = dimsize
+
+    if start < 0:
+        start += dimsize
+    if end < 0:
+        end += dimsize
+    if start < 0:
+        start = 0
+    elif start >= dimsize:
+        start = dimsize
+    if end < start:
+        end = start
+    elif end >= dimsize:
+        end = dimsize
+
+    canonical_start = start
+    canonical_end = end
+
+    new_offset += canonical_start * self.stride()[dim]
+
+    new_size[dim] = (canonical_end - canonical_start + step - 1) // step
+
+    if step != 1:
+        new_stride[dim] *= step
+
+    return self.as_strided(new_size, new_stride, new_offset)
+
+
 @register_decomposition(aten.select_backward)
 def select_backward(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
     grad_input = grad_output.new_zeros(input_sizes)
