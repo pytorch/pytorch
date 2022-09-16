@@ -2,10 +2,8 @@ import inspect
 from typing import Dict, List, Union
 
 from torch import _C
-from torch.onnx import _constants, symbolic_registry
-
-for v in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
-    symbolic_registry.register_version("", v)
+from torch.onnx import _constants
+from torch.onnx._internal import registration
 
 
 class _TorchSchema:
@@ -74,18 +72,27 @@ def _symbolic_argument_count(func):
     return params
 
 
-def _all_symbolics_schemas():
-    symbolics_schemas: Dict[str, _TorchSchema] = {}
+def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
+    symbolics_schemas = {}
 
-    for domain, version in symbolic_registry._registry:
-        for opname, sym_func in symbolic_registry._registry[(domain, version)].items():
-            symbolics_schema = _TorchSchema("aten::" + opname)
-            symbolics_schema.arguments = _symbolic_argument_count(sym_func)
-            if opname in symbolics_schemas:
-                symbolics_schemas[opname].opsets.append(version)
-            else:
-                symbolics_schema.opsets = [version]
-                symbolics_schemas[opname] = symbolics_schema
+    for name in registration.registry.all_functions():
+        func_group = registration.registry.get_function_group(name)
+        assert func_group is not None
+        symbolics_schema = _TorchSchema(name)
+        func = func_group.get(_constants.ONNX_MAX_OPSET)
+        if func is not None:
+            symbolics_schema.arguments = _symbolic_argument_count(func)
+            symbolics_schema.opsets = list(
+                range(func_group.get_min_supported(), _constants.ONNX_MAX_OPSET + 1)
+            )
+        else:
+            # Only support opset < 9
+            func = func_group.get(7)
+            symbolics_schema.arguments = _symbolic_argument_count(func)
+            symbolics_schema.opsets = list(range(7, _constants.ONNX_BASE_OPSET))
+
+        symbolics_schemas[name] = symbolics_schema
+
     return symbolics_schemas
 
 
@@ -97,7 +104,7 @@ def onnx_supported_ops():
     onnx_supported = []
     for schema in aten_schemas:
         if schema in torch_schemas:
-            opname = schema.name[6:]  # without "aten::" prefix
+            opname = schema.name
             opsets = symbolic_schemas[opname].opsets
             if schema not in supported_ops:
                 supported_ops.append(symbolic_schemas[opname])
