@@ -1601,9 +1601,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rtruediv',
         '_refs.rpow',
         # These should be tested with their out-of-place counterparts
+        '_refs.index_add_',
         '_refs.index_copy_',
         '_refs.index_fill_',
-        '_refs.index_add_',
     }
 
     not_in_decomp_table = {
@@ -1613,9 +1613,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
-        '_refs.index_copy_',
         '_refs.index_add_',
-        '_refs.index_fill_',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
