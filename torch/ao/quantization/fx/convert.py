@@ -83,7 +83,6 @@ __all__ = [
     "maybe_get_observer_for_node",
     "maybe_recursive_remove_dequantize",
     "remove_extra_dequantize",
-    "remove_quant_dequant_pairs",
     "restore_state",
     "run_weight_observers",
 ]
@@ -186,24 +185,6 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
                 quantized.graph.erase_node(dequant)
-
-    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
-    return quantized
-
-def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
-    quantized_root = quantized
-    for node in quantized.graph.nodes:
-        if node.op == "call_function" and node.target in [torch.quantize_per_tensor, torch.quantize_per_channel]:
-            users = list(node.users)
-            user = users[0] if users else None
-            if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
-                user.replace_all_uses_with(node.args[0])
-                quantized.graph.erase_node(user)
-                orig_args = list(node.args)
-                quantized.graph.erase_node(node)
-                for arg in orig_args:
-                    if isinstance(arg, Node) and len(list(arg.users)) == 0:
-                        quantized.graph.erase_node(arg)
 
     quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
     return quantized
@@ -795,7 +776,6 @@ def convert(
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
-        model = remove_quant_dequant_pairs(model)
     # TODO: this looks hacky, we want to check why we need this and see if we can
     # remove this
     # removes qconfig and activation_post_process modules
