@@ -4046,6 +4046,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
+@register_decomposition(torch.ops.aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,
