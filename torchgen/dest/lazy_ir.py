@@ -23,7 +23,6 @@ from torchgen.api.types import (
     OptionalCType,
     VectorCType,
 )
-from torchgen.api.translate import translate
 from torchgen.context import method_with_native_function
 from torchgen.dest.lazy_ts_lowering import ts_lowering_body
 from torchgen.model import (
