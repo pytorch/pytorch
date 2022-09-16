@@ -1,7 +1,5 @@
 """Module for handling symbolic function registration."""
 
-import importlib
-import inspect
 import warnings
 from typing import (
     Callable,

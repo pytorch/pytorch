@@ -6300,7 +6300,7 @@ def prim_device(ctx: SymbolicContext, g: GraphLike, *inputs, **kwargs) -> None:
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
+def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
     n = ctx.cur_node
     env = ctx.env
     params_dict = ctx.params_dict
@@ -6309,9 +6309,12 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
     opset_version = GLOBALS.export_onnx_opset_version
 
     new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
-    new_node = (
-        new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
-    )
+
+    if isinstance(new_op_outputs, Sequence):
+        new_node = new_op_outputs[0].node()
+    else:
+        new_node = new_op_outputs.node()
+
     for b in n.blocks():
         new_block = new_node.addBlock()
         # Copy input metadata to subblock
@@ -6412,9 +6415,12 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
         return final_b_list
     else:
         new_op_outputs = g.op("If", *inputs, outputs=n.outputsSize())
-        new_node = (
-            new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
-        )
+
+        if isinstance(new_op_outputs, Sequence):
+            new_node = new_op_outputs[0].node()
+        else:
+            new_node = new_op_outputs.node()
+
         for b in n.blocks():
             new_block = new_node.addBlock()
             torch._C._jit_pass_onnx_block(
