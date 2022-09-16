@@ -914,9 +914,9 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
-
     # ???
-    xfail('nn.functional.ctc_loss'),
+    skip('nn.functional.ctc_loss'),  # sometimes it passes
+
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
     # segfaults
