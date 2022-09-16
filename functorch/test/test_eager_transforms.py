@@ -1592,7 +1592,7 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_inplace(self, device, jacapi):
         def f(x, y):
             y.copy_(x)
