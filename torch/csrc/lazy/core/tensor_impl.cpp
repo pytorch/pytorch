@@ -134,30 +134,11 @@ void LTCTensorImpl::shallow_copy_from(
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
-  return sym_strides_default();
-}
-
-void LTCTensorImpl::setup_sym_sizes() const {
-  auto rank = tensor_->shape().Get().sizes().size();
-  std::vector<c10::SymInt> sym_sizes;
-  sym_sizes.reserve(rank);
-  for (auto i : c10::irange(rank)) {
-    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
-        this->tensor_->GetIrValue(), i);
-    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
-    sym_sizes.push_back(sn->toSymInt());
-  }
-
-  sym_sizes_ = sym_sizes;
+  return c10::fromIntArrayRef(strides_custom());
+  ;
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  std::cout << FLAGS_ltc_enable_symbolic_shapes << std::endl;
-  if (FLAGS_ltc_enable_symbolic_shapes) {
-    setup_sym_sizes();
-    return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());
-  }
-
   return c10::fromIntArrayRef(sizes_custom());
 }
 
