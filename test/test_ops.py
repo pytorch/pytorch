@@ -93,6 +93,7 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+_ops_and_refs_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -163,7 +164,7 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
     @suppress_warnings
-    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    @ops(_ops_and_refs_no_numpy_ref, dtypes=OpDTypes.any_one)
     def test_compare_cpu(self, device, dtype, op):
 
         if dtype not in op.dtypes:
