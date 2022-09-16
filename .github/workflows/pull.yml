@@ -245,7 +245,6 @@ jobs:
           { config: "functorch", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-
   win-vs2019-cpu-py3-test:
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-test.yml
