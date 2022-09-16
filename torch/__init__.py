@@ -748,7 +748,6 @@ _tensor_classes: Set[Type] = set()
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
-from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
@@ -981,5 +980,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
+
+from ._tensor_str import set_printoptions
 
 from ._dispatch import python

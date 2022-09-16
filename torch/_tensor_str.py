@@ -1,5 +1,6 @@
 import math
 from typing import Optional
+import textwrap
 
 import torch
 from torch._six import inf
@@ -607,7 +608,7 @@ def functorch_tensor_subclass_str(tensor, *, tensor_contents=None):
     assert level != -1
 
     if functorch._C.is_functionaltensor(tensor):
-        # Since we're unwrapping the FunctionalTensorWrapper, we need to make su
+        # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
         # that it's up to date first
         torch._sync(tensor)
 
@@ -625,18 +626,19 @@ def functorch_tensor_subclass_str(tensor, *, tensor_contents=None):
         if (dl_enabled):
             functorch._C._set_dynamic_layer_keys_included(True)
 
+    indented_value_repr = textwrap.indent(value_repr, ' ' * 4)
     if functorch._C.is_batchedtensor(tensor):
         bdim = functorch._C.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
             f'BatchedTensor(lvl={level}, bdim={bdim}, value=\n'
-            f'{prep_value(value_repr)}\n'
+            f'{indented_value_repr}\n'
             f')'
         )
     if functorch._C.is_gradtrackingtensor(tensor):
         return (
             f'GradTrackingTensor(lvl={level}, value=\n'
-            f'{prep_value(value_repr)}\n'
+            f'{indented_value_repr}\n'
             f')'
         )
     if functorch._C.is_functionaltensor(tensor):
