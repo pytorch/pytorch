@@ -137,7 +137,17 @@ def create_joint_forward_backward(fn):
         primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
         # Call the forward pass
-        outs = fn(*primals)
+        if isinstance(fn, torch.fx.GraphModule):
+            with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", "Anomaly Detection has been enabled."
+                )
+                with torch.autograd.detect_anomaly(check_nan=False):
+
+                    outs = torch.fx.Interpreter(fn).run(*primals)
+        else:
+            outs = fn(*primals)
+
         # Get the inputs that need gradients
         grad_primals = []
         inputs_needs_grads = []
