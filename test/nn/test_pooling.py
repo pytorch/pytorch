@@ -1096,7 +1096,7 @@ torch.cuda.synchronize()
             if dim == 1:
                 return torch.tensor([0, 1, 0, 1], dtype=dtype).repeat(2, 2, 1)
             grad = expected_grad(dim - 1, dtype=dtype)
-            zero = torch.zeros(grad.size())
+            zero = torch.zeros(grad.size(), dtype=dtype)
             return torch.stack((zero, grad, zero, grad), 2)
 
         def expected_output(dim, dtype):
