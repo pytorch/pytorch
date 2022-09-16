@@ -291,7 +291,7 @@ class ShapeEnv(object):
         return None
 
     @_lru_cache
-    def replace(self, expr: sympy.Expr) -> sympy.Expr:
+    def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
         replacements = {s: self._find(s) for s in expr.free_symbols}
         return sympy.expand(expr.xreplace(replacements))
 
