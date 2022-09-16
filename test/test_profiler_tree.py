@@ -463,6 +463,7 @@ class TestProfilerTree(TestCase):
               torch/_tensor.py(...): backward
                 <built-in function _has_torch_function_unary>
                 torch/autograd/__init__.py(...): backward
+                  <built-in method _are_functorch_transforms_active of PyCapsule object at 0xXXXXXXXXXXXX>
                   <built-in function isinstance>
                   <built-in function isinstance>
                   <built-in function len>
