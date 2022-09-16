@@ -3986,6 +3986,7 @@ else:
             doubles, sz, lambda input, out: out.copy_(input))
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4002,6 +4003,7 @@ else:
             ind.index_add_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_copy_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4018,6 +4020,7 @@ else:
             ind.index_copy_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
@@ -4042,6 +4045,7 @@ else:
             x[:-1] >>= x[1:]
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
@@ -4054,10 +4058,9 @@ else:
         p = torch.rand(6, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.bernoulli_(p=p)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.bernoulli(torch.rand_like(x), out=x)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
@@ -4079,6 +4082,7 @@ else:
             ind.put_(ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
@@ -4100,6 +4104,7 @@ else:
             ind.index_put_((ind.clone(),), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
@@ -4116,6 +4121,7 @@ else:
             mask[1:].masked_fill_(mask[:-1], False)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
@@ -4127,6 +4133,7 @@ else:
             x.masked_scatter_(mask, src)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4985,47 +4992,6 @@ else:
                                  torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
-
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid(self, device):
-        def test(probs):
-            with self.assertRaisesRegex(RuntimeError,
-                                        'probability tensor contains either `inf`, `nan` or element < 0'):
-                out = torch.multinomial(probs.to(device), 2)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        test(torch.tensor([1., -1., 1.]))
-        test(torch.tensor([1., inf, 1.]))
-        test(torch.tensor([1., -inf, 1.]))
-        test(torch.tensor([1., 1., nan]))
-
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid_distribution(self, device):
-        def test(probs, replacement):
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
-                out = torch.multinomial(probs, 2, replacement)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        x = torch.zeros(3, device=device)
-        y = torch.zeros(3, 3, device=device)
-        z = torch.zeros(3, 3, device=device)
-        z[1, :] = 1
-
-        test(x, False)
-        test(y, False)
-        test(z, False)
-
-        # Verify only for CPU as replacement=True
-        # throws device side assert triggered.
-        if self.device_type == 'cpu':
-            test(x, True)
-            test(y, True)
-            test(z, True)
 
     # FIXME: move to test distributions
     def _test_multinomial_empty(self, device, replacement, num_samples):
