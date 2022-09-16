@@ -14,6 +14,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    Any
 )
 
 import torch
@@ -21,6 +22,11 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+
+from ._tensor_flattener import (
+    _param_extension_add,
+    _param_extension_get_unflat_view,
+)
 
 from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
@@ -196,6 +202,7 @@ class FlatParameter(nn.Parameter):
         shapes: List[torch.Size],
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
+        param_extension: Any,
     ) -> None:
         """
         Initializes attributes holding metadata about the original parameters
@@ -215,12 +222,14 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(numels)
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(prefixed_param_names)
+        assert len(param_infos) == len(param_extension)
         self._num_params = len(param_infos)
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
+        self._param_extension = tuple(param_extension)
         self._unpadded_unsharded_size = self.size()
         _set_fsdp_flattened(self)
 
@@ -290,6 +299,8 @@ class FlatParamHandle:
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
         params_to_flatten: List[nn.Parameter] = []
+        param_extension = []
+
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
         for submodule_name, submodule in module.named_modules():
@@ -327,6 +338,9 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
+
+                    param = _param_extension_add(param_extension, param)
+
                     dtype = param.dtype
                     requires_grad = param.requires_grad
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
@@ -350,6 +364,7 @@ class FlatParamHandle:
             shapes,
             prefixed_param_names,
             shared_param_infos,
+            param_extension,
         )
 
     @staticmethod
@@ -932,9 +947,14 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            subtensor.view(shape)
-            for (subtensor, shape) in zip(
-                torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes  # type: ignore[arg-type]
+            _param_extension_get_unflat_view(
+                subtensor.view(shape),
+                param_extension
+            )
+            for (subtensor, shape, param_extension) in zip(
+                torch.split(tensor, flat_param._numels, dim=0),
+                flat_param._shapes,  # type: ignore[arg-type]
+                flat_param._param_extension,  # type: ignore[arg-type]
             )
         )
         return views

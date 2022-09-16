@@ -20,7 +20,6 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 
-
 def _sharding_spec_to_offsets(
     sharding_spec: ShardingSpec, tensor_numel: int, world_size: int
 ) -> List[int]:
@@ -241,6 +240,9 @@ def _create_chunk_sharded_tensor(
         ShardMetadata(offset, size, placement)
         for offset, size, placement in zip(chunk_offsets, chunk_sizes, placements)
     ]
+
+    # FIXME add is_pinned to DT
+    is_pinned = tensor.is_pinned() if isinstance(tensor, ShardedTensor) else False
     sharded_tensor_metadata = ShardedTensorMetadata(
         shards_metadata=shard_metadata,
         size=tensor.size(),
@@ -249,7 +251,7 @@ def _create_chunk_sharded_tensor(
             layout=tensor.layout,
             requires_grad=False,
             memory_format=torch.contiguous_format,
-            pin_memory=tensor.is_pinned(),
+            pin_memory=tensor.is_pinned(), # DT doesn't implement is_pinned
         )
     )
     return ShardedTensor._init_from_local_shards_and_global_metadata(

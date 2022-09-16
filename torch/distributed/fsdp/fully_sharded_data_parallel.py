@@ -64,7 +64,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._shard_utils import _create_chunk_sharded_tensor
+
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -93,6 +93,10 @@ from .wrap import (
     _wrap_batchnorm_individually,
 )
 
+from ._tensor_flattener import(
+    _param_extension_sharded_state_dict_get_param_and_shards,
+    _param_extension_chunk_tensor,
+)
 _TORCHDISTX_AVAIL = True
 try:
     from torchdistx import deferred_init, fake
@@ -2238,7 +2242,7 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                state_dict[f"{prefix}{fqn}"] = _param_extension_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
@@ -2486,8 +2490,16 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            shards = param.local_shards()
-            local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
+            param, shards = \
+                _param_extension_sharded_state_dict_get_param_and_shards(param)
+
+            assert len(shards) < 2, "FullySharded state_dict tensors must have 0 or 1 shards per rank"
+
+            # Handle the case we have no shards, F.E. if the tensor has shape (1, 1, 756)
+            if len(shards) == 0:
+                local_tensor = torch.tensor([], dtype=param.dtype, device=self.compute_device)
+            else:
+                local_tensor = cast(torch.Tensor, shards[0]).flatten()
             dim_0_size = param.size()[0]
             param_numel = param.size().numel()
             chunk_size = (
