@@ -199,9 +199,15 @@ TEST(TestSymInt, Basic) {
   foo2 = SymInt(4);
   ASSERT_TRUE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
-  // NOLINTNEXTLINE(Wself-assign-overload)
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   foo2 = foo2;
   ASSERT_TRUE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
   ASSERT_EQ(a_impl.use_count(), 3);
+
+  ASSERT_THROW(foo.to<double>(), c10::Error);
+
+  Scalar int_s = 3;
+  TORCH_CHECK(int_s.toSymInt().expect_int(), 3);
+
 }

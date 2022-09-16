@@ -72,14 +72,21 @@ class C10_API Scalar {
     }                                                                   \
     if (Tag::HAS_b == tag) {                                            \
       return checked_convert<type, bool>(v.u.i, #type);                 \
-    } else {                                                            \
+    } else if (Tag::HAS_i == tag) {                                     \
       return checked_convert<type, int64_t>(v.u.i, #type);              \
+    } else if (Tag::HAS_si == tag) {                                    \
+      TORCH_CHECK(false)                                                \
     }                                                                   \
+    TORCH_CHECK(false)                                                  \
   }
 
   SymInt toSymInt() const {
-    TORCH_CHECK(Tag::HAS_si == tag);
-    return v.si;
+    if (Tag::HAS_si == tag) {
+      return v.si;
+    } else {
+      TORCH_CHECK(Tag::HAS_i == tag);
+      return v.u.i;
+    }
   }
 
   // TODO: Support ComplexHalf accessor
@@ -206,9 +213,8 @@ class C10_API Scalar {
 
   C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
     if (rhs.tag == Tag::HAS_si) {
-      new (&v.si) c10::SymInt(rhs.v.si);
+      new (&v.si) c10::SymInt(std::move(rhs.v.si));
       rhs.v.si.release_();
-      // v.si = std::move(rhs.v.si);
     } else {
       v.u = rhs.v.u;
     }
