@@ -2548,6 +2548,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    @property
+    def device(self):
+        return f"cuda:{self.rank}"
+
+
     def setUp(self):
         super(CommTest, self).setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -2806,6 +2811,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nncl_rank_membership(self):
         self._test_rank_membership(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="nccl")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
@@ -2856,6 +2871,12 @@ class CompilerTest(test_c10d_common.CompilerTest):
     @skip_if_lt_x_gpu(2)
     def test_nested_comm_tensor_wrapping(self):
         self._test_nested_comm_tensor_wrapping(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_consecutive_comm_work_wait_gpu(self):
+        self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
