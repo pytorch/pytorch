@@ -89,7 +89,7 @@ __all__ = [
     "sign",
     "signbit",
     "sin",
-    "sicn",
+    "sinc",
     "sinh",
     "sqrt",
     "square",
