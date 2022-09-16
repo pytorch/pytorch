@@ -88,11 +88,11 @@ constexpr float EPSILON = 0.01;
 namespace at {
 namespace native {
 
-at::Tensor sparse_mm_2x4(
+at::Tensor _cusparselt_masked_mm(
   const at::Tensor& A, const at::Tensor& B, const at::Tensor& C,
-  int m, int n, int k, int iters,
-  int gpu_index, int check_correctness,
-  int endtoend)
+  int64_t m, int64_t n, int64_t k, int64_t iters,
+  int64_t gpu_index, int64_t check_correctness,
+  int64_t endtoend)
 {
   CHECK_CUDA(cudaSetDevice(gpu_index));
 
