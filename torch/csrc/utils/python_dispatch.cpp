@@ -474,9 +474,8 @@ void initDispatchBindings(PyObject* module) {
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
     return (
-      include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
-      include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode)
-    );
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 }
 
