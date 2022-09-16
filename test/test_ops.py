@@ -184,18 +184,7 @@ class TestCommon(TestCase):
             cuda_results = op(sample.input, *sample.args, **sample.kwargs)
             cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
-            self.assertEqual(type(cuda_results), type(cpu_results))
-
-            # Make all retults a tuple to compare
-            if not isinstance(cuda_results, tuple):
-                cuda_results = (cuda_results,)
-                cpu_results = (cpu_results,)
-
-            # Simple first check that the return values have the same number of arguments
-            self.assertEqual(len(cuda_results), len(cpu_results))
-
-            for cpu_result, cuda_result in zip(cpu_results, cuda_results):
-                self.assertEqual(cpu_result, cuda_result)
+            self.assertEqual(cuda_results, cpu_results)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
