@@ -290,6 +290,33 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
+    def _test_grads_reduced_precision(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Linear(10, 10)
+                self.lin2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin2(self.lin1(x))
+
+        m = MyModel().cuda()
+        mp = MixedPrecision(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+            buffer_dtype=torch.bfloat16,
+            keep_casted_gradients=True,
+        )
+        m.lin1 = FSDP(m.lin1, mixed_precision=mp)
+        m = FSDP(m, mixed_precision=mp)
+        for _ in range(6):
+            inp = torch.ones(1, 10)
+            m(inp).sum().backward()
+            for param in m.parameters():
+                self.assertEqual(torch.bfloat16, param.grad.dtype)
+
+        dist.barrier()
+
     def _run_test_mixed_precision_e2e(
         self,
         mp_config,
@@ -577,6 +604,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         loss.backward()
 
     @skip_if_lt_x_gpu(2)
+    def test_grads_reduced_precision(self):
+        self._test_grads_reduced_precision()
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("convert_sync_bn", [True, False])
     def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
@@ -640,6 +671,10 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     @property
     def world_size(self):
         return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_grads_reduced_precision(self):
+        return self._test_grads_reduced_precision()
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_no_reshard_after_forward(self):
