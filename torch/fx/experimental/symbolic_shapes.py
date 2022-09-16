@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import List, Type, Optional
+from typing import Dict, List, Type, Optional, cast
 import operator
 import functools
 from functools import lru_cache
@@ -13,7 +13,7 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten
+aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "PySymInt", "ShapeEnv",
@@ -219,9 +219,14 @@ def _lru_cache(fn, maxsize=None):
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
-        self.var_to_val = {}
-        self.replacements = {}
-        self.divisible = {}
+        # Maps symbolic ints to their original concrete values
+        # Currently populated from tensors
+        self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        # Maps from sympy ints to expressions representing them
+        # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
+        self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
+        # Keys are Mod(x, y), values are 0 (for ease of substitution)
+        self.divisible: Dict["sympy.Expr", "sympy.Integer"] = {}
 
     def _get_key(self):
         """
@@ -291,7 +296,7 @@ class ShapeEnv(object):
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
-        replacements = {s: self._find(s) for s in expr.free_symbols}
+        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
         return sympy.expand(expr.xreplace(replacements))
 
     @_lru_cache
@@ -300,14 +305,14 @@ class ShapeEnv(object):
         for k in self.divisible:
             res = self.replace(k)
             if len(res.free_symbols) > 0:
-                new_divisible[k] = 0
+                new_divisible[k] = sympy.Integer(0)
 
         self.divisible = new_divisible
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if len(expr.atoms(sympy.Mod)) > 0:
+        if expr.has(sympy.Mod):
             self._update_divisible()
             expr = expr.xreplace(self.divisible)
             expr = sympy.expand(expr)
@@ -315,21 +320,30 @@ class ShapeEnv(object):
 
     @lru_cache(256)
     def size_hint(self, expr: "sympy.Expr"):
+        """
+        Gets a size hint for a given expression from the underlying shapes we had.
+        Does not introduce a guard, so only use this when you can guarantee that
+        your code is still valid for arbitrary shapes (such as optimization decisions)
+        """
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
         assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
         return result_expr
 
-    def _find(self, a):
+    @_lru_cache
+    def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
-        Implements a DSU to find the variable that represents a
-        TODO: Improve this to handle non-identity transitive replacements
+        Implements a DSU-like algorithm to find the variable that represents a
+        Also handles transitive non-identity replacements.
+
+        a: b + c
+        c: d
         """
-        acopy = a
-        while a in self.replacements:
-            a = self.replacements[a]
-        while acopy in self.replacements:
-            self.replacements[acopy], acopy = a, self.replacements[acopy]
-        return a
+        if a not in self.replacements:
+            return a
+        res = self.replacements[a]
+        cur_replace = {s: self._find(s) for s in res.free_symbols}
+        self.replacements[a] = self.replacements[a].xreplace(cur_replace)
+        return self.replacements[a]
 
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
@@ -343,32 +357,30 @@ class ShapeEnv(object):
 
         assert len(free) > 0, "The expression should not be static by this point"
         # In case of really gnarly expression, we don't blow up
-        if len(free) <= 4:
-            free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
-            lhs = expr.lhs
-            rhs = expr.rhs
-            try:
-                solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
-                if not solutions.is_finite_set:
-                    if len(expr.atoms(sympy.Mod)) == 1:
-                        mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                        solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
-                        if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
-                            self.divisible[mod_expr] = 0
-                    return
+        if len(free) > 5:
+            return
+        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        lhs = expr.lhs
+        rhs = expr.rhs
+        try:
+            solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
+            if not solutions.is_finite_set:
+                if expr.has(sympy.Mod):
+                    mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                    solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
+                    if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
+                        self.divisible[mod_expr] = sympy.Integer(0)
+                return
 
-                if not isinstance(solutions, sympy.FiniteSet):
-                    return
+            if not isinstance(solutions, sympy.FiniteSet):
+                return
 
-                solutions = tuple(solutions)
-                if len(solutions) == 1 and "/" not in str(solutions[0]):
-                    new_var = solutions[0]
-                    new_var = self._find(solutions[0])
-                    self.replacements[free[0]] = new_var
-            except ZeroDivisionError:
-                pass
-
-        return
+            solutions = tuple(solutions)
+            if len(solutions) == 1 and all(t.is_integer for t in sympy.preorder_traversal(solutions[0])):
+                new_var = self._find(solutions[0])
+                self.replacements[cast(sympy.Symbol, free[0])] = new_var
+        except ZeroDivisionError:
+            pass
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
