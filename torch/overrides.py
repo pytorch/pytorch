@@ -207,6 +207,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.init.kaiming_normal,
         torch.nn.init.orthogonal,
         torch.nn.init.sparse,
+        torch.nested.to_padded_tensor,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -254,6 +255,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__subclasshook__,
         Tensor.__hash__,
         Tensor.as_subclass,
+        Tensor.eig,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -281,7 +283,6 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor,
     }
 
 
@@ -487,7 +488,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
