@@ -8,8 +8,8 @@ namespace c10 {
 namespace impl {
 
 struct C10_API PythonDispatcherTLS {
-  static void set_state(SafePyHandle state);
-  static SafePyHandle get_state();
+  static void set_state(PyInterpreter* state);
+  static PyInterpreter* get_state();
   static void reset_state();
 };
 
@@ -20,7 +20,7 @@ struct C10_API DisablePythonDispatcher {
   ~DisablePythonDispatcher() {
     PythonDispatcherTLS::set_state(old_);
   }
-  c10::SafePyHandle old_;
+  PyInterpreter* old_;
 };
 
 } // namespace impl
