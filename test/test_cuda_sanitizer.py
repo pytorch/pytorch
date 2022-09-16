@@ -481,14 +481,14 @@ class TestMessages(TestCase):
                 CSAN detected a possible data race on tensor with data pointer 1
                 Access by stream 1001 during kernel:
                 schema
-                writing to arguments: b, and to the output
+                writing to argument(s) b, and to the output
                 With stack trace:
                   File "file", line 0, in name
                     trace a
 
                 Previous access by stream 1000 during kernel:
                 schema
-                reading from arguments: a
+                reading from argument(s) a
                 With stack trace:
                   File "file", line 0, in name
                     trace b

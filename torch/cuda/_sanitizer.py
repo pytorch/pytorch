@@ -93,6 +93,18 @@ class UnsynchronizedAccessError(SynchronizationError):
         self.previous_access = previous_access
 
     def __str__(self):
+        def format_access(access: Access):
+            message.write(f"{access.operator}\n{access.type}")
+            if access.aliases:
+                message.write(" argument(s) " + ", ".join(access.aliases))
+                if access.is_output:
+                    message.write(", and to")
+            if access.is_output:
+                message.write(" the output")
+            message.write(
+                f"\nWith stack trace:\n{''.join(access.stack_trace.format())}\n"
+            )
+
         with io.StringIO() as message:
             message.write(
                 textwrap.dedent(
@@ -100,36 +112,16 @@ class UnsynchronizedAccessError(SynchronizationError):
                     ============================
                     CSAN detected a possible data race on tensor with data pointer {self.data_ptr}
                     Access by stream {self.current_access.stream} during kernel:
-                    {self.current_access.operator}
-                    {self.current_access.type}"""
+                    """
                 )
             )
-            if self.current_access.aliases:
-                message.write(" arguments: " + ", ".join(self.current_access.aliases))
-                if self.current_access.is_output:
-                    message.write(", and to")
-            if self.current_access.is_output:
-                message.write(" the output")
+            format_access(self.current_access)
+
             message.write(
-                f"\nWith stack trace:\n{''.join(self.current_access.stack_trace.format())}\n"
+                f"Previous access by stream {self.previous_access.stream} during kernel:\n"
             )
-            message.write(
-                textwrap.dedent(
-                    f"""\
-                    Previous access by stream {self.previous_access.stream} during kernel:
-                    {self.previous_access.operator}
-                    {self.previous_access.type}"""
-                )
-            )
-            if self.previous_access.aliases:
-                message.write(" arguments: " + ", ".join(self.previous_access.aliases))
-                if self.previous_access.is_output:
-                    message.write(" , and to")
-            if self.previous_access.is_output:
-                message.write(" the output")
-            message.write(
-                f"\nWith stack trace:\n{''.join(self.previous_access.stack_trace.format())}\n"
-            )
+            format_access(self.previous_access)
+
             if self.allocation_stack_trace:
                 message.write(
                     "Tensor was allocated with stack trace:\n"
@@ -525,7 +517,7 @@ class ArgumentHandler:
                 self.dataptrs_read.add(data_ptr)
 
             self.tensor_aliases.setdefault(data_ptr, [])
-            if name:
+            if name is not None:
                 self.tensor_aliases[data_ptr].append(name)
             if is_output:
                 self.outputs.add(data_ptr)
