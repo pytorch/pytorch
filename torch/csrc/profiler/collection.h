@@ -69,6 +69,8 @@ struct RawTensorMetadata {
 };
 
 struct TensorMetadata : public RawTensorMetadata {
+  explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
+
   c10::Device device() const {
     return {device_type_, device_index_};
   }

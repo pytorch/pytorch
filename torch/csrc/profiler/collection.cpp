@@ -99,7 +99,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
       out.strides_.emplace_back();
       switch (*tag_it) {
         case Tag::Tensor: {
-          const auto& md = *tensor_metadata_it++;
+          const TensorMetadata md{*tensor_metadata_it++};
           for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
             out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
@@ -108,7 +108,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
               out.strides_.back().push_back(*tensor_size_strides_it++);
             }
           }
-          out.tensor_metadata_.emplace_back(TensorMetadata{md});
+          out.tensor_metadata_.emplace_back(std::move(md));
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
