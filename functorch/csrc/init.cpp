@@ -356,6 +356,11 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
+static bool is_functorch_tensor_subclass(const Tensor& tensor) {
+  auto level = maybe_get_level(tensor);
+  return level != -1;
+}
+
 } // namespace functorch
 }
 
@@ -363,6 +368,7 @@ static void dump_local_tls() {
 namespace at { namespace functorch {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("_is_functorch_tensor_subclass", &at::functorch::is_functorch_tensor_subclass);
   m.def("_add_batch_dim", &at::functorch::_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &at::functorch::_remove_batch_dim, "remove batch dim");
   m.def("_wrap_functional_tensor", &at::functorch::_wrap_functional_tensor, "add functional tensor");
