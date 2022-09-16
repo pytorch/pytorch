@@ -754,23 +754,37 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._softmax)
-@pw_cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
-    return unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._log_softmax)
-@pw_cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    return shifted - shifted_logsumexp
+    result = shifted - shifted_logsumexp
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
