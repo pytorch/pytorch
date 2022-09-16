@@ -9,6 +9,7 @@ from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 # will also force use further restrict the amount of memory per process for cuda
 NUM_PROCS = 3
 
+
 def calculate_shards(
     num_shards: int,
     tests: List[str],
@@ -43,10 +44,10 @@ def calculate_shards(
         )
 
     # Not the best idea, but attempt to mask the long jobs with other long jobs
-    for i in range(0, len(parallel), 3):
+    for i in range(0, len(parallel), NUM_PROCS):
         min_shard_index = sorted(range(num_shards), key=lambda j: sharded_jobs[j][0])[0]
         curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
-        curr_shard_jobs.extend(parallel[i : i + 3])
+        curr_shard_jobs.extend(parallel[i : i + NUM_PROCS])
         sharded_jobs[min_shard_index] = (
             curr_shard_time + filtered_job_times[parallel[i]],
             curr_shard_jobs,
