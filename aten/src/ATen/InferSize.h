@@ -7,8 +7,6 @@
 #include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
-#include <c10/util/DimVector.h>
-#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 
@@ -64,7 +62,6 @@ inline void infer_size_impl(
   ss << "shape '" << shape << "' is invalid for input of size " << numel;
   throw std::runtime_error(ss.str());
 }
-
 
 inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
   auto res = shape.vec();
