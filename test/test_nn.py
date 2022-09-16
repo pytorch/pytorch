@@ -17960,6 +17960,12 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
 
+    @onlyCUDA
+    @largeTensorTest("90GB", "cpu")
+    @largeTensorTest("18GB", "cuda")
+    def test_nll_loss_large_tensor(self, device):
+        self._nll_loss_helper([int(2 ** 16), int(2 ** 16) + 1], "none", torch.empty([int(2 ** 16)]), device)
+
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
