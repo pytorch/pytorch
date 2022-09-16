@@ -108,7 +108,6 @@ class HandleConfig:
     offload_params: bool
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: Optional[bool] = False
 
 
 class FlatParameter(nn.Parameter):
@@ -794,21 +793,6 @@ class FlatParamHandle:
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
-                    # If we're using mixed precision with keeping grads
-                    # casted, gradient here might still be of the reduced
-                    # dtype if we didn't clear / set the gradients to None
-                    # after previous forward. In that case, make sure
-                    # p._saved_grad_shard is cast to the full precision type
-                    # so that we can accumulate in full precision in
-                    # _post_backward_hook and assign back in full precision
-                    # in _wait_for_post_backward.
-                    if (
-                        self._config.keep_low_precision_grads and
-                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
-                    ):
-                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
-                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
-                        )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
