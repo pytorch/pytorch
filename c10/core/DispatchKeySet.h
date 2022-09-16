@@ -645,16 +645,14 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
 });
 
 // See Note [TLS Initialization]
-constexpr DispatchKeySet default_included_set = DispatchKeySet({
-    DispatchKey::BackendSelect,
-    DispatchKey::ADInplaceOrView,
-});
+C10_API DispatchKeySet get_default_included_set();
 
-constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-});
+C10_API DispatchKeySet get_default_excluded_set();
+
+void add_to_default_include_set(std::initializer_list<DispatchKey> ks);
+void remove_from_default_include_set(std::initializer_list<DispatchKey> ks);
+void add_to_default_exclude_set(std::initializer_list<DispatchKey> ks);
+void remove_from_default_exclude_set(std::initializer_list<DispatchKey> ks);
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
