@@ -1,10 +1,11 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Dict, Any, List, Type
+from typing import List, Type, Optional
 import operator
 import functools
 from functools import lru_cache
 import traceback
+import collections
 
 try:
     import sympy  # type: ignore[import]
@@ -191,6 +192,15 @@ for method, _func in magic_methods.items():
         setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
 
 def _lru_cache(fn, maxsize=None):
+    """
+    Wrapper around lru_cache that clears when new info about shapes has been
+    updated.
+
+    Use lru_cache if the output is always the same, regardless of the
+    constraints we know now (i.e. evaluate_expr)
+
+    Use _lru_cache otherwise.
+    """
     fn_cache = lru_cache(maxsize)(fn)
     prior_key = None
 
@@ -202,7 +212,7 @@ def _lru_cache(fn, maxsize=None):
             fn_cache.cache_clear()
         return fn_cache(self, *args, **kwargs)
 
-    wrapper.cache_info = fn_cache.cache_info
+    wrapper.cache_info = fn_cache.cache_info  # type: ignore[attr-defined]
     return wrapper
 
 
@@ -231,7 +241,7 @@ class ShapeEnv(object):
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
-        self.var_to_val[sympy_expr] = val
+        self.var_to_val[sympy_expr] = sympy.Integer(val)
         return cpp_sym_int
 
     def create_shapes_for_args(self, args):
@@ -252,8 +262,19 @@ class ShapeEnv(object):
         _ = new_env.create_shapes_for_args(args)
         return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
 
+    def get_nontrivial_guards(self):
+        guards = [(self.simplify(guard), val) for guard, val, _ in self.guards]
+        guards = [guard for guard in guards if len(guard[0].free_symbols) > 0]
+        return guards
+
+    def get_shape_groups(self):
+        shape_groups = collections.defaultdict(list)
+        for k, v in self.replacements.items():
+            shape_groups[v].append(k)
+        return shape_groups
+
     @_lru_cache
-    def maybe_evaluate_static(self, expr):
+    def _maybe_evaluate_static(self, expr: sympy.Expr) -> Optional[sympy.Expr]:
         """
         Tries to evaluate expr without introducing guards
         """
@@ -270,12 +291,12 @@ class ShapeEnv(object):
         return None
 
     @_lru_cache
-    def replace(self, expr):
-        replacements = {s: self.find(s) for s in expr.free_symbols}
+    def replace(self, expr: sympy.Expr) -> sympy.Expr:
+        replacements = {s: self._find(s) for s in expr.free_symbols}
         return sympy.expand(expr.xreplace(replacements))
 
     @_lru_cache
-    def update_divisible(self):
+    def _update_divisible(self):
         new_divisible = {}
         for k in self.divisible:
             res = self.replace(k)
@@ -285,21 +306,25 @@ class ShapeEnv(object):
         self.divisible = new_divisible
 
     @_lru_cache
-    def simplify(self, expr):
+    def simplify(self, expr: sympy.Expr) -> sympy.Expr:
         expr = self.replace(expr)
         if len(expr.atoms(sympy.Mod)) > 0:
-            self.update_divisible()
+            self._update_divisible()
             expr = expr.xreplace(self.divisible)
             expr = sympy.expand(expr)
         return expr
 
-    @lru_cache
+    @lru_cache(256)
     def size_hint(self, expr: sympy.Expr):
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
-        assert (not isinstance(result_expr, sympy.Expr)) or len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
+        assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
         return result_expr
 
-    def find(self, a):
+    def _find(self, a):
+        """
+        Implements a DSU to find the variable that represents a
+        TODO: Improve this to handle non-identity transitive replacements
+        """
         acopy = a
         while a in self.replacements:
             a = self.replacements[a]
@@ -307,15 +332,20 @@ class ShapeEnv(object):
             self.replacements[acopy], acopy = a, self.replacements[acopy]
         return a
 
-    def evaluate_eq(self, expr: sympy.Eq):
+    def _maybe_guard_eq(self, expr: sympy.Eq) -> None:
+        """
+        Evaluates the result of an eq call. If true, uses information to
+        simplify shapes (i.e. a == b or a % 5 == 0)
+        """
         concrete_bool = bool(self.size_hint(expr))
         if not concrete_bool:
             return
         free = list(expr.free_symbols)
 
         assert len(free) > 0, "The expression should not be static by this point"
-        if len(free) in (1, 2, 3):
-            free = sorted(free, key=lambda x: (-self.size_hint(x), x.name))
+        # In case of really gnarly expression, we don't blow up
+        if len(free) <= 4:
+            free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
             lhs = expr.lhs
             rhs = expr.rhs
             solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
@@ -333,24 +363,27 @@ class ShapeEnv(object):
             solutions = tuple(solutions)
             if len(solutions) == 1 and "/" not in str(solutions[0]):
                 new_var = solutions[0]
-                new_var = self.find(solutions[0])
+                new_var = self._find(solutions[0])
                 self.replacements[free[0]] = new_var
 
         return
 
     @lru_cache(256)
-    def evaluate_expr(self, expr):
+    def evaluate_expr(self, expr: sympy.Expr):
+        """
+        Given an expression, evaluates it, adding guards if necessary
+        """
         try:
             if len(list(expr.free_symbols)) == 0:
                 return expr
             expr = self.simplify(expr)
 
-            static_expr = self.maybe_evaluate_static(expr)
+            static_expr = self._maybe_evaluate_static(expr)
             if static_expr is not None:
                 return static_expr
 
             if isinstance(expr, sympy.Eq):
-                self.evaluate_eq(expr)
+                self._maybe_guard_eq(expr)
             concrete_val = self.size_hint(expr)
 
             # Uncomment this to see what code triggered this guard.
