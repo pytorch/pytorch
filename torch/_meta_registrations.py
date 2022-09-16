@@ -829,12 +829,6 @@ def meta_rand_like(self, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
-@register_meta(aten.empty_like.default)
-def meta_empty_like(self, **kwargs):
-    # TODO: stride semantics?
-    return aten.empty.memory_format(self.size(), **kwargs)
-
-
 @register_meta(aten.full_like.default)
 def meta_full_like(self, fill_value, **kwargs):
     return aten.empty_like.default(self, **kwargs)
