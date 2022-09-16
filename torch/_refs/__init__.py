@@ -3597,9 +3597,6 @@ def arange(
     pass
 
 
-# See https://github.com/pytorch/pytorch/issues/82364
-# @register_decomposition(torch.ops.aten.arange)
-# @out_wrapper()
 @register_decomposition(
     [
         torch.ops.aten.arange.default,
@@ -3607,9 +3604,10 @@ def arange(
         torch.ops.aten.arange.start_step,
     ]
 )
+@out_wrapper()
 def arange(
-    a: Optional[NumberType] = None,
-    b: Optional[NumberType] = None,
+    start: Optional[NumberType] = None,
+    end: Optional[NumberType] = None,
     step: NumberType = 1,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -3618,7 +3616,7 @@ def arange(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    assert (a is not None and b is not None) or (a is not None and b is None)
+    a, b = start, end
     if a is not None and b is not None:
         return prims.arange(
             a,
@@ -3630,7 +3628,8 @@ def arange(
             # pin_memory=pin_memory,
             requires_grad=requires_grad,
         )
-    elif a is not None and b is None:
+    else:
+        assert a is not None and b is None
         return prims.arange(
             0,
             a,
@@ -3641,8 +3640,6 @@ def arange(
             # pin_memory=pin_memory,
             requires_grad=requires_grad,
         )
-    else:
-        raise AssertionError()
 
 
 @register_decomposition(torch.ops.aten.linspace)
