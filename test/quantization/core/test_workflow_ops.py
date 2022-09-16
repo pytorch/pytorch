@@ -293,17 +293,6 @@ class TestFakeQuantizeOps(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    def test_forward_backward_per_tensor_with_amp(self):
-        net = nn.Sequential(nn.Conv2d(1, 1, 3))
-        net.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-        net_prep = torch.ao.quantization.prepare_qat(net)
-
-        with torch.cuda.amp.autocast():
-            x = torch.randn(4, 1, 5, 5)
-            out = net_prep(x).sum()
-            out.backward()
-            self.assertTrue(net_prep[0].weight.grad is not None)
-
     def test_forward_per_tensor_half_precision_numerics(self):
         scale = .1
         zero = 0

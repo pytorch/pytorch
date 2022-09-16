@@ -308,7 +308,11 @@ def error_on_missing_kernels(
         # but we don't want to include kernel names that come from function calls,
         # like "return torch_xla::XLANativeFunctions::empty_strided_symint(...)".
         # Easy check is to ignore any lines with colons before the class name.
-        [y for (x, y) in re.findall(kernel_defn_regex, backend_defns)if not x.endswith(":")]
+        [
+            y
+            for (x, y) in re.findall(kernel_defn_regex, backend_defns)
+            if not x.endswith(":")
+        ]
     )
 
     missing_kernels_err_msg = ""
