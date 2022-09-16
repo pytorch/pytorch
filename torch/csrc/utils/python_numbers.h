@@ -150,8 +150,8 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
     return true;
   }
 #endif
-  return PyFloat_Check(obj) ||
-      PyLong_Check(obj) | torch::is_symint_node(py::handle(obj));
+  return PyFloat_Check(obj) || PyLong_Check(obj) ||
+      torch::is_symint_node(py::handle(obj));
 }
 
 inline bool THPUtils_checkScalar(PyObject* obj) {
@@ -160,8 +160,8 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
     return true;
   }
 #endif
-  return PyFloat_Check(obj) || PyLong_Check(obj) ||
-      PyComplex_Check(obj) | torch::is_symint_node(py::handle(obj));
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
+      torch::is_symint_node(py::handle(obj));
 }
 
 inline double THPUtils_unpackDouble(PyObject* obj) {

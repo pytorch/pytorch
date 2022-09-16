@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <random>
+#include <c10/core/SymInt.h>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -179,4 +180,28 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("false", format(Scalar(false)));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
+}
+
+TEST(TestSymInt, Basic) {
+  Scalar foo;
+  auto a_impl = c10::make_intrusive<c10::SymIntNodeImpl>();
+  foo = Scalar(a_impl->toSymInt());
+  ASSERT_EQ(a_impl.use_count(), 2);
+  Scalar bar{foo};
+  ASSERT_EQ(a_impl.use_count(), 3);
+  auto baz = bar;
+  ASSERT_EQ(a_impl.use_count(), 4);
+  auto foo2 = std::move(bar);
+  ASSERT_EQ(a_impl.use_count(), 4);
+  ASSERT_TRUE(foo2.isSymInt());
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  ASSERT_TRUE(bar.isIntegral(false));
+  foo2 = SymInt(4);
+  ASSERT_TRUE(foo2.isSymInt());
+  ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
+  // NOLINTNEXTLINE(Wself-assign-overload)
+  foo2 = foo2;
+  ASSERT_TRUE(foo2.isSymInt());
+  ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
+  ASSERT_EQ(a_impl.use_count(), 3);
 }

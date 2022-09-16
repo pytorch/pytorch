@@ -32,7 +32,6 @@ namespace c10 {
  */
 class C10_API Scalar {
  public:
- public:
   Scalar() : Scalar(int64_t(0)) {}
 
 #define DEFINE_IMPLICIT_CTOR(type, name) \
@@ -122,20 +121,17 @@ class C10_API Scalar {
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) {
+    if (&other == this) {
+      return *this;
+    }
+
     destroy();
     moveFrom(std::move(other));
     return *this;
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(const Scalar& other) {
-    destroy();
-
-    this->tag = other.tag;
-    if (other.tag != Tag::HAS_si) {
-      this->v.u = other.v.u;
-    } else {
-      this->v.si = other.v.si;
-    }
+    *this = Scalar(other);
     return *this;
   }
 
@@ -212,6 +208,7 @@ class C10_API Scalar {
     if (rhs.tag == Tag::HAS_si) {
       new (&v.si) c10::SymInt(rhs.v.si);
       rhs.v.si.release_();
+      // v.si = std::move(rhs.v.si);
     } else {
       v.u = rhs.v.u;
     }
@@ -247,7 +244,7 @@ class C10_API Scalar {
 
   Scalar(const Payload& p, Scalar::Tag t) : tag(t) {
     if (t == Tag::HAS_si) {
-      v.si = c10::SymInt(p.si);
+      v.si = p.si;
     } else {
       v.u = p.u;
     }
