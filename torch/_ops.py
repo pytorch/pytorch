@@ -10,7 +10,6 @@ import torch._C
 
 import torch.jit
 from torch import _utils_internal
-from torch._C import DispatchKey  # type: ignore[attr-defined]
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -50,6 +49,8 @@ class PyOperatorABC(ABC):
 
 
 is_included_in_alias = torch._C._dispatch_is_included_in_alias
+
+DispatchKey = torch._C.DispatchKey
 
 # Equivalent to computeDispatchTableEntryWithDebug
 def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
