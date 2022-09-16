@@ -104,6 +104,21 @@ def set_meta(proxy, val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
+def cache(f):
+    out = None
+    @functools.wraps(f)
+    def new_f(*args, **kwargs):
+        nonlocal out
+        if out is None:
+            out = f(*args, **kwargs)
+        return out
+    return new_f
+
+def thunkify(f, *args, **kwargs):
+    """
+    Delays computation of f until it's called again, which is done by
+    """
+    return cache(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
@@ -118,7 +133,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
                 if proxy is None:
                     proxy = proxy_callable(inner_s, *args)
                 return proxy
-            set_proxy_slot(inner_s, tracer, thunk)
+            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -472,6 +487,19 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
+    def _compute_proxy(self, func, args, out):
+        n_args = tuple(
+            get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
+            if isinstance(a, (PySymInt, PySymFloat)) else a
+            for a in args
+        )
+        # func doesn't have a __torch_function__ that Proxy can interpose, so
+        # we gotta do it manually
+        n_out = self.tracer.create_node("call_function", func, n_args, {})
+        p_out = fx.Proxy(n_out, self.tracer)
+        set_meta(p_out, out)
+        return p_out
+
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
             return func(*args, **kwargs)
@@ -479,20 +507,12 @@ class ProxySymDispatchMode(SymDispatchMode):
         # (otherwise we could use tree_map)
         # We also assume there are no keyword arguments.
         assert not kwargs
-        n_args = tuple(
-            get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
-            if isinstance(a, (PySymInt, PySymFloat)) else a
-            for a in args
-        )
-
-        # func doesn't have a __torch_function__ that Proxy can interpose, so
-        # we gotta do it manually
-        n_out = self.tracer.create_node("call_function", func, n_args, {})
-        p_out = fx.Proxy(n_out, self.tracer)
         out = func(*args, **kwargs)
-        set_meta(p_out, out)
         assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
-        set_proxy_slot(out, self.tracer, lambda: p_out)
+
+        # Delays tracing out the proxies on this op until we actually need it
+        p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
+        set_proxy_slot(out, self.tracer, p_out_thunk)
         return out
 
 

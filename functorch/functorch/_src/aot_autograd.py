@@ -322,8 +322,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
         fx_g = make_fx(joint_forward_backward, tracing_mode=TRACING_MODE)(*joint_inputs)
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
