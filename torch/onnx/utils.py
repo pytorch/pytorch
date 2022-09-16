@@ -43,10 +43,9 @@ from torch.onnx import (  # noqa: F401
     errors,
     symbolic_caffe2,
     symbolic_helper,
-    symbolic_registry,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
 
 __all__ = [
     "is_in_onnx_export",
@@ -59,7 +58,6 @@ __all__ = [
     "unpack_quantized_tensor",
     "export_to_pretty_string",
     "unconvertible_ops",
-    "get_ns_op_name_from_custom_op",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
 ]
@@ -1279,7 +1277,7 @@ def unconvertible_ops(
             operator_export_type=_C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
         )
     unsupported_ops = list()
-    supported_namespaces = ("onnx", "prim", "quantized")
+    supported_namespaces = {"onnx", "prim", "quantized"}
     for node in graph.nodes():
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
@@ -1690,37 +1688,10 @@ def _add_output_to_block(block: _C.Block, value: _C.Value):
 
 
 @_beartype.beartype
-def _find_symbolic_in_registry(
-    domain: str,
-    op_name: str,
-    opset_version: int,
-    operator_export_type: _C_onnx.OperatorExportTypes,
-) -> Optional[Callable]:
-    """Looks up for the symbolic function in the registry.
-
-    Args:
-        domain: The domain of the symbolic function.
-        op_name: The name of the op.
-        opset_version: Currect opset used.
-        operator_export_type: An enum in _C_onnx.OperatorExportTypes.
-
-    Returns:
-        The symbolic function if found, None otherwise.
-    """
-
-    if not symbolic_registry.is_registered_op(op_name, domain, opset_version):
-        if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
-            # Use the original node directly
-            return None
-    return symbolic_registry.get_registered_op(op_name, domain, opset_version)
-
-
-@_beartype.beartype
-def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
-
-    is_exportable_aten_op = symbolic_registry.is_registered_op(
-        op_name, "", opset_version
-    )
+def _should_aten_fallback(
+    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
+):
+    is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
     is_aten_fallback_export = (
         operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -1787,64 +1758,59 @@ def _run_symbolic_function(
     namespace, op_name = ns_op_name.split("::")
 
     try:
-        symbolic_registry.register_version("", opset_version)
-
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
             symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        if namespace == "aten":
-            domain = ""
-        elif namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
+        if namespace == "quantized" and symbolic_helper.is_caffe2_aten_fallback():
             domain = "caffe2"
         else:
             domain = namespace
+        symbolic_function_name = f"{domain}::{op_name}"
 
-        if symbolic_registry.is_registered_op(op_name, domain, opset_version):
-            symbolic_fn = _find_symbolic_in_registry(
-                domain, op_name, opset_version, operator_export_type
-            )
-            assert symbolic_fn is not None
+        symbolic_function_group = registration.registry.get_function_group(
+            symbolic_function_name
+        )
+        if symbolic_function_group is not None:
+            symbolic_fn = symbolic_function_group.get(opset_version)
+            if symbolic_fn is not None:
+                attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
+                if _need_symbolic_context(symbolic_fn):
+                    # TODO(justinchuby): Refactor how we check for the need of the symbolic context
+                    ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
+                    return symbolic_fn(ctx, g, *inputs, **attrs)
+                # PythonOp symbolic need access to the node to resolve the name conflict,
+                # this is inconsistent with regular op symbolic.
+                if op_name == "PythonOp":
+                    inputs = (n, *inputs)
+                return symbolic_fn(g, *inputs, **attrs)
 
-            attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
-            if _need_symbolic_context(symbolic_fn):
-                ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
-                return symbolic_fn(ctx, g, *inputs, **attrs)
-            # PythonOp symbolic need access to the node to resolve the name conflict,
-            # this is inconsistent with regular op symbolic.
-            if op_name == "PythonOp":
-                inputs = (n, *inputs)
-            return symbolic_fn(g, *inputs, **attrs)
-        elif namespace == "onnx":
+        attrs = {
+            k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+            for k in n.attributeNames()
+        }
+        if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {
-                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
-                for k in n.attributeNames()
-            }
             return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
-        elif _should_aten_fallback(
-            namespace, op_name, opset_version, operator_export_type
-        ):
+
+        if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
             # Direct ATen export requested
-            attrs = {
-                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
-                for k in n.attributeNames()
-            }
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
-        else:
-            raise errors.UnsupportedOperatorError(
-                domain,
-                op_name,
-                opset_version,
-                symbolic_registry.get_op_supported_version(
-                    op_name, domain, opset_version
-                ),
-            )
+
+        raise errors.UnsupportedOperatorError(
+            domain,
+            op_name,
+            opset_version,
+            symbolic_function_group.get_min_supported()
+            if symbolic_function_group
+            else None,
+        )
+
     except RuntimeError:
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
@@ -1869,31 +1835,26 @@ def _run_symbolic_function(
 
 
 @_beartype.beartype
-def get_ns_op_name_from_custom_op(symbolic_name):
-    if not bool(
-        re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)
-    ):
-        raise ValueError(
-            f"Failed to register operator {symbolic_name}."
-            "The symbolic name must match the format Domain::Name, "
+def _verify_custom_op_name(symbolic_name: str):
+    if not re.match(r"^[a-zA-Z0-9-_]+::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
+        raise errors.OnnxExporterError(
+            f"Failed to register operator {symbolic_name}. "
+            "The symbolic name must match the format domain::name, "
             "and should start with a letter and contain only "
             "alphanumerical characters"
         )
 
-    ns, op_name = symbolic_name.split("::")
+    ns, _ = symbolic_name.split("::")
     if ns == "onnx":
         raise ValueError(
             f"Failed to register operator {symbolic_name}. {ns} domain cannot be modified."
         )
 
-    if ns == "aten":
-        ns = ""
-
-    return ns, op_name
-
 
 @_beartype.beartype
-def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+def register_custom_op_symbolic(
+    symbolic_name: str, symbolic_fn: Callable, opset_version: int
+):
     """Registers a symbolic function for a custom operator.
 
     When the user registers symbolic for custom/contrib ops,
@@ -1911,11 +1872,16 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
             operator nodes to add to the graph.
         opset_version (int): The ONNX opset version in which to register.
     """
-    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
+    if symbolic_name.startswith("::"):
+        symbolic_name = f"aten{symbolic_name}"
+
+    _verify_custom_op_name(symbolic_name)
 
     for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
-            symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
+            registration.registry.register(
+                symbolic_name, version, symbolic_fn, custom=True
+            )
 
 
 @_beartype.beartype
@@ -1929,11 +1895,14 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
             format.
         opset_version (int): The ONNX opset version in which to unregister.
     """
-    ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
+    if symbolic_name.startswith("::"):
+        symbolic_name = f"aten{symbolic_name}"
+
+    _verify_custom_op_name(symbolic_name)
 
     for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
-            symbolic_registry.unregister_op(op_name, ns, version)
+            registration.registry.unregister(symbolic_name, version)
 
 
 @_beartype.beartype

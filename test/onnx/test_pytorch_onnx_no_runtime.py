@@ -6,6 +6,7 @@ import contextlib
 import io
 import itertools
 import unittest
+import unittest.mock
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import onnx
@@ -14,14 +15,15 @@ import onnx.numpy_helper
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import symbolic_helper, symbolic_registry, utils
+from torch.onnx import symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import registration
 from torch.testing._internal import common_utils
 
 
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
-    input: Tuple[torch.Tensor],
+    input: Union[torch.Tensor, Tuple[torch.Tensor]],
     custom_ops: Optional[
         Iterable[
             Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
@@ -436,14 +438,11 @@ class TestONNXExport(common_utils.TestCase):
             def forward(self, x):
                 return torch.clamp(x, min=-0.5, max=0.5)
 
-        def break_is_registered_op_api(opname, domain, version):
-            fake_missing_symbolics = ("clamp",)
-            if opname in fake_missing_symbolics:
-                return False
-            return (
-                (domain, version) in symbolic_registry._registry
-                and opname in symbolic_registry._registry[(domain, version)]
-            )
+        def break_is_registered_op_api(name):
+            fake_missing_symbolics = {"aten::clamp"}
+            if name in fake_missing_symbolics:
+                return None
+            return registration.registry.get_function_group(name)
 
         # Force missing symbolic for well-known op using a mock
         onnx_model = export_to_onnx(
@@ -451,7 +450,7 @@ class TestONNXExport(common_utils.TestCase):
             torch.randn(3, 4, requires_grad=True),
             mocks=[
                 unittest.mock.patch(
-                    "torch.onnx.symbolic_registry.is_registered_op",
+                    "torch.onnx._internal.registration.registry.get_function_group",
                     side_effect=break_is_registered_op_api,
                 )
             ],
