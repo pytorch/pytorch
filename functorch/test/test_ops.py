@@ -545,15 +545,6 @@ class TestOperators(TestCase):
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d"),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_groups_with_bias'),
-        # Given transposed=1, weight of size [4, 4, 3, 3], expected input[2, 8, 4, 4]
-        # to have 4 channels, but got 8 channels instead
-        xfail("nn.functional.conv2d", 'stride_depthwise_with_bias'),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -579,7 +570,6 @@ class TestOperators(TestCase):
         # supported with memory_format torch.preserve_format
         # or torch.contiguous_format (got ChannelsLast)s
         xfail("nn.functional.max_unpool2d", "grad"),
-        xfail("nn.functional.prelu"),  # Mismatch!
         xfail("nn.functional.rrelu"),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
@@ -596,9 +586,6 @@ class TestOperators(TestCase):
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
-        # locally fails with `bias tensor has to be contiguous`
-        # but passes on CI, hence the skip.
-        skip("nn.functional.conv_transpose3d", device_type='cuda'),
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -1137,9 +1124,6 @@ class TestOperators(TestCase):
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
-        xfail('_masked.log_softmax', ''),  # NYI: forward-AD for _log_softmax_backward_data
-        xfail('_masked.softmax', ''),  # NYI: forward-AD for _softmax_backward_data
-        xfail('_masked.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
@@ -1147,10 +1131,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
-        xfail('nn.functional.instance_norm', ''),  # NYI: forward AD for native_batch_norm_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
-        xfail('nn.functional.softmin', ''),  # NYI: forward-AD for _softmax_backward_data
-        xfail('nn.functional.softmin', 'with_dtype'),  # NYI: forward-AD for _softmax_backward_data
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
@@ -1164,7 +1145,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'mean'),  # NYI: forward-AD for scatter_reduce
         xfail('scatter_reduce', 'prod'),  # NYI: forward-AD for scatter_reduce
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
-        xfail('native_layer_norm', ''),  # NYI: forward-AD for native_layer_norm_backward
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
@@ -1190,11 +1170,6 @@ class TestOperators(TestCase):
 
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
-
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
 
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
@@ -1225,37 +1200,8 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            # HACK: obviously pytorch should also have the same coverage
-            # For things that do have the same coverage, we test that jvp x vjp
-            # are the same between PyTorch and functorch. For things that don't,
-            # we check that jacfwd(vjp) and jacrev(vjp) are the same. This results
-            # in slower tests.
-            FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH = {
-                'nn.functional.nll_loss',
-                'softmax',
-                'log_softmax',
-                'nn.functional.cross_entropy',
-                'nn.functional.layer_norm',
-                'nn.functional.batch_norm',
-            }
-            if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
-                self.assertFalse(op.supports_fwgrad_bwgrad,
-                                 f"{op.name} now supports forward over reverse without a decomposition. " +
-                                 "Please remove the decomposition version")
-
-                def is_differentiable(t):
-                    return isinstance(t, torch.Tensor) and t.dtype == torch.float32
-                args = (cotangents, *primals)
-                if op.name == 'nn.functional.binary_cross_entropy':
-                    argnums = (0, 1)  # targets is float32 but isn't differentiable
-                    atol_rtol = 1.5e-4, 1.3e-06
-                else:
-                    argnums = tuple(i for i in range(len(args)) if is_differentiable(args[i]))
-                    atol_rtol = None
-                self._compare_jacobians_of_vjp(fn, args, argnums, atol_rtol)
-            else:
-                expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
-                self.assertEqual(result, expected)
+            expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
+            self.assertEqual(result, expected)
 
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
         # Following operatos take too long, hence skipped
@@ -1363,8 +1309,6 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
-    # linalg.svd - manual tolerance
-    # svd
     def test_vmapjvpvjp(self, device, dtype, op):
         # Since we test `jvpvjp` seperately,
         # in this we just check that vmap of `jvpvjp`
@@ -1388,11 +1332,6 @@ class TestOperators(TestCase):
             primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
             cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
 
-            if isinstance(primals[0], torch.Tensor) and primals[0].numel() == 0:
-                # typically the first primal arg is the input. If the input has no elements, we will typically run
-                # into an issue of "Expected Tensor but got None"
-                continue
-
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
                 return vjp_fn(cotangents)
@@ -1403,12 +1342,9 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                if isinstance(primals_out, torch.Tensor):
-                    return (primals_out, tangents_out)
-                else:
-                    flat_primals_out, _ = tree_flatten(primals_out)
-                    flat_tangents_out, _ = tree_flatten(tangents_out)
-                    return tuple(flat_primals_out + flat_tangents_out)
+                flat_primals_out, _ = tree_flatten(primals_out)
+                flat_tangents_out, _ = tree_flatten(tangents_out)
+                return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
