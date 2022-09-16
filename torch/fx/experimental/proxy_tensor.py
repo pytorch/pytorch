@@ -106,7 +106,8 @@ def set_meta(proxy, val):
 
 def thunkify(f, *args, **kwargs):
     """
-    Delays computation of f until it's called again, which is done by
+    Delays computation of f until it's called again
+    Also caches the result
     """
     return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
 
@@ -116,7 +117,6 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         if isinstance(outer_s, SymInt):
             inner_s = outer_s.get_pyobj()
             assert isinstance(inner_s, PySymInt)
-            proxy = None
 
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
