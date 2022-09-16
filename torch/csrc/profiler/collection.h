@@ -46,11 +46,8 @@ using TensorImplAddress = strong::type<
     strong::regular,
     strong::hashable>;
 
-using StorageImplData = strong::type<
-    void*,
-    struct StorageImplData_,
-    strong::regular,
-    strong::hashable>;
+using StorageImplData = strong::
+    type<void*, struct StorageImplData_, strong::regular, strong::hashable>;
 
 struct TensorMetadata {
   c10::Device device() const {
