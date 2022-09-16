@@ -11,6 +11,8 @@ import os
 
 use_functionalize = True
 
+enable_pre_autograd_decomps = True
+
 use_fake_tensor = True
 
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
