@@ -2199,23 +2199,36 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
+py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+    // Parse the name into namespace and name (no overload_name)
+    // TODO: put this into the library
+    const auto& schema = op.schema();
+    const auto& qualified_name = op.operator_name().name;
+    const auto& overload_name = schema.overload_name();
+    auto pos = qualified_name.find("::");
+    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    // Make me some null terminated strings
+    std::string ns_str = qualified_name.substr(0, pos);
+    const char* ns = ns_str.c_str();
+    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    if (overload_name == "") {
+      return torch_api_function.attr("default").ptr();
+    } else {
+      return torch_api_function.attr(overload_name.c_str()).ptr();
+    }
+  });
+}
+
 void ConcretePyInterpreterVTable::dispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // Parse the name into namespace and name (no overload_name)
-  // TODO: put this into the library
-  const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
-  auto pos = qualified_name.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  // Make me some null terminated strings
-  std::string ns_str = qualified_name.substr(0, pos);
-  const char* ns = ns_str.c_str();
-  const char* func_name = qualified_name.c_str() + pos + strlen("::");
 
   // The plan: convert all the arguments back into PyObjects,
   // extracting out the tensor handles, then call
@@ -2226,16 +2239,7 @@ void ConcretePyInterpreterVTable::dispatch(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function =
-      py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-  py::handle torch_api_function_overload;
-  if (overload_name == "") {
-    torch_api_function_overload = torch_api_function.attr("default");
-  } else {
-    torch_api_function_overload =
-        torch_api_function.attr(overload_name.c_str());
-  }
-  std::string module_name_str = "torch.ops." + ns_str;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
   for (const auto idx : c10::irange(arguments.size())) {
@@ -2267,9 +2271,9 @@ void ConcretePyInterpreterVTable::dispatch(
       overloaded_args,
       args.ptr(),
       kwargs.ptr(),
-      func_name,
+      nullptr,
       torch_api_function_overload.ptr(),
-      module_name_str.c_str(),
+      nullptr,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
@@ -2283,17 +2287,6 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
-  // Parse the name into namespace and name (no overload_name)
-  // TODO: put this into the library
-  const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
-  auto pos = qualified_name.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  // Make me some null terminated strings
-  std::string ns_str = qualified_name.substr(0, pos);
-  const char* ns = ns_str.c_str();
-  const char* func_name = qualified_name.c_str() + pos + strlen("::");
-
   // The plan: convert all the arguments back into PyObjects,
   // extracting out the tensor handles, then call
   // handle_torch_function_no_python_arg_parser
@@ -2303,16 +2296,7 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function =
-      py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-  py::handle torch_api_function_overload;
-  if (overload_name == "") {
-    torch_api_function_overload = torch_api_function.attr("default");
-  } else {
-    torch_api_function_overload =
-        torch_api_function.attr(overload_name.c_str());
-  }
-  std::string module_name_str = "torch.ops." + ns_str;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
   auto args = std::move(args_kwargs.first);

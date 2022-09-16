@@ -377,8 +377,15 @@ auto handle_torch_function_no_python_arg_parser(
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '" << module_name << "." << func_name
-       << "' on types that implement " << torch_function_name_str << ": [";
+    ss << "no implementation found for '";
+    if (module_name && func_name) {
+      ss << module_name << "." << func_name;
+    } else {
+      py::handle fn = torch_api_function;
+      ss << py::str(fn.attr("__module__")) << "."
+         << py::str(fn.attr("__name__"));
+    }
+    ss << "' on types that implement " << torch_function_name_str << ": [";
     for (auto& arg : overloaded_args) {
       ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
       if (!arg.is(overloaded_args.back())) {
