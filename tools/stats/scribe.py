@@ -1,7 +1,34 @@
 import base64
 import bz2
-import os
 import json
+import os
+from typing import Any
+
+
+_lambda_client = None
+
+
+def sprint(*args: Any) -> None:
+    print("[scribe]", *args)
+
+
+def aws_lambda() -> Any:
+    global _lambda_client
+    # lazy import so that we don't need to introduce extra dependencies
+    import boto3  # type: ignore[import]
+
+    if _lambda_client is None:
+        _lambda_client = boto3.client("lambda")
+
+    return _lambda_client
+
+
+def invoke_lambda(name: str, payload: Any) -> Any:
+    res = aws_lambda().invoke(FunctionName=name, Payload=json.dumps(payload).encode())
+    payload = str(res["Payload"].read().decode())
+    if res.get("FunctionError"):
+        raise Exception(payload)
+    return payload
 
 
 def send_to_scribe(logs: str) -> str:
@@ -16,24 +43,16 @@ def send_to_scribe(logs: str) -> str:
 
 
 def _send_to_scribe_via_boto3(logs: str) -> str:
-    # lazy import so that we don't need to introduce extra dependencies
-    import boto3  # type: ignore[import]
-
-    print("Scribe access token not provided, sending report via boto3...")
+    sprint("Scribe access token not provided, sending report via boto3...")
     event = {"base64_bz2_logs": base64.b64encode(bz2.compress(logs.encode())).decode()}
-    client = boto3.client("lambda")
-    res = client.invoke(FunctionName='gh-ci-scribe-proxy', Payload=json.dumps(event).encode())
-    payload = str(res['Payload'].read().decode())
-    if res.get('FunctionError'):
-        raise Exception(payload)
-    return payload
+    return str(invoke_lambda("gh-ci-scribe-proxy", event))
 
 
 def _send_to_scribe_via_http(access_token: str, logs: str) -> str:
     # lazy import so that we don't need to introduce extra dependencies
     import requests  # type: ignore[import]
 
-    print("Scribe access token provided, sending report via http...")
+    sprint("Scribe access token provided, sending report via http...")
     r = requests.post(
         "https://graph.facebook.com/scribe_logs",
         data={"access_token": access_token, "logs": logs},

@@ -20,6 +20,26 @@ C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
 
 namespace caffe2 {
 
+namespace {
+  class ThreadPoolImpl : public ThreadPool {
+  public:
+    explicit ThreadPoolImpl(int numThreads);
+    ~ThreadPoolImpl() override;
+
+    // Returns the number of threads currently in use
+    int getNumThreads() const override;
+    void setNumThreads(size_t numThreads) override;
+
+    void run(const std::function<void(int, size_t)>& fn, size_t range) override;
+    void withPool(const std::function<void(WorkersPool*)>& f) override;
+
+  private:
+    std::atomic_size_t numThreads_;
+    std::shared_ptr<WorkersPool> workersPool_;
+    std::vector<std::shared_ptr<Task>> tasks_;
+  };
+}
+
 size_t getDefaultNumThreads() {
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
@@ -80,6 +100,17 @@ size_t getDefaultNumThreads() {
     // Always give precedence to explicit setting.
     numThreads = FLAGS_pthreadpool_size;
   }
+
+  /*
+   * For llvm-tsan, holding limit for the number of locks for a single thread
+   * is 64. pthreadpool's worst case is the number of threads in a pool. So we
+   * want to limit the threadpool size to 64 when running with tsan. However,
+   * sometimes it is tricky to detect if we are running under tsan, for now
+   * capping the default threadcount to the tsan limit unconditionally.
+   */
+  int tsanThreadLimit = 64;
+  numThreads = std::min(numThreads, tsanThreadLimit);
+
   return numThreads;
 }
 
@@ -89,43 +120,40 @@ constexpr size_t kDefaultMinWorkSize = 1;
 
 size_t ThreadPool::defaultNumThreads_ = 0;
 
+ThreadPool* ThreadPool::createThreadPool(int numThreads) {
+  return new ThreadPoolImpl(numThreads);
+}
+
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
   defaultNumThreads_ = getDefaultNumThreads();
   LOG(INFO) << "Constructing thread pool with " << defaultNumThreads_
             << " threads";
-  return std::make_unique<ThreadPool>(defaultNumThreads_);
+  return std::make_unique<ThreadPoolImpl>(defaultNumThreads_);
 }
 
-ThreadPool::ThreadPool(int numThreads)
-    : minWorkSize_(kDefaultMinWorkSize),
-      numThreads_(numThreads),
-      workersPool_(std::make_shared<WorkersPool>()) {}
+ThreadPoolImpl::ThreadPoolImpl(int numThreads)
+    : numThreads_(numThreads),
+      workersPool_(std::make_shared<WorkersPool>()) {
+  minWorkSize_ = kDefaultMinWorkSize;
+}
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-ThreadPool::~ThreadPool() {}
+ThreadPoolImpl::~ThreadPoolImpl() {}
 
-int ThreadPool::getNumThreads() const {
+int ThreadPoolImpl::getNumThreads() const {
   return numThreads_;
 }
 
 // Sets the number of threads
 // # of threads should not be bigger than the number of big cores
-void ThreadPool::setNumThreads(size_t numThreads) {
+void ThreadPoolImpl::setNumThreads(size_t numThreads) {
   if (defaultNumThreads_ == 0) {
     defaultNumThreads_ = getDefaultNumThreads();
   }
   numThreads_ = std::min(numThreads, defaultNumThreads_);
 }
 
-// Sets the minimum work size (range) for which to invoke the
-// threadpool; work sizes smaller than this will just be run on the
-// main (calling) thread
-void ThreadPool::setMinWorkSize(size_t size) {
-  std::lock_guard<std::mutex> guard(executionMutex_);
-  minWorkSize_ = size;
-}
-
-void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
+void ThreadPoolImpl::run(const std::function<void(int, size_t)>& fn, size_t range) {
   const auto numThreads = numThreads_.load(std::memory_order_relaxed);
 
   std::lock_guard<std::mutex> guard(executionMutex_);
@@ -183,7 +211,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   workersPool_->Execute(tasks_);
 }
 
-void ThreadPool::withPool(const std::function<void(WorkersPool*)>& f) {
+void ThreadPoolImpl::withPool(const std::function<void(WorkersPool*)>& f) {
   std::lock_guard<std::mutex> guard(executionMutex_);
   f(workersPool_.get());
 }

@@ -14,8 +14,12 @@ class ProcessException(Exception):
 
     def __init__(self, msg: str, error_index: int, pid: int):
         super().__init__(msg)
+        self.msg = msg
         self.error_index = error_index
         self.pid = pid
+
+    def __reduce__(self):
+        return type(self), (self.msg, self.error_index, self.pid)
 
 
 class ProcessRaisedException(ProcessException):
@@ -46,6 +50,12 @@ class ProcessExitedException(ProcessException):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
         self.signal_name = signal_name
+
+    def __reduce__(self):
+        return (
+            type(self),
+            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
+        )
 
 
 def _wrap(fn, i, args, error_queue):
@@ -213,7 +223,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
         join (bool): Perform a blocking join on all processes.
         daemon (bool): The spawned processes' daemon flag. If set to True,
                        daemonic processes will be created.
-        start_method (string): (deprecated) this method will always use ``spawn``
+        start_method (str): (deprecated) this method will always use ``spawn``
                                as the start method. To use a different start method
                                use ``start_processes()``.
 

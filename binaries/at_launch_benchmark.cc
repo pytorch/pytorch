@@ -3,6 +3,7 @@
 #include "c10/util/Flags.h"
 #include "caffe2/core/init.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <iostream>

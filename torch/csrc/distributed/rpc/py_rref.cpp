@@ -56,7 +56,7 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
 TypePtr tryInferTypeWithTypeHint(
     const py::object& value,
     const py::object& type_hint) {
-  // If the py::object to be contained by the RRef is a ScripModule, we enforce
+  // If the py::object to be contained by the RRef is a ScriptModule, we enforce
   // users to specify its ModuleInterface type.
   if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
@@ -72,7 +72,7 @@ TypePtr tryInferTypeWithTypeHint(
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
             module.value().type()->isSubtypeOfExt(
-                type_hint_ptr, &subtype_check_msg),
+                *type_hint_ptr, &subtype_check_msg),
         module.value().type()->repr_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
@@ -101,7 +101,7 @@ TypePtr tryInferTypeWithTypeHint(
   }
 
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
-  // excluding ScripModule.
+  // excluding ScriptModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
   if (type_inferred.success()) {
     // If we could infer the type from the pyobject, we create
@@ -121,6 +121,7 @@ TypePtr tryInferTypeWithTypeHint(
 PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
     : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref");
 }
 
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
@@ -181,6 +182,7 @@ std::string PyRRef::ownerName() const {
 }
 
 py::object PyRRef::toHere(const float timeoutSeconds) const {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.rref.to_here");
   if (rref_->isOwner()) {
     return localValue();
   } else {
@@ -191,10 +193,10 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
-      auto rfr_values = value.toTuple()->elements();
+      auto rfr_values = value.toTupleRef().elements().vec();
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       auto ret = pythonRpcHandler.deserialize(
-          SerializedPyObj::fromIValues(rfr_values));
+          SerializedPyObj::fromIValues(std::move(rfr_values)));
       pythonRpcHandler.handleException(ret);
       return ret;
     } else {

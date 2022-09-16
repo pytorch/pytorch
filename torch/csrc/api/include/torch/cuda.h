@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace torch {
 namespace cuda {

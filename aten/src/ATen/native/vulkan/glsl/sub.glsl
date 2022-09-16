@@ -1,17 +1,18 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput0;
-layout(set = 0, binding = 2) uniform PRECISION                    sampler3D uInput1;
-layout(set = 0, binding = 3) uniform PRECISION restrict           Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput0;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uInput1;
+layout(set = 0, binding = 3)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 isize0;
-  ivec3 isize1;
+  ivec4 isize1;
   float alpha;
 } uBlock;
 
@@ -23,9 +24,12 @@ void main() {
   if (all(lessThan(pos, uBlock.size.xyz))) {
     const ivec3 input0_pos = pos % uBlock.isize0.xyz;
     const ivec3 input1_pos = pos % uBlock.isize1.xyz;
-    imageStore(
-        uOutput,
-        pos,
-        texelFetch(uInput0, input0_pos, 0) - uBlock.alpha * texelFetch(uInput1, input1_pos, 0));
+    const vec4 v0 = uBlock.isize0.w == 1
+                      ? texelFetch(uInput0, input0_pos, 0).xxxx
+                      : texelFetch(uInput0, input0_pos, 0);
+    const vec4 v1 = uBlock.isize1.w == 1
+                      ? texelFetch(uInput1, input1_pos, 0).xxxx
+                      : texelFetch(uInput1, input1_pos, 0);
+    imageStore(uOutput, pos, v0 - uBlock.alpha * v1);
   }
 }

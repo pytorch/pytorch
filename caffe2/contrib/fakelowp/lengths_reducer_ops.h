@@ -94,7 +94,7 @@ class SparseLengthsReductionFakeFp16Op final : public Operator<CPUContext> {
     float* out = out_data;
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       memset(out, 0, sizeof(float) * block_size);
       if (current + lengths[m] > index_size) {
         return false;

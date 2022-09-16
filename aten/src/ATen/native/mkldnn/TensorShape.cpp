@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/core/SymIntArrayRef.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -31,7 +32,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -85,4 +86,16 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED
+
+
+namespace at {
+namespace native {
+
+
+Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  return mkldnn_view(self, c10::asIntArrayRefSlow(size));
+}
+
+} // namespace native
+} // namespace at

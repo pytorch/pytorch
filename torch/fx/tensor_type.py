@@ -1,3 +1,9 @@
+from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
+
+from ._compatibility import compatibility
+
+
+@compatibility(is_backward_compatible=False)
 class TensorType:
     """
     TensorType defines a type for tensors, which consists of a list of dimensions.
@@ -22,8 +28,9 @@ class TensorType:
 
     @staticmethod
     def __class_getitem__(*args):
-        assert isinstance(args[0], tuple)
-        return TensorType(args[0])
+        if len(args) == 1 and isinstance(args[0], tuple):
+            args = args[0]
+        return TensorType(tuple(args))
 
 
 class _DynType:
@@ -45,7 +52,7 @@ class _DynType:
 
 Dyn = _DynType()
 
-
+@compatibility(is_backward_compatible=False)
 def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
@@ -61,7 +68,7 @@ def is_consistent(t1, t2):
     if t1 == t2:
         return True
 
-    if isinstance(t1, _DynType) or isinstance(t2, _DynType):
+    if t1 == Dyn or t2 == Dyn or isinstance(t1, Var) or isinstance(t2, Var):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
@@ -71,6 +78,7 @@ def is_consistent(t1, t2):
         return False
 
 
+@compatibility(is_backward_compatible=False)
 def is_more_precise(t1, t2):
     """
     A binary relation denoted by <= that determines if t1 is more precise than t2.

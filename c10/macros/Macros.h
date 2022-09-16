@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+#include <cassert>
 
 /* Main entry for c10/macros.
  *
@@ -113,22 +114,17 @@
 //  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
 //  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#define C10_NODISCARD
-#if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
+#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
 #define C10_NODISCARD [[nodiscard]]
-#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
+#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
 // TODO: It's possible this is still triggering
 // https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
 // fix it.
-#undef C10_NODISCARD
 #define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+#else
+#define C10_NODISCARD
 #endif
 
 // suppress an unused variable.
@@ -137,6 +133,13 @@
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
+
+// Direct port of LLVM_ATTRIBUTE_USED.
+#if __has_attribute(used)
+#define C10_USED __attribute__((__used__))
+#else
+#define C10_USED
+#endif
 
 #define C10_RESTRICT __restrict
 
@@ -218,6 +221,16 @@ using namespace c10::hip;
 #define C10_ALWAYS_INLINE inline
 #endif
 
+#if defined(_MSC_VER)
+#define C10_ATTR_VISIBILITY_HIDDEN
+#elif defined(__GNUC__)
+#define C10_ATTR_VISIBILITY_HIDDEN __attribute__((__visibility__("hidden")))
+#else
+#define C10_ATTR_VISIBILITY_HIDDEN
+#endif
+
+#define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
+
 // C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
 #if C10_HAS_CPP_ATTRIBUTE(fallthrough)
 #define C10_FALLTHROUGH [[fallthrough]]
@@ -225,8 +238,7 @@ using namespace c10::hip;
 #define C10_FALLTHROUGH
 #endif
 
-#include <sstream>
-#include <string>
+#include <cstdint>
 
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
@@ -295,14 +307,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_HIP_HOST_DEVICE __host__ __device__
 #else
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE 64
+#if defined(USE_ROCM)
+#define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
 #endif
@@ -314,22 +326,35 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || \
-    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) ||  \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
+    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void _wassert(
+    const wchar_t* wexpr,
+    const wchar_t* wfile,
+    unsigned line);
+#else
+#if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
 }
-#endif
+#endif // __SYCL_DEVICE_ONLY__
+#endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
     (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
   }
@@ -343,20 +368,41 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
-    defined(__HIP_ARCH__) || defined(__HIP__)
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+// CUDA supports __assert_fail function which are common for both device
+// and host side code.
 __host__ __device__
-#endif // __CUDA_ARCH__
+#endif
+
+    // This forward declaration matching the declaration of __assert_fail
+    // exactly how it is in glibc in case parts of the program are compiled with
+    // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
+    // error. Note: On ROCm - this declaration serves for host side compilation.
     void
     __assert_fail(
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw();
-#endif
+        const char* function) throw() __attribute__((__noreturn__));
+
+#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
+    !defined(ROCM_DISABLE_GPU_ASSERTS)
+// ROCm supports __assert_fail only as a device side function.
+__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
+    const char* assertion,
+    const char* file,
+    unsigned int line,
+    const char* function);
+#endif // defined(__HIP_ARCH__) || defined(__HIP__)
+#endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
@@ -377,6 +423,12 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
+#if defined(C10_MOBILE) && C10_MOBILE
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
+
 // Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
@@ -385,34 +437,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
-// device code in CUDA to call host constexpr functions. Unfortunately,
-// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
-// with many of the constexpr things we'd like to do and the device code
-// compiler crashes when it sees one of these host-only functions.
-// It works when nvcc builds host code, but not when it builds device code
-// and notices it can call these constexpr functions from device code.
-// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
-// functions. This enables constexpr when compiled on the host and applies
-// __host__ when it is compiled on the device in an attempt to stop it from
-// being called from device functions. Not sure if the latter works, but
-// even if not, it not being constexpr anymore should be enough to stop
-// it from being called from device code.
-// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
-#if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR __host__
-#define C10_HOST_CONSTEXPR_VAR
-#else
-#define C10_HOST_CONSTEXPR constexpr
-#define C10_HOST_CONSTEXPR_VAR constexpr
-#endif
-
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ <= 9200)
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92
-#else
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 constexpr
 #endif
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
@@ -483,6 +507,32 @@ __host__ __device__
   static constexpr const char* field = val;
 #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
+#endif
+
+#ifndef HAS_DEMANGLE
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
+#define HAS_DEMANGLE 0
+#elif defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
+#define HAS_DEMANGLE 0
+#else
+#define HAS_DEMANGLE 1
+#endif
+#endif // HAS_DEMANGLE
+
+#ifdef __clang__
+#define _C10_PRAGMA__(string) _Pragma(#string)
+#define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
+#define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
+#define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
+  _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_HAS_WARNING(flag) __has_warning(flag)
+#else
+#define C10_CLANG_DIAGNOSTIC_PUSH()
+#define C10_CLANG_DIAGNOSTIC_POP()
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
+#define C10_CLANG_HAS_WARNING(flag) 0
 #endif
 
 #endif // C10_MACROS_MACROS_H_

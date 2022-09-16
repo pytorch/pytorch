@@ -308,7 +308,7 @@ class TestCreateOperator(test_util.TestCase):
         self.assertTrue(op.HasField('device_option'))
         self.assertEqual(op.device_option.device_type, workspace.GpuDeviceType)
         self.assertEqual(op.device_option.device_id, 1)
-        self.assertTrue(len(op.arg), 3)
+        self.assertEqual(len(op.arg), 3)
 
         # can't guarantee ordering of kwargs, so generate a set of args
         # to test with
@@ -1236,6 +1236,28 @@ class TestRunAllOnGPU(test_util.TestCase):
         self.assertEqual(net_proto.device_option.device_type, workspace.GpuDeviceType)
         self.assertEqual(net_proto.device_option.device_id, 3)
         self.assertTrue(net_proto.op[0].arg[0].n.HasField('device_option'))
+
+
+class TestConstructionFromProto(test_util.TestCase):
+    def test_inplace_construction(self):
+        # just create some random net
+        n = core.Net('original')
+        a1 = n.AddExternalInput('a1')
+        a2 = n.AddExternalInput('a2')
+        b1, b2 = n.Concat([a1, a2], ['b1', 'b2'], axis=0)
+        c1 = n.Sum([b1, b1], ['c1'])
+        c2 = n.Sum([b2], ['c2'])
+        d = n.Sum([c1, c2], ['d'])
+
+        proto = n.Proto()
+        n_copied = core.Net(proto)
+        n_moved = core.Net(proto, inplace=True)
+        self.assertTrue(n_moved.Proto() is proto)
+        self.assertTrue(n_copied.Proto() is not proto)
+
+        proto.external_input.extend(['foo'])
+        self.assertEqual(len(n_moved.Proto().external_input), len(proto.external_input))
+        self.assertEqual(len(n_copied.Proto().external_input), len(proto.external_input) - 1)
 
 
 if __name__ == '__main__':

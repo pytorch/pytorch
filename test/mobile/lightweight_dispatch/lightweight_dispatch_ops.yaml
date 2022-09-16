@@ -1,0 +1,6 @@
+# base ops for preparing inputs
+- aten::copy_
+- aten::detach
+- aten::fill_.Tensor
+- aten::to.device
+# model introduced ops begin from here

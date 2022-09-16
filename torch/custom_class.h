@@ -1,18 +1,17 @@
 #pragma once
 
-#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/library.h>
 #include <torch/custom_class_detail.h>
+#include <torch/library.h>
 #include <iostream>
 #include <sstream>
 
@@ -34,8 +33,7 @@ struct InitLambda {
 
 template <typename Func>
 decltype(auto) init(Func&& f) {
-  using InitTraits =
-      c10::guts::infer_function_traits_t<std::decay_t<Func>>;
+  using InitTraits = c10::guts::infer_function_traits_t<std::decay_t<Func>>;
   using ParameterTypeList = typename InitTraits::parameter_types;
 
   InitLambda<Func, ParameterTypeList> init{std::forward<Func>(f)};
@@ -62,8 +60,9 @@ decltype(auto) init(Func&& f) {
 /// is registered with a C++ lambda expression.
 template <class CurClass>
 class class_ : public ::torch::detail::class_base {
-  static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
-    "torch::class_<T> requires T to inherit from CustomClassHolder");
+  static_assert(
+      std::is_base_of<CustomClassHolder, CurClass>::value,
+      "torch::class_<T> requires T to inherit from CustomClassHolder");
 
  public:
   /// This constructor actually registers the class type.
@@ -73,18 +72,27 @@ class class_ : public ::torch::detail::class_base {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass `foo` as the namespace name and `Bar` as the className, the
   /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
-  explicit class_(const std::string& namespaceName, const std::string& className, std::string doc_string = "")
-      : class_base(namespaceName, className, std::move(doc_string), typeid(c10::intrusive_ptr<CurClass>), typeid(c10::tagged_capsule<CurClass>)) {}
+  explicit class_(
+      const std::string& namespaceName,
+      const std::string& className,
+      std::string doc_string = "")
+      : class_base(
+            namespaceName,
+            className,
+            std::move(doc_string),
+            typeid(c10::intrusive_ptr<CurClass>),
+            typeid(c10::tagged_capsule<CurClass>)) {}
 
   /// def() can be used in conjunction with `torch::init()` to register
   /// a constructor for a given C++ class type. For example, passing
-  /// `torch::init<int, std::string>()` would register a two-argument constructor
-  /// taking an `int` and a `std::string` as argument.
+  /// `torch::init<int, std::string>()` would register a two-argument
+  /// constructor taking an `int` and a `std::string` as argument.
   template <typename... Types>
   class_& def(
       torch::detail::types<void, Types...>,
       std::string doc_string = "",
-      std::initializer_list<arg> default_args = {}) { // Used in combination with
+      std::initializer_list<arg> default_args =
+          {}) { // Used in combination with
     // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
@@ -247,11 +255,18 @@ class class_ : public ::torch::detail::class_base {
     return def_property(name, getter_func);
   }
 
-  /// This is an unsafe method registration API added for adding custom JIT backend support via custom
-  /// C++ classes. It is not for general purpose use.
-  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
+  /// This is an unsafe method registration API added for adding custom JIT
+  /// backend support via custom C++ classes. It is not for general purpose use.
+  class_& _def_unboxed(
+      std::string name,
+      std::function<void(jit::Stack&)> func,
+      c10::FunctionSchema schema,
+      std::string doc_string = "") {
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualClassName + "." + name, std::move(schema), std::move(func), std::move(doc_string));
+        qualClassName + "." + name,
+        std::move(schema),
+        std::move(func),
+        std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
@@ -299,7 +314,7 @@ class class_ : public ::torch::detail::class_base {
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
     // __setstate__ needs to be registered with some custom handling:
-    // We need to wrap the invocation of of the user-provided function
+    // We need to wrap the invocation of the user-provided function
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
     using SetStateTraits =
@@ -344,7 +359,7 @@ class class_ : public ::torch::detail::class_base {
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        ser_type->isSubtypeOf(arg_type),
+        ser_type->isSubtypeOf(*arg_type),
         "__getstate__'s return type should be a subtype of "
         "input argument of __setstate__. Got ",
         ser_type->repr_str(),
@@ -362,7 +377,8 @@ class class_ : public ::torch::detail::class_base {
       std::string doc_string = "",
       std::initializer_list<arg> default_args = {}) {
     auto qualMethodName = qualClassName + "." + name;
-    auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+    auto schema =
+        c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
     // If default values are provided for function arguments, there must be
     // none (no default values) or default values for all function
@@ -372,11 +388,11 @@ class class_ : public ::torch::detail::class_base {
     // have an actual default value provided.
     TORCH_CHECK(
         default_args.size() == 0 ||
-        default_args.size() == schema.arguments().size() - 1,
+            default_args.size() == schema.arguments().size() - 1,
         "Default values must be specified for none or all arguments");
 
-    // If there are default args, copy the argument names and default values to the
-    // function schema.
+    // If there are default args, copy the argument names and default values to
+    // the function schema.
     if (default_args.size() > 0) {
       schema = withNewArguments(schema, default_args);
     }
@@ -391,7 +407,10 @@ class class_ : public ::torch::detail::class_base {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(wrapped_func), std::move(doc_string));
+        qualMethodName,
+        std::move(schema),
+        std::move(wrapped_func),
+        std::move(doc_string));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
@@ -404,19 +423,40 @@ class class_ : public ::torch::detail::class_base {
   }
 };
 
-/// make_custom_class() is a convenient way to create an instance of a registered
-/// custom class and wrap it in an IValue, for example when you want to pass the
-/// object to TorchScript. Its syntax is equivalent to APIs like `std::make_shared<>`
-/// or `c10::make_intrusive<>`.
+/// make_custom_class() is a convenient way to create an instance of a
+/// registered custom class and wrap it in an IValue, for example when you want
+/// to pass the object to TorchScript. Its syntax is equivalent to APIs like
+/// `std::make_shared<>` or `c10::make_intrusive<>`.
 ///
-/// For example, if you have a custom C++ class that can be constructed from an `int`
-/// and `std::string`, you might use this API like so:
+/// For example, if you have a custom C++ class that can be constructed from an
+/// `int` and `std::string`, you might use this API like so:
 ///
-///     IValue custom_class_iv = torch::make_custom_class<MyClass>(3, "foobarbaz");
+///     IValue custom_class_iv = torch::make_custom_class<MyClass>(3,
+///     "foobarbaz");
 template <typename CurClass, typename... CtorArgs>
 c10::IValue make_custom_class(CtorArgs&&... args) {
-  auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
+  auto userClassInstance =
+      c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
   return c10::IValue(std::move(userClassInstance));
+}
+
+// Alternative api for creating a torchbind class over torch::class_ this api is
+// preffered to prevent size regressions on Edge usecases. Must be used in
+// conjunction with TORCH_SELECTIVE_CLASS macro aka
+// selective_class<foo>("foo_namespace", TORCH_SELECTIVE_CLASS("foo"))
+template <class CurClass>
+inline class_<CurClass> selective_class_(
+    const std::string& namespace_name,
+    detail::SelectiveStr<true> className) {
+  auto class_name = std::string(className.operator const char*());
+  return torch::class_<CurClass>(namespace_name, class_name);
+}
+
+template <class CurClass>
+inline detail::ClassNotSelected selective_class_(
+    const std::string&,
+    detail::SelectiveStr<false>) {
+  return detail::ClassNotSelected();
 }
 
 // jit namespace for backward-compatibility
@@ -424,21 +464,53 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
 // better reflect that these features are not limited only to TorchScript
 namespace jit {
 
-using ::torch::getCustomClass;
-using ::torch::isCustomClass;
-using ::torch::init;
 using ::torch::class_;
+using ::torch::getCustomClass;
+using ::torch::init;
+using ::torch::isCustomClass;
 
 } // namespace jit
 
 template <class CurClass>
 inline class_<CurClass> Library::class_(const std::string& className) {
-  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
-    "class_(\"", className, "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
-    "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
-    "(Error occurred at ", file_, ":", line_, ")");
+  TORCH_CHECK(
+      kind_ == DEF || kind_ == FRAGMENT,
+      "class_(\"",
+      className,
+      "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+      "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+      "(Error occurred at ",
+      file_,
+      ":",
+      line_,
+      ")");
   TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
   return torch::class_<CurClass>(*ns_, className);
 }
 
+const std::unordered_set<std::string> getAllCustomClassesNames();
+
+template <class CurClass>
+inline class_<CurClass> Library::class_(detail::SelectiveStr<true> className) {
+  auto class_name = std::string(className.operator const char*());
+  TORCH_CHECK(
+      kind_ == DEF || kind_ == FRAGMENT,
+      "class_(\"",
+      class_name,
+      "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+      "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+      "(Error occurred at ",
+      file_,
+      ":",
+      line_,
+      ")");
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
+  return torch::class_<CurClass>(*ns_, class_name);
 }
+
+template <class CurClass>
+inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false>) {
+  return detail::ClassNotSelected();
+}
+
+} // namespace torch

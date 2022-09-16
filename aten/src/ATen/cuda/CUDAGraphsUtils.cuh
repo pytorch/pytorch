@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/UnpackRaw.cuh>
 #include <ATen/cuda/detail/CUDAHooks.h>
@@ -40,6 +40,19 @@ inline void assertNotCapturing(std::string attempt) {
               "please file an issue. "
               "Current cudaStreamCaptureStatus: ",
               status);
+}
+
+inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+  auto status = currentStreamCaptureStatus();
+  TORCH_CHECK(status == CaptureStatus::None,
+              "Current cudaStreamCaptureStatus: ",
+              status,
+              "\nCapturing ",
+              version_specific,
+              "is prohibited. Possible causes of this error:\n"
+              "1. No warmup iterations occurred before capture.\n"
+              "2. The convolutions you're trying to capture use dynamic shapes, "
+              "in which case capturing them is generally prohibited.");
 }
 
 } // namespace cuda

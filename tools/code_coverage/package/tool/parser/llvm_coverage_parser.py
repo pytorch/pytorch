@@ -6,9 +6,9 @@ from .llvm_coverage_segment import LlvmCoverageSegment, parse_segments
 
 class LlvmCoverageParser:
     """
-        Accepts a parsed json produced by llvm-cov export -- typically,
-        representing a single C++ test and produces a list
-        of CoverageRecord(s).
+    Accepts a parsed json produced by llvm-cov export -- typically,
+    representing a single C++ test and produces a list
+    of CoverageRecord(s).
 
     """
 
@@ -18,9 +18,9 @@ class LlvmCoverageParser:
     @staticmethod
     def _skip_coverage(path: str) -> bool:
         """
-            Returns True if file path should not be processed.
-            This is repo-specific and only makes sense for the current state of
-            ovrsource.
+        Returns True if file path should not be processed.
+        This is repo-specific and only makes sense for the current state of
+        ovrsource.
         """
         if "/third-party/" in path:
             return True
@@ -31,7 +31,7 @@ class LlvmCoverageParser:
         segments: List[LlvmCoverageSegment],
     ) -> Tuple[List[int], List[int]]:
         """
-            Stateful parsing of coverage segments.
+        Stateful parsing of coverage segments.
         """
         covered_lines: Set[int] = set()
         uncovered_lines: Set[int] = set()

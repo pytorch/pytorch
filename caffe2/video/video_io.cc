@@ -1,5 +1,5 @@
-#include <caffe2/video/video_io.h>
 #include <caffe2/core/logging.h>
+#include <caffe2/video/video_io.h>
 #include <algorithm>
 #include <random>
 #include <string>

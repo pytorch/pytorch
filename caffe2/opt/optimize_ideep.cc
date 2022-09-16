@@ -1,7 +1,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/converter.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <cpuinfo.h>
 #include "caffe2/ideep/ideep_utils.h"
 #endif
@@ -11,7 +11,7 @@ namespace opt {
 
 using namespace nom;
 
-#ifndef CAFFE2_USE_MKLDNN
+#ifndef USE_MKLDNN
 void OptimizeForMkldnn(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -533,8 +533,6 @@ bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
     auto relu_node = consumers.front();
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-    auto relu = repr::nn::get<repr::Relu>(relu_node);
 
     auto relu_outputs = repr::nn::getOutputs(relu_node);
     if (relu_outputs.size() != 1) {
@@ -893,10 +891,6 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
       initValue(strides, {1, 1});
       auto pads = convTranspose->getPads();
       initValue(pads, {0, 0, 0, 0});
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-      auto* op = getMutableOpDef(*convTranspose);
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-      auto aalgorithm = ialgo::deconvolution_direct;
       auto dataType = filter->get_data_type();
       ideep::tensor::dims filter_dims_mkldnn{filter->get_dim(1),
                                              filter->get_dim(0),
@@ -1018,7 +1012,7 @@ void OptimizeForMkldnn(
   setPoolingInferenceMode(nn);
 }
 
-#endif // CAFFE2_USE_MKLDNN
+#endif // USE_MKLDNN
 
 } // namespace opt
 } // namespace caffe2

@@ -6,4 +6,4 @@ REGISTER_CPU_OPERATOR(CreateDB, CreateDBOp<CPUContext>);
 OPERATOR_SCHEMA(CreateDB).NumInputs(0).NumOutputs(1);
 
 NO_GRADIENT(CreateDB);
-}  // namespace caffe2
+} // namespace caffe2

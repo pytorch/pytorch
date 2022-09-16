@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Poisson']
 
 class Poisson(ExponentialFamily):
     r"""
@@ -17,6 +18,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +SKIP("poisson_cpu not implemented for 'Long'")
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
         tensor([ 3.])
@@ -24,12 +26,16 @@ class Poisson(ExponentialFamily):
     Args:
         rate (Number, Tensor): the rate parameter
     """
-    arg_constraints = {'rate': constraints.positive}
+    arg_constraints = {'rate': constraints.nonnegative}
     support = constraints.nonnegative_integer
 
     @property
     def mean(self):
         return self.rate
+
+    @property
+    def mode(self):
+        return self.rate.floor()
 
     @property
     def variance(self):
@@ -60,7 +66,7 @@ class Poisson(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
-        return (rate.log() * value) - rate - (value + 1).lgamma()
+        return value.xlogy(rate) - rate - (value + 1).lgamma()
 
     @property
     def _natural_params(self):

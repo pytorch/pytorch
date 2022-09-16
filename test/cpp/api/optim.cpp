@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -36,14 +37,17 @@ bool test_optimizer_xor(Options options) {
   while (running_loss > 0.1) {
     auto inputs = torch::empty({kBatchSize, 2});
     auto labels = torch::empty({kBatchSize});
-    for (size_t i = 0; i < kBatchSize; i++) {
+    for (const auto i : c10::irange(kBatchSize)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
 
     inputs.set_requires_grad(true);
 
-    auto step = [&](OptimizerClass& optimizer, Sequential model, torch::Tensor inputs, torch::Tensor labels) {
+    auto step = [&](OptimizerClass& optimizer,
+                    Sequential model,
+                    torch::Tensor inputs,
+                    torch::Tensor labels) {
       auto closure = [&]() {
         optimizer.zero_grad();
         auto x = model->forward(inputs);
@@ -101,18 +105,26 @@ void check_exact_values(
   assign_parameter(
       parameters,
       "0.weight",
-      torch::tensor({-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}, torch::kFloat64));
+      torch::tensor(
+          {-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976},
+          torch::kFloat64));
   assign_parameter(
-      parameters, "0.bias", torch::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64));
+      parameters,
+      "0.bias",
+      torch::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64));
   assign_parameter(
-      parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64));
-  assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}, torch::kFloat64));
+      parameters,
+      "2.weight",
+      torch::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64));
+  assign_parameter(
+      parameters, "2.bias", torch::tensor({-0.0711}, torch::kFloat64));
 
   auto optimizer = OptimizerClass(parameters.values(), options);
   torch::Tensor input =
-      torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64).reshape({3, 2});
+      torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64)
+          .reshape({3, 2});
 
-  for (size_t i = 0; i < kIterations; ++i) {
+  for (const auto i : c10::irange(kIterations)) {
     optimizer.zero_grad();
     auto output = model->forward(input);
     auto loss = output.sum();
@@ -124,11 +136,13 @@ void check_exact_values(
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
-      for (size_t p = 0; p < parameters.size(); ++p) {
+      for (const auto p : c10::irange(parameters.size())) {
         ASSERT_TRUE(parameters[p]->defined());
-        // Always compare using double dtype, regardless of the original dtype of the tensors
+        // Always compare using double dtype, regardless of the original dtype
+        // of the tensors
         auto computed = parameters[p]->flatten().to(torch::kFloat64);
-        auto expected = expected_parameters.at(i / kSampleEvery).at(p).to(torch::kFloat64);
+        auto expected =
+            expected_parameters.at(i / kSampleEvery).at(p).to(torch::kFloat64);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
                     << " != " << expected << " (parameter " << p << ")"
@@ -143,7 +157,8 @@ void check_exact_values(
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
+    (void)i; // Suppress unused variable warning
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);
@@ -155,23 +170,26 @@ TEST(OptimTest, OptimizerAccessors) {
   // NOLINTNEXTLINE(modernize-use-emplace)
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
-  for (size_t i = 0; i < params_1.size(); i++) {
+  for (const auto i : c10::irange(params_1.size())) {
     torch::equal(params[i], params_1[i]);
   }
 
-  // test for add_param_group() when one or more params existing in another param_group
-  // are passed in the new param group to be added
+  // test for add_param_group() when one or more params existing in another
+  // param_group are passed in the new param group to be added
   ASSERT_THROWS_WITH(
-    optimizer.add_param_group(OptimizerParamGroup(params)), "some parameters appear in more than one parameter group");
+      optimizer.add_param_group(OptimizerParamGroup(params)),
+      "some parameters appear in more than one parameter group");
 
   // test for state() with non-const reference return
-  auto& state_ = static_cast<AdagradParamState&>(*(optimizer.state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
-  state_.step(state_.step()+1);
+  auto& state_ = static_cast<AdagradParamState&>(
+      *(optimizer
+            .state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
+  state_.step(state_.step() + 1);
 
   const auto& optimizer_ = Adagrad(params, options);
   optimizer_.defaults();
   // test for param_groups() with const reference return
-  const auto& params_2 = optimizer_.param_groups();
+  (void)optimizer_.param_groups();
   // test for state() with const reference return
   optimizer_.state();
 }
@@ -186,19 +204,25 @@ TEST(OptimTest, OptimizerAccessors) {
         1);                                     \
   }
 
-struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
-  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
+struct MyOptimizerOptions
+    : public OptimizerCloneableOptions<MyOptimizerOptions> {
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr){};
   TORCH_ARG(double, lr) = 1.0;
 };
 
 TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
-    torch::Tensor step(LossClosure closure = nullptr) override { return {};}
+    torch::Tensor step(LossClosure closure = nullptr) override {
+      return {};
+    }
     explicit MyOptimizer(
-        std::vector<at::Tensor> params, MyOptimizerOptions defaults = {}) :
-          // NOLINTNEXTLINE(performance-move-const-arg)
-          Optimizer({std::move(OptimizerParamGroup(params))}, std::make_unique<MyOptimizerOptions>(defaults)) {}
+        std::vector<at::Tensor> params,
+        MyOptimizerOptions defaults = {})
+        : // NOLINTNEXTLINE(performance-move-const-arg)
+          Optimizer(
+              {std::move(OptimizerParamGroup(params))},
+              std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
@@ -225,7 +249,7 @@ TEST(OptimTest, OldInterface) {
 
     std::vector<torch::Tensor> params_;
     OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
-    for (size_t p = 0; p < size; ++p) {
+    for (const auto p : c10::irange(size)) {
       ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }
@@ -247,7 +271,8 @@ TEST(OptimTest, XORConvergence_SGD) {
 
 TEST(OptimTest, XORConvergence_LBFGS) {
   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
-  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(
+      LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
 TEST(OptimTest, XORConvergence_Adagrad) {
@@ -294,8 +319,7 @@ TEST(OptimTest, XORConvergence_AdamW) {
 }
 
 TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
-  ASSERT_TRUE(test_optimizer_xor<AdamW>(
-      AdamWOptions(0.1).amsgrad(true)));
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1).amsgrad(true)));
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdamW) {
@@ -380,9 +404,7 @@ TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
 }
 
 TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
-  check_exact_values<LBFGS>(
-      LBFGSOptions(1.0),
-      expected_parameters::LBFGS());
+  check_exact_values<LBFGS>(LBFGSOptions(1.0), expected_parameters::LBFGS());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_LBFGS_with_line_search) {
@@ -459,38 +481,38 @@ TEST(OptimTest, AddParameter_LBFGS) {
   // REQUIRE this doesn't throw
 }
 
-//Check whether the learning rate of the parameter groups in the optimizer are the
-//same as the expected learning rates given in the epoch:learning rate map
+// Check whether the learning rate of the parameter groups in the optimizer are
+// the same as the expected learning rates given in the epoch:learning rate map
 void check_lr_change(
     Optimizer& optimizer,
     LRScheduler& lr_scheduler,
     std::map<unsigned, double> expected_epoch_lrs) {
+  // Find maximum epoch in map
+  unsigned kIterations = std::max_element(
+                             expected_epoch_lrs.begin(),
+                             expected_epoch_lrs.end(),
+                             [](const std::pair<unsigned, double>& a,
+                                const std::pair<unsigned, double>& b) -> bool {
+                               return a.second > b.second;
+                             })
+                             ->first;
 
-  //Find maximum epoch in map
-  unsigned kIterations =
-    std::max_element(expected_epoch_lrs.begin(),
-                     expected_epoch_lrs.end(),
-                     [] (const std::pair<unsigned, double>& a,
-                         const std::pair<unsigned, double>& b) -> bool {
-                       return a.second > b.second;
-                     })->first;
-
-  for(unsigned i = 0; i <= kIterations; i++) {
+  for (unsigned i = 0; i <= kIterations; i++) {
     const auto epoch_iter = expected_epoch_lrs.find(i);
-    if(epoch_iter != expected_epoch_lrs.end())
-    {
-      //Compare the similarity of the two floating point learning rates
-      ASSERT_TRUE(fabs(epoch_iter->second - optimizer.param_groups()[0].options().get_lr()) <
-                  std::numeric_limits<double>::epsilon());
+    if (epoch_iter != expected_epoch_lrs.end()) {
+      // Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(
+          fabs(
+              epoch_iter->second -
+              optimizer.param_groups()[0].options().get_lr()) <
+          std::numeric_limits<double>::epsilon());
     }
     optimizer.step();
     lr_scheduler.step();
   }
-
 }
 
 TEST(OptimTest, CheckLRChange_StepLR_Adam) {
-
   torch::Tensor parameters = torch::zeros({1});
   auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
 
@@ -498,11 +520,8 @@ TEST(OptimTest, CheckLRChange_StepLR_Adam) {
   const double gamma = 0.5;
   StepLR step_lr_scheduler(optimizer, step_size, gamma);
 
-  //The learning rate should have halved at epoch 20
-  const std::map<unsigned, double> expected_epoch_lrs = {
-    {1, 1e-3},
-    {25, 5e-4}
-  };
+  // The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {{1, 1e-3}, {25, 5e-4}};
 
   check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
 }

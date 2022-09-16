@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 import os
 import zipfile
 from sys import version_info
@@ -9,10 +11,10 @@ from unittest import skipIf
 import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import (
-    run_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    run_tests,
 )
 
 try:
@@ -43,6 +45,7 @@ class DirectoryReaderTest(PackageTestCase):
     """Tests use of DirectoryReader as accessor for opened packages."""
 
     @skipIfNoTorchVision
+    @skipIf(True, "Does not work with latest TorchVision, see https://github.com/pytorch/pytorch/issues/81115")
     def test_loading_pickle(self):
         """
         Test basic saving and loading of modules and pickles from a DirectoryReader.
@@ -61,7 +64,7 @@ class DirectoryReaderTest(PackageTestCase):
             importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             dir_mod = importer.load_pickle("model", "model.pkl")
             input = torch.rand(1, 3, 224, 224)
-            self.assertTrue(torch.allclose(dir_mod(input), resnet(input)))
+            self.assertEqual(dir_mod(input), resnet(input))
 
     def test_loading_module(self):
         """

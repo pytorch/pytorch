@@ -58,6 +58,11 @@ updated, and all models on different processes should be exactly the same.
             join=True)
 
     if __name__=="__main__":
+        # Environment variables which need to be
+        # set when using c10d's default "env"
+        # initialization mode.
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
         main()
 
 

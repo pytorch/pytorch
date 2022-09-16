@@ -1,18 +1,14 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/piecewise_linear_transform_op.h"
-
-#include <thrust/binary_search.h>
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/functional.h>
+#include <c10/cuda/CUDAAlgorithm.h>
 
 namespace caffe2 {
 
 namespace {
+
 __global__ void PieceWiseLinearTransformGeneralKernel(
     const int N,
     const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -31,8 +27,7 @@ __global__ void PieceWiseLinearTransformGeneralKernel(
       Y[i] = slopes_group[num_fnc_per_grp - 1] * bounds_group[num_fnc_per_grp] +
           intercepts_group[num_fnc_per_grp - 1];
     } else {
-      auto low_bound = thrust::lower_bound(
-          thrust::device,
+      auto low_bound = c10::cuda::lower_bound(
           bounds_group,
           bounds_group + num_fnc_per_grp + 1,
           X[i]);
@@ -47,8 +42,6 @@ __global__ void PieceWiseLinearTransformGeneralKernel(
 namespace {
 __global__ void PieceWiseLinearTransformBinaryKernel1(
     const int N,
-    const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -62,8 +55,8 @@ __global__ void PieceWiseLinearTransformBinaryKernel1(
       Y[i] = slopes[num_fnc_per_grp - 1] * bounds[num_fnc_per_grp] +
           intercepts[num_fnc_per_grp - 1];
     } else {
-      auto low_bound = thrust::lower_bound(
-          thrust::device, bounds, bounds + num_fnc_per_grp + 1, X[i]);
+      auto low_bound = c10::cuda::lower_bound(
+          bounds, bounds + num_fnc_per_grp + 1, X[i]);
       int bounds_idx = low_bound - bounds - 1;
       Y[i] = slopes[bounds_idx] * X[i] + intercepts[bounds_idx];
     }
@@ -75,7 +68,6 @@ namespace {
 __global__ void PieceWiseLinearTransformBinaryKernel2(
     const int N,
     const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -91,8 +83,8 @@ __global__ void PieceWiseLinearTransformBinaryKernel2(
       Y[index + 1] = slopes[num_fnc_per_grp - 1] * bounds[num_fnc_per_grp] +
           intercepts[num_fnc_per_grp - 1];
     } else {
-      auto low_bound = thrust::lower_bound(
-          thrust::device, bounds, bounds + num_fnc_per_grp + 1, X[index + 1]);
+      auto low_bound = c10::cuda::lower_bound(
+          bounds, bounds + num_fnc_per_grp + 1, X[index + 1]);
       int bounds_idx = low_bound - bounds - 1;
       Y[index + 1] = slopes[bounds_idx] * X[index + 1] + intercepts[bounds_idx];
     }
@@ -212,7 +204,6 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
       context_.cuda_stream()>>>(
       N,
       M,
-      num_group,
       num_func_per_group,
       bounds_device_.data<float>(),
       slopes_device_.data<float>(),
@@ -248,8 +239,6 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         0,
         context_.cuda_stream()>>>(
         N,
-        M,
-        num_group,
         num_func_per_group,
         bounds_device_.data<float>(),
         slopes_device_.data<float>(),
@@ -266,7 +255,6 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         context_.cuda_stream()>>>(
         N,
         M,
-        num_group,
         num_func_per_group,
         bounds_device_.data<float>(),
         slopes_device_.data<float>(),

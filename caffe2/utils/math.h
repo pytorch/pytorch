@@ -126,7 +126,8 @@ TORCH_API void Broadcast(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
+    Context* context,
+    bool allow_broadcast_fastpath=false);
 
 // Computes inv_std from variance.
 template <typename T, class Context>

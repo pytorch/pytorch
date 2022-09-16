@@ -21,6 +21,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 C10_DEFINE_string(
     caffe2_cuda_memory_pool,
@@ -436,7 +437,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), PROTO_CUDA);
+  TORCH_DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 CUDAContext::~CUDAContext() {

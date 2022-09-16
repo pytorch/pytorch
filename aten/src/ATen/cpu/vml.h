@@ -12,7 +12,7 @@
 // It implements various functions with a simple interface
 // For example it enables the user to call vsin(float* out, const float* in,
 // size) This functions takes a pointer to a contious output array of floats and
-// a constant input array. It will then apply sin to each value in in the input
+// a constant input array. It will then apply sin to each value in the input
 // array and write the result into the output array. out and in may point to the
 // same memory, i.e. this fully supports in-place operations. These functions
 // also implement their own parallelization, so take precautions when calling
@@ -28,7 +28,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <type_traits>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
@@ -40,7 +39,7 @@
 
 namespace at {
 namespace vml {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 

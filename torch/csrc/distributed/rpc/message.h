@@ -12,7 +12,7 @@ enum RPCErrorType {
   UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
   TIMEOUT = 1, /* Indicates that the RPC has timed out */
   INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
-                             FaultyProcessGroupAgent for testing */
+                             FaultyAgent for testing */
 };
 
 // The enum values are bitwise ORed with MessageType
@@ -101,9 +101,9 @@ enum MessageType {
 //        can then serialize and send tensors chunck-by-chunk, in the streaming
 //        fashion.
 //    type (MessageType): type of the message.
-//    id (int64_t): message id, this is used by ProcessGroupAgent to match
-//                  request and response. Other implementation can ignore it
-//                  if they have their own ways to do matching.
+//    id (int64_t): message id, this is used to match request and response.
+//               Other implementation can ignore it if they have their own
+//               ways to do matching.
 //
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent

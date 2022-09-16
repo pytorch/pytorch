@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <thread>
 
@@ -13,7 +14,8 @@ void test(int given_num_threads) {
   ASSERT_TRUE(given_num_threads >= 0);
   ASSERT_EQ(at::get_num_threads(), given_num_threads);
   auto t_sum = t.sum();
-  for (int i = 0; i < 1000; ++i) {
+  for (const auto i : c10::irange(1000)) {
+    (void)i; // Suppress unused variable warning
     t_sum = t_sum + t.sum();
   }
 }

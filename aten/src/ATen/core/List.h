@@ -1,13 +1,14 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -17,7 +18,6 @@ namespace c10 {
 struct IValue;
 template<class T> class List;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
@@ -69,7 +69,11 @@ struct ListElementConstReferenceTraits<c10::optional<std::string>> {
 template<class T, class Iterator>
 class ListElementReference final {
 public:
-  operator T() const;
+  operator std::conditional_t<
+      std::is_reference<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      const T&,
+      T>() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
@@ -77,6 +81,10 @@ public:
 
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
+
+  const IValue& get() const& {
+    return *iterator_;
+  }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
@@ -102,9 +110,14 @@ private:
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+template <class T, class Iterator>
+class ListIterator final : public std::iterator<
+                               std::random_access_iterator_tag,
+                               T,
+                               std::ptrdiff_t,
+                               T*,
+                               ListElementReference<T, Iterator>> {
+ public:
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -235,6 +248,7 @@ public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
   using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
@@ -259,8 +273,6 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) noexcept;
-  List& operator=(List&&) noexcept;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
@@ -477,4 +489,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

@@ -14,6 +14,7 @@ from torch.distributions import constraints, Beta
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['LKJCholesky']
 
 class LKJCholesky(Distribution):
     r"""
@@ -33,6 +34,7 @@ class LKJCholesky(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> l = LKJCholesky(3, 0.5)
         >>> l.sample()  # l @ l.T is a sample of a correlation 3x3 matrix
         tensor([[ 1.0000,  0.0000,  0.0000],
@@ -112,7 +114,7 @@ class LKJCholesky(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         diag_elems = value.diagonal(dim1=-1, dim2=-2)[..., 1:]
-        order = torch.arange(2, self.dim + 1)
+        order = torch.arange(2, self.dim + 1, device=self.concentration.device)
         order = 2 * (self.concentration - 1).unsqueeze(-1) + self.dim - order
         unnormalized_log_pdf = torch.sum(order * diag_elems.log(), dim=-1)
         # Compute normalization constant (page 1999 of [1])

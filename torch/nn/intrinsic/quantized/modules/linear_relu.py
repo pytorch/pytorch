@@ -1,18 +1,19 @@
 import torch
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 
 class LinearReLU(nnq.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules
 
-    We adopt the same interface as :class:`torch.nn.quantized.Linear`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Linear`.
 
     Attributes:
-        Same as torch.nn.quantized.Linear
+        Same as torch.ao.nn.quantized.Linear
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.intrinsic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
@@ -34,3 +35,7 @@ class LinearReLU(nnq.Linear):
     @classmethod
     def from_float(cls, mod):
         return super(LinearReLU, cls).from_float(mod)
+
+    @classmethod
+    def from_reference(cls, ref_linear_relu, output_scale, output_zero_point):
+        return super().from_reference(ref_linear_relu[0], output_scale, output_zero_point)

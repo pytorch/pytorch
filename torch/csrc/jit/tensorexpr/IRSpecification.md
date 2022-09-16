@@ -1,9 +1,10 @@
-# IR Specification (Updated 3/30/21)
+# IR Specification (Updated 10/14/21)
 Stmt
 = Block(stmts_ = [Stmt])
 | Store(buf_ = Buf, indices = [Expr], value_ = Expr, mask_ = Expr)
 | Allocate(buf_ = Buf)
 | Free(buf_ = Buf)
+| PlacementAllocate(buf_ = Buf, buf_to_reuse_ = Buf)
 | Let(var_ = Var, val_ = Expr)
 | Cond(condition_ = Expr, true_stmt_ = Block, false_stmt_ = Block)
 | For(var_ = Var, start_ = Expr, stop_ = Expr, body_ = Block, loopOptions = LoopOptions)
@@ -13,7 +14,7 @@ Stmt
 
 Expr
 = Var()
-| Buf(base_handle_ = Var, dims = [Expr])
+| Buf(base_handle_ = Var, dims = [Expr], qscale_ = Expr, qzero_ = Expr)
 | Term(variables_ = [Expr], scalar_ = Expr)
 | Polynomial(variables_ = [Term], scalar_ = Expr)
 | MaxTerm(variables_ = [Term], scalar_ = Expr)

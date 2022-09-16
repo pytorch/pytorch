@@ -1,10 +1,13 @@
-from typing import List, Tuple, Union, Dict, Any, Set
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping
+import collections
 from dataclasses import dataclass
 
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx._compatibility import compatibility
 
+__all__ = ['get_acc_ops_name', 'get_node_target', 'is_node_output_tensor', 'FxNetAccFusionsFinder', 'legalize_graph']
 
 Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
@@ -14,7 +17,19 @@ Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
-def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node) -> str:
+@compatibility(is_backward_compatible=False)
+def get_acc_ops_name(k):
+    if isinstance(k, str):
+        return k
+    elif k.__module__ and "acc_ops" in k.__module__:
+        return f"acc_ops.{k.__name__}"
+    else:
+        module = k.__module__.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+        return f"{module if module else ''}.{k.__name__}"
+
+
+@compatibility(is_backward_compatible=False)
+def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
     """
     Given a `node` returns its target typename.
 
@@ -35,7 +50,9 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
 
     if node.op == "call_module":
         assert isinstance(node.target, str)
-        return torch.typename(submodules[node.target])
+        submod = submodules[node.target]
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        return get_acc_ops_name(submod_type)
     elif node.op == "call_function":
         target: Any = node.target
         return (
@@ -47,7 +64,18 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
         assert isinstance(node.target, str)
         return node.target
 
+@compatibility(is_backward_compatible=False)
+def is_node_output_tensor(node: torch.fx.Node) -> bool:
+    """Checks if the node output produces a Tensor or not.
 
+    NOTE: This requires to run `ShapeProp` on the containing fx graph before
+    calling this function. This is because it works by checking the `type`
+    metadata on the node. This metadata is produced by the `ShapeProp`.
+    """
+    type_ = node.meta.get("type", None)
+    return type_ is not None and issubclass(type_, torch.Tensor)
+
+@compatibility(is_backward_compatible=False)
 class FxNetAccFusionsFinder:
     """
     Finds groups of connected ACC nodes that pass non-tensor data between each other.
@@ -179,3 +207,47 @@ class FxNetAccFusionsFinder:
                     result[n] = fusion_group.nodes
 
         return result
+
+
+@compatibility(is_backward_compatible=False)
+def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Replace the graph of the given GraphModule with one that contains the same nodes as the
+    original, but in topologically sorted order.
+
+    This is used by the merge_matmul transformation below, which disturbs the topologically sorted
+    order of its input GraphModule, so that this order is restored before further transformation.
+
+    Arguments:
+        gm: The graph module to topologically sort. It is modified in-place.
+
+    Returns:
+        The graph module in-place sorted
+    """
+    indeg = {node: 0 for node in gm.graph.nodes}
+    new_graph = torch.fx.Graph()
+    # Track how many unfulfilled dependencies each node has
+    for node in gm.graph.nodes:
+        for user in node.users:
+            indeg[user] += 1
+    queue: collections.deque = collections.deque()
+    # Add all nodes with no dependencies to the queue
+    for node in gm.graph.nodes:
+        if indeg[node] == 0:
+            queue.append(node)
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    # Pop nodes from the queue, and add nodes that have had all their
+    # dependencies fulfilled
+    while len(queue) > 0:
+        cur = queue.popleft()
+        env[cur] = new_graph.node_copy(cur, lambda x: env[x])
+        for user in cur.users:
+            indeg[user] -= 1
+            if indeg[user] == 0:
+                queue.append(user)
+    # If the new graph's size is not as large as the old one, then there must be
+    # a cycle (i.e. some node's dependencies were not satisfied.)
+    if len(new_graph.nodes) < len(gm.graph.nodes):
+        raise RuntimeError(f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}")
+    gm.graph = new_graph
+    return gm

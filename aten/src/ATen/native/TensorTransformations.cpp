@@ -1,10 +1,13 @@
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/IndexKernel.h>  // for flip_stub
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -22,7 +25,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   // Count dimensions in which we need to do work
   int n = 0;
   auto strides = DimVector(self.strides());
-  for(int64_t i = 0; i < total_dims; i++) {
+  for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
       n++;
       strides[i] = 0;
@@ -61,7 +64,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   //   - We move the pointer to the opposite vertex of the cube
   //   - We iterate in the opposite direction (invert the strides)
 
-  for (int i=0; i<iter.ndim(); i++){
+  for (const auto i : c10::irange(iter.ndim())) {
     // We know that an dimension has a zero stride and self[i] does not, as we defined above
     // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
     // strides_self[i] == 0. We do not want to do anything there
@@ -207,6 +210,10 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   };
   std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
+}
+
+Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+  return self.to(kComplexHalf, false, false, memory_format);
 }
 
 DEFINE_DISPATCH(flip_stub);

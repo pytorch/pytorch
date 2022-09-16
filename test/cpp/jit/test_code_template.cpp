@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/frontend/code_template.h"
+#include <ATen/code_template.h>
+#include <test/cpp/jit/test_utils.h>
 
 namespace torch {
 namespace jit {
 
-static const auto ct = CodeTemplate(R"(
+static const auto ct = at::jit::CodeTemplate(R"(
   int foo($args) {
 
       $bar
@@ -34,10 +34,10 @@ static const auto ct_expect = R"(
   )";
 
 TEST(TestCodeTemplate, Copying) {
-  TemplateEnv e;
+  at::jit::TemplateEnv e;
   e.s("hi", "foo");
   e.v("what", {"is", "this"});
-  TemplateEnv c(e);
+  at::jit::TemplateEnv c(e);
   c.s("hi", "foo2");
   ASSERT_EQ(e.s("hi"), "foo");
   ASSERT_EQ(c.s("hi"), "foo2");
@@ -45,7 +45,7 @@ TEST(TestCodeTemplate, Copying) {
 }
 
 TEST(TestCodeTemplate, Formatting) {
-  TemplateEnv e;
+  at::jit::TemplateEnv e;
   e.v("args", {"hi", "8"});
   e.v("bar", {"what\non many\nlines...", "7"});
   e.s("a", "3");

@@ -111,7 +111,7 @@ class C10_CUDA_API CUDAStream {
 
   bool query() const {
     DeviceGuard guard{stream_.device()};
-    cudaError_t err = cudaStreamQuery(stream());
+    cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream()));
 
     if (err == cudaSuccess) {
       return true;
@@ -119,7 +119,7 @@ class C10_CUDA_API CUDAStream {
       C10_CUDA_CHECK(err);
     } else {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
 
     return false;

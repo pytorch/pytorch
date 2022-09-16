@@ -52,7 +52,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Create output blobs in parent workspace,
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
-    for (int i = 0; i < base_def_.output_size(); i++) {
+    for (const auto i : c10::irange(base_def_.output_size())) {
       // For in-place case, the in/output tensor for local_ws must be
       // re-created, instead of forwarding from current workspace.
       string parent_name(base_def_.output(i));
@@ -60,7 +60,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         parent_name += "_cpu_output_blob_" + base_def_.type();
       }
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
-      CHECK_NOTNULL(local_output_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_output_blobs_.back());
       forwarded_output_blobs[base_def_.output(i)] = parent_name;
       output_inplace_.push_back(false);
       for (const string &input_name : base_def_.input()) {
@@ -74,14 +74,14 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Set up the symbols for the local workspace.
     for (const string& name : base_def_.input()) {
       local_input_blobs_.push_back(local_ws_->CreateBlob(name));
-      CHECK_NOTNULL(local_input_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_input_blobs_.back());
     }
     input_share_.resize(local_input_blobs_.size(), false);
     base_op_.reset(new CPUOp(base_def_, local_ws_.get()));
   }
 
   bool RunOnDevice() override {
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       if (InputIsType<itensor>(i)
           && (Input(i).has_scale()
             || Input(i).get_data_type() == idtype::f32)) {
@@ -128,7 +128,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
       return false;
     }
 
-    for (int i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       if (SkipOutputCopy::Contains(i)) {
         VLOG(1) << "Copy output: index " << i << " skipped.";
         continue;

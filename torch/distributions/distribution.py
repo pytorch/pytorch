@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
 from typing import Dict, Optional, Any
 
+__all__ = ['Distribution']
 
 class Distribution(object):
     r"""
@@ -59,8 +60,6 @@ class Distribution(object):
                         f"to satisfy the constraint {repr(constraint)}, "
                         f"but found invalid values:\n{value}"
                     )
-                if not constraint.check(getattr(self, param)).all():
-                    raise ValueError("The parameter {} has invalid values".format(param))
         super(Distribution, self).__init__()
 
     def expand(self, batch_shape, _instance=None):
@@ -122,6 +121,13 @@ class Distribution(object):
         Returns the mean of the distribution.
         """
         raise NotImplementedError
+
+    @property
+    def mode(self):
+        """
+        Returns the mode of the distribution.
+        """
+        raise NotImplementedError(f"{self.__class__} does not implement mode")
 
     @property
     def variance(self):

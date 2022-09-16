@@ -7,14 +7,14 @@
 #include <cuda.h>
 #include <nvrtc.h>
 
-#define NVRTC_CHECK(condition)                                                 \
-  do {                                                                         \
-    nvrtcResult result = condition;                                            \
-    if (result != NVRTC_SUCCESS) {                                             \
-      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "   \
-                      << nvrtcGetErrorString(result);                          \
-    }                                                                          \
-  } while(0)
+#define NVRTC_CHECK(condition)                                          \
+  do {                                                                  \
+    nvrtcResult result = condition;                                     \
+    if (result != NVRTC_SUCCESS) {                                      \
+      LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": " \
+                 << nvrtcGetErrorString(result);                        \
+    }                                                                   \
+  } while (0)
 
 namespace caffe2 {
 
@@ -39,15 +39,14 @@ class CudaRTCFunction {
     VLOG(1) << "function src:\n" << src;
     // Actually do the compiling.
     nvrtcProgram prog;
-    NVRTC_CHECK(nvrtcCreateProgram(
-        &prog, src.c_str(), nullptr, 0, nullptr, nullptr));
+    NVRTC_CHECK(
+        nvrtcCreateProgram(&prog, src.c_str(), nullptr, 0, nullptr, nullptr));
     // Compile the program.
     // TODO(Yangqing): how to find the current gpu architecture instead of hard
     // coding it?
-    const char *nvrtc_opts[] = {"--gpu-architecture=compute_35",
-                                "--use_fast_math"};
-    nvrtcResult compile_result = nvrtcCompileProgram(
-        prog, 2, nvrtc_opts);
+    const char* nvrtc_opts[] = {
+        "--gpu-architecture=compute_35", "--use_fast_math"};
+    nvrtcResult compile_result = nvrtcCompileProgram(prog, 2, nvrtc_opts);
     if (compile_result != NVRTC_SUCCESS) {
       size_t log_size;
       NVRTC_CHECK(nvrtcGetProgramLogSize(prog, &log_size));
@@ -74,21 +73,33 @@ class CudaRTCFunction {
   }
 
   template <typename... Args>
-  void Launch(unsigned int gx, unsigned int gy, unsigned int gz,
-              unsigned int bx, unsigned int by, unsigned int bz,
-              unsigned int shared_mem, cudaStream_t stream,
-              Args... args) {
+  void Launch(
+      unsigned int gx,
+      unsigned int gy,
+      unsigned int gz,
+      unsigned int bx,
+      unsigned int by,
+      unsigned int bz,
+      unsigned int shared_mem,
+      cudaStream_t stream,
+      Args... args) {
     CAFFE_ENFORCE(
         module_loaded_, "Cannot call Launch before a module is loaded.");
-    void * args_voidp[] = {&args...};
+    void* args_voidp[] = {&args...};
     CUDA_DRIVERAPI_ENFORCE(cuLaunchKernel(
         kernel_, gx, gy, gz, bx, by, bz, shared_mem, stream, args_voidp, 0));
   }
 
-  void LaunchEx(unsigned int gx, unsigned int gy, unsigned int gz,
-                unsigned int bx, unsigned int by, unsigned int bz,
-                unsigned int shared_mem, cudaStream_t stream,
-                void** extra) {
+  void LaunchEx(
+      unsigned int gx,
+      unsigned int gy,
+      unsigned int gz,
+      unsigned int bx,
+      unsigned int by,
+      unsigned int bz,
+      unsigned int shared_mem,
+      cudaStream_t stream,
+      void** extra) {
     CAFFE_ENFORCE(
         module_loaded_, "Cannot call Launch before a module is loaded.");
     CUDA_DRIVERAPI_ENFORCE(cuLaunchKernel(
@@ -109,12 +120,12 @@ inline std::string GetUniqueName() {
 
   std::stringstream ss;
   ss << "_cuda_kernel_";
-  for (int i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     ss << alpha[rand() % (sizeof(alpha) - 1)];
   }
   return ss.str();
 }
 
-}  // namepsace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CUDA_RTC_COMMON_RTC_H_
+#endif // CAFFE2_CUDA_RTC_COMMON_RTC_H_

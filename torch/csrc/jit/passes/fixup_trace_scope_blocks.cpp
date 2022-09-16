@@ -459,7 +459,7 @@ void inlineScopeBlocks(Block* b) {
       const auto& old_outputs = n->outputs();
 
       AT_ASSERT(new_outputs.size() == old_outputs.size());
-      for (size_t i = 0; i < old_outputs.size(); ++i) {
+      for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }
       n->destroy();

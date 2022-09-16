@@ -1,28 +1,29 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
+#include <c10/util/irange.h>
 #include <test/cpp/api/support.h>
-
+#include <torch/torch.h>
 
 // Naive DFT of a 1 dimensional tensor
-torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
+torch::Tensor naive_dft(torch::Tensor x, bool forward = true) {
   TORCH_INTERNAL_ASSERT(x.dim() == 1);
   x = x.contiguous();
   auto out_tensor = torch::zeros_like(x);
   const int64_t len = x.size(0);
 
-  // Roots of unity, exp(-2*pi*j*n/N) for n in [0, N), reversed for inverse transform
+  // Roots of unity, exp(-2*pi*j*n/N) for n in [0, N), reversed for inverse
+  // transform
   std::vector<c10::complex<double>> roots(len);
   const auto angle_base = (forward ? -2.0 : 2.0) * M_PI / len;
-  for (int64_t i = 0; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     auto angle = i * angle_base;
     roots[i] = c10::complex<double>(std::cos(angle), std::sin(angle));
   }
 
   const auto in = x.data_ptr<c10::complex<double>>();
   const auto out = out_tensor.data_ptr<c10::complex<double>>();
-  for (int64_t i = 0; i < len; ++i) {
-    for (int64_t j = 0; j < len; ++j) {
+  for (const auto i : c10::irange(len)) {
+    for (const auto j : c10::irange(len)) {
       out[i] += roots[(j * i) % len] * in[j];
     }
   }

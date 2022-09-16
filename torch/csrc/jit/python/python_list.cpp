@@ -1,8 +1,10 @@
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_list.h>
+#include <torch/csrc/utils/pybind.h>
 #include <stdexcept>
 
 namespace torch {
@@ -133,7 +135,8 @@ void initScriptListBindings(PyObject* module) {
 
             auto seq = std::make_shared<ScriptList>(self->type());
 
-            for (size_t i = 0; i < slicelength; ++i) {
+            for (const auto i : c10::irange(slicelength)) {
+              (void)i; // Suppress unused variable warning
               seq->append(self->getItem(start));
               start += step;
             }
@@ -172,7 +175,7 @@ void initScriptListBindings(PyObject* module) {
                   "Left and right hand size of slice assignment have different sizes");
             }
 
-            for (size_t i = 0; i < slicelength; ++i) {
+            for (const auto i : c10::irange(slicelength)) {
               try {
                 self->setItem(
                     start, toIValue(value[i], self->type()->getElementType()));
@@ -249,7 +252,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               for (py::handle obj : iter) {
                 iter_list.append(toIValue(
-                    py::object(obj, /*is_borrowed*/ true),
+                    py::reinterpret_borrow<py::object>(obj),
                     self->type()->getElementType()));
               }
             } catch (const py::cast_error& e) {

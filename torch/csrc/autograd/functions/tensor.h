@@ -1,8 +1,8 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/TensorGeometry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -11,7 +11,8 @@
 #include <cstdint>
 #include <memory>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
@@ -22,8 +23,8 @@ struct TORCH_API CopyBackwards : public Node {
 // Note [View + Inplace update for base tensor]
 // Performs grad_view = fn(grad_view), but out-of-place.
 // view_fn_ is an optional lambda function saved in DifferentiableViewMeta
-// from forward pass, so that we can recover we when as_strided is not supported.
-// It preserves the invariants:
+// from forward pass, so that we can recover we when as_strided is not
+// supported. It preserves the invariants:
 //   view = view_fn_(base)
 //   grad_view = view_fn_(grad_base)
 //
@@ -99,4 +100,5 @@ struct TORCH_API CopySlices : public Node {
   std::shared_ptr<Node> fn;
 };
 
-}}
+} // namespace autograd
+} // namespace torch

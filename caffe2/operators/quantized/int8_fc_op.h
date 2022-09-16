@@ -39,16 +39,18 @@ class Int8FCOp final : public Operator<CPUContext> {
     // (NxHxW)xC == MxK x (NxK) -> MxN
     const auto K = X.t.size_from_dim(1);
     const auto N = W.t.size(0);
-    CHECK_EQ(K, W.t.size(1));
-    CHECK_EQ(N, B.t.numel());
+    TORCH_CHECK_EQ(K, W.t.size(1));
+    TORCH_CHECK_EQ(N, B.t.numel());
     const auto M = X.t.numel() / K;
     ReinitializeTensor(&Y->t, {M, N}, at::dtype<uint8_t>().device(CPU));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       pthreadpool_t threadpool =
           reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
       if (this->qnnpackObject_ == nullptr) {
         const qnnp_status createStatus = qnnp_create_fully_connected_nc_q8(

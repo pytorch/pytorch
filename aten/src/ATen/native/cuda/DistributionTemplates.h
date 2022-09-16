@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandBase.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
@@ -188,11 +189,11 @@ __global__ void distribution_binary_elementwise_kernel(
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
-  input_t_1 inputs_1[thread_work_size];
-  input_t_2 inputs_2[thread_work_size];
+  input_t_1 inputs_1[thread_work_size()];
+  input_t_2 inputs_2[thread_work_size()];
 
-  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
-  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+  int base_index = block_work_size() * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, block_work_size());
 
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
@@ -203,7 +204,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -212,25 +213,25 @@ __global__ void distribution_binary_elementwise_kernel(
     inputs_1[i] = input_data_1[offsets[0]];
     inputs_2[i] = input_data_2[offsets[1]];
 
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 
   // compute and store
   thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
     int input_idx = thread_idx + base_index;
     auto offsets = out_calc.get(input_idx);
     output_data[offsets[0]] = f(state, inputs_1[i], inputs_2[i]);
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 }
 
 template <typename func_t>
-void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_args, const func_t &f) {
+void distribution_binary_kernel(TensorIteratorBase &iter, PhiloxCudaState philox_args, const func_t &f) {
   static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
@@ -254,16 +255,16 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
-    distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid,num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid, num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -429,7 +430,7 @@ void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transfo
 // ==================================================== Normal ========================================================
 
 template<typename RNG>
-void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
+void normal_kernel(const TensorBase &self, double mean_, double std_, RNG gen) {
   auto iter = TensorIterator::borrowing_nullary_op(self);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -445,7 +446,7 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -573,7 +574,7 @@ struct CauchyKernel {
 
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
-    at::Tensor& ret, const at::Tensor& p,
+    const TensorBase &ret, const at::TensorBase &p,
     PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
@@ -617,22 +618,25 @@ void bernoulli_tensor_cuda_kernel(
 }
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
-  auto p_CUDA = p_.to(kCUDA);
-  c10::MaybeOwned<Tensor> p = expand_inplace(self, p_CUDA);
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
+  // cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
+  const auto p_type = self.dtype() == at::kDouble ? at::kDouble : at::kFloat;
+  auto p_cuda = p_.to(TensorOptions().device(self.device()).dtype(p_type));
+  auto p = expand_inplace(self, p_cuda);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
-        using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, *p, rng_engine_inputs);
-      });
+      if (std::is_same<scalar_t, double>::value) {
+        return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
+      } else {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
+      }
    });
 }
 
@@ -654,7 +658,7 @@ struct BernoulliKernel {
   void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
     bernoulli_kernel(iter, p, check_generator<RNG>(gen));
   }
-  void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };

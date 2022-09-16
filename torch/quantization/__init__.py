@@ -18,13 +18,15 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
+# TODO(future PR): fix the typo, should be `__all__`
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
     'prepare', 'convert', 'prepare_qat',
     # Top level API for graph mode quantization on TorchScript
-    'quantize_jit', 'quantize_dynamic_jit',
+    'quantize_jit', 'quantize_dynamic_jit', '_prepare_ondevice_dynamic_jit',
+    '_convert_ondevice_dynamic_jit', '_quantize_ondevice_dynamic_jit',
     # Top level API for graph mode quantization on GraphModule(torch.fx)
     # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
     # 'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
@@ -42,12 +44,14 @@ _all__ = [
     'default_eval_fn', 'get_observer_dict',
     'register_activation_post_process_hook',
     # Observers
-    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
+    'ObserverBase', 'WeightObserver', 'HistogramObserver',
+    'observer', 'default_observer',
     'default_weight_observer', 'default_placeholder_observer',
+    'default_per_channel_weight_observer',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
-    'default_symmetric_fixed_qparams_fake_quant',
-    'default_affine_fixed_qparams_fake_quant',
+    'default_fixed_qparams_range_neg1to1_fake_quant',
+    'default_fixed_qparams_range_0to1_fake_quant',
     'default_per_channel_weight_fake_quant',
     'default_histogram_fake_quant',
     # QConfig

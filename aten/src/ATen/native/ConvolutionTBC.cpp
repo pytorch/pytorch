@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 namespace at {
@@ -39,7 +40,7 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
     weight_size[2],
   }, self.options());
   output.copy_(bias.expand(output.sizes()));
-  for (int k = 0; k < kw; k++) {
+  for (const auto k : c10::irange(kw)) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));
     int oShift = std::max(0, static_cast<int>(real_pad - k));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)

@@ -39,7 +39,7 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Bool:
-      dtype.code = DLDataTypeCode::kDLUInt;
+      TORCH_CHECK(false, "Bool type is not supported by dlpack");
       break;
     case ScalarType::ComplexHalf:
       dtype.code = DLDataTypeCode::kDLComplex;
@@ -57,6 +57,7 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt8:
     case ScalarType::QInt32:
     case ScalarType::QUInt4x2:
+    case ScalarType::QUInt2x4:
       TORCH_CHECK(false, "QUInt/QInt types are not supported by dlpack");
       break;
     case ScalarType::Undefined:
@@ -80,7 +81,7 @@ DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       // while everyone else should see HIP
       ctx.device_type = DLDeviceType::kDLROCM;
 #else
-      ctx.device_type = DLDeviceType::kDLGPU;
+      ctx.device_type = DLDeviceType::kDLCUDA;
 #endif
       break;
     case DeviceType::OPENCL:
@@ -101,7 +102,7 @@ static Device getATenDevice(const DLDevice& ctx) {
       return at::Device(DeviceType::CPU);
 #ifndef USE_ROCM
     // if we are compiled under HIP, we cannot do cuda
-    case DLDeviceType::kDLGPU:
+    case DLDeviceType::kDLCUDA:
       return at::Device(DeviceType::CUDA, ctx.device_id);
 #endif
     case DLDeviceType::kDLOpenCL:
@@ -214,11 +215,22 @@ void deleter(DLManagedTensor* arg) {
 // This function returns a shared_ptr to memory managed DLpack tensor
 // constructed out of ATen tensor
 DLManagedTensor* toDLPack(const Tensor& src) {
+  // create a new tensor with possibly normalized strides
+  // gh-83069
+  auto shape = src.sizes();
+  auto strides = src.strides().vec();
+  for (int i=0; i<src.dim(); i++) {
+    if (shape[i] < 2) {
+      strides[i] = 1;
+    }
+  }
+
+  auto view = src.as_strided(shape, strides, src.storage_offset());
   ATenDLMTensor* atDLMTensor(new ATenDLMTensor);
-  atDLMTensor->handle = src;
+  atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
-  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+  atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   int64_t device_id = 0;
   if (src.is_cuda()) {
     device_id = src.get_device();
@@ -228,10 +240,10 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.sizes().data());
+      const_cast<int64_t*>(view.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.strides().data());
+      const_cast<int64_t*>(view.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }

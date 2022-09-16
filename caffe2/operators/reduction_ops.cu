@@ -2,7 +2,7 @@
 #include "caffe2/operators/reduction_ops.h"
 #include "caffe2/utils/conversions.h"
 
-#include <cub/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -83,7 +83,7 @@ template <>
 bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
-  DCHECK_EQ(dY.numel(), 1);
+  TORCH_DCHECK_EQ(dY.numel(), 1);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
   SumElementsGradientKernel<float>

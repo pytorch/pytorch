@@ -140,9 +140,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+            this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        counter_halflife_(
+            this->template GetSingleArgument<int64_t>("counter_halflife", -1)) {
     VLOG(1) << "gradient optimization operator in use: "
-            << "RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp";
+            << " weight_decay_=" << weight_decay_
+            << " counter_halflife=" << counter_halflife_
+            << " RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp bcyuan";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -182,6 +186,9 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     const auto* gradIn = segmentGradsInput.template data<T>();
     const auto* paramIn = Input(PARAM).template data<Tdata>();
     const auto* momentIn = Input(MOMENT_1).template data<T>();
+    const auto* count = counter_halflife_ == -1
+      ? nullptr
+      : Input(COUNTER).template data<double>();
 
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<Tdata>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
@@ -210,8 +217,8 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     auto* grad_buffer_data =
         is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
     if (is_mean) {
-      for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
-        for (auto tmpIndex = 0; tmpIndex < block_size; ++tmpIndex) {
+      for (const auto rangeIndex : c10::irange(numSegments)) {
+        for (const auto tmpIndex : c10::irange(block_size)) {
           auto offsetI = rangeIndex * block_size;
           grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
               ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
@@ -230,11 +237,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         paramIn,
         numParams,
         momentIn,
+        count,
         paramOut,
         momentOut,
         epsilon_,
         lr[0],
         weight_decay_,
+        counter_halflife_,
         kernel_);
 
     return true;
@@ -251,14 +260,16 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       const Tdata* paramIn,
       int64_t numParams,
       const T* momentIn,
+      const double* count,
       Tdata* paramOut,
       T* momentOut,
       float epsilon,
       T lr,
       T weight_decay,
+      T counter_halflife,
       rowWiseAdagradT& kernel) {
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -287,8 +298,12 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             " max size:",
             numParams);
 
+        float freq = (counter_halflife > 0 && count[idx] > 0)
+        ? counter_halflife / count[idx]
+        : 1.0;
+
         if (block_size == 1) {
-          float gi = std::fma(weight_decay, paramIn[idx], *g);
+          float gi = std::fma(weight_decay * freq, paramIn[idx], *g);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] = paramIn[idx] + lr / (std::sqrt(hi) + epsilon) * gi;
         } else {
@@ -301,7 +316,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
           if (HAS_WEIGHT_DECAY) {
             g_sq_avg =
                 internal::compute_square_average_with_weight_decay_inlined_(
-                    g, paramOut + offsetIdx, block_size, weight_decay);
+                    g, paramOut + offsetIdx, block_size, weight_decay * freq);
           }
 
           kernel(
@@ -318,7 +333,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
               epsilon,
               lr,
-              HAS_WEIGHT_DECAY ? weight_decay : 0.0f);
+              HAS_WEIGHT_DECAY ? weight_decay * freq : 0.0f);
         }
       }
     }
@@ -336,11 +351,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       const Tdata* paramIn,
       int64_t numParams,
       const T* momentIn,
+      const double* count,
       Tdata* paramOut,
       T* momentOut,
       float epsilon,
       T lr,
       T weight_decay,
+      T counter_halflife,
       rowWiseAdagradT& kernel) {
     if (weight_decay == 0.0f) {
       compute<SIndex, false>(
@@ -353,11 +370,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
           paramIn,
           numParams,
           momentIn,
+          count,
           paramOut,
           momentOut,
           epsilon,
           lr,
           0.0f,
+          /*counter_halflife=*/-1,
           kernel);
     } else {
       compute<SIndex, true>(
@@ -370,11 +389,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
           paramIn,
           numParams,
           momentIn,
+          count,
           paramOut,
           momentOut,
           epsilon,
           lr,
           weight_decay,
+          counter_halflife,
           kernel);
     }
   }
@@ -382,10 +403,11 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
  protected:
   T epsilon_;
   T weight_decay_;
+  T counter_halflife_;
   rowWiseAdagradT kernel_;
   Tensor grad_buffer_{CPU};
 
-  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
+  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS, COUNTER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
 
@@ -403,10 +425,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    VLOG(1)
-        << "gradient optimization operator in use: "
-        << "RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
+            this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        counter_halflife_(
+            this->template GetSingleArgument<int64_t>("counter_halflife", -1)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << " weight_decay_=" << weight_decay_
+            << " counter_halflife=" << counter_halflife_
+            << " RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp bcyuan";
   }
 
   bool RunOnDevice() override {
@@ -444,6 +469,9 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     const auto* paramIn = Input(PARAM).template data<Tdata>();
     const auto* momentIn = Input(MOMENT_1).template data<T>();
     const auto* auxParamIn = Input(AUX_PARAM).template data<T>();
+    const auto* count = counter_halflife_ == -1
+      ? nullptr
+      : Input(COUNTER).template data<double>();
 
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<Tdata>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
@@ -483,6 +511,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         paramIn,
         numParams,
         momentIn,
+        count,
         auxParamIn,
         paramOut,
         momentOut,
@@ -490,6 +519,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         epsilon_,
         lr[0],
         weight_decay_,
+        counter_halflife_,
         kernel_,
         &context_);
 
@@ -507,6 +537,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       const Tdata* paramIn,
       int64_t numParams,
       const T* momentIn,
+      const double* count,
       const T* auxParamIn,
       Tdata* paramOut,
       T* momentOut,
@@ -514,6 +545,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       float epsilon,
       T lr,
       T weight_decay,
+      T counter_halflife,
       rowWiseAdagradT& kernel,
       CPUContext* context) {
     // Cannot fuse this loop with the loop below because paramIn is updated
@@ -525,7 +557,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     // ignores this dependency and fuses these two loops.
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -559,7 +591,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     CAFFE_ENFORCE_EQ(dataIndex, n);
 
     dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -574,12 +606,16 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         auto offsetIdx = idx * block_size;
         auto localOffset = dataIndex - start;
 
-        for (int i = 0; i < block_size; ++i) {
+        for (const auto i : c10::irange(block_size)) {
           temp_grad[i] = auxParamIn[localOffset] * g[i];
         }
 
+        float freq = (counter_halflife > 0 && count[idx] > 0)
+        ? counter_halflife / count[idx]
+        : 1.0;
+
         if (block_size == 1) {
-          float gi = std::fma(weight_decay, paramIn[idx], temp_grad[0]);
+          float gi = std::fma(weight_decay * freq, paramIn[idx], temp_grad[0]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] = paramIn[idx] + lr / (std::sqrt(hi) + epsilon) * gi;
         } else {
@@ -595,7 +631,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
                     temp_grad.data(),
                     paramOut + offsetIdx,
                     block_size,
-                    weight_decay);
+                    weight_decay * freq);
           }
 
           kernel(
@@ -615,7 +651,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
 
               epsilon,
               lr,
-              HAS_WEIGHT_DECAY ? weight_decay : 0.0f);
+              HAS_WEIGHT_DECAY ? weight_decay * freq : 0.0f);
         }
       }
     }
@@ -632,6 +668,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       const Tdata* paramIn,
       int64_t numParams,
       const T* momentIn,
+      const double* count,
       const T* auxParamIn,
       Tdata* paramOut,
       T* momentOut,
@@ -639,6 +676,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       float epsilon,
       T lr,
       T weight_decay,
+      T counter_halflife,
       rowWiseAdagradT& kernel,
       CPUContext* context) {
     if (weight_decay == 0.0f) {
@@ -652,6 +690,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           paramIn,
           numParams,
           momentIn,
+          count,
           auxParamIn,
           paramOut,
           momentOut,
@@ -659,6 +698,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           epsilon,
           lr,
           0.0f,
+          /*counter_halflife=*/-1,
           kernel,
           context);
     } else {
@@ -672,6 +712,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           paramIn,
           numParams,
           momentIn,
+          count,
           auxParamIn,
           paramOut,
           momentOut,
@@ -679,6 +720,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           epsilon,
           lr,
           weight_decay,
+          counter_halflife,
           kernel,
           context);
     }
@@ -687,9 +729,10 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
  protected:
   T epsilon_;
   T weight_decay_;
+  T counter_halflife_;
   rowWiseAdagradT kernel_;
 
-  INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);
+  INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS, COUNTER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, AUX_GRAD);
 };
 
@@ -707,10 +750,13 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)),
         weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
-    VLOG(1)
-        << "gradient optimization operator in use: "
-        << "RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
+            this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        counter_halflife_(
+            this->template GetSingleArgument<int64_t>("counter_halflife", -1)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << " weight_decay_=" << weight_decay_
+            << " counter_halflife=" << counter_halflife_
+            << " RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp bcyuan";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -758,6 +804,9 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
     const auto* gradIn = segmentGradsInput.template data<T>();
     const auto* paramIn = Input(PARAM).template data<Tdata>();
     const auto* momentIn = Input(MOMENT_1).template data<T>();
+    const auto* count = counter_halflife_ == -1
+      ? nullptr
+      : Input(COUNTER).template data<double>();
     const auto* auxParamIn = Input(AUX_PARAM).template data<T>();
 
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<Tdata>();
@@ -790,7 +839,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
 
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -853,7 +902,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
 
         alignas(64) float temp[VLEN];
         _mm256_store_ps(temp, acc_v);
-        for (int j = 0; j < VLEN; ++j) {
+        for (const auto j : c10::irange(VLEN)) {
           acc += temp[j];
         }
 #endif
@@ -865,8 +914,12 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
         }
         auxGrad[dataIndex] = acc;
 
+        float freq = (counter_halflife_ > 0 && count[idx] > 0)
+        ? counter_halflife_ / count[idx]
+        : 1.0;
+
         if (block_size == 1) {
-          float gi = std::fma(weight_decay_, paramIn[idx], temp_grad[0]);
+          float gi = std::fma(weight_decay_ * freq, paramIn[idx], temp_grad[0]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] =
               paramIn[idx] + lr[0] / (std::sqrt(hi) + epsilon_) * gi;
@@ -883,7 +936,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
                     temp_grad.data(),
                     paramOut + offsetIdx,
                     block_size,
-                    weight_decay_);
+                    weight_decay_ * freq);
           }
 
           kernel_(
@@ -903,7 +956,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
 
               epsilon_,
               lr[0],
-              HAS_WEIGHT_DECAY ? weight_decay_ : 0.0f);
+              HAS_WEIGHT_DECAY ? weight_decay_ * freq : 0.0f);
         }
       }
     }
@@ -915,9 +968,10 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
  protected:
   T epsilon_;
   T weight_decay_;
+  T counter_halflife_;
   rowWiseAdagradT kernel_;
 
-  INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);
+  INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS, COUNTER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, AUX_GRAD);
 };
 

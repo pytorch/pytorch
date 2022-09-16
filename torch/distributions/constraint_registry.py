@@ -98,7 +98,7 @@ class ConstraintRegistry(object):
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
                 A subclass of :class:`~torch.distributions.constraints.Constraint`, or
                 a singleton object of the desired class.
-            factory (callable): A callable that inputs a constraint object and returns
+            factory (Callable): A callable that inputs a constraint object and returns
                 a  :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.
@@ -173,7 +173,9 @@ def _transform_to_independent(constraint):
 
 
 @biject_to.register(constraints.positive)
+@biject_to.register(constraints.nonnegative)
 @transform_to.register(constraints.positive)
+@transform_to.register(constraints.nonnegative)
 def _transform_to_positive(constraint):
     return transforms.ExpTransform()
 

@@ -63,6 +63,10 @@ s3_upload() {
   )
 }
 
+# Install dependencies (should be a no-op if previously installed)
+conda install -yq anaconda-client
+pip install -q awscli
+
 case "${PACKAGE_TYPE}" in
   conda)
     conda_upload

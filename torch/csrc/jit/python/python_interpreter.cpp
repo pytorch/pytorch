@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/python_engine.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
@@ -43,7 +44,7 @@ Operation createPythonOperation(const Node* op_) {
 
   AT_ASSERT(op->outputs().size() == 1);
 
-  return [=](Stack* stack) {
+  return [=](Stack& stack) {
     pybind11::gil_scoped_acquire gil;
     py::tuple py_inputs(op->cconv.size());
     size_t i = 0;
@@ -66,7 +67,7 @@ Operation createPythonOperation(const Node* op_) {
     drop(stack, num_inputs);
     try {
       py::object py_output(func(*py_inputs));
-      stack->push_back(returnToIValue(op->output()->type(), py_output));
+      stack.push_back(returnToIValue(op->output()->type(), py_output));
     } catch (py::error_already_set& e) {
       throw std::runtime_error(e.what());
     }

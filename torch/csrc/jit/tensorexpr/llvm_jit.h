@@ -3,7 +3,7 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <llvm/ExecutionEngine/JITSymbol.h>
 #include <llvm/ExecutionEngine/Orc/Core.h>
@@ -16,8 +16,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data);
 
 inline std::string formatError(llvm::Error&& err, const char* msg) {
   static constexpr char* defaultErrorMsg = "Unexpected failure in LLVM JIT";

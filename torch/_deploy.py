@@ -1,9 +1,11 @@
 import io
+
 import torch
+from torch.package import Importer, OrderedImporter, PackageImporter, sys_importer
 from torch.package._package_pickler import create_pickler
 from torch.package._package_unpickler import PackageUnpickler
-from torch.package import sys_importer, OrderedImporter, PackageImporter, Importer
 from torch.serialization import _maybe_decode_ascii
+
 
 def _save_storages(importer, obj):
     serialized_storages = []
@@ -17,15 +19,19 @@ def _save_storages(importer, obj):
         importers = sys_importer
 
     def persistent_id(obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
-        if torch.is_storage(obj):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                dtype = obj.dtype
+            else:
+                storage = obj
+                dtype = torch.uint8
+
             serialized_storages.append(obj)
-            serialized_dtypes.append(obj.dtype)
-            return ('storage', len(serialized_storages) - 1)
+            serialized_dtypes.append(dtype)
+            return ("storage", len(serialized_storages) - 1)
 
         if hasattr(obj, "__reduce_deploy__"):
             if _serialized_reduces.get(id(obj)) is None:
@@ -44,26 +50,36 @@ def _save_storages(importer, obj):
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
     data_value = data_buf.getvalue()
-    return data_value, serialized_storages, serialized_dtypes, importer.zip_reader if importer else None
+    return (
+        data_value,
+        serialized_storages,
+        serialized_dtypes,
+        importer.zip_reader if importer else None,
+    )
 
-def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
 
+def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dtypes):
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
-        if typename == 'storage':
-            return serialized_storages[data[0]]
+        if typename == "storage":
+            # TODO: Once we decide to break serialization FC, we can
+            # stop wrapping with TypedStorage
+            storage = serialized_storages[data[0]]
+            dtype = serialized_dtypes[data[0]]
+            return torch.storage.TypedStorage(
+                wrap_storage=storage.untyped(), dtype=dtype
+            )
 
-        if typename == 'reduce_deploy':
+        if typename == "reduce_deploy":
             reduce_id, func, args = data
             if reduce_id not in _loaded_reduces:
                 _loaded_reduces[reduce_id] = func(_raw_packages[zip_reader], *args)
             return _loaded_reduces[reduce_id]
 
         return None
-
 
     importer: Importer
     if zip_reader is not None:
@@ -72,9 +88,10 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
         importer = sys_importer
 
     unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
-    unpickler.persistent_load = persistent_load
+    unpickler.persistent_load = persistent_load  # type: ignore[assignment]
     result = _deploy_objects[id] = unpickler.load()
     return result
+
 
 def _get_package(zip_reader):
     if zip_reader not in _raw_packages:

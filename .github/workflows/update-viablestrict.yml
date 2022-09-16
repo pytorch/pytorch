@@ -1,0 +1,56 @@
+name: Update viable/strict
+
+on:
+  schedule:
+    - cron: 17,47 * * * *
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  do_update_viablestrict:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install Python Packages
+        run: |
+          pip3 install rockset==0.8.10
+          pip3 install boto3==1.19.12
+          pip3 install six==1.16.0
+
+      - name: Get latest viable commit
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+        run: |
+          output=$(python3 .github/scripts/fetch_latest_green_commit.py)
+          echo "::set-output name=latest_viable_sha::$output"
+        id: get-latest-commit
+
+      - name: Push SHA to viable/strict branch
+        if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+        run: |
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
+          echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
+          # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
+          # to ignore because we already have the later green commit in visable/strict
+          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true

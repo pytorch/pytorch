@@ -1,12 +1,13 @@
 #ifndef CAFFE2_OPERATORS_FIND_DUPLICATE_ELEMENTS_OP_H
 #define CAFFE2_OPERATORS_FIND_DUPLICATE_ELEMENTS_OP_H
 
-#include <unordered_map>
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "c10/util/irange.h"
+
+#include <unordered_map>
+#include <vector>
 
 namespace caffe2 {
 
@@ -44,7 +45,7 @@ class FindDuplicateElementsOp final : public Operator<Context> {
     auto* output =
         Output(0, {static_cast<int64_t>(dupSize)}, at::dtype<int64_t>());
     auto* out_ptr = output->template mutable_data<int64_t>();
-    for (size_t i = 0; i < dupSize; ++i) {
+    for (const auto i : c10::irange(dupSize)) {
       out_ptr[i] = dupIndices[i];
     }
 

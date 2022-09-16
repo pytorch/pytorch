@@ -112,6 +112,7 @@ cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_VERBOSE_MAKEFILE=1 \
     -DUSE_CUDA=OFF \
+    -DUSE_ITT=OFF \
     -DUSE_OPENCV=OFF \
     -DUSE_LMDB=OFF \
     -DCAFFE2_CPU_FLAGS="-mfpu=neon -mfloat-abi=soft" \

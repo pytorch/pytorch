@@ -1,39 +1,38 @@
 #include <benchmark/benchmark.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
-#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/torch.h>
-#include "caffe2/operators/tanh_op.h"
 #include "caffe2/operators/logit_op.h"
+#include "caffe2/operators/tanh_op.h"
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target, int width) {
+void vectorize(tensorexpr::LoopNest* ln, tensorexpr::Tensor target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
+  ForPtr inner, tail;
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ln->vectorize(inner);
 }
 
-void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
-  std::vector<For*> loops = ln->getLoopStmtsFor(target);
-  For *inner, *tail;
+void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor target) {
+  std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
+  ForPtr inner, tail;
   ln->splitWithTail(loops[0], 16 * 8, &inner, &tail);
-  For* outer = loops[0];
+  ForPtr outer = loops[0];
   ln->vectorize(inner);
   ln->splitWithTail(outer, 8, &inner, &tail);
-  Stmt* unrolled;
-  LoopNest::unroll(inner, &unrolled);
+  StmtPtr unrolled;
+  LoopNest::fullUnroll(inner, &unrolled);
 }
 
 static void relu_nnc(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   auto clamp = 0;
-  torch::jit::tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i){
+  torch::jit::tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -44,7 +43,7 @@ static void relu_nnc(benchmark::State& state) {
   LoopNest ln({B});
   optimizePointwise(&ln, B);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -56,25 +55,23 @@ static void relu_nnc(benchmark::State& state) {
   auto B_ref = at::relu(A_t);
   cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   TORCH_CHECK(at::allclose(B_t, B_ref));
-  for (auto _ : state){
+  for (auto _ : state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["log/s"] = benchmark::Counter(
-    uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void log_nnc_sleef(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
-      Compute("B", {N}, [&](const VarHandle& i) {
-        return log(A.load(i));
-      });
+  BufHandle A("A", {N}, kFloat);
+  torch::jit::tensorexpr::Tensor B =
+      Compute("B", {N}, [&](const VarHandle& i) { return log(A.load(i)); });
   LoopNest ln({B});
   ln.prepareForCodegen();
   vectorize(&ln, B, 8);
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -90,21 +87,19 @@ static void log_nnc_sleef(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["log/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void log_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
-      Compute("B", {N}, [&](const VarHandle& i) {
-        return fast_log(A.load(i));
-      });
+  BufHandle A("A", {N}, kFloat);
+  torch::jit::tensorexpr::Tensor B = Compute(
+      "B", {N}, [&](const VarHandle& i) { return fast_log(A.load(i)); });
   LoopNest ln({B});
   optimizePointwise(&ln, B);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -120,21 +115,19 @@ static void log_nnc_fast(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["log/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void log_nnc_vml(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
-      Compute("B", {N}, [&](const VarHandle& i) {
-        return log_vml(A.load(i));
-      });
+  BufHandle A("A", {N}, kFloat);
+  torch::jit::tensorexpr::Tensor B =
+      Compute("B", {N}, [&](const VarHandle& i) { return log_vml(A.load(i)); });
   LoopNest ln({B});
   vectorize(&ln, B, 8);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -150,7 +143,8 @@ static void log_nnc_vml(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["log/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void log_aten(benchmark::State& state) {
@@ -160,15 +154,15 @@ static void log_aten(benchmark::State& state) {
     at::log_out(B_t, A_t);
   }
   state.counters["log/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void logit_nnc_sleef(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -181,7 +175,7 @@ static void logit_nnc_sleef(benchmark::State& state) {
   LoopNest ln({B});
   ln.prepareForCodegen();
   optimizePointwise(&ln, B);
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -197,15 +191,15 @@ static void logit_nnc_sleef(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["logit/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void logit_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -218,7 +212,7 @@ static void logit_nnc_fast(benchmark::State& state) {
   LoopNest ln({B});
   ln.prepareForCodegen();
   optimizePointwise(&ln, B);
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -234,15 +228,15 @@ static void logit_nnc_fast(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["logit/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void logit_nnc_vml(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
+  BufHandle A("A", {N}, kFloat);
   auto clamp = 1e-6f;
-  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
       auto elem = A.load(i);
       auto min = FloatImm::make(clamp);
@@ -255,7 +249,7 @@ static void logit_nnc_vml(benchmark::State& state) {
   LoopNest ln({B});
   ln.prepareForCodegen();
   vectorize(&ln, B, 16);
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -271,7 +265,8 @@ static void logit_nnc_vml(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["logit/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void logit_aten(benchmark::State& state) {
@@ -282,7 +277,8 @@ static void logit_aten(benchmark::State& state) {
     at::native::logit_out(A_t, clamp, B_t);
   }
   state.counters["logit/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 template <typename T>
@@ -312,21 +308,19 @@ static void logit_caffe2(benchmark::State& state) {
   }
 
   state.counters["logit/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void tanh_nnc_fast(benchmark::State& state) {
-  KernelScope ks;
   auto N = VarHandle("N", kInt);
-  Placeholder A("A", kFloat, {N});
-  torch::jit::tensorexpr::Tensor* B =
-      Compute("B", {N}, [&](const VarHandle& i) {
-        return fast_tanh(A.load(i));
-      });
+  BufHandle A("A", {N}, kFloat);
+  torch::jit::tensorexpr::Tensor B = Compute(
+      "B", {N}, [&](const VarHandle& i) { return fast_tanh(A.load(i)); });
   LoopNest ln({B});
   optimizePointwise(&ln, B);
   ln.prepareForCodegen();
-  Stmt* s = ln.root_stmt();
+  StmtPtr s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
@@ -342,7 +336,8 @@ static void tanh_nnc_fast(benchmark::State& state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
   state.counters["tanh/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void tanh_aten(benchmark::State& state) {
@@ -352,10 +347,12 @@ static void tanh_aten(benchmark::State& state) {
     at::tanh_out(A_t, B_t);
   }
   state.counters["tanh/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
 }
 
 static void tanh_caffe2(benchmark::State& state) {
+#ifdef FBCODE_CAFFE2
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   at::Tensor B_ref = torch::randn({state.range(0)});
@@ -373,71 +370,64 @@ static void tanh_caffe2(benchmark::State& state) {
     tanh(N, X, Y, &c);
   }
   state.counters["tanh/s"] = benchmark::Counter(
-      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+      uint64_t(state.range(0) * state.iterations()),
+      benchmark::Counter::kIsRate);
+#endif
 }
 
-BENCHMARK(relu_nnc)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+BENCHMARK(relu_nnc)->Args({2 << 5})->Args({2 << 8})->Args({2 << 12})->Args(
+    {2 << 14});
 BENCHMARK(log_nnc_sleef)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(log_nnc_fast)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(log_nnc_vml)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
-BENCHMARK(log_aten)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
+BENCHMARK(log_aten)->Args({2 << 5})->Args({2 << 8})->Args({2 << 12})->Args(
+    {2 << 14});
 BENCHMARK(logit_nnc_sleef)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(logit_nnc_fast)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(logit_nnc_vml)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(logit_aten)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(logit_caffe2)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
 BENCHMARK(tanh_nnc_fast)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
-BENCHMARK(tanh_aten)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});
+BENCHMARK(tanh_aten)->Args({2 << 5})->Args({2 << 8})->Args({2 << 12})->Args(
+    {2 << 14});
 BENCHMARK(tanh_caffe2)
-  ->Args({2<<5})
-  ->Args({2<<8})
-  ->Args({2<<12})
-  ->Args({2<<14});
+    ->Args({2 << 5})
+    ->Args({2 << 8})
+    ->Args({2 << 12})
+    ->Args({2 << 14});

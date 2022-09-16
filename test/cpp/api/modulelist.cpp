@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -118,7 +119,7 @@ TEST_F(ModuleListTest, AccessWithAt) {
   ASSERT_EQ(list->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(&list->at<M>(i), modules[i].get());
   }
 
@@ -143,7 +144,7 @@ TEST_F(ModuleListTest, AccessWithPtr) {
   ASSERT_EQ(list->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(list->ptr(i).get(), modules[i].get());
     ASSERT_EQ(list[i].get(), modules[i].get());
     ASSERT_EQ(list->ptr<M>(i).get(), modules[i].get());
@@ -183,8 +184,8 @@ TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
   ASSERT_TRUE(b[0]->as<C>());
   ASSERT_TRUE(b[1]->as<D>());
 
-  std::vector<std::shared_ptr<A>> c = {std::make_shared<A>(),
-                                       std::make_shared<A>()};
+  std::vector<std::shared_ptr<A>> c = {
+      std::make_shared<A>(), std::make_shared<A>()};
   b->extend(c);
 
   ASSERT_EQ(b->size(), 4);
@@ -290,13 +291,12 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
 
 TEST_F(ModuleListTest, RangeBasedForLoop) {
   torch::nn::ModuleList mlist(
-    torch::nn::Linear(3, 4),
-    torch::nn::BatchNorm1d(4),
-    torch::nn::Dropout(0.5)
-  );
+      torch::nn::Linear(3, 4),
+      torch::nn::BatchNorm1d(4),
+      torch::nn::Dropout(0.5));
 
   std::stringstream buffer;
-  for (const auto &module : *mlist) {
+  for (const auto& module : *mlist) {
     module->pretty_print(buffer);
   }
 }

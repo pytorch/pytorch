@@ -5,9 +5,9 @@ import time
 from typing import Any, NoReturn, Optional
 
 from .setting import (
+    CompilerType,
     LOG_DIR,
     PROFILE_DIR,
-    CompilerType,
     TestList,
     TestPlatform,
     TestType,
@@ -138,7 +138,9 @@ def check_test_type(test_type: str, target: str) -> None:
     )
 
 
-def raise_no_test_found_exception(cpp_binary_folder: str, python_binary_folder: str) -> NoReturn:
+def raise_no_test_found_exception(
+    cpp_binary_folder: str, python_binary_folder: str
+) -> NoReturn:
     raise RuntimeError(
         f"No cpp and python tests found in folder **{cpp_binary_folder} and **{python_binary_folder}**"
     )

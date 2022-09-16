@@ -16,13 +16,11 @@ pushd "$(dirname "$0")/../../.."
 
 cp torch/_utils_internal.py tools/shared
 
-python -m tools.codegen.gen
+python -m torchgen.gen --source-path aten/src/ATen
 
 python tools/setup_helpers/generate_code.py                 \
-  --declarations-path build/aten/src/ATen/Declarations.yaml \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
-  --nn-path aten/src
-
+  --tags-path aten/src/ATen/native/tags.yaml
 popd
 
 # Run doxygen and log all output.

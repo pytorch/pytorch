@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/data/dataloader/base.h>
 
 #include <cstddef>
@@ -16,8 +17,8 @@ namespace data {
 /// this dataset is itself responsible for producing batches rather than
 /// depending on a sampler. The statefulness here actually refers to the
 /// dataset. The StatefulDataLoader simply alters the data loading algorithm to
-/// accommodate the stateful, shared nature of the dataset. Note that the dataset
-/// must be thread safe if more than one worker thread is used.
+/// accommodate the stateful, shared nature of the dataset. Note that the
+/// dataset must be thread safe if more than one worker thread is used.
 ///
 /// A stateful dataloader is created by calling `make_data_loader` with a
 /// stateful dataset.
@@ -39,7 +40,7 @@ class StatefulDataLoader : public DataLoaderBase<
             // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(options),
             torch::make_unique<Dataset>(std::move(dataset))) {
-    for (size_t w = 0; w < this->options_.workers; ++w) {
+    for (const auto w : c10::irange(this->options_.workers)) {
       // As opposed to the stateless case, here all worker threads access the
       // same underlying dataset.
       this->workers_.emplace_back(

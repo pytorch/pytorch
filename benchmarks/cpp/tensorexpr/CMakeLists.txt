@@ -6,9 +6,12 @@ add_executable(
   bench_batchnorm.cpp
   bench_concat.cpp
   bench_compile.cpp
+  bench_signed_log1p.cpp
   bench_fuser_overhead.cpp
   bench_gemm.cpp
+  bench_kernels.cpp
   bench_parallel.cpp
+  bench_prefix_sum.cpp
   bench_reduce.cpp
   main.cpp)
 

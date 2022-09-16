@@ -1,7 +1,20 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/BinaryOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_div_native.h>
+#include <ATen/ops/_foreach_mul_native.h>
+#include <ATen/ops/_foreach_sub_native.h>
+
+#include <ATen/ops/empty_like_native.h>
+#endif
+
 namespace at { namespace native {
 
 template<template<class> class Op>
@@ -17,7 +30,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, const Scalar& scalar) 
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<2>(tensor_lists,
                               BinaryOpScalarFunctor<scalar_t,
                                                     /* depth */ 2,
@@ -35,7 +48,7 @@ void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        using opmath_t = at::opmath_type<scalar_t>;
         multi_tensor_apply<1>(tensor_lists,
                               BinaryOpScalarFunctor<scalar_t,
                                                     /* depth */ 1,

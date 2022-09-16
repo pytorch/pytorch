@@ -1,10 +1,11 @@
 #include <torch/csrc/autograd/saved_variable.h>
 
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Tensor.h>
 
@@ -13,9 +14,13 @@
 #include <memory>
 #include <sstream>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_on_view) {
+SavedVariable::SavedVariable(
+    const Variable& variable,
+    bool is_output,
+    bool is_inplace_on_view) {
   if (variable.defined()) {
     // Note [Inference tensor cannot be saved for backward]
     // Invariant:
@@ -23,61 +28,76 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // If an inference tensor was saved for backward in an autograd session and
     // then you reenter inference mode and make an inplace update to the tensor
     // without bumping version_counter, it'll lead to silent wrong result when
-    // you do backward() for the previous autograd session.  Technically we don't
-    // have to check here since it'll fail when querying `current_version` on
-    // the inference tensor, but we can give a much better error message here.
+    // you do backward() for the previous autograd session.  Technically we
+    // don't have to check here since it'll fail when querying `current_version`
+    // on the inference tensor, but we can give a much better error message
+    // here.
     //
     // Note in the documentation we say "inference tensor cannot participate
     // in autograd" which is more restrictive than the invariant.  In practice
     // the check is more permissive and only error out when an inference tensor
-    // is saved for backward.  Whether a tensor is saved for backward is determined
-    // by derivative formula and thus varies op by op, so by saying "no inference
-    // tensor in autograd" it's easier for users to understand and follow.
-    TORCH_CHECK(!variable.is_inference(),
-      "Inference tensors cannot be saved for backward. To work around "
-      "you can make a clone to get a normal tensor and use it in autograd.")
+    // is saved for backward.  Whether a tensor is saved for backward is
+    // determined by derivative formula and thus varies op by op, so by saying
+    // "no inference tensor in autograd" it's easier for users to understand and
+    // follow.
+    TORCH_CHECK(
+        !variable.is_inference(),
+        "Inference tensors cannot be saved for backward. To work around "
+        "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
     const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
     is_leaf_ = variable.is_leaf();
     is_output_ = is_output;
+    is_inplace_on_view_ = is_inplace_on_view;
+
+    if (is_inplace_on_view) {
+      TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
+      weak_grad_fn_ = variable.grad_fn();
+    }
+
+    auto maybe_hooks = get_default_hooks();
+
+    if (maybe_hooks) {
+      save_metadata(variable);
+      set_hooks_and_pack_data(std::move(maybe_hooks), variable);
+      return;
+    }
 
     // If the variable is a leaf or is not an output, we can safely save the
     // original variable without running the risk of reference cycles.
     // 1. If the variable is not an output, its grad_fn has already been fully
     // created and in particular will be a different Node than the one
     // we are currently constructing (the one that owns this SavedVariable).
-    // 2. If the variable is a leaf, it only has weak reference to the grad_accumulator
-    // which cannot create a cycle.
-    // In those cases, we save the original variable and don't need further processing.
+    // 2. If the variable is a leaf, it only has weak reference to the
+    // grad_accumulator which cannot create a cycle. In those cases, we save the
+    // original variable and don't need further processing.
     if (!is_output || is_leaf_) {
       saved_original_ = true;
       data_ = variable;
       return;
     }
 
-    // From now on, we can assume the variable is not a leaf and is an output.
+    save_metadata(variable);
 
-    is_inplace_on_view_ = is_inplace_on_view;
-
-    if(is_inplace_on_view) {
-      weak_grad_fn_ = variable.grad_fn();
-    }
-
-    save_common_metadata(variable);
-
-    // These copies are all shared_ptr copies, so slightly more expensive.
-    // Do them here instead of in the init list in case data is undefined.
+    // Only do this if we actually need to.
     data_ = variable.tensor_data();
   }
 }
 
-void SavedVariable::save_common_metadata(const Variable& data) {
+void SavedVariable::save_metadata(const Variable& data) {
   // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
   version_counter_ = impl::version_counter(data);
+
+  if (is_leaf_) {
+    grad_accumulator_ = impl::grad_accumulator(data);
+    requires_grad_ = data.requires_grad();
+  } else if (!is_output_) {
+    grad_fn_ = data.grad_fn();
+  }
 
   // TODO(albanD) This needs to be updated when moving to multiple levels
   const auto& fw_grad = data._fw_grad(/* level */ 0);
@@ -87,6 +107,9 @@ void SavedVariable::save_common_metadata(const Variable& data) {
   }
 }
 
+std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks() {
+  return Engine::get_default_engine().get_default_saved_variable_hooks();
+}
 
 void SavedVariable::reset_data() {
   hooks_.reset();
@@ -94,8 +117,14 @@ void SavedVariable::reset_data() {
   data_.reset();
 }
 
-SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_on_view)
-  : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_on_view) {}
+SavedVariable::SavedVariable(
+    const c10::optional<Variable>& variable,
+    bool is_output,
+    bool is_inplace_on_view)
+    : SavedVariable(
+          variable.has_value() ? *variable : Variable(),
+          is_output,
+          is_inplace_on_view) {}
 
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (was_default_constructed_) {
@@ -110,8 +139,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // if versions don't match
 
   auto grad_fn = is_inplace_on_view_ ? weak_grad_fn_.lock()
-                                     : !hooks_ ? saved_original_ ? data_.grad_fn() : nullptr
-                                               : grad_fn_;
+      : !hooks_ ? saved_original_ ? data_.grad_fn() : nullptr
+                : grad_fn_;
 
   if (!is_leaf_ && !grad_fn) {
     TORCH_INTERNAL_ASSERT(saved_for, "No grad_fn for non-leaf saved tensor");
@@ -121,36 +150,44 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // Only check version counter in the case without hooks
   // If user provides hooks, we can't track versions through the hooks
   if (!hooks_) {
-    auto current_version = saved_original_ ? impl::version_counter(data_).current_version()
-                                           : version_counter_.current_version();
+    auto current_version = saved_original_
+        ? impl::version_counter(data_).current_version()
+        : version_counter_.current_version();
 
     if (saved_version_ != current_version) {
       std::stringstream message;
-      message << "one of the variables needed for gradient computation has been "
-          "modified by an inplace operation: [" << data_.toString() << " "
-          << data_.sizes() << "]";
+      message
+          << "one of the variables needed for gradient computation has been "
+             "modified by an inplace operation: ["
+          << data_.toString() << " ";
+      if (data_.is_nested()) {
+        message << data_._nested_tensor_size() << "]";
+      } else {
+        message << data_.sizes() << "]";
+      }
       if (grad_fn) {
-          message << ", which is output " << output_nr_
-              << " of " << grad_fn->name() << ",";
+        message << ", which is output " << output_nr_ << " of "
+                << grad_fn->name() << ",";
       }
-      message << " is at version " << current_version
-          << "; expected version " << saved_version_ << " instead.";
+      message << " is at version " << current_version << "; expected version "
+              << saved_version_ << " instead.";
       if (!AnomalyMode::is_enabled()) {
-          message << " Hint: enable anomaly detection to find the operation "
-              "that failed to compute its gradient, with torch.autograd."
-              "set_detect_anomaly(True).";
-      }
-      else {
-          message << " Hint: the backtrace further above shows the operation "
-              "that failed to compute its gradient. The variable in question "
-              "was changed in there or anywhere later. Good luck!";
+        message << " Hint: enable anomaly detection to find the operation "
+                   "that failed to compute its gradient, with torch.autograd."
+                   "set_detect_anomaly(True).";
+      } else {
+        message
+            << " Hint: the backtrace further above shows the operation "
+               "that failed to compute its gradient. The variable in question "
+               "was changed in there or anywhere later. Good luck!";
       }
       TORCH_CHECK(false, message.str());
     }
   }
 
   // The version counter is correct.
-  // Additionnally, if we deal with a non-leaf variable, we have its correct grad_fn.
+  // Additionnally, if we deal with a non-leaf variable, we have its correct
+  // grad_fn.
 
   // If we have the original variable, we simply return it
   if (!hooks_ && saved_original_) {
@@ -177,8 +214,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // graph.
   if (is_leaf_ && requires_grad_) {
     TORCH_INTERNAL_ASSERT(
-        !grad_accumulator_.expired(),
-        "No grad accumulator for a saved leaf");
+        !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
   }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
@@ -195,44 +231,49 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
-void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
-  TORCH_CHECK(!hooks_,
-    "Calling register_hooks on a saved tensor whose hooks have already been set. "
-    "Hint: only one pair of hooks is allowed at a time.");
+void SavedVariable::set_hooks_and_pack_data(
+    std::unique_ptr<SavedVariableHooks>&& hooks,
+    const Variable& data) {
+  hooks_ = std::move(hooks);
+  at::NoGradGuard guard;
+  const auto version = impl::version_counter(data).current_version();
+  hooks_->call_pack_hook(saved_original_ ? data.detach() : data);
+  TORCH_CHECK(
+      version == impl::version_counter(data).current_version(),
+      "A saved tensor pack hook is modifying its input in place. "
+      "Tensors provided as input to pack hook can not be modified by "
+      "in-place operations as this can lead to unexpected side-effects. "
+      "Please open an issue if you need to perform in-place operations on "
+      "the input to a pack hook.");
+}
+
+void SavedVariable::register_hooks(
+    std::unique_ptr<SavedVariableHooks>&& hooks) {
+  TORCH_INTERNAL_ASSERT(hooks);
+  TORCH_CHECK(
+      !hooks_,
+      "Calling register_hooks on a saved tensor whose hooks have already been set. "
+      "Hint: only one pair of hooks is allowed at a time.");
   if (!data_.defined()) {
     if (!was_default_constructed_) {
-      TORCH_CHECK(false,
-        "Calling register_hooks on a saved tensor after it has been freed. "
-        "Saved intermediate values of the graph are freed when you call "
-        ".backward() or autograd.grad(). Specify retain_graph=True if you "
-        "need to backward through the graph a second time or if you need to "
-        "access saved variables after calling backward.");
+      TORCH_CHECK(
+          false,
+          "Calling register_hooks on a saved tensor after it has been freed. "
+          "Saved intermediate values of the graph are freed when you call "
+          ".backward() or autograd.grad(). Specify retain_graph=True if you "
+          "need to backward through the graph a second time or if you need to "
+          "access saved variables after calling backward.");
     } else {
-      TORCH_CHECK(false,
-        "Calling register_hooks on a saved tensor with value None is forbidden");
+      TORCH_CHECK(
+          false,
+          "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
-  hooks_ = std::move(hooks);
-
-  // If we didn't save the original variable, we already have all we need to reconstruct it
+  // If we didn't save the original variable, we already saved metadata
   if (saved_original_) {
-    save_common_metadata(data_);
-
-    if (is_leaf_) {
-      grad_accumulator_ = impl::grad_accumulator(data_);
-      requires_grad_ = data_.requires_grad();
-    } else if (!is_output_) {
-      grad_fn_ = data_.grad_fn();
-    } else {
-      // Current code assumes that the original variable is saved if and only if (is_leaf_ || !is_output)
-      TORCH_INTERNAL_ASSERT(false);
-    }
-
-    data_ = data_.tensor_data();
+    save_metadata(data_);
   }
-
-  at::NoGradGuard guard;
-  hooks_->call_pack_hook(data_);
+  set_hooks_and_pack_data(std::move(hooks), data_);
   data_.reset();
 }
 
@@ -243,4 +284,5 @@ const char* ERR_BACKWARD_TWICE =
     "retain_graph=True if you need to backward through the graph a second time or "
     "if you need to access saved tensors after calling backward.";
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

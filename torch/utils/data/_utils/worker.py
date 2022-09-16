@@ -10,7 +10,7 @@ import os
 import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
-from typing import Union
+from typing import Optional, Union
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
 
 if IS_WINDOWS:
@@ -117,7 +117,7 @@ class _IterableDatasetStopIteration(object):
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 @dataclass(frozen=True)
 class _ResumeIteration(object):
-    pass
+    seed: Optional[int] = None
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
 # from https://github.com/numpy/numpy/blob/main/numpy/random/bit_generator.pyx
@@ -201,7 +201,7 @@ def _generate_state(base_seed, worker_id):
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
-                 num_workers, persistent_workers):
+                 num_workers, persistent_workers, shared_seed):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -221,6 +221,15 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
             np.random.seed(np_seed)
+
+        from torch.utils.data import IterDataPipe
+        from torch.utils.data.graph_settings import apply_random_seed
+
+        shared_rng = torch.Generator()
+        if isinstance(dataset, IterDataPipe):
+            assert shared_seed is not None
+            shared_rng.manual_seed(shared_seed)
+            dataset = apply_random_seed(dataset, shared_rng)
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
@@ -264,6 +273,12 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 # Acknowledge the main process
                 data_queue.put((r, None))
                 iteration_end = False
+
+                if isinstance(dataset, IterDataPipe):
+                    assert r.seed is not None
+                    shared_rng.manual_seed(r.seed)
+                    dataset = apply_random_seed(dataset, shared_rng)
+
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
                     dataset_kind, dataset, auto_collation, collate_fn, drop_last)

@@ -114,6 +114,14 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
   }
 }
 
+void RRefContext::handleExceptionSilent(const JitFuture& jitFuture) {
+  if (jitFuture.hasError()) {
+    auto errMsg = jitFuture.tryRetrieveErrorMessage();
+    VLOG(1) << "Got exception: " << errMsg;
+    TORCH_CHECK_MSG(false, errMsg);
+  }
+}
+
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
     : agent_(std::move(agent)), destroyed_(false) {}
 
@@ -219,7 +227,7 @@ void RRefContext::delUser(
           RRefUserDelete(rrefId, forkId).toMessage());
 
       jitFuture->addCallback([this](JitFuture& future) {
-        handleException(future);
+        handleExceptionSilent(future);
         --numPendingFutures_;
       });
     }
@@ -348,9 +356,9 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType
     // information on other workers because it's only information only.
-    if (type->isSubtypeOf(TensorType::get())) {
+    if (type->isSubtypeOf(*TensorType::get())) {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type()->isSubtypeOf(TensorType::get()),
+          ownerRRef->type()->isSubtypeOf(*TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
           ownerRRef->type()->repr_str());
     } else {
@@ -507,7 +515,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     auto jitFuture = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
     jitFuture->addCallback([this](JitFuture& future) {
-      handleException(future);
+      handleExceptionSilent(future);
       --numPendingFutures_;
     });
   } else {
@@ -706,7 +714,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
   jitFuture->addCallback([this](JitFuture& future) {
-    handleException(future);
+    handleExceptionSilent(future);
     --numPendingFutures_;
   });
 }

@@ -113,12 +113,12 @@ class TileOp final : public Operator<Context> {
   bool DoTile(const int outer_size, const int inner_size, const T* X, T* Y) {
     if (inner_size == 1) {
       EigenArrayMap<T> Y_arr(Y, tiles_, outer_size);
-      for (int i = 0; i < outer_size; ++i) {
+      for (const auto i : c10::irange(outer_size)) {
         Y_arr.col(i) = X[i];
       }
     } else {
       ConstEigenArrayMap<T> X_arr(X, inner_size, outer_size);
-      for (int i = 0; i < outer_size; ++i) {
+      for (const auto i : c10::irange(outer_size)) {
         EigenArrayMap<T>(Y + i * tiles_ * inner_size, inner_size, tiles_)
             .colwise() = X_arr.col(i);
       }
@@ -245,10 +245,10 @@ class TileGradientOp final : public Operator<Context> {
           dX,
           inner_size,
           &context_);
-      for (int i = 0; i < outer_size; ++i) {
+      for (const auto i : c10::irange(outer_size)) {
         const T* dY_ptr = dY + i * tiles_ * inner_size;
         T* dX_ptr = dX + i * inner_size;
-        for (int j = 1; j < tiles_; ++j) {
+        for (const auto j : c10::irange(1, tiles_)) {
           math::Add<T, Context>(
               inner_size, dX_ptr, dY_ptr + j * inner_size, dX_ptr, &context_);
         }

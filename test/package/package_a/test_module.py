@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import torch
 from torch.fx import wrap
 

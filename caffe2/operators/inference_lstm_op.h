@@ -7,6 +7,7 @@
 #include <vector>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/eigen_utils.h"
@@ -125,7 +126,7 @@ struct FullLSTMLayer : Layer<t_tuple, CellParams> {
     std::vector<Tensor> step_outputs;
     auto hidden = copy_ctor(input_hidden);
 
-    for (size_t i = 0; i < step_inputs.size(); i++) {
+    for (const auto i : c10::irange(step_inputs.size())) {
       hidden = cell_(step_inputs[i], hidden, params);
       step_outputs.push_back(copy_ctor(std::get<0>(hidden)));
     }
@@ -203,7 +204,7 @@ LayerOutput<Tensor, std::vector<hidden_type>> apply_layer_stack(
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens(num_layers);
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.at(l) = std::move(layer_output.final_hidden);
     layer_input = std::move(layer_output.outputs);
@@ -225,7 +226,7 @@ std::tuple<Tensor, Tensor, Tensor> _lstm_impl(
   int64_t total_layers = layer_hx.size();
   std::vector<std::tuple<Tensor, Tensor>> hiddens;
   hiddens.reserve(total_layers);
-  for (int64_t i = 0; i < total_layers; ++i) {
+  for (const auto i : c10::irange(total_layers)) {
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
   LSTMCell cell(context);

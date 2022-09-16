@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/types.h>
 #include <c10/util/variant.h>
+#include <torch/arg.h>
+#include <torch/csrc/Export.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace nn {
@@ -78,7 +78,10 @@ struct TORCH_API UnflattenOptions {
 /// Bilinear model(BilinearOptions(3, 2, 4).bias(false));
 /// ```
 struct TORCH_API BilinearOptions {
-  BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features);
+  BilinearOptions(
+      int64_t in1_features,
+      int64_t in2_features,
+      int64_t out_features);
   /// The number of features in input 1 (columns of the input1 matrix).
   TORCH_ARG(int64_t, in1_features);
   /// The number of features in input 2 (columns of the input2 matrix).

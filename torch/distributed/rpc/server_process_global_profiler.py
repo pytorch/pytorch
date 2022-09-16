@@ -3,13 +3,15 @@
 import itertools
 
 import torch
-from torch.autograd.profiler import profile
+from torch.autograd.profiler_legacy import profile
+from typing import List
 
 from . import (
     _disable_server_process_global_profiler,
     _enable_server_process_global_profiler,
 )
 
+__all__: List[str] = []
 
 class _server_process_global_profile(profile):
     """
@@ -53,6 +55,7 @@ class _server_process_global_profile(profile):
         please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
@@ -65,7 +68,7 @@ class _server_process_global_profile(profile):
         >>> inner_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
         >>> inner_profile_rref.rpc_sync().__exit__(None, None, None)
-        >>> outer_profile_rref.rpc_sync().__exit__(None, None, None
+        >>> outer_profile_rref.rpc_sync().__exit__(None, None, None)
         >>> print(inner_profile_rref.rpc_sync().key_averages())
         ---------  ---------------  ---------------  ---------------  ---------------  ---------------  ---------------
         Name       Self CPU total %  Self CPU total   CPU total %      CPU total        CPU time avg     Number of Calls
@@ -117,7 +120,9 @@ class _server_process_global_profile(profile):
             self.record_shapes,
             self.profile_memory,
             False,
-            False)
+            False,
+            False,
+            torch.profiler._ExperimentalConfig())
         _enable_server_process_global_profiler(profiler_config)
         return self
 
@@ -146,7 +151,7 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_legacy_records(
+            thread_local_function_events = torch.autograd.profiler_legacy._parse_legacy_records(
                 thread_local_events
             )
             thread_local_function_events.sort(
@@ -160,7 +165,7 @@ class _server_process_global_profile(profile):
         flattened_function_events = list(
             itertools.chain(*process_global_function_events)
         )
-        self.function_events = torch.autograd.profiler.EventList(
+        self.function_events = torch.autograd.profiler_util.EventList(
             flattened_function_events,
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,

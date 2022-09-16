@@ -1,12 +1,14 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Distance.h>
 
-#include <numeric>
-#include <iterator>
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native { namespace {
 
@@ -90,7 +92,7 @@ struct Dist {
   struct zdist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
   };
 
   // One norm
@@ -98,8 +100,8 @@ struct Dist {
   struct odist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t /*dist*/, const Vec& /*p*/) { return Vec(grad) * sign(diff); }
   };
 
   // Special general pnorm derivative if p is less than two
@@ -227,7 +229,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (int x = 0; x < m; x++) {
+        for (const auto x : c10::irange(m)) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -392,7 +394,8 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (int64_t l = 0; l < d; l++) {
+    for (const auto l : c10::irange(d)) {
+      (void)l; //Suppress unused variable warning
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);

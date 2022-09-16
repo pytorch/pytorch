@@ -5,9 +5,11 @@ import collections
 import textwrap
 import functools
 import warnings
+import sys
 from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
+from torch._sources import fake_range
 from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.jit._check import AttributeTypeIsSupportedChecker
@@ -24,13 +26,15 @@ ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
-    "_modules",
-    "_initializing",
+    "_non_persistent_buffers_set",
     "_backward_hooks",
     "_forward_hooks",
     "_forward_pre_hooks",
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+    "_modules",
+    "_initializing",
     "dump_patches",
 ]
 
@@ -128,9 +132,28 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_dict()
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
+    if isinstance(nn_module, (torch.nn.ParameterList)):
+        concrete_type_builder.set_parameter_list()
+    if isinstance(nn_module, (torch.nn.ParameterDict)):
+        concrete_type_builder.set_parameter_dict()
 
-    class_annotations = getattr(nn_module, '__annotations__', {})
-    if isinstance(nn_module, (torch.quantization.QuantWrapper)):
+    def get_annotations(obj):
+        if sys.version_info < (3, 10):
+            return getattr(obj, '__annotations__', {})
+        # In Python-3.10+ it is recommended to use inspect.get_annotations
+        # See https://docs.python.org/3.10/howto/annotations.html
+        # But also, in 3.10 annotations from base class are not inherited
+        # by unannotated derived one, so they must be manually extracted
+        annotations = inspect.get_annotations(obj)
+        if len(annotations) > 0:
+            return annotations
+        cls = obj if isinstance(obj, type) else type(obj)
+        if len(cls.__bases__) == 0:
+            return {}
+        return inspect.get_annotations(cls.__bases__[0])
+
+    class_annotations = get_annotations(nn_module)
+    if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
         class_annotations = {}
 
     # Get user-annotated ignored attributes.
@@ -148,10 +171,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         inferred = False
         try:
             if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
-                ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
+                ann_to_type = torch.jit.annotations.ann_to_type(class_annotations[name], fake_range())
                 attr_type = torch._C.InferredType(ann_to_type)
             elif isinstance(item, torch.jit.Attribute):
-                ann_to_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
+                ann_to_type = torch.jit.annotations.ann_to_type(item.type, fake_range())
                 attr_type = torch._C.InferredType(ann_to_type)
             else:
                 attr_type = torch._C._jit_try_infer_type(item)
@@ -264,6 +287,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             # Don't re-add anything we already added
             continue
 
+        isoverloadpacket = isinstance(value, torch._ops.OpOverloadPacket)
+        if isoverloadpacket:
+            value = value.op
         # Handle Python function attributes
         if inspect.isfunction(value):
             try:
@@ -620,6 +646,10 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
+            if item.__func__ in method_overloads:
+                raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
+                    'method', item.__func__))
+
             names = [name + "__" + str(i) for i in range(len(method_overloads))]
             overloads[item] = list(zip(names, method_overloads))
 
@@ -639,7 +669,7 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func, None, _jit_internal.fake_range(), inspect.ismethod(func))
+    signature = torch.jit.annotations.get_signature(func, None, fake_range(), inspect.ismethod(func))
     if signature is None:
         qual_name = _jit_internal._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))

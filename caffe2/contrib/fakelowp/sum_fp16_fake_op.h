@@ -18,7 +18,7 @@ class SumFP16FP16AccOp : public Operator<Context> {
     size_t N = input0.numel();
     auto* output = Output(0, input0.sizes(), at::dtype<float>());
     // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(1, InputSize())) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->sizes() == Input(i).sizes().",
@@ -37,7 +37,7 @@ class SumFP16FP16AccOp : public Operator<Context> {
     std::vector<float> t1(N);
     std::vector<float> t2(N);
 
-    for (auto i = 0; i < InputSize(); i++) {
+    for (const auto i : c10::irange(InputSize())) {
       fbgemm::RoundToFloat16(
           Input(i).template data<float>(),
           t1.data(),

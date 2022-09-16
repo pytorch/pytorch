@@ -8,6 +8,7 @@
 #include <string>
 
 #include <c10/core/thread_pool.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/db.h>
 #include <caffe2/core/logging.h>
 #include <caffe2/operators/prefetch_op.h>
@@ -225,7 +226,7 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
     if (random_sampling_rate_) {
       LOG(INFO) << "random sampling with max:" << random_sampling_rate_;
     }
-    for (int i = 0; i < channels_rgb_; i++) {
+    for (const auto i : c10::irange(channels_rgb_)) {
       LOG(INFO) << "    RGB " << i << "-th channel mean: " << mean_rgb_[i]
                 << " std: " << 1.f / inv_std_rgb_[i];
     }
@@ -237,7 +238,7 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
               << "and a sampling rate of 1:" << sampling_rate_of_
               << " flow_data_type_: " << flow_data_type_
               << " flow_alg_type_: " << flow_alg_type_;
-    for (int i = 0; i < channels_of_; i++) {
+    for (const auto i : c10::irange(channels_of_)) {
       LOG(INFO) << "    Optical flow" << i
                 << "-th channel mean: " << mean_of_[i]
                 << " std: " << 1.f / inv_std_of_[i];
@@ -257,7 +258,7 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
   if (video_res_type_ == VideoResType::USE_SHORT_EDGE) {
     if (jitter_scales_.size() > 0) {
       LOG(INFO) << "Using scale jittering:";
-      for (int idx = 0; idx < jitter_scales_.size(); idx++) {
+      for (const auto idx : c10::irange(jitter_scales_.size())) {
         LOG(INFO) << "scale " << idx << ": " << jitter_scales_[idx];
       }
     } else {
@@ -390,7 +391,7 @@ VideoInputOp<Context>::VideoInputOp(
       }
 
       channels_rgb_ = 3;
-      for (int i = 4; i < 7; i++) {
+      for (const auto i : c10::irange(4, 7)) {
         mean_rgb_.push_back(InputDataMean[i]);
         inv_std_rgb_.push_back(1.f / InputDataStd[i]);
       }
@@ -403,7 +404,7 @@ VideoInputOp<Context>::VideoInputOp(
       get_optical_flow_ = false;
       get_rgb_ = true;
       sampling_rate_rgb_ = 1;
-      for (int i = 4; i < 7; i++) {
+      for (const auto i : c10::irange(4, 7)) {
         mean_rgb_.push_back(InputDataMean[i]);
         inv_std_rgb_.push_back(1.f / InputDataStd[i]);
       }
@@ -420,7 +421,7 @@ VideoInputOp<Context>::VideoInputOp(
       switch (flow_data_type_) {
         case FlowDataType::Flow2C:
           channels_of_ = 2;
-          for (int i = 0; i < channels_of_; i++) {
+          for (const auto i : c10::irange(channels_of_)) {
             mean_of_.push_back(InputDataMean[i]);
             inv_std_of_.push_back(1.f / InputDataStd[i]);
           }
@@ -428,7 +429,7 @@ VideoInputOp<Context>::VideoInputOp(
 
         case FlowDataType::Flow3C:
           channels_of_ = 3;
-          for (int i = 0; i < channels_of_; i++) {
+          for (const auto i : c10::irange(channels_of_)) {
             mean_of_.push_back(InputDataMean[i]);
             inv_std_of_.push_back(1.f / InputDataStd[i]);
           }
@@ -437,7 +438,7 @@ VideoInputOp<Context>::VideoInputOp(
         // early fusion with gray
         case FlowDataType::FlowWithGray:
           channels_of_ = 3;
-          for (int i = 0; i < 2; i++) {
+          for (const auto i : c10::irange(2)) {
             mean_of_.push_back(InputDataMean[i]);
             inv_std_of_.push_back(1.f / InputDataStd[i]);
           }
@@ -448,11 +449,11 @@ VideoInputOp<Context>::VideoInputOp(
         // early fusion with RGB
         case FlowDataType::FlowWithRGB:
           channels_of_ = 5;
-          for (int i = 0; i < 2; i++) {
+          for (const auto i : c10::irange(2)) {
             mean_of_.push_back(InputDataMean[i]);
             inv_std_of_.push_back(1.f / InputDataStd[i]);
           }
-          for (int i = 4; i < 7; i++) {
+          for (const auto i : c10::irange(4, 7)) {
             mean_of_.push_back(InputDataMean[i]);
             inv_std_of_.push_back(1.f / InputDataStd[i]);
           }
@@ -527,15 +528,15 @@ void VideoInputOp<Context>::GetLabelsFromProto(
     int* label_data) {
   int num_clips = clip_per_video_ * crop_per_clip_;
   if (!do_multi_label_) {
-    for (int i = 0; i < num_clips; i++) {
+    for (const auto i : c10::irange(num_clips)) {
       label_data[i] = label_proto.int32_data(0);
     }
   } else {
     // For multiple label case, output label is a binary vector
     // where presented concepts are marked 1
     memset(label_data, 0, sizeof(int) * num_of_class_ * num_clips);
-    for (int i = 0; i < num_clips; i++) {
-      for (int j = 0; j < label_proto.int32_data_size(); j++) {
+    for (const auto i : c10::irange(num_clips)) {
+      for (const auto j : c10::irange(label_proto.int32_data_size())) {
         CAFFE_ENFORCE_LT(
             label_proto.int32_data(j),
             num_of_class_,
@@ -563,7 +564,7 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
   cv::Mat src;
   if (image_proto.data_type() == TensorProto::STRING) {
     // encoded image string.
-    DCHECK_EQ(image_proto.string_data_size(), 1);
+    TORCH_DCHECK_EQ(image_proto.string_data_size(), 1);
     const string& encoded_image_str = image_proto.string_data(0);
     int encoded_size = encoded_image_str.size();
     // We use a cv::Mat to wrap the encoded str so we do not need a copy.
@@ -606,7 +607,9 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
     img = scaled_img;
   } else {
     cv::cvtColor(
-        scaled_img, img, (channels_rgb_ == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
+        scaled_img,
+        img,
+        (channels_rgb_ == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
   }
 
   cv::Mat rgb_img;
@@ -657,7 +660,7 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
     const TensorProto& start_frm_proto = protos.protos(curr_proto_idx++);
     start_frm = start_frm_proto.int32_data(0);
     if (get_start_frame_) {
-      for (int i = 0; i < num_clips; i++) {
+      for (const auto i : c10::irange(num_clips)) {
         start_frame_data[i] = start_frm;
       }
     }
@@ -667,7 +670,7 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
     CAFFE_ENFORCE_GE(
         protos.protos_size(), curr_proto_idx + 1, "Video Id not provided");
     const TensorProto& video_id_proto = protos.protos(curr_proto_idx);
-    for (int i = 0; i < num_clips; i++) {
+    for (const auto i : c10::irange(num_clips)) {
       video_id_data[i] = video_id_proto.int64_data(0);
     }
   }
@@ -772,7 +775,7 @@ void VideoInputOp<Context>::DecodeAndTransform(
     int clip_offset_of = channels_of_ * length_of_ * crop_size_ * crop_size_;
     for (int i = 0; i < std::min(clip_per_video_, int(buffer_rgb.size()));
          i++) {
-      for (int j = 0; j < crop_per_clip_; j++) {
+      for (const auto j : c10::irange(crop_per_clip_)) {
         // get the rectangle for cropping
         int h_off = 0;
         int w_off = 0;
@@ -855,7 +858,7 @@ void VideoInputOp<Context>::DecodeAndTransform(
       }
     }
     if (buffer_rgb.size() > 0) {
-      for (int i = 0; i < buffer_rgb.size(); i++) {
+      for (const auto i : c10::irange(buffer_rgb.size())) {
         unsigned char* buff = buffer_rgb[i];
         delete[] buff;
       }
@@ -884,12 +887,12 @@ bool VideoInputOp<Context>::Prefetch() {
     // Prefetching handled with a thread pool of "decode_threads" threads.
     std::mt19937 meta_randgen(time(nullptr));
     std::vector<std::mt19937> randgen_per_thread;
-    for (int i = 0; i < num_decode_threads_; ++i) {
+    for (const auto i : c10::irange(num_decode_threads_)) {
       randgen_per_thread.emplace_back(meta_randgen());
     }
 
     std::bernoulli_distribution mirror_this_clip(0.5);
-    for (int item_id = 0; item_id < batch_size_; ++item_id) {
+    for (const auto item_id : c10::irange(batch_size_)) {
       std::mt19937* randgen =
           &randgen_per_thread[item_id % num_decode_threads_];
 

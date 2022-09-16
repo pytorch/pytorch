@@ -1,10 +1,16 @@
 #pragma once
 
-#include <ATen/Functions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:
@@ -29,6 +35,10 @@ namespace at { namespace native {
 //    In this case, we first calculate the size of top trapezoid, and then
 //    calculate the size of the bottom rectangle.
 inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
+  // If either dimension is 0 then the there is no tril
+  if (row == 0 || col == 0) {
+    return 0;
+  }
   // number of elements in the first row of the tril
   auto m_first_row = offset > 0 ?
     std::min<int64_t>(col, 1 + offset) : // upper bounded by col
@@ -86,6 +96,23 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
       break;
   }
 }
+
+// The ZeroTensor allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct ZeroTensorAllocator final : public at::Allocator {
+  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ~ZeroTensorAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t /*nbytes*/) const override {
+    return {nullptr, nullptr, &deleter, device_};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+  at::Device device_;
+};
 
 using binary_fn = void (*)(TensorIterator&);
 

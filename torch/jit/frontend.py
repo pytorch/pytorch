@@ -1,8 +1,10 @@
 import torch
 import sys
 import ast
+import dataclasses
 import inspect
 import string
+import re
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
@@ -17,9 +19,12 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file, parse_def, make_source_context
+from torch._sources import ParsedDef as _ParsedDef
+from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
-from torch._jit_internal import make_source_context, should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
+from torch import _jit_internal
 import torch.jit.annotations
 
 _IS_ASTUNPARSE_INSTALLED = False
@@ -195,60 +200,48 @@ def get_jit_class_def(cls, self_name):
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
-    methods = [get_jit_def(obj,
-                           name,
-                           self_name=self_name,
-                           is_classmethod=is_classmethod(obj)) for (name, obj) in methods]
-
-    properties = get_class_properties(cls, self_name)
-
+    # Get and parse the source code for this class
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
+
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
-    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
+
     class_ast = py_ast.body[0]
     assert isinstance(class_ast, ast.ClassDef)
+
+    # Special case for dataclasses. In general we need access to the source code for
+    # an object in order to JIT compile it. But the dataclasses module dynamically synthesizes
+    # magic methods for classes, and we can't get the source code for these methods. As a
+    # workaround, we synthesize TorchScript-friendly implementations ourselves.
+    if dataclasses.is_dataclass(cls):
+        # Detect whether the user manually implemented any of the magic methods. If they did,
+        # we don't want to synthesize/override them.
+        overrides = {
+            method.name
+            for method in class_ast.body
+            if isinstance(method, ast.FunctionDef) and method.name in DATACLASS_MAGIC_METHODS
+        }
+        for i, (name, _) in enumerate(methods):
+            # Is this a magic method we can synthesize?
+            synthesizer_fn = DATACLASS_MAGIC_METHODS.get(name)
+            if synthesizer_fn and name not in overrides:
+                parsed_def = synthesizer_fn(cls)
+                methods[i] = name, parsed_def
+                func = getattr(cls, name)
+                _jit_internal.loader.cache(func, parsed_def.source)
+
+    method_defs = [
+        get_jit_def(obj, name, self_name=self_name, is_classmethod=is_classmethod(obj))
+        for (name, obj) in methods
+    ]
+    properties = get_class_properties(cls, self_name)
+
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
+    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
     assigns = get_class_assigns(ctx, class_ast)
 
-    return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
-
-
-def normalize_source_lines(sourcelines: List[str]) -> List[str]:
-    """
-    This helper function accepts a list of source lines. It finds the
-    indentation level of the function definition (`def`), then it indents
-    all lines in the function body to a point at or greater than that
-    level. This allows for comments and continued string literals that
-    are at a lower indentation than the rest of the code.
-    Args:
-        sourcelines: function source code, separated into lines by
-                        the '\n' character
-    Returns:
-        A list of source lines that have been correctly aligned
-    """
-
-    def remove_prefix(text, prefix):
-        return text[text.startswith(prefix) and len(prefix):]
-
-    # Find the line and line number containing the function definition
-    for i, l in enumerate(sourcelines):
-        if l.lstrip().startswith("def"):
-            idx = i
-            break
-    fn_def = sourcelines[idx]
-
-    # Get a string representing the amount of leading whitespace
-    whitespace = fn_def.split("def")[0]
-
-    # Add this leading whitespace to all lines before and after the `def`
-    aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
-    aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
-
-    # Put it together again
-    aligned_prefix.append(fn_def)
-    return aligned_prefix + aligned_suffix
+    return build_class_def(ctx, class_ast, method_defs, properties, self_name, assigns)
 
 
 def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
@@ -256,7 +249,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     Build a JIT AST (TreeView) from the given function.
 
     Args:
-        fn: A function object to compile
+        fn: A function object to compile or a pre-parsed ParsedDef object
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
                 def _forward(self):
@@ -266,17 +259,9 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
     """
-    sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
-    sourcelines = normalize_source_lines(sourcelines)
-    source = ''.join(sourcelines)
-    dedent_src = dedent(source)
-    py_ast = ast.parse(dedent_src)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
-    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
-    type_line = torch.jit.annotations.get_type_line(source)
-    ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, True)
-    fn_def = py_ast.body[0]
+    parsed_def = parse_def(fn) if not isinstance(fn, _ParsedDef) else fn
+    type_line = torch.jit.annotations.get_type_line(parsed_def.source)
+    fn_def = parsed_def.ast.body[0]
 
     if is_classmethod:
         arg_name = fn_def.args.args[0].arg
@@ -288,7 +273,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
+            raise RuntimeError(f"Expected a single top-level function: {parsed_def.filename}:{parsed_def.file_lineno}")
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -301,11 +286,11 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace:
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
+    return build_def(parsed_def.ctx, fn_def, type_line, def_name, self_name=self_name, pdt_arg_types=pdt_arg_types)
 
 # TODO: more robust handling of recognizing ignore context manager
 def is_torch_jit_ignore_context_manager(stmt):
@@ -381,9 +366,9 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     # List of Tuple of args and type as inferred by profile directed typing
-    arg_and_types = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
+    arg_and_types = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg]) else None)
                      for arg in py_args.args]
-    arg_and_types_kwonlyargs = [(arg, next(iter(pdt_arg_types[arg.arg])) if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+    arg_and_types_kwonlyargs = [(arg, pdt_arg_types[arg.arg] if pdt_arg_types and bool(pdt_arg_types[arg.arg])
                                 else None) for arg in py_args.kwonlyargs]
 
     result = [build_param(ctx, arg, self_name, kwarg_only=False, pdt_arg_type=arg_type)
@@ -434,7 +419,8 @@ def build_ignore_context_manager(ctx, stmt):
     def create_unique_name_ext(ctx, stmt):
         # extension will be based on the full path filename plus
         # the line number of original context manager
-        return ctx.filename.replace(".", "_").replace("/", "_") + "_" + str(stmt.lineno)
+        fn = re.sub(r'[^a-zA-Z0-9_]', '_', ctx.filename)
+        return f"{fn}_{stmt.lineno}"
 
     def build_return_ann_stmt(outputs):
         return_type_ann = ""
@@ -496,6 +482,7 @@ def get_default_args(fn):
         return {}
 
     signature = inspect.signature(fn)
+
     return {
         k: v.default
         for k, v in signature.parameters.items()
@@ -576,6 +563,18 @@ class StmtBuilder(Builder):
     def build_AnnAssign(ctx, stmt):
         if stmt.value is None:
             raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
+
+        # Disallow type annotations on instance attributes outside of __init__
+        if type(stmt.target) == ast.Attribute and \
+                stmt.target.value.id == "self" and ctx.funcname != "__init__":  # type: ignore[attr-defined]
+            start = stmt.col_offset
+            end = start + len(f"self.{stmt.target.attr}")
+            if hasattr(stmt.annotation, 'id'):
+                end += len(f": {stmt.annotation.id}")
+            sr = ctx.make_range(stmt.lineno, start, end)
+            raise ValueError("Type annotations on instance attributes must be declared in "
+                             f"__init__, not '{ctx.funcname}': {sr}")
+
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
@@ -982,7 +981,7 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1)
         return StringLiteral(r, value)
 
     @staticmethod
@@ -1020,6 +1019,11 @@ class ExprBuilder(Builder):
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
 
         return ListComp(r, elt_expr, target_expr, iter_expr)
+
+    @staticmethod
+    def build_GeneratorExp(ctx, stmt):
+        # Convert Generator expression to ListComp
+        return ExprBuilder.build_ListComp(ctx, stmt)
 
     @staticmethod
     def build_DictComp(ctx, stmt):

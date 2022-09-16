@@ -10,5 +10,5 @@ int main(int argc, char* argv[]) {
 
 TEST(TorchDeployMissingInterpreter, Throws) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(torch::deploy::InterpreterManager(1), c10::Error);
+  EXPECT_THROW(torch::deploy::InterpreterManager(1), std::runtime_error);
 }

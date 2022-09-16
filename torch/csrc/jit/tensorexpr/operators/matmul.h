@@ -6,14 +6,18 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* computeMatmul(
+Tensor computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType);
-Tensor* computeAddMM(
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+Tensor computeAddMM(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType);
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
 
 } // namespace tensorexpr
 } // namespace jit

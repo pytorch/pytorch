@@ -4,9 +4,13 @@ from torch.nn.parameter import Parameter
 from torch import Tensor
 
 import collections
+import copyreg
+from copy import deepcopy
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
 
+__all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
+           'type_before_parametrizations', 'transfer_parametrizations_and_params']
 
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
@@ -129,8 +133,11 @@ class ParametrizationList(ModuleList):
             new = original
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    new = module.right_inverse(new)
-                # else, we assume that right_inverse is the identity
+                    try:
+                        new = module.right_inverse(new)
+                    except NotImplementedError:
+                        pass
+                # else, or if it throws, we assume that right_inverse is the identity
 
         if not isinstance(new, Tensor) and not isinstance(new, collections.abc.Sequence):
             raise ValueError("'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
@@ -209,7 +216,9 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)
-                # else we assume that right_inverse is the identity
+                else:
+                    raise RuntimeError(f"parametrization {type(module).__name__} does not implement "
+                                       "right_inverse.")
             if self.is_tensor:
                 # These exceptions should only throw when a right_inverse function does not
                 # return the same dtype for every input, which should most likely be caused by a bug
@@ -250,6 +259,8 @@ class ParametrizationList(ModuleList):
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         # Unpack the originals for the first parametrization
         if self.is_tensor:
             x = self[0](self.original)
@@ -257,8 +268,11 @@ class ParametrizationList(ModuleList):
             originals = (getattr(self, f"original{i}") for i in range(self.ntensors))
             x = self[0](*originals)
         # It's not possible to call self[1:] here, so we have to be a bit more cryptic
-        for module in list(self._modules.values())[1:]:
-            x = module(x)
+        # Also we want to skip all non-integer keys
+        curr_idx = 1
+        while hasattr(self, str(curr_idx)):
+            x = self[curr_idx](x)
+            curr_idx += 1
         return x
 
 
@@ -273,6 +287,21 @@ def _inject_new_class(module: Module) -> None:
     """
     cls = module.__class__
 
+    def default_deepcopy(self, memo):
+        # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
+        obj = memo.get(id(self), None)
+        if obj is not None:
+            return obj
+        replica = self.__new__(self.__class__)
+        memo[id(self)] = replica
+        replica.__dict__ = deepcopy(self.__dict__, memo)
+        # Also save all slots if they exist.
+        slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+        for slot in slots_to_save:
+            if hasattr(self, slot):
+                setattr(replica, slot, deepcopy(getattr(self, slot), memo))
+        return replica
+
     def getstate(self):
         raise RuntimeError(
             "Serialization of parametrized modules is only "
@@ -281,12 +310,16 @@ def _inject_new_class(module: Module) -> None:
             "#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training"
         )
 
+    dct = {"__getstate__": getstate}
+    # We don't allow serialization of parametrized modules but should still allow deepcopying.
+    # Default 'deepcopy' function invokes __deepcopy__ method instead of __getstate__ when it exists.
+    if not hasattr(cls, "__deepcopy__"):
+        dct["__deepcopy__"] = default_deepcopy  # type: ignore[assignment]
+
     param_cls = type(
         f"Parametrized{cls.__name__}",
         (cls,),
-        {
-            "__getstate__": getstate,
-        },
+        dct,
     )
 
     module.__class__ = param_cls
@@ -318,6 +351,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -334,6 +369,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
@@ -372,16 +409,12 @@ def register_parametrization(
 
         def right_inverse(self, X: Tensor) -> Union[Tensor, Sequence[Tensor]]
 
-    If this method is not implemented, it defaults to the identity.
     This method is called on the unparametrized tensor when the first parametrization
-    is registered.
+    is registered to compute the initial value of the original tensor.
+    If this method is not implemented, the original tensor will be just the unparametrized tensor.
 
-    In most situations, ``right_inverse`` will be a function such that
-    ``forward(right_inverse(X)) == X`` (see
-    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
-    Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this.
-    This may be used to initialize the tensor, as shown in the example below.
+    If all the parametrizations registered on a tensor implement `right_inverse` it is possible
+    to initialize a parametrized tensor by assigning to it, as shown in the example below.
 
     It is possible for the first parametrization to depend on several inputs.
     This may be implemented returning a tuple of tensors from ``right_inverse``
@@ -396,6 +429,14 @@ def register_parametrization(
         once to perform a number of consistency checks.
         If unsafe=True, then right_inverse will be called if the tensor is not parametrized,
         and nothing will be called otherwise.
+
+    .. note::
+
+        In most situations, ``right_inverse`` will be a function such that
+        ``forward(right_inverse(X)) == X`` (see
+        `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
+        Sometimes, when the parametrization is not surjective, it may be reasonable
+        to relax this.
 
     .. warning::
 
@@ -419,6 +460,7 @@ def register_parametrization(
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P
@@ -483,25 +525,29 @@ def register_parametrization(
                     f"parametrization(module.{tensor_name}).shape: {X.shape}"
                 )
             if hasattr(parametrization, "right_inverse"):
-                Z = parametrization.right_inverse(X)  # type: ignore[operator]
-                if not isinstance(Z, Tensor):
-                    raise ValueError(
-                        f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
-                    )
-                if Z.dtype != Y.dtype:
-                    raise ValueError(
-                        "The tensor returned by parametrization.right_inverse must have the same dtype "
-                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
-                        f"module.{tensor_name}.dtype: {Y.dtype}\n"
-                        f"returned dtype: {Z.dtype}"
-                    )
-                if Z.shape != Y.shape:
-                    raise ValueError(
-                        "The tensor returned by parametrization.right_inverse must have the same shape "
-                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
-                        f"module.{tensor_name}.shape: {Y.shape}\n"
-                        f"returned shape: {Z.shape}"
-                    )
+                try:
+                    Z = parametrization.right_inverse(X)  # type: ignore[operator]
+                except NotImplementedError:
+                    pass
+                else:
+                    if not isinstance(Z, Tensor):
+                        raise ValueError(
+                            f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
+                        )
+                    if Z.dtype != Y.dtype:
+                        raise ValueError(
+                            "The tensor returned by parametrization.right_inverse must have the same dtype "
+                            f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                            f"module.{tensor_name}.dtype: {Y.dtype}\n"
+                            f"returned dtype: {Z.dtype}"
+                        )
+                    if Z.shape != Y.shape:
+                        raise ValueError(
+                            "The tensor returned by parametrization.right_inverse must have the same shape "
+                            f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                            f"module.{tensor_name}.shape: {Y.shape}\n"
+                            f"returned shape: {Z.shape}"
+                        )
             # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
@@ -557,7 +603,6 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     else:
         return tensor_name in parametrizations
 
-
 def remove_parametrizations(
     module: Module, tensor_name: str, leave_parametrized: bool = True
 ) -> Module:
@@ -600,7 +645,19 @@ def remove_parametrizations(
             # We do this so that the parameter does not to change the id()
             # This way the user does not need to update the optimizer
             with torch.no_grad():
-                original.set_(t)
+                if type(original) is torch.Tensor:
+                    original.set_(t)
+                else:
+                    try:
+                        original.set_(t)
+                    except RuntimeError as e:
+                        # TODO: Fix this for tensor subclasses that are parameters:
+                        # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
+                        raise RuntimeError("Calling remove_parametrizations() with leave_parametrized=True "
+                                           "for a parameter that is an instance of a tensor subclass requires "
+                                           "set_() to be implemented correctly for the tensor subclass. Either "
+                                           "set leave_parametrized=False or provide a working implementation for "
+                                           "set_() in the tensor subclass.")
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more
@@ -628,3 +685,75 @@ def remove_parametrizations(
         orig_cls = module.__class__.__bases__[0]
         module.__class__ = orig_cls
     return module
+
+def type_before_parametrizations(module: Module) -> type:
+    r"""Returns the module type before parametrizations were applied and if not,
+    then it returns the module type.
+
+    Args:
+        module (nn.Module): module to get type of
+    """
+    if is_parametrized(module):
+        return module.__class__.__bases__[0]
+    else:
+        return type(module)
+
+def transfer_parametrizations_and_params(
+    from_module: Module, to_module: Module, tensor_name: Optional[str] = None
+) -> Module:
+    r"""Transfers parametrizations and the parameters they parametrize from from_module
+    to to_module. If tensor_name is specified, only transfers the specified parameter, otherwise
+    transfers all parametrized parameters. If those parameters do not exist in to_module, it will create them.
+    Does nothing if from_module is not parametrized.
+
+    Args:
+        from_module (nn.Module): module to transfer from
+        to_module (nn.Module): module to transfer to
+        tensor_name (str, optional): parameter to transfer
+
+    Returns:
+        Module: to_module
+    """
+    if is_parametrized(from_module):
+        assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
+
+        # get list of all params or the single param to transfer
+        parameters_to_transfer: Union[list, ModuleDict] = (
+            from_module.parametrizations if tensor_name is None else [tensor_name]
+        )
+
+        assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
+        for parameter_name in parameters_to_transfer:
+
+            # initialize the to-be-transfered param in to_module if it doesn't exist already
+            if not hasattr(to_module, parameter_name):
+                setattr(
+                    to_module,
+                    parameter_name,
+                    Parameter(getattr(from_module, parameter_name)),
+                )
+
+            # apply the params's parametrizations to to_module
+            for param_func in from_module.parametrizations[parameter_name]:
+                register_parametrization(to_module, parameter_name, param_func)
+            assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
+
+            # make values match, original values can be stored in either original or
+            # original0, original1..., need to check both cases
+            if hasattr(from_module.parametrizations[parameter_name], "original"):
+                to_module.parametrizations[parameter_name].original = \
+                    from_module.parametrizations[parameter_name].original
+            else:
+                num = 0
+                orig_num = "original" + str(num)
+                # loop through each original# until all values have been set
+                while hasattr(from_module.parametrizations[parameter_name], orig_num):
+                    setattr(
+                        to_module.parametrizations[parameter_name],
+                        orig_num,
+                        getattr(from_module.parametrizations[parameter_name], orig_num),
+                    )
+                    num = num + 1
+                    orig_num = "original" + str(num)
+
+    return to_module

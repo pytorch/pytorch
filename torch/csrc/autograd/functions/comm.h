@@ -1,12 +1,12 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <cstddef>
 #include <vector>
@@ -19,8 +19,8 @@ struct TORCH_CUDA_CU_API Scatter : public Node {
       std::vector<at::Device> devices,
       const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
       int64_t dim = 0,
-      const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
-          c10::nullopt,
+      const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+          streams = c10::nullopt,
       bool unsqueeze_scalars = false);
   ~Scatter() override;
 

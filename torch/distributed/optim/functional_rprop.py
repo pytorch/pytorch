@@ -4,6 +4,8 @@ import torch.optim._functional as F
 
 from torch import Tensor
 
+__all__ : List[str] = []
+
 # Define a TorchScript compatible Functional Rprop Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
@@ -20,15 +22,20 @@ class _FunctionalRprop(object):
         params: List[Tensor],
         lr: float = 1e-2,
         etas: Tuple[float, float] = (0.5, 1.2),
-        step_sizes: Tuple[float, float] = (1e-6, 50)
+        step_sizes: Tuple[float, float] = (1e-6, 50),
+        foreach: bool = False,
+        maximize: bool = False,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
         }
         self.etas = etas
         self.step_sizes = step_sizes
+        self.foreach = foreach
+        self.maximize = maximize
 
-        if len(params) == 0:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
@@ -39,6 +46,7 @@ class _FunctionalRprop(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         prevs = []
         step_sizes = []
@@ -55,6 +63,7 @@ class _FunctionalRprop(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -71,11 +80,13 @@ class _FunctionalRprop(object):
                 state['step'] += 1
 
         with torch.no_grad():
-            F.rprop(params,
+            F.rprop(params_with_grad,
                     grads,
                     prevs,
                     step_sizes,
                     step_size_min=step_size_min,
                     step_size_max=step_size_max,
                     etaminus=etaminus,
-                    etaplus=etaplus)
+                    etaplus=etaplus,
+                    foreach=self.foreach,
+                    maximize=self.maximize)

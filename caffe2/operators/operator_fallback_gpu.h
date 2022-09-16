@@ -52,17 +52,17 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
-      CHECK_NOTNULL(local_input_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_input_blobs_.back());
     }
     base_op_ = CreateOperator(base_def_, &local_ws_);
     for (const string& name : def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
-      CHECK_NOTNULL(local_output_blobs_.back());
+      TORCH_CHECK_NOTNULL(local_output_blobs_.back());
     }
   }
 
   bool RunOnDevice() override {
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       if (this->InputIsTensorType(i, CUDA)) {
         // use sync copy
         BlobGetMutableTensor(local_input_blobs_[i], CPU)->CopyFrom(Input(i));
@@ -82,7 +82,7 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
                  << ProtoDebugString(this->debug_def());
       return false;
     }
-    for (int i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       if (SkipOutputCopy::Contains(i)) {
         VLOG(1) << "Copy output: index " << i << " skipped.";
         continue;

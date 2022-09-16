@@ -9,6 +9,7 @@ bugprone-*,
 -bugprone-reserved-identifier,
 cppcoreguidelines-*,
 -cppcoreguidelines-avoid-magic-numbers,
+-cppcoreguidelines-avoid-non-const-global-variables,
 -cppcoreguidelines-interfaces-global-init,
 -cppcoreguidelines-macro-usage,
 -cppcoreguidelines-owning-memory,
@@ -21,6 +22,7 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
 -cppcoreguidelines-special-member-functions,
+-cppcoreguidelines-non-private-member-variables-in-classes,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
@@ -31,11 +33,13 @@ modernize-*,
 -modernize-use-default-member-init,
 -modernize-use-using,
 -modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 '
-HeaderFilterRegex: 'torch/csrc/.*'
+HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false
+WarningsAsErrors: '*'
 CheckOptions:
 ...

@@ -1,161 +1,153 @@
-
 import abc
 import copy
 from collections import defaultdict
-from typing import Dict
+from typing import Any, Dict, Optional, Set, Tuple, List, Type
 
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .utils import FakeSparsity
+from .utils import (
+    FakeSparsity,
+    get_arg_info_from_tensor_fqn,
+    module_to_fqn,
+)
+
+__all__ = ["BaseSparsifier"]
 
 SUPPORTED_MODULES = {
     nn.Linear
 }
 
-def _module_to_fqn(model, layer, prefix=''):
-    for name, child in model.named_children():
-        new_name = prefix + '.' + name
-        if child is layer:
-            return new_name
-        child_path = _module_to_fqn(child, layer, prefix=new_name)
-        if child_path is not None:
-            return child_path
-    return None
+KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
-def _fqn_to_module(model, path):
-    path = path.split('.')
-    for name in path:
-        model = getattr(model, name, None)
-        if model is None:
-            return None
-    return model
+__all__ = ["BaseSparsifier"]
 
-
+# TODO update desc with new config args
 class BaseSparsifier(abc.ABC):
     r"""Base class for all sparsifiers.
 
     Abstract methods that need to be implemented:
 
     - update_mask: Function to compute a new mask for all keys in the
-        `module_groups`.
+        `groups`.
 
     Args:
         - model [nn.Module]: model to configure. The model itself is not saved
             but used for the state_dict saving / loading.
-        - config [list]: configuration elements could either be instances of
-            nn.Module or dict maps. The dicts must have a key 'module' with the
-            value being an instance of a nn.Module.
+        - config [list]: configuration elements should be a dict map that includes
+            `tensor_fqn` of tensors to sparsify
         - defaults [dict]: default configurations will be attached to the
             configuration. Only the keys that don't exist in the `config` will
             be updated.
 
     Example::
 
-        >>> config = [model.layer1, {'module': model.linear2, 'sparsity_level': 0.5}]
+        >>> # xdoctest: +SKIP("Can't instantiate abstract class BaseSparsifier with abstract method update_mask")
+        >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
-        >>> # model.layer1 will have `sparsity_level` = 0.7 (getting default)
+        >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
-    def __init__(self, defaults):
+    def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
-        self.defaults = defaults
-        if self.defaults is None:
-            self.defaults = dict()
+        self.defaults: Dict[str, Any] = defaults or {}
 
         self.state: Dict[str, Dict] = defaultdict(dict)
-        self.module_groups = []
+        self.groups: List[Dict[str, Any]] = []
         self.enable_mask_update = True
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         return {
             'defaults': self.defaults,
             'state': self.state,
-            'module_groups': self.module_groups,
+            'groups': self.groups,
         }
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Dict[str, Any]]) -> None:
         self.__dict__.update(state)
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
-        for i, sparse_args in enumerate(self.module_groups):
+        for i, sparse_args in enumerate(self.groups):
             module = sparse_args['module']
             format_string += '\n'
-            format_string += f'\tModule Group {i}\n'
+            format_string += f'\tGroup {i}\n'
             format_string += f'\t    module: {module}\n'
             for key in sorted(sparse_args.keys()):
-                if key == 'module':
+                if key == "module":
                     continue
-                format_string += f'\t    {key}: {sparse_args[key]}\n'
-        format_string += ')'
+                format_string += f"\t    {key}: {sparse_args[key]}\n"
+        format_string += ")"
         return format_string
 
-    def _pack_state(self):
-        state: Dict[str, Dict] = defaultdict(dict)
-        for g in self.module_groups:
-            parametrization = g['module'].parametrizations['weight']
-            # original_weight = parametrization.original
-            key = g['fqn']
-            mask = None
-            # Find the mask in the FakeSparsity.
-            found = False
-            for p in parametrization:
-                if isinstance(p, FakeSparsity):
-                    parametrization = p
-                    found = True
-                    break
-            if found:
-                mask = parametrization.mask
-            state[key]['mask'] = mask
-            # Get all the tensors inside the module_group
-            state[key].update(
-                {key: value for key, value in self.state[key].items()})
-        return state
-
-    def state_dict(self):
+    def state_dict(self) -> Dict[str, Any]:
         r"""Returns the state of the optimizer as a :class:`dict`.
 
         It contains:
         * state - current state of the sparsification.
-        * module_groups - a list containing all sparsity configuration groups
-            with the key 'fqn' specifying the layer path within a model
+        * groups - a list containing all sparsity configuration groups
+            with the key 'tensor_fqn' specifying the path to the sparsified tensor within a model
+
+        TODO: Need a clean way of loading the state of the "prepared" module
         """
-        module_groups = [
-            dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
-            for mg in self.module_groups
+
+
+        groups: List[Dict[str, Any]] = [
+            dict(filter(lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT , mg.items()))
+            for mg in self.groups
         ]
 
         return {
-            'state': self._pack_state(),
-            'module_groups': module_groups,
+            'state': self.state,
+            'groups': groups,
         }
 
-    def load_state_dict(self, state_dict, strict=True):
-        module_groups = copy.deepcopy(state_dict['module_groups'])
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+        groups = copy.deepcopy(state_dict['groups'])
         states = state_dict['state']
-        for fqn, s in states.items():
-            layer = _fqn_to_module(self.model, fqn)
-            if strict and layer is None:
-                raise RuntimeError(f'Error loading {fqn} into the model')
+        for tensor_fqn, s in states.items():
+            arg_info = get_arg_info_from_tensor_fqn(self.model, tensor_fqn)
+            module = arg_info["module"]
+            tensor_name = arg_info["tensor_name"]
+            if strict and module is None:
+                raise RuntimeError(f"Error loading {tensor_fqn} into the model")
 
             found = False
-            for p in layer.parametrizations['weight']:
+            for p in module.parametrizations[tensor_name]:
                 if isinstance(p, FakeSparsity):
                     found = True
                     break
             if not found:
-                p = FakeSparsity(torch.ones(layer.weight.shape))
-                parametrize.register_parametrization(layer, 'weight', p)
-            if s.get('mask', None) is not None:
-                mask = s.pop('mask')
+                p = FakeSparsity(torch.ones(getattr(module, tensor_name).shape))
+                parametrize.register_parametrization(module, tensor_name, p)
+            if s.get("mask", None) is not None:
+                mask = s.pop("mask")
                 p.mask = mask
 
-            for mg in module_groups:
-                if mg['fqn'] == fqn:
-                    mg['module'] = layer
-        self.__setstate__({'state': states, 'module_groups': module_groups})
+            for mg in groups:
+                if mg["tensor_fqn"] == tensor_fqn:
+                    mg.update(arg_info)
+        self.__setstate__({"state": states, "groups": groups})
+
+    def make_config_from_model(
+        self,
+        model: nn.Module,
+        SUPPORTED_MODULES: Set[Type] = SUPPORTED_MODULES,
+    ) -> None:
+        self.config = []
+        stack = [model]
+        while stack:
+            module = stack.pop()
+            for name, child in module.named_children():
+                if type(child) in SUPPORTED_MODULES:
+                    module_fqn = module_to_fqn(model, child)
+                    assert isinstance(module_fqn, str)  # for mypy
+                    self.config.append(
+                        {"tensor_fqn": module_fqn + ".weight"}
+                    )
+                else:
+                    stack.append(child)
 
     def prepare(self, model, config):
         r"""Prepares a model, by adding the parametrizations.
@@ -167,61 +159,149 @@ class BaseSparsifier(abc.ABC):
         """
         self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
+
         # If no config -- try getting all the supported layers
         if self.config is None:
-            # Add all models to the config
-            self.config = []
-            stack = [model]
-            while stack:
-                module = stack.pop()
-                for name, child in module.named_children():
-                    if type(child) in SUPPORTED_MODULES:
-                        self.config.append(child)
-                    else:
-                        stack.append(child)
+            self.make_config_from_model(model)
 
+        # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
-            if isinstance(module_config, nn.Module):
-                module_config = {'module': module_config}
+            assert isinstance(module_config, dict), (
+                "config elements should be dicts not modules i.e.:"
+                "[{`tensor_fqn`: `foo.bar.weight`}, {`tensor_fqn`: ... }, ...]"
+            )
+
+            assert isinstance(self.defaults, Dict)  # for mypy
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
-            module = local_args['module']
-            module_fqn = _module_to_fqn(model, module)
-            if module_fqn and module_fqn[0] == '.':
-                module_fqn = module_fqn[1:]
-            local_args['fqn'] = module_fqn
-            self.module_groups.append(local_args)
 
+            tensor_fqn = local_args.get("tensor_fqn", None)
+            assert tensor_fqn is not None, (
+                "tensor_fqn is a required argument in the sparsity config which"
+                "replaces previous `module` and [module]`fqn` arguments"
+            )
+
+            # populate all information from tensor_fqn
+            info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
+
+            # check that whatever was put into local_args agrees with what was obtained
+            # from tensor_fqn
+            for key in info_from_tensor_fqn.keys():
+                if key in local_args:
+                    assert (
+                        info_from_tensor_fqn[key] == local_args[key]
+                        or (
+                            key == "tensor_fqn"
+                            and "." + info_from_tensor_fqn[key] == local_args[key]
+                        )
+                        # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
+                    ), (
+                        "Given both `{}` and `tensor_fqn` in the config, it is expected them to "
+                        "agree!".format(key)
+                    )
+            local_args.update(info_from_tensor_fqn)
+            self.groups.append(local_args)
         self._prepare()
 
     def _prepare(self, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
-        for config in self.module_groups:
+        for config in self.groups:
             module = config['module']
-            param = config.get('parametrization', FakeSparsity)
-            mask = config.get('mask', torch.ones(module.weight.shape))
-            parametrize.register_parametrization(module, 'weight', param(mask))
+            tensor_name = config['tensor_name']
+            parametrization = config.get('parametrization', FakeSparsity)
+            mask = config.get('mask', torch.ones_like(getattr(module, tensor_name)))
+            self.state[config['tensor_fqn']]['mask'] = mask
+            parametrize.register_parametrization(module, tensor_name, parametrization(mask))
 
-    def squash_mask(self, *args, **kwargs):
-        for config in self.module_groups:
+    def squash_mask(self,
+                    params_to_keep: Optional[Tuple[str, ...]] = None,
+                    params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
+                    *args, **kwargs):
+        r"""Squashes the sparse masks into the appropriate tensors.
+
+        If either the `params_to_keep` or `params_to_keep_per_layer` is set,
+        the module will have a `sparse_params` dict attached to it.
+
+        Args:
+            params_to_keep: List of keys to save in the module or a dict
+                            representing the modules and keys that will have
+                            sparsity parameters saved
+            params_to_keep_per_layer: Dict to specify the params that should be
+                            saved for specific layers. The keys in the dict
+                            should be the module fqn, while the values should
+                            be a list of strings with the names of the variables
+                            to save in the `sparse_params`
+
+        Examples:
+            >>> # xdoctest: +SKIP("locals are undefined")
+            >>> # Don't save any sparse params
+            >>> sparsifier.squash_mask()
+            >>> hasattr(model.submodule1, 'sparse_params')
+            False
+
+            >>> # Keep sparse params per layer
+            >>> sparsifier.squash_mask(
+            ...     params_to_keep_per_layer={
+            ...         'submodule1.linear1': ('foo', 'bar'),
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'baz': 0.1}
+
+            >>> # Keep sparse params for all layers
+            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'foo': 42, 'bar': 24}
+
+            >>> # Keep some sparse params for all layers, and specific ones for
+            >>> # some other layers
+            >>> sparsifier.squash_mask(
+            ...     params_to_keep=('foo', 'bar'),
+            ...     params_to_keep_per_layer={
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'foo': 42, 'bar': 24, 'baz': 0.1}
+        """
+        for config in self.groups:
             module = config['module']
-            parametrize.remove_parametrizations(module, 'weight',
+            tensor_name = config['tensor_name']
+            parametrize.remove_parametrizations(module, tensor_name,
                                                 leave_parametrized=True)
+            sparse_params = {}
+            if params_to_keep is not None:
+                global_params = {k: config[k] for k in params_to_keep}
+                sparse_params.update(global_params)
+            if params_to_keep_per_layer is not None:
+                params = params_to_keep_per_layer.get(config["module_fqn"], None)
+                if params is not None:
+                    per_layer_params = {k: config[k] for k in params}
+                    sparse_params.update(per_layer_params)
+            if sparse_params:
+                # TODO handle multiple tensor being quantized on a single module, where to store sparse_params?
+                module.sparse_params = sparse_params
 
     def convert(self):
         # TODO: Call the torch.ao.utils.convert in here
-        raise NotImplementedError('`convert` is not implemented. Please, use '
-                                  '`torch.ao.utils.convert` instead.')
+        raise NotImplementedError(
+            "`convert` is not implemented. Please, use "
+            "`torch.ao.utils.convert` instead."
+        )
 
-    def step(self, use_path=True):
+    def step(self, use_path: bool = True) -> None:
         if not self.enable_mask_update:
             return
         with torch.no_grad():
-            for config in self.module_groups:
-                module = config['module']
-                self.update_mask(module, **config)
+            for config in self.groups:
+                self.update_mask(**config)
 
     @abc.abstractmethod
-    def update_mask(self, layer, **kwargs):
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs):
         pass

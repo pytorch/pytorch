@@ -6,28 +6,22 @@
 namespace at {
 class TORCH_API OptionalTensorRef {
  public:
-  OptionalTensorRef() {}
+  OptionalTensorRef() = default;
 
   ~OptionalTensorRef() {
     ref_.unsafeReleaseTensorImpl();
   }
 
-  OptionalTensorRef(const Tensor& src)
-      : ref_(c10::intrusive_ptr<TensorImpl>(
-            src.unsafeGetTensorImpl(),
-            c10::raw::DontIncreaseRefcount{})) {
+  OptionalTensorRef(const TensorBase& src)
+      : ref_(Tensor::unsafe_borrow_t{}, src) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(src.defined());
   }
 
   OptionalTensorRef(const OptionalTensorRef& rhs)
-      : OptionalTensorRef(rhs.ref_) {}
+      : ref_(Tensor::unsafe_borrow_t{}, rhs.ref_) {}
 
-  OptionalTensorRef& operator=(const OptionalTensorRef& rhs) {
-    // Need to call unsafeReleaseTensorImpl on ref_ since we are reassigning it
-    // (which does not call the destructor).
-    ref_.unsafeReleaseTensorImpl();
-    ref_ = Tensor(c10::intrusive_ptr<TensorImpl>(
-        rhs.ref_.unsafeGetTensorImpl(), c10::raw::DontIncreaseRefcount{}));
+  OptionalTensorRef& operator=(OptionalTensorRef rhs) {
+    std::swap(ref_, rhs.ref_);
     return *this;
   }
 
@@ -39,6 +33,14 @@ class TORCH_API OptionalTensorRef {
     return ref_;
   }
 
+  const Tensor& operator*() const & {
+    return ref_;
+  }
+
+  const Tensor* operator->() const & {
+    return &ref_;
+  }
+
   operator bool() const {
     return ref_.defined();
   }
@@ -46,4 +48,27 @@ class TORCH_API OptionalTensorRef {
  private:
   Tensor ref_;
 };
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
+                "Expected hook to return void");
+  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
+    OptionalTensorRef grad(grad_base);
+    fn(*grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad_base) {
+    OptionalTensorRef grad(grad_base);
+    Tensor ret = fn(*grad);
+    return TensorBase(std::move(ret));
+  });
+}
+
 } // namespace at

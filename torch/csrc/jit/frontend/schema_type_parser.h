@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/core/Macros.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
@@ -14,6 +15,8 @@ struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
   c10::optional<c10::AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
+  std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<c10::AliasInfo>>
+  parseFakeAndRealType();
   c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
   TypePtr parseRefinedTensor();
 
@@ -28,7 +31,7 @@ struct TORCH_API SchemaTypeParser {
       int begin,
       int sep,
       int end,
-      const std::function<void()>& callback);
+      c10::function_ref<void()> callback);
 
   bool complete_tensor_types;
   Lexer& L;

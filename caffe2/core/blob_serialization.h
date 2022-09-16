@@ -9,6 +9,8 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/tensor.h"
+
+#include <c10/util/irange.h>
 #include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
@@ -201,7 +203,7 @@ void ExtendRepeatedField(
 #else
   // We unfortunately do still need to support old protobuf versions in some
   // build configurations.
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     field->Add(0);
   }
 #endif
@@ -236,7 +238,7 @@ inline void CopyToProtoWithCast(
   context->template CopyToCPU<SrcType>(size, src, buffer.get());
   context->FinishDeviceComputation();
   field->Reserve(size);
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     field->Add(static_cast<DstType>(buffer[i]));
   }
 }
@@ -267,7 +269,7 @@ inline void CopyFromProtoWithCast(
   // CPUContext. Remove it if it is performance critical.
   unique_ptr<DstType[]> buffer(new DstType[size]);
   const SrcType* src = field.data();
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     buffer[i] = static_cast<DstType>(src[i]);
   }
   context->template CopyFromCPU<DstType>(size, buffer.get(), dst);
@@ -294,7 +296,7 @@ inline std::string SerializeBlobProtoAsString_EnforceCheck(
 
 int64_t NumelFromTensorProto(const TensorProto& tensor_proto);
 
-std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto);
+c10::IntArrayRef DimsFromTensorProto(const TensorProto& proto);
 
 TypeMeta GetDataType(const TensorProto& tensor_proto);
 

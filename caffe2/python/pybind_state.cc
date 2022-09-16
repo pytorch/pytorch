@@ -300,7 +300,7 @@ class GetPythonGradient : public GradientMakerBase {
     }
     if (gradOutputIndices.size() > 0) {
       // NOLINTNEXTLINE(modernize-loop-convert)
-      for (int i = 0; i < gradOutputIndices.size(); ++i) {
+      for (unsigned i = 0; i < gradOutputIndices.size(); ++i) {
         int GO_i = gradOutputIndices[i];
         gradientInputs.push_back(GO(GO_i));
       }
@@ -312,7 +312,7 @@ class GetPythonGradient : public GradientMakerBase {
     std::vector<std::string> gradientOutputs;
     if (gradInputIndices.size() > 0) {
       // NOLINTNEXTLINE(modernize-loop-convert)
-      for (int i = 0; i < gradInputIndices.size(); ++i) {
+      for (unsigned i = 0; i < gradInputIndices.size(); ++i) {
         int GI_i = gradInputIndices[i];
         gradientOutputs.push_back(GI(GI_i));
       }
@@ -568,7 +568,7 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "nets",
           [](Workspace* self) {
-            CHECK_NOTNULL(self);
+            TORCH_CHECK_NOTNULL(self);
             std::map<std::string, py::object> nets;
             for (const auto& name : self->Nets()) {
               LOG(INFO) << "name: " << name;
@@ -580,7 +580,7 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "blobs",
           [](Workspace* self) {
-            CHECK_NOTNULL(self);
+            TORCH_CHECK_NOTNULL(self);
             std::map<std::string, py::object> blobs;
             for (const auto& name : self->Blobs()) {
               blobs[name] = py::cast(self->GetBlob(name));
@@ -846,8 +846,7 @@ void addObjectMethods(py::module& m) {
              std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             caffe2::Predictor::TensorMap tensors_data{};
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
 #ifdef USE_NUMPY
@@ -878,7 +877,7 @@ void addObjectMethods(py::module& m) {
             std::vector<TensorCPU> tensors_data;
 #ifdef USE_NUMPY
             // NOLINTNEXTLINE(modernize-loop-convert)
-            for (auto i = 0; i < inputs.size(); ++i) {
+            for (auto i = 0U; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
@@ -989,7 +988,7 @@ void addObjectMethods(py::module& m) {
             std::vector<Tensor> tensors_data;
 #ifdef USE_NUMPY
             // NOLINTNEXTLINE(modernize-loop-convert)
-            for (auto i = 0; i < inputs.size(); ++i) {
+            for (auto i = 0U; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
@@ -1017,8 +1016,7 @@ void addObjectMethods(py::module& m) {
               -> std::vector<py::object> {
             Predictor::TensorMap tensors_data;
 #ifdef USE_NUMPY
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
               CAFFE_ENFORCE(
@@ -1059,22 +1057,22 @@ void addGlobalMethods(py::module& m) {
   m.attr("has_mkldnn") = py::bool_(false);
 
   m.attr("use_mkldnn") = py::bool_(
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
       true
-#else // CAFFE2_USE_MKLDNN
+#else // USE_MKLDNN
       false
-#endif // CAFFE2_USE_MKLDNN
+#endif // USE_MKLDNN
   );
 
-  // if the binary is built with __HIP_PLATFORM_HCC__, this is a ROCm build
+  // if the binary is built with USE_ROCM, this is a ROCm build
   // and therefore we need to ignore dyndep failures (because the the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       true
-#else // __HIP_PLATFORM_HCC__
+#else // USE_ROCM
       false
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   );
 
   m.attr("use_trt") = py::bool_(
@@ -1203,7 +1201,7 @@ void addGlobalMethods(py::module& m) {
   });
   m.def("nearby_opnames", [](const std::string& name) {
     std::vector<std::string> alternatives;
-    int editTolerance = 3;
+    unsigned editTolerance = 3;
     // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto it : caffe2::CPUOperatorRegistry()->Keys()) {
       if (editDistance(it, name, editTolerance) < editTolerance + 1) {
@@ -1395,7 +1393,7 @@ void addGlobalMethods(py::module& m) {
           shapes.emplace_back(GetTensorShapeOfBlob(blob));
         }
         const auto c = schema->InferCost(def, shapes);
-        return std::make_tuple(c.flops, c.bytes_written);
+        return std::make_tuple(c.flops, c.bytes_written, c.bytes_read);
       });
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);

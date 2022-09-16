@@ -230,7 +230,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_ENFORCE(
           curandSetPseudoRandomGeneratorSeed(curand_generator_, random_seed_));
-      CHECK_NOTNULL(curand_generator_);
+      TORCH_CHECK_NOTNULL(curand_generator_);
     }
     CURAND_ENFORCE(curandSetStream(curand_generator_, cuda_stream()));
     return curand_generator_;
@@ -313,7 +313,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     auto status = cudaStreamQuery(stream);
     if (status == cudaErrorNotReady) {
       // ignore and clear the error if not ready
-      cudaGetLastError();
+      (void)cudaGetLastError();
     }
     return status == cudaSuccess;
   }

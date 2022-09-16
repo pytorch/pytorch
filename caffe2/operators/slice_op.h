@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -30,7 +31,7 @@ bool SliceImpl(
   std::vector<SIndex> ends_idx(data.dim());
   std::vector<SIndex> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.dim(); ++i) {
+  for (const auto i : c10::irange(data.dim())) {
     if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.size(i);
@@ -78,7 +79,7 @@ bool SliceImpl(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.dim(); ++i) {
+  for (const auto i : c10::irange(data.dim())) {
     if (starts_idx[i] > 0 || ends_idx[i] < data.size(i)) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
@@ -131,15 +132,15 @@ bool SliceImpl(
 
     char* src_offset_bytes = src_bytes + itemsize * src_offset;
     char* dst_offset_bytes = dst_bytes;
-    for (size_t i = 0; i < num_blocks; ++i) {
+    for (const auto i : c10::irange(num_blocks)) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
           dst_offset_bytes + i * dst_block_size_bytes;
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(src_bytes + src_nbytes));
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(dst_bytes + dst_nbytes));
       context->CopyItemsSameDevice(
@@ -177,15 +178,15 @@ bool SliceImpl(
       return true;
     }
 
-    for (size_t i = 0; i < num_blocks; ++i) {
+    for (const auto i : c10::irange(num_blocks)) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
           dst_offset_bytes + i * dst_block_size_bytes;
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           local_src_offset_bytes + src_block_size_bytes,
           src_bytes + src_nbytes);
-      DCHECK_LE(
+      TORCH_DCHECK_LE(
           local_dst_offset_bytes + src_block_size_bytes,
           dst_bytes + dst_nbytes);
       context->CopyItemsSameDevice(

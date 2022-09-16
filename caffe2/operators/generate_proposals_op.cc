@@ -11,7 +11,7 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.dim());
+  TORCH_DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -27,7 +27,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
+  TORCH_DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -180,7 +180,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
     // 4. sort all (proposal, score) pairs by score from highest to lowest
     // 5. take top pre_nms_topN (e.g. 6000)
-    std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
+    std::stable_sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
       return scores[lhs] > scores[rhs];
     });
   } else {
@@ -244,7 +244,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 3. remove predicted boxes with either height or width < min_size
   auto keep =
       utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
-  DCHECK_LE(keep.size(), scores_sorted.size());
+  TORCH_DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
@@ -328,16 +328,21 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   }
 
   int roi_counts = 0;
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  const int roi_col_count = box_dim + 1;
-  auto* out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
-  auto* out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  const int64_t roi_col_count = box_dim + 1;
+  auto *const out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
+  auto *const out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  if(roi_counts == 0){
+    return true;
+  }
+
   float* out_rois_ptr = out_rois->template mutable_data<float>();
   float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     const ERArrXXf& im_i_boxes = im_boxes[i];
     const EArrXf& im_i_probs = im_probs[i];
     int csz = im_i_boxes.rows();

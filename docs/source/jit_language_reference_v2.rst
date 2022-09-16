@@ -209,12 +209,13 @@ such as ``Future[int]``. Structural types are composable with any ``TSType``.
 ::
 
     TSStructuralType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSFuture | TSRRef
+                        TSOptional | TSUnion | TSFuture | TSRRef
 
     TSTuple          ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple     ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList           ::= "List" "[" TSType "]"
     TSOptional       ::= "Optional" "[" TSType "]"
+    TSUnion          ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture         ::= "Future" "[" TSType "]"
     TSRRef           ::= "RRef" "[" TSType "]"
     TSDict           ::= "Dict" "[" KeyType "," TSType "]"
@@ -828,11 +829,12 @@ TorchScript Type System Definition
     TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
 
     TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                         TSOptional | TSFuture | TSRRef
+                         TSOptional | TSUnion | TSFuture | TSRRef
     TSTuple         ::= "Tuple" "[" (TSType ",")* TSType "]"
     TSNamedTuple    ::= "namedtuple" "(" (TSType ",")* TSType ")"
     TSList          ::= "List" "[" TSType "]"
     TSOptional      ::= "Optional" "[" TSType "]"
+    TSUnion         ::= "Union" "[" (TSType ",")* TSType "]"
     TSFuture        ::= "Future" "[" TSType "]"
     TSRRef          ::= "RRef" "[" TSType "]"
     TSDict          ::= "Dict" "[" KeyType "," TSType "]"
@@ -855,7 +857,6 @@ documentation is unsupported. The following table summarizes ``typing`` construc
 -----------------------------  ----------------
 ``typing.Any``                  In development
 ``typing.NoReturn``             Not supported
-``typing.Union``                In development
 ``typing.Callable``             Not supported
 ``typing.Literal``              Not supported
 ``typing.ClassVar``             Not supported
@@ -905,7 +906,7 @@ Atoms are the most basic elements of expressions.
 
 Identifiers
 """""""""""
-The rules that dictate what is a legal identifer in TorchScript are the same as
+The rules that dictate what is a legal identifier in TorchScript are the same as
 their `Python counterparts <https://docs.python.org/3/reference/lexical_analysis.html#identifiers>`_.
 
 Literals
@@ -1829,7 +1830,7 @@ Specifically, following APIs are fully supported:
 
 - ``torch.distributed.rpc.rpc_async()``
     - ``rpc_async()`` makes a non-blocking RPC call to run a function on a remote worker. RPC messages are sent and received in parallel to execution of Python code.
-    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+    - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
 - ``torch.distributed.rpc.remote()``
     - ``remote.()`` executes a remote call on a worker and gets a Remote Reference ``RRef`` as the return value.
     - More details about its usage and examples can be found in :meth:`~torch.distributed.rpc.remote`.
@@ -1883,6 +1884,9 @@ TorchScript provides a set of utilities to facilitate meta programming:
     - When used in an ``assert`` or an ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
     - Its value can be evaluated statically at compile time, thus commonly used in ``if`` statements to stop TorchScript from compiling one of the branches.
     - More details and examples can be found in :meth:`~torch.jit.is_scripting`
+- ``torch.jit.is_tracing()``
+    - Returns a boolean value indicating whether the current program is traced by ``torch.jit.trace`` / ``torch.jit.trace_module`` or not.
+    - More details can be found in :meth:`~torch.jit.is_tracing`
 - ``@torch.jit.ignore``
     - This decorator indicates to the compiler that a function or method should be ignored and left as a Python function.
     - This allows you to leave code in your model that is not yet TorchScript compatible.
@@ -1902,4 +1906,4 @@ Type Refinement
 
 - ``torch.jit.isinstance()``
     - Returns a boolean indicating whether a variable is of the specified type.
-    - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.
+    - More details about its usage and examples can be found in :meth:`~torch.jit.isinstance`.

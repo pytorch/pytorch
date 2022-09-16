@@ -14,7 +14,7 @@ import uuid
 import torch
 
 
-__all__ = ["TaskSpec", "Measurement", "_make_temp_dir"]
+__all__ = ["TaskSpec", "Measurement", "select_unit", "unit_to_english", "trim_sigfig", "ordered_unique", "set_torch_threads"]
 
 
 _MAX_SIGNIFICANT_FIGURES = 4
@@ -227,17 +227,17 @@ class Measurement:
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
     @staticmethod
-    def merge(measurements):  # type: (Iterable[Measurement]) -> List[Measurement]
+    def merge(measurements: Iterable["Measurement"]) -> List["Measurement"]:
         """Convenience method for merging replicates.
 
         Merge will extrapolate times to `number_per_run=1` and will not
         transfer any metadata. (Since it might differ between replicates)
         """
-        grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
+        grouped_measurements: DefaultDict[TaskSpec, List["Measurement"]] = collections.defaultdict(list)
         for m in measurements:
             grouped_measurements[m.task_spec].append(m)
 
-        def merge_group(task_spec: TaskSpec, group: List[Measurement]) -> Measurement:
+        def merge_group(task_spec: TaskSpec, group: List["Measurement"]) -> "Measurement":
             times: List[float] = []
             for m in group:
                 # Different measurements could have different `number_per_run`,

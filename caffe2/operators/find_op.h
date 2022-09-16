@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 #include <unordered_map>
 
@@ -42,7 +43,7 @@ class FindOp final : public Operator<Context> {
     // index into a map
     if (needles.numel() < 16) {
       // Brute force O(nm)
-      for (int i = 0; i < needles.numel(); i++) {
+      for (const auto i : c10::irange(needles.numel())) {
         T x = needles_data[i];
         T res = static_cast<T>(missing_value_);
         for (int j = idx_size - 1; j >= 0; j--) {
@@ -56,10 +57,10 @@ class FindOp final : public Operator<Context> {
     } else {
       // O(n + m)
       std::unordered_map<T, int> idx_map;
-      for (int j = 0; j < idx_size; j++) {
+      for (const auto j : c10::irange(idx_size)) {
         idx_map[idx_data[j]] = j;
       }
-      for (int i = 0; i < needles.numel(); i++) {
+      for (const auto i : c10::irange(needles.numel())) {
         T x = needles_data[i];
         auto it = idx_map.find(x);
         res_data[i] = (it == idx_map.end() ? missing_value_ : it->second);

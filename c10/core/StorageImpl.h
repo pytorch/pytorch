@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymInt.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -30,13 +31,13 @@ namespace c10 {
 // - Version counts won't work correctly, because we do all VC tracking at the
 //   level of storages (unless you explicitly disconnect the VC with detach);
 //   mutation because data pointers are the same are totally untracked
-struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
+struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
@@ -52,14 +53,16 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            allocator->allocate(size_bytes),
+            size_bytes.is_symbolic()
+                ? allocator->allocate(0)
+                : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
@@ -68,7 +71,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() = default;
+  ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
@@ -85,11 +88,17 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
   }
 
   size_t nbytes() const {
+    return size_bytes_.expect_int();
+  }
+
+  SymInt sym_nbytes() const {
     return size_bytes_;
   }
 
@@ -112,8 +121,9 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    std::swap(data_ptr_, data_ptr);
-    return std::move(data_ptr);
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    return old_data_ptr;
   };
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
@@ -196,7 +206,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
  private:
   DataPtr data_ptr_;
-  size_t size_bytes_;
+  SymInt size_bytes_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation

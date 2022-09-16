@@ -4,9 +4,17 @@
 #include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
 
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/ExclusivelyOwned.h>
+#include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/intrusive_ptr.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
@@ -55,6 +63,10 @@ class TORCH_API Tensor final {
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  TensorImpl* unsafeReleaseTensorImpl() {
+    return impl_.release();
   }
 
   Tensor UnsafeSharedInstance() const {
@@ -423,6 +435,18 @@ class TORCH_API Tensor final {
     return impl_.get()->sizes();
   }
 
+  inline c10::SymIntArrayRef sym_sizes() const {
+    return impl_->sym_sizes();
+  }
+
+  inline c10::SymInt sym_numel() const {
+    return impl_->sym_numel();
+  }
+
+  inline c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
+  }
+
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }
@@ -638,5 +662,13 @@ void TensorPrinter::Print(const Tensor& tensor) {
   }
 }
 
+CAFFE_DECLARE_KNOWN_TYPE(Tensor)
 } // namespace caffe2
+
+C10_CLANG_DIAGNOSTIC_POP()
+
+namespace c10 {
+template <>
+struct ExclusivelyOwnedTraits<caffe2::Tensor> : public c10::ExclusivelyOwnedTensorTraits<caffe2::Tensor> {};
+} // namespace c10
 #endif // CAFFE2_CORE_TENSOR_H_

@@ -1,3 +1,5 @@
+# Owner(s): ["module: fx"]
+
 from __future__ import annotations    # type: ignore[attr-defined]
 import torch
 import typing

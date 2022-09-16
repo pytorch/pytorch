@@ -1,8 +1,9 @@
 #include <ATen/Utils.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/CallOnce.h>
 #include <ATen/Utils.h>
 
 namespace at {
@@ -12,13 +13,13 @@ namespace detail {
 namespace {
 
 // Ensures we only call cudaGetDeviceCount only once.
-static std::once_flag num_gpu_init_flag;
+static c10::once_flag num_gpu_init_flag;
 
 // Total number of gpus in the system.
 static int64_t num_gpus;
 
 // Ensures default_gens_cuda is initialized once.
-static std::deque<std::once_flag> cuda_gens_init_flag;
+static std::deque<c10::once_flag> cuda_gens_init_flag;
 
 // Default, global CUDA generators, one per GPU.
 static std::vector<Generator> default_gens_cuda;
@@ -44,14 +45,14 @@ static void initCUDAGenVector(){
  * cuda device.
  */
 const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
-  std::call_once(num_gpu_init_flag, initCUDAGenVector);
+  c10::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
   } else {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
-  std::call_once(cuda_gens_init_flag[idx], [&] {
+  c10::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = make_generator<CUDAGeneratorImpl>(idx);
     default_gens_cuda[idx].seed();
   });
@@ -62,7 +63,7 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
  * Utility to create a CUDAGeneratorImpl. Returns a shared_ptr
  */
 Generator createCUDAGenerator(DeviceIndex device_index) {
-  std::call_once(num_gpu_init_flag, initCUDAGenVector);
+  c10::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
@@ -230,7 +231,8 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
  * offset_extragraph is the initial offset at the start of the graphed region.
  * offset_intragraph tracks the offset in the graphed region.
  */
-void CUDAGeneratorImpl::capture_prologue(int64_t* offset_extragraph) {
+void CUDAGeneratorImpl::capture_prologue(int64_t* seed_extragraph, int64_t* offset_extragraph) {
+  seed_extragraph_ = seed_extragraph;
   offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
   graph_expects_this_gen_ = true;
@@ -278,7 +280,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
                           std::numeric_limits<uint32_t>::max() - increment);
     this->offset_intragraph_ += increment;
-    return PhiloxCudaState(this->seed_,
+    return PhiloxCudaState(this->seed_extragraph_,
                            this->offset_extragraph_,
                            offset);
   } else {

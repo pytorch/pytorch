@@ -5,7 +5,42 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
+  // WorkerInfo needs to be registered exactly once. Since the op registration
+  // happens in libtorch_python we wrap the class registration in a helper to
+  // make sure that if there's multiple copies of Python such as used in
+  // torch::deploy we only ever register it once.
+  static auto workerInfo = torch::class_<WorkerInfo>("dist_rpc", "WorkerInfo")
+                               .def(torch::init<std::string, int64_t>());
+}
+
 constexpr size_t WorkerInfo::MAX_NAME_LEN;
+
+WorkerInfo::WorkerInfo(std::string name, int64_t id)
+    : WorkerInfo(std::move(name), (worker_id_t)id) {
+  TORCH_CHECK(
+      id <= std::numeric_limits<worker_id_t>::max(),
+      "RPC worker id ",
+      id,
+      " out of bound of int16_t.");
+}
+
+WorkerInfo::WorkerInfo(std::string name, worker_id_t id)
+    : name_(std::move(name)), id_(id) {
+  bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
+  bool validChar =
+      std::find_if(name_.begin(), name_.end(), [](char c) {
+        return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
+      }) == name_.end();
+  TORCH_CHECK(
+      validSize && validChar,
+      "Worker name must match ^[A-Za-z0-9-_:]*$, "
+      "and must be non-empty and shorter than ",
+      MAX_NAME_LEN,
+      " chars, "
+      "but got ",
+      name_);
+}
 
 // Large Time Duration for waiting on the condition variable until the map is
 // population. Cannot use
@@ -234,7 +269,10 @@ bool RpcAgent::isCurrentRpcAgentSet() {
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
-  TORCH_INTERNAL_ASSERT(agent, "Current RPC agent is not set!");
+  TORCH_CHECK(
+      agent,
+      "Current RPC agent is not set! Did you initialize the RPC "
+      "framework (e.g. by calling `rpc.init_rpc`)?");
   return agent;
 }
 

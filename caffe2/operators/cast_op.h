@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -19,7 +20,6 @@ class CastOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     TensorProto_DataType to = cast::GetCastDataType(helper, "to");
-    TensorProto_DataType from = cast::GetCastDataType(helper, "from_type");
 
     SetBody(to);
   }
@@ -42,7 +42,7 @@ class CastOp : public Operator<Context> {
     const auto* data = input.template data<SrcType>();
     auto* out = output->template mutable_data<DstType>();
     auto N = input.size();
-    for (int64_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       out[i] = static_cast<DstType>(data[i]);
     }
     return true;

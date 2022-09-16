@@ -4,6 +4,8 @@ import torch.optim._functional as F
 
 from torch import Tensor
 
+__all__ : List[str] = []
+
 # Define a TorchScript compatible Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
@@ -22,6 +24,9 @@ class _FunctionalAdadelta(object):
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0.0,
+        foreach: bool = False,
+        maximize: bool = False,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -29,8 +34,10 @@ class _FunctionalAdadelta(object):
             "eps": eps,
             "weight_decay": weight_decay,
         }
+        self.foreach = foreach
+        self.maximize = maximize
 
-        if len(params) == 0:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
@@ -41,6 +48,7 @@ class _FunctionalAdadelta(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         square_avgs = []
         acc_deltas = []
@@ -58,6 +66,7 @@ class _FunctionalAdadelta(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -72,11 +81,13 @@ class _FunctionalAdadelta(object):
                 acc_deltas.append(state['acc_delta'])
 
         with torch.no_grad():
-            F.adadelta(params,
+            F.adadelta(params_with_grad,
                        grads,
                        square_avgs,
                        acc_deltas,
                        lr=lr,
                        rho=rho,
                        eps=eps,
-                       weight_decay=weight_decay)
+                       weight_decay=weight_decay,
+                       foreach=self.foreach,
+                       maximize=self.maximize)

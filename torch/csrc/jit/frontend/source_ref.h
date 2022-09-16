@@ -21,26 +21,26 @@ namespace jit {
  */
 class TORCH_API SourceRef : public CustomClassHolder {
  public:
-  explicit SourceRef(std::shared_ptr<Source> source)
-      : source_(std::move(source)) {}
+  explicit SourceRef(std::shared_ptr<Source> source_view)
+      : source_view_(std::move(source_view)) {}
   bool operator==(const SourceRef& other) const {
-    return source_ == other.source_;
+    return source_view_ == other.source_view_;
   }
   bool operator<(const Source& other) const {
-    return source_.get() < &other;
+    return source_view_.get() < &other;
   }
   friend bool operator<(const Source& other, const SourceRef& self) {
-    return &other < self.source_.get();
+    return &other < self.source_view_.get();
   }
   bool operator<(const SourceRef& other) const {
-    return *this < *other.source_.get();
+    return *this < *other.source_view_.get();
   }
   const Source* operator->() const {
-    return source_.get();
+    return source_view_.get();
   }
 
  private:
-  std::shared_ptr<Source> source_;
+  std::shared_ptr<Source> source_view_;
 };
 
 } // namespace jit

@@ -17,7 +17,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 TEST(IRPrinter, BasicValueTest) {
-  KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
 
@@ -27,7 +26,6 @@ TEST(IRPrinter, BasicValueTest) {
 }
 
 TEST(IRPrinter, BasicValueTest02) {
-  KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
   ExprHandle c(4.0f);
@@ -40,7 +38,6 @@ TEST(IRPrinter, BasicValueTest02) {
 }
 
 TEST(IRPrinter, CastTest) {
-  KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
   ExprHandle body = ExprHandle(2.f) +
@@ -52,47 +49,40 @@ TEST(IRPrinter, CastTest) {
 }
 
 TEST(IRPrinter, FunctionName) {
-  KernelScope kernel_scope;
   int M = 4;
   int N = 20;
 
-  Tensor* producer = Compute(
-      "producer",
-      {{M, "m"}, {N, "n"}},
-      [&](const ExprHandle& m, const ExprHandle& n) { return m * n; });
-
-  Tensor* chunk_0 = Compute(
-      "chunk",
-      {{M, "m"}, {N / 2, "n"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->load(m, n);
+  Tensor producer = Compute(
+      "producer", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return m * n;
       });
 
-  Tensor* chunk_1 = Compute(
-      "chunk",
-      {{M, "m"}, {N / 2, "n"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->load(m, n + ExprHandle(N / 2));
+  Tensor chunk_0 = Compute(
+      "chunk_0", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return producer.load(m, n);
       });
 
-  Tensor* consumer = Compute(
-      "consumer",
-      {{M, "i"}, {N / 2, "j"}},
-      [&](const ExprHandle& i, const ExprHandle& j) {
-        return i * chunk_1->load(i, j);
+  Tensor chunk_1 = Compute(
+      "chunk_1", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return producer.load(m, n + ExprHandle(N / 2));
+      });
+
+  Tensor consumer = Compute(
+      "consumer", {M, N / 2}, [&](const ExprHandle& i, const ExprHandle& j) {
+        return i * chunk_1.load(i, j);
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});
-  auto* body = l.root_stmt();
+  auto body = LoopNest::sanitizeNames(l.root_stmt());
 
   std::stringstream ss;
   ss << *body;
 
   const std::string& verification_pattern =
       R"IR(
- # CHECK:   for (int i
- # CHECK:    for (int j
- # CHECK:     consumer[i, j] = i * (chunk_1[i, j])IR";
+ # CHECK:   for (int i_2
+ # CHECK:    for (int j_2
+ # CHECK:     consumer[i_2, j_2] = i_2 * (chunk_1[i_2, j_2])IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, ss.str());
 }

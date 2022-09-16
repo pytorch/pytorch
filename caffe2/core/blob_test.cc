@@ -40,9 +40,9 @@ class BlobTestNonDefaultConstructible {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(BlobTestFoo);
-CAFFE_KNOWN_TYPE(BlobTestBar);
-CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -1018,7 +1018,7 @@ class DummyTypeDeserializer : public BlobDeserializerBase {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(DummyType);
+CAFFE_KNOWN_TYPE_NOEXPORT(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);
@@ -1264,7 +1264,7 @@ void TestDataType(
     std::string dataTypeName) {
   LOG(INFO) << dataTypeName;
   FLAGS_caffe2_serialize_using_bytes_as_holder = true;
-  size_t numEl = 1000;
+  int numEl = 1000;
   // Proto with int32
   auto protoInt32 = CreateProtoWithInt32Data(dataType, numEl, false);
   caffe2::Blob blobInt32;

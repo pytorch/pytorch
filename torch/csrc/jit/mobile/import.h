@@ -1,5 +1,6 @@
 #pragma once
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <istream>
 #include <memory>
@@ -17,13 +18,6 @@ constexpr const char* kArchiveNameBytecode = "bytecode";
 constexpr const char* kArchiveNameConstants = "constants";
 constexpr const char* kArchiveNameVersion = "version";
 
-enum MobileModuleLoadOptions {
-  OPERATOR_CHECK = 1,
-};
-
-const uint64_t _default_mobile_module_load_options =
-    MobileModuleLoadOptions::OPERATOR_CHECK;
-
 // The family of methods below load a serialized Mobile Module
 // into a mobile::Module object.
 TORCH_API mobile::Module _load_for_mobile(
@@ -39,7 +33,8 @@ TORCH_API mobile::Module _load_for_mobile(
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
@@ -86,9 +81,9 @@ c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit);
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
-    at::StrongTypePtr type,
-    at::IValue input,
-    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit);
+    const at::StrongTypePtr& type,
+    const at::IValue& input,
+    mobile::CompilationUnit& mobile_compilation_unit);
 
 // Given a reader, which has access to a model file,
 // return true if there exists tensors in `bytecode` archive
@@ -111,5 +106,19 @@ TORCH_API std::set<std::string> _export_operator_list(
     torch::jit::mobile::Module& module);
 
 } // namespace mobile
+
+extern mobile::Module (*load_flatbuffer_bytes)(
+    std::shared_ptr<char>,
+    size_t size,
+    c10::optional<at::Device>,
+    ExtraFilesMap*);
+
+extern mobile::Module (*load_flatbuffer_bytes_no_object)(
+    std::shared_ptr<char>,
+    size_t size,
+    c10::optional<at::Device>);
+
+extern uint64_t (*get_flatbuffer_bytecode_version)(char* flatbuffer_content);
+
 } // namespace jit
 } // namespace torch

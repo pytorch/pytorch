@@ -11,7 +11,7 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_KNOWN_TYPE(Tensor);
 
 TensorPrinter::TensorPrinter(
     // NOLINTNEXTLINE(modernize-pass-by-value)
@@ -299,7 +299,7 @@ void Tensor::CopyFrom(const Tensor& src, bool async) {
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-Tensor::Tensor(at::Tensor tensor) : impl_(std::move(tensor.impl_)) {
+Tensor::Tensor(at::Tensor tensor) : impl_(tensor.unsafeReleaseIntrusivePtr()) {
   enforce_invariants();
 }
 

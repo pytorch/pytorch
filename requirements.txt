@@ -1,6 +1,8 @@
 # Python dependencies required for development
 astunparse
+expecttest
 future
+hypothesis
 numpy
 psutil
 pyyaml
@@ -9,4 +11,4 @@ setuptools
 six
 types-dataclasses
 typing_extensions
-dataclasses; python_version<"3.7"
+sympy

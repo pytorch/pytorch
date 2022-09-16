@@ -10,9 +10,6 @@
 #include <functional>
 #include <memory>
 
-// Forward-declares THHState
-struct THHState;
-
 namespace at {
 class Context;
 }
@@ -29,8 +26,8 @@ struct TORCH_API HIPHooksInterface {
   // squelch -Werror=non-virtual-dtor
   virtual ~HIPHooksInterface() {}
 
-  // Initialize THHState and, transitively, the HIP state
-  virtual std::unique_ptr<THHState, void (*)(THHState*)> initHIP() const {
+  // Initialize the HIP library state
+  virtual void initHIP() const {
     AT_ERROR("Cannot initialize HIP without ATen_hip library.");
   }
 

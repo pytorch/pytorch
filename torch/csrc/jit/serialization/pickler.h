@@ -8,7 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -60,7 +60,7 @@ enum class PickleOpCode : char {
   BINFLOAT = 'G',
 
   // Protocol 2
-  PROTO = '\x80',
+  PROTO = char('\x80'),
   NEWOBJ = '\x81',
   EXT1 = '\x82',
   EXT2 = '\x83',
@@ -78,7 +78,7 @@ enum class PickleOpCode : char {
   SHORT_BINBYTES = 'C',
 
   // Protocol 4
-  SHORT_BINUNICODE = '\x8c',
+  SHORT_BINUNICODE = char('\x8c'),
   BINUNICODE8 = '\x8d',
   BINBYTES8 = '\x8e',
   EMPTY_SET = '\x8f',
@@ -172,6 +172,7 @@ class TORCH_API Pickler {
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
+  void pushLiteralSparseTensor(const at::Tensor& tensor);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);

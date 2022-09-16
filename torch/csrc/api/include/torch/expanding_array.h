@@ -3,6 +3,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <array>
@@ -102,52 +103,59 @@ std::ostream& operator<<(
   return stream << static_cast<at::ArrayRef<T>>(expanding_array);
 }
 
-/// A utility class that accepts either a container of `D`-many `c10::optional<T>` values,
-/// or a single `c10::optional<T>` value, which is internally repeated `D` times.
-/// It has the additional ability to accept containers of the underlying type `T` and
-/// convert them to a container of `c10::optional<T>`.
+/// A utility class that accepts either a container of `D`-many
+/// `c10::optional<T>` values, or a single `c10::optional<T>` value, which is
+/// internally repeated `D` times. It has the additional ability to accept
+/// containers of the underlying type `T` and convert them to a container of
+/// `c10::optional<T>`.
 template <size_t D, typename T = int64_t>
-class ExpandingArrayWithOptionalElem : public ExpandingArray<D, c10::optional<T>> {
+class ExpandingArrayWithOptionalElem
+    : public ExpandingArray<D, c10::optional<T>> {
  public:
   using ExpandingArray<D, c10::optional<T>>::ExpandingArray;
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from an `initializer_list` of the underlying type `T`.
-  /// The extent of the length is checked against the `ExpandingArrayWithOptionalElem`'s extent parameter `D`
-  /// at runtime.
+  /// Constructs an `ExpandingArrayWithOptionalElem` from an `initializer_list`
+  /// of the underlying type `T`. The extent of the length is checked against
+  /// the `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
   /*implicit*/ ExpandingArrayWithOptionalElem(std::initializer_list<T> list)
       : ExpandingArrayWithOptionalElem(at::ArrayRef<T>(list)) {}
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from an `std::vector` of the underlying type `T`.
-  /// The extent of the length is checked against the `ExpandingArrayWithOptionalElem`'s extent parameter `D`
-  /// at runtime.
+  /// Constructs an `ExpandingArrayWithOptionalElem` from an `std::vector` of
+  /// the underlying type `T`. The extent of the length is checked against the
+  /// `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
   /*implicit*/ ExpandingArrayWithOptionalElem(std::vector<T> vec)
       : ExpandingArrayWithOptionalElem(at::ArrayRef<T>(vec)) {}
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from an `at::ArrayRef` of the underlying type `T`.
-  /// The extent of the length is checked against the `ExpandingArrayWithOptionalElem`'s extent parameter `D`
-  /// at runtime.
-  /*implicit*/ ExpandingArrayWithOptionalElem(at::ArrayRef<T> values) : ExpandingArray<D, c10::optional<T>>(0) {
+  /// Constructs an `ExpandingArrayWithOptionalElem` from an `at::ArrayRef` of
+  /// the underlying type `T`. The extent of the length is checked against the
+  /// `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
+  /*implicit*/ ExpandingArrayWithOptionalElem(at::ArrayRef<T> values)
+      : ExpandingArray<D, c10::optional<T>>(0) {
     // clang-format off
     TORCH_CHECK(
         values.size() == D,
         "Expected ", D, " values, but instead got ", values.size());
     // clang-format on
-    for (size_t i = 0; i < this->values_.size(); i++) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = values[i];
     }
   }
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from a single value of the underlying type `T`,
-  /// which is repeated `D` times (where `D` is the extent parameter of the `ExpandingArrayWithOptionalElem`).
-  /*implicit*/ ExpandingArrayWithOptionalElem(T single_size) : ExpandingArray<D, c10::optional<T>>(0) {
-    for (size_t i = 0; i < this->values_.size(); i++) {
+  /// Constructs an `ExpandingArrayWithOptionalElem` from a single value of the
+  /// underlying type `T`, which is repeated `D` times (where `D` is the extent
+  /// parameter of the `ExpandingArrayWithOptionalElem`).
+  /*implicit*/ ExpandingArrayWithOptionalElem(T single_size)
+      : ExpandingArray<D, c10::optional<T>>(0) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = single_size;
     }
   }
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from a correctly sized `std::array` of the underlying type `T`.
-  /*implicit*/ ExpandingArrayWithOptionalElem(const std::array<T, D>& values) : ExpandingArray<D, c10::optional<T>>(0) {
-    for (size_t i = 0; i < this->values_.size(); i++) {
+  /// Constructs an `ExpandingArrayWithOptionalElem` from a correctly sized
+  /// `std::array` of the underlying type `T`.
+  /*implicit*/ ExpandingArrayWithOptionalElem(const std::array<T, D>& values)
+      : ExpandingArray<D, c10::optional<T>>(0) {
+    for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = values[i];
     }
   }
@@ -163,7 +171,8 @@ std::ostream& operator<<(
   } else {
     std::vector<std::string> str_array;
     for (const auto& elem : *expanding_array_with_opt_elem) {
-      str_array.emplace_back(elem.has_value() ? c10::str(elem.value()) : "None");
+      str_array.emplace_back(
+          elem.has_value() ? c10::str(elem.value()) : "None");
     }
     stream << at::ArrayRef<std::string>(str_array);
   }

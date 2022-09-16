@@ -15,7 +15,11 @@ namespace int8 {
 class Int8ReluOp final : public Operator<CPUContext> {
  public:
   explicit Int8ReluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
+      : Operator<CPUContext>(operator_def, ws) {
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+        ws_ = ws;
+#endif
+      }
 
   ~Int8ReluOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -30,14 +34,14 @@ class Int8ReluOp final : public Operator<CPUContext> {
     Y->t.ResizeLike(X.t);
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
-    CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());
+    TORCH_CHECK_LE(X.zero_point, std::numeric_limits<uint8_t>::max());
     const int32_t Y_offset =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale =
         this->template GetSingleArgument<float>("Y_scale", 1.0f);
-    CHECK_EQ(Y_offset, X.zero_point);
-    CHECK_EQ(Y_scale, X.scale);
+    TORCH_CHECK_EQ(Y_offset, X.zero_point);
+    TORCH_CHECK_EQ(Y_scale, X.scale);
 
     initQNNPACK();
 
@@ -82,7 +86,9 @@ class Int8ReluOp final : public Operator<CPUContext> {
   }
 
  private:
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK Clamp operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

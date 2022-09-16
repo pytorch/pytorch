@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <torch/csrc/autograd/variable.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/Variadic.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstdint>
 #include <tuple>
@@ -127,7 +127,11 @@ void apply(Function function, Ts&&... ts) {
   (void)_;
 }
 
-template <typename ReturnType, typename... Ts, typename Function, typename Accessor>
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor>
 ReturnType unpack(Function function, Accessor accessor) {
   return ReturnType(unpack<ReturnType, Ts...>(
       std::move(function),
@@ -135,7 +139,12 @@ ReturnType unpack(Function function, Accessor accessor) {
       typename MakeIndices<sizeof...(Ts)>::indices()));
 }
 
-template <typename ReturnType, typename... Ts, typename Function, typename Accessor, size_t... Is>
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
+    typename Accessor,
+    size_t... Is>
 ReturnType unpack(Function function, Accessor accessor, Indices<Is...>) {
   return ReturnType(function(accessor.template operator()<Ts>(Is)...));
 }

@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -26,16 +27,20 @@ namespace tracer {
 std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
+  Py_INCREF(frame);
   std::vector<StackEntry> entries;
 
   while (nullptr != frame) {
-    size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
+    size_t line = PyCode_Addr2Line(code.get(), PyFrame_GetLasti(frame));
+    std::string filename = THPUtils_unpackString(code->co_filename);
+    std::string funcname = THPUtils_unpackString(code->co_name);
     auto source = std::make_shared<Source>(funcname, filename, line);
     entries.emplace_back(
         StackEntry{funcname, SourceRange(source, 0, funcname.size())});
-    frame = frame->f_back;
+    auto new_frame = PyFrame_GetBack(frame);
+    Py_DECREF(frame);
+    frame = new_frame;
   }
   return entries;
 }
@@ -89,7 +94,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       [&func](Stack inputs) -> Stack {
         size_t num_func_inputs = inputs.size();
         py::tuple py_inputs(num_func_inputs);
-        for (size_t i = 0; i < num_func_inputs; ++i) {
+        for (const auto i : c10::irange(num_func_inputs)) {
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);

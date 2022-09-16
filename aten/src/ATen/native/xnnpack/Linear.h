@@ -20,6 +20,9 @@ c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
 
 Tensor linear_clamp_run(const Tensor& input, const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
 
+IValue
+unpack_prepacked_sizes_linear(const IValue& ivalue);
+
 ContextLinear create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,

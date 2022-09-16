@@ -34,7 +34,7 @@ that there exists an ordering of the tensor's dimensions
 that is nicely "nested," with each dimension contained
 within the next one.
 */
-bool maybeOverlappingIndices(const Tensor& t) {
+bool maybeOverlappingIndices(const TensorBase& t) {
   /* Extract size/stride arrays; only consider size >1 dims. */
   std::vector<SizeAndStride> info(t.dim());
   int dims = t.dim();

@@ -104,7 +104,7 @@ else()
   append_torchlib_if_found(onnx onnx_proto)
 
   append_torchlib_if_found(foxi_loader fmt)
-  append_torchlib_if_found(clog cpuinfo)
+  append_torchlib_if_found(cpuinfo clog)
 
   if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
     append_torchlib_if_found(pthreadpool)
@@ -162,8 +162,8 @@ if(@USE_CUDA@)
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
-# When we build libtorch with the old GCC ABI, dependent libraries must too.
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+# When we build libtorch with the old libstdc++ ABI, dependent libraries must too.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
 endif()
 

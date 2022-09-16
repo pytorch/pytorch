@@ -1,7 +1,11 @@
 #include <climits>
 
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/irange.h>
+
+#include <map>
+#include <set>
 
 namespace c10 {
 

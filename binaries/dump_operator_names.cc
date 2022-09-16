@@ -29,7 +29,8 @@ void dump_opnames(const Module& m, std::unordered_set<std::string>& opnames) {
   for (const auto& method : methods) {
     const auto& func = method.function();
     std::cout << "function name: " << func.name() << std::endl;
-    torch::jit::Code code(func.graph(), "");
+    auto graph = toGraphFunction(func).graph()->copy();
+    torch::jit::Code code(graph, "");
     for (size_t i = 0; i < code.instructions().size(); ++i) {
       auto ins = code.instructions()[i];
       auto node = code.instructions_source()[i];

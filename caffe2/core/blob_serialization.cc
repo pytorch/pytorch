@@ -399,8 +399,8 @@ void TensorSerializer::SerializeWithOptions(
   std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
     futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(FLAGS_caffe2_max_tensor_serializer_threads)) {
+      (void)i;
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -785,13 +785,8 @@ void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
 
 // === Local helper functions ===
 // Get dimensions from Tensor proto
-std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
-  std::vector<int64_t> dims;
-  dims.reserve(proto.dims().size());
-  for (const int64_t d : proto.dims()) {
-    dims.push_back(d);
-  }
-  return dims;
+c10::IntArrayRef DimsFromTensorProto(const TensorProto& proto) {
+  return c10::IntArrayRef(proto.dims().data(), proto.dims().size());
 }
 
 // Get number of elements from Tensor proto

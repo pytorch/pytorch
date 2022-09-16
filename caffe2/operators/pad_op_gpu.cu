@@ -9,8 +9,9 @@ namespace caffe2 {
 namespace {
 template <typename T>
 __global__ void PadImageConstNCHW(
-    const int nthreads, const T* const bottom_data, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads,
+    const T* const bottom_data,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T value, T* const top_data) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -28,8 +29,8 @@ __global__ void PadImageConstNCHW(
 
 template <typename T>
 __global__ void PadImageReflectNCHW(
-    const int nthreads, const T* const bottom_data, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads, const T* const bottom_data,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const top_data) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -49,8 +50,8 @@ __global__ void PadImageReflectNCHW(
 
 template <typename T>
 __global__ void PadImageEdgeNCHW(
-    const int nthreads, const T* const bottom_data, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads, const T* const bottom_data,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const top_data) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -66,7 +67,7 @@ __global__ void PadImageEdgeNCHW(
 
 template <typename T>
 __global__ void PadImageConstNHWC(
-    const int nthreads, const T* const bottom_data, const int num,
+    const int nthreads, const T* const bottom_data,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T value, T* const top_data) {
@@ -87,7 +88,7 @@ __global__ void PadImageConstNHWC(
 
 template <typename T>
 __global__ void PadImageReflectNHWC(
-    const int nthreads, const T* const bottom_data, const int num,
+    const int nthreads, const T* const bottom_data,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const top_data) {
@@ -111,7 +112,7 @@ __global__ void PadImageReflectNHWC(
 
 template <typename T>
 __global__ void PadImageEdgeNHWC(
-    const int nthreads, const T* const bottom_data, const int num,
+    const int nthreads, const T* const bottom_data,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const top_data) {
@@ -131,8 +132,8 @@ __global__ void PadImageEdgeNHWC(
 
 template <typename T>
 __global__ void PadImageGradientConstNCHW(
-    const int nthreads, const T* const top_diff, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads, const T* const top_diff,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -147,8 +148,8 @@ __global__ void PadImageGradientConstNCHW(
 
 template <typename T>
 __global__ void PadImageGradientReflectNCHW(
-    const int nthreads, const T* const top_diff, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads, const T* const top_diff,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -168,8 +169,8 @@ __global__ void PadImageGradientReflectNCHW(
 
 template <typename T>
 __global__ void PadImageGradientEdgeNCHW(
-    const int nthreads, const T* const top_diff, const int num,
-    const int channels, const int height, const int width,
+    const int nthreads, const T* const top_diff,
+    const int height, const int width,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
@@ -185,7 +186,7 @@ __global__ void PadImageGradientEdgeNCHW(
 
 template <typename T>
 __global__ void PadImageGradientConstNHWC(
-    const int nthreads, const T* const top_diff, const int num,
+    const int nthreads, const T* const top_diff,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
@@ -203,7 +204,7 @@ __global__ void PadImageGradientConstNHWC(
 
 template <typename T>
 __global__ void PadImageGradientReflectNHWC(
-    const int nthreads, const T* const top_diff, const int num,
+    const int nthreads, const T* const top_diff,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
@@ -228,7 +229,7 @@ __global__ void PadImageGradientReflectNHWC(
 
 template <typename T>
 __global__ void PadImageGradientEdgeNHWC(
-    const int nthreads, const T* const top_diff, const int num,
+    const int nthreads, const T* const top_diff,
     const int height, const int width, const int channels,
     const int padded_height, const int padded_width,
     const int pad_t, const int pad_l, T* const bottom_diff) {
@@ -274,8 +275,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -294,8 +293,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -313,8 +310,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -354,7 +349,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
           height,
           width,
           channels,
@@ -374,7 +368,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
           height,
           width,
           channels,
@@ -393,7 +386,6 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           output_size,
           Xdata,
-          num,
           height,
           width,
           channels,
@@ -438,8 +430,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           output_size,
           dYdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -457,8 +447,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           input_size,
           dYdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -476,8 +464,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           context_.cuda_stream()>>>(
           input_size,
           dYdata,
-          num,
-          channels,
           height,
           width,
           padded_height,
@@ -521,7 +507,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           output_size,
           dYdata,
-          num,
           height,
           width,
           channels,
@@ -540,7 +525,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           input_size,
           dYdata,
-          num,
           height,
           width,
           channels,
@@ -559,7 +543,6 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           context_.cuda_stream()>>>(
           input_size,
           dYdata,
-          num,
           height,
           width,
           channels,

@@ -12,11 +12,11 @@ import java.util.Map;
 import org.junit.Test;
 
 public abstract class PytorchTestBase {
-  private static final String TEST_MODULE_ASSET_NAME = "test.pt";
+  private static final String TEST_MODULE_ASSET_NAME = "android_api_module.ptl";
 
   @Test
   public void testForwardNull() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue input = IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
@@ -25,7 +25,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqBool() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     for (boolean value : new boolean[] {false, true}) {
       final IValue input = IValue.from(value);
       assertTrue(input.isBool());
@@ -38,7 +38,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqInt() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     for (long value : new long[] {Long.MIN_VALUE, -1024, -1, 0, 1, 1024, Long.MAX_VALUE}) {
       final IValue input = IValue.from(value);
       assertTrue(input.isLong());
@@ -51,7 +51,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqFloat() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     double[] values =
         new double[] {
           -Double.MAX_VALUE,
@@ -86,7 +86,7 @@ public abstract class PytorchTestBase {
     }
     final Tensor inputTensor = Tensor.fromBlob(inputTensorData, inputTensorShape);
 
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue input = IValue.from(inputTensor);
     assertTrue(input.isTensor());
     assertTrue(inputTensor == input.toTensor());
@@ -103,7 +103,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqDictIntKeyIntValue() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final Map<Long, IValue> inputMap = new HashMap<>();
 
     inputMap.put(Long.MIN_VALUE, IValue.from(-Long.MIN_VALUE));
@@ -127,7 +127,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqDictStrKeyIntValue() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final Map<String, IValue> inputMap = new HashMap<>();
 
     inputMap.put("long_min_value", IValue.from(Long.MIN_VALUE));
@@ -151,7 +151,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testListIntSumReturnTuple() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     for (int n : new int[] {0, 1, 128}) {
       long[] a = new long[n];
@@ -178,7 +178,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testOptionalIntIsNone() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     assertFalse(module.runMethod("optionalIntIsNone", IValue.from(1l)).toBool());
     assertTrue(module.runMethod("optionalIntIsNone", IValue.optionalNull()).toBool());
@@ -186,7 +186,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testIntEq0None() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     assertTrue(module.runMethod("intEq0None", IValue.from(0l)).isNull());
     assertTrue(module.runMethod("intEq0None", IValue.from(1l)).toLong() == 1l);
@@ -194,7 +194,7 @@ public abstract class PytorchTestBase {
 
   @Test(expected = IllegalArgumentException.class)
   public void testRunUndefinedMethod() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     module.runMethod("test_undefined_method_throws_exception");
   }
 
@@ -241,7 +241,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEqString() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     String[] values =
         new String[] {
           "smoketest",
@@ -260,7 +260,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testStr3Concat() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     String[] values =
         new String[] {
           "smoketest",
@@ -281,7 +281,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testEmptyShape() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final long someNumber = 43;
     final IValue input = IValue.from(Tensor.fromBlob(new long[] {someNumber}, new long[] {}));
     final IValue output = module.runMethod("newEmptyShapeWithItem", input);
@@ -293,7 +293,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testAliasWithOffset() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue output = module.runMethod("testAliasWithOffset");
     assertTrue(output.isTensorList());
     Tensor[] tensors = output.toTensorList();
@@ -303,7 +303,7 @@ public abstract class PytorchTestBase {
 
   @Test
   public void testNonContiguous() throws IOException {
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue output = module.runMethod("testNonContiguous");
     assertTrue(output.isTensor());
     Tensor value = output.toTensor();
@@ -316,7 +316,7 @@ public abstract class PytorchTestBase {
     long[] inputShape = new long[] {1, 3, 2, 2};
     long[] data = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
     Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
     assertIValueTensor(
         outputNCHW,
@@ -334,7 +334,7 @@ public abstract class PytorchTestBase {
     long[] dataNHWDC = new long[] {1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16};
 
     Tensor inputNHWDC = Tensor.fromBlob(dataNHWDC, shape, MemoryFormat.CHANNELS_LAST_3D);
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
     final IValue outputNCHWD = module.runMethod("contiguous", IValue.from(inputNHWDC));
     assertIValueTensor(outputNCHWD, MemoryFormat.CONTIGUOUS, shape, dataNCHWD);
 
@@ -358,7 +358,7 @@ public abstract class PytorchTestBase {
     long[] dataWeightOHWI = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
     Tensor wNHWC = Tensor.fromBlob(dataWeightOHWI, weightShape, MemoryFormat.CHANNELS_LAST);
 
-    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final Module module = loadModel(TEST_MODULE_ASSET_NAME);
 
     final IValue outputNCHW =
         module.runMethod("conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
@@ -377,6 +377,186 @@ public abstract class PytorchTestBase {
         new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
   }
 
+  @Test
+  public void testMobileNetV2() throws IOException {
+    try {
+      final Module module = loadModel("mobilenet_v2.ptl");
+      final IValue inputs = module.runMethod("get_all_bundled_inputs");
+      assertTrue(inputs.isList());
+      final IValue input = inputs.toList()[0];
+      assertTrue(input.isTuple());
+      module.forward(input.toTuple()[0]);
+      assertTrue(true);
+    } catch (Exception ex) {
+      assertTrue("failed to run MobileNetV2 " + ex.getMessage(), false);
+    }
+  }
+
+  @Test
+  public void testPointwiseOps() throws IOException {
+    runModel("pointwise_ops");
+  }
+
+  @Test
+  public void testReductionOps() throws IOException {
+    runModel("reduction_ops");
+  }
+
+  @Test
+  public void testComparisonOps() throws IOException {
+    runModel("comparison_ops");
+  }
+
+  @Test
+  public void testOtherMathOps() throws IOException {
+    runModel("other_math_ops");
+  }
+
+  @Test
+  public void testSpectralOps() throws IOException {
+    runModel("spectral_ops");
+  }
+
+  @Test
+  public void testBlasLapackOps() throws IOException {
+    runModel("blas_lapack_ops");
+  }
+
+  @Test
+  public void testSamplingOps() throws IOException {
+    runModel("sampling_ops");
+  }
+
+  @Test
+  public void testTensorOps() throws IOException {
+    runModel("tensor_general_ops");
+  }
+
+  @Test
+  public void testTensorCreationOps() throws IOException {
+    runModel("tensor_creation_ops");
+  }
+
+  @Test
+  public void testTensorIndexingOps() throws IOException {
+    runModel("tensor_indexing_ops");
+  }
+
+  @Test
+  public void testTensorTypingOps() throws IOException {
+    runModel("tensor_typing_ops");
+  }
+
+  @Test
+  public void testTensorViewOps() throws IOException {
+    runModel("tensor_view_ops");
+  }
+
+  @Test
+  public void testConvolutionOps() throws IOException {
+    runModel("convolution_ops");
+  }
+
+  @Test
+  public void testPoolingOps() throws IOException {
+    runModel("pooling_ops");
+  }
+
+  @Test
+  public void testPaddingOps() throws IOException {
+    runModel("padding_ops");
+  }
+
+  @Test
+  public void testActivationOps() throws IOException {
+    runModel("activation_ops");
+  }
+
+  @Test
+  public void testNormalizationOps() throws IOException {
+    runModel("normalization_ops");
+  }
+
+  @Test
+  public void testRecurrentOps() throws IOException {
+    runModel("recurrent_ops");
+  }
+
+  @Test
+  public void testTransformerOps() throws IOException {
+    runModel("transformer_ops");
+  }
+
+  @Test
+  public void testLinearOps() throws IOException {
+    runModel("linear_ops");
+  }
+
+  @Test
+  public void testDropoutOps() throws IOException {
+    runModel("dropout_ops");
+  }
+
+  @Test
+  public void testSparseOps() throws IOException {
+    runModel("sparse_ops");
+  }
+
+  @Test
+  public void testDistanceFunctionOps() throws IOException {
+    runModel("distance_function_ops");
+  }
+
+  @Test
+  public void testLossFunctionOps() throws IOException {
+    runModel("loss_function_ops");
+  }
+
+  @Test
+  public void testVisionFunctionOps() throws IOException {
+    runModel("vision_function_ops");
+  }
+
+  @Test
+  public void testShuffleOps() throws IOException {
+    runModel("shuffle_ops");
+  }
+
+  @Test
+  public void testNNUtilsOps() throws IOException {
+    runModel("nn_utils_ops");
+  }
+
+  @Test
+  public void testQuantOps() throws IOException {
+    runModel("general_quant_ops");
+  }
+
+  @Test
+  public void testDynamicQuantOps() throws IOException {
+    runModel("dynamic_quant_ops");
+  }
+
+  @Test
+  public void testStaticQuantOps() throws IOException {
+    runModel("static_quant_ops");
+  }
+
+  @Test
+  public void testFusedQuantOps() throws IOException {
+    runModel("fused_quant_ops");
+  }
+
+  @Test
+  public void testTorchScriptBuiltinQuantOps() throws IOException {
+    runModel("torchscript_builtin_ops");
+  }
+
+  @Test
+  public void testTorchScriptCollectionQuantOps() throws IOException {
+    runModel("torchscript_collection_ops");
+  }
+
   static void assertIValueTensor(
       final IValue ivalue,
       final MemoryFormat memoryFormat,
@@ -389,5 +569,15 @@ public abstract class PytorchTestBase {
     assertArrayEquals(expectedData, t.getDataAsLongArray());
   }
 
-  protected abstract String assetFilePath(String assetName) throws IOException;
+  void runModel(final String name) throws IOException {
+    final Module storage_module = loadModel(name + ".ptl");
+    storage_module.forward();
+
+    // TODO enable this once the on-the-fly script is ready
+    // final Module on_the_fly_module = loadModel(name + "_temp.ptl");
+    // on_the_fly_module.forward();
+    assertTrue(true);
+  }
+
+  protected abstract Module loadModel(String assetName) throws IOException;
 }

@@ -20,8 +20,8 @@ int getSizeFromDims(const std::vector<int>& dims) {
   return tot;
 }
 
-template <class OP>
-struct FP16PairWiseCPUFunctor : public OP {
+template <class Functor>
+struct FP16PairWiseCPUFunctor {
   template <typename TIn, typename TOut>
   bool Forward(
       const std::vector<int>& A_dims,
@@ -30,7 +30,7 @@ struct FP16PairWiseCPUFunctor : public OP {
       const TIn* B,
       TOut* C,
       CPUContext* context) const {
-    OP::Forward(A_dims, B_dims, A, B, C, context);
+    functor.Forward(A_dims, B_dims, A, B, C, context);
 
     return true;
   }
@@ -54,11 +54,13 @@ struct FP16PairWiseCPUFunctor : public OP {
     fbgemm::RoundToFloat16(
         B, B_fp16.data(), B_sz, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
-    OP::Forward(A_dims, B_dims, A_fp16.data(), B_fp16.data(), C, context);
+    functor.Forward(A_dims, B_dims, A_fp16.data(), B_fp16.data(), C, context);
     fbgemm::RoundToFloat16(C, C, A_sz, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
     return true;
   }
+
+  Functor functor;
 };
 } // namespace
 

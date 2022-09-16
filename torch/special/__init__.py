@@ -1,8 +1,65 @@
-import sys
-
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
+
+__all__ = [
+    'airy_ai',
+    'bessel_j0',
+    'bessel_j1',
+    'bessel_y0',
+    'bessel_y1',
+    'chebyshev_polynomial_t',
+    'chebyshev_polynomial_u',
+    'chebyshev_polynomial_v',
+    'chebyshev_polynomial_w',
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'hermite_polynomial_h',
+    'hermite_polynomial_he',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'laguerre_polynomial_l',
+    'legendre_polynomial_p',
+    'log1p',
+    'log_ndtr',
+    'log_softmax',
+    'logit',
+    'logsumexp',
+    'modified_bessel_i0',
+    'modified_bessel_i1',
+    'modified_bessel_k0',
+    'modified_bessel_k1',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'shifted_chebyshev_polynomial_t',
+    'shifted_chebyshev_polynomial_u',
+    'shifted_chebyshev_polynomial_v',
+    'shifted_chebyshev_polynomial_w',
+    'scaled_modified_bessel_k0',
+    'scaled_modified_bessel_k1',
+    'sinc',
+    'softmax',
+    'spherical_bessel_j0',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
 
@@ -544,6 +601,27 @@ Example::
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
 """.format(**common_args))
 
+log_ndtr = _add_docstr(_special.special_log_ndtr,
+                       r"""
+log_ndtr(input, *, out=None) -> Tensor
+Computes the log of the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{log\_ndtr}(x) = \log\left(\frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt \right)
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
+""".format(**common_args))
+
 log1p = _add_docstr(_special.special_log1p,
                     r"""
 log1p(input, *, out=None) -> Tensor
@@ -586,9 +664,38 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
+softmax = _add_docstr(_special.special_softmax,
+                      r"""
+softmax(input, dim, *, dtype=None) -> Tensor
+
+Computes the softmax function.
+
+Softmax is defined as:
+
+:math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+It is applied to all slices along dim, and will re-scale them so that the elements
+lie in the range `[0, 1]` and sum to 1.
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Examples::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.softmax(t, 0)
+    tensor([[0.5000, 0.5000],
+            [0.5000, 0.5000]])
+
+""")
+
 log_softmax = _add_docstr(_special.special_log_softmax,
                           r"""
 log_softmax(input, dim, *, dtype=None) -> Tensor
+
 Computes softmax followed by a logarithm.
 
 While mathematically equivalent to log(softmax(x)), doing these two
@@ -675,4 +782,502 @@ Example::
     >>> torch.special.multigammaln(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
+""".format(**common_args))
+
+gammainc = _add_docstr(_special.special_gammainc,
+                       r"""
+gammainc(input, other, *, out=None) -> Tensor
+
+Computes the regularized lower incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.special.gammaincc` and :func:`torch.special.gammaln` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.special.gammaincc(a1, a2)
+    tensor([0.3528, 0.5665, 0.7350])
+    tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+gammaincc = _add_docstr(_special.special_gammaincc,
+                        r"""
+gammaincc(input, other, *, out=None) -> Tensor
+
+Computes the regularized upper incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.special.gammainc` and :func:`torch.special.gammaln` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.special.gammaincc(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+Airy function :math:`\text{Ai}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_j0 = _add_docstr(_special.special_bessel_j0,
+                        r"""
+bessel_j0(input, *, out=None) -> Tensor
+
+Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_j1 = _add_docstr(_special.special_bessel_j1,
+                        r"""
+bessel_j1(input, *, out=None) -> Tensor
+
+Bessel function of the first kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_y0 = _add_docstr(_special.special_bessel_y0,
+                        r"""
+bessel_y0(input, *, out=None) -> Tensor
+
+Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+bessel_y1 = _add_docstr(_special.special_bessel_y1,
+                        r"""
+bessel_y1(input, *, out=None) -> Tensor
+
+Bessel function of the second kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
+                                     r"""
+chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
+:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
+:math:`|\text{input}| > 1`, the recursion:
+
+.. math::
+    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+
+is evaluated. Otherwise, the explicit trigonometric formula:
+
+.. math::
+    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_v = _add_docstr(_special.special_chebyshev_polynomial_v,
+                                     r"""
+chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+chebyshev_polynomial_w = _add_docstr(_special.special_chebyshev_polynomial_w,
+                                     r"""
+chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
+                                   r"""
+hermite_polynomial_h(input, n, *, out=None) -> Tensor
+
+Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
+                                    r"""
+hermite_polynomial_he(input, n, *, out=None) -> Tensor
+
+Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
+                                    r"""
+laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+
+Laguerre polynomial :math:`L_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+legendre_polynomial_p = _add_docstr(_special.special_legendre_polynomial_p,
+                                    r"""
+legendre_polynomial_p(input, n, *, out=None) -> Tensor
+
+Legendre polynomial :math:`P_{n}(\text{input})`.
+
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+is returned. Otherwise, the recursion:
+
+.. math::
+    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
+
+is evaluated.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_i0 = _add_docstr(_special.special_modified_bessel_i0,
+                                 r"""
+modified_bessel_i0(input, *, out=None) -> Tensor
+
+Modified Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_i1 = _add_docstr(_special.special_modified_bessel_i1,
+                                 r"""
+modified_bessel_i1(input, *, out=None) -> Tensor
+
+Modified Bessel function of the first kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_k0 = _add_docstr(_special.special_modified_bessel_k0,
+                                 r"""
+modified_bessel_k0(input, *, out=None) -> Tensor
+
+Modified Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+modified_bessel_k1 = _add_docstr(_special.special_modified_bessel_k1,
+                                 r"""
+modified_bessel_k1(input, *, out=None) -> Tensor
+
+Modified Bessel function of the second kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_k0,
+                                        r"""
+scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
+                                        r"""
+scaled_modified_bessel_k1(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`1`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_t = _add_docstr(_special.special_shifted_chebyshev_polynomial_t,
+                                             r"""
+shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_u = _add_docstr(_special.special_shifted_chebyshev_polynomial_u,
+                                             r"""
+shifted_chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_v = _add_docstr(_special.special_shifted_chebyshev_polynomial_v,
+                                             r"""
+shifted_chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+shifted_chebyshev_polynomial_w = _add_docstr(_special.special_shifted_chebyshev_polynomial_w,
+                                             r"""
+shifted_chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+
+""" + r"""
+Args:
+    {input}
+    n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
+                                  r"""
+spherical_bessel_j0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))

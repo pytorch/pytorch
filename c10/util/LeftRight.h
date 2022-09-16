@@ -1,8 +1,11 @@
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace c10 {
@@ -76,7 +79,7 @@ class LeftRight final {
   }
 
   template <typename F>
-  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
     detail::IncrementRAII _increment_counter(
         &_counters[_foregroundCounterIndex.load()]);
 
@@ -87,7 +90,7 @@ class LeftRight final {
   // the old or the new state, depending on if the first or the second call to
   // writeFunc threw.
   template <typename F>
-  auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     std::unique_lock<std::mutex> lock(_writeMutex);
 
     return _write(writeFunc);
@@ -95,7 +98,7 @@ class LeftRight final {
 
  private:
   template <class F>
-  auto _write(const F& writeFunc) -> typename std::result_of<F(T&)>::type {
+  auto _write(const F& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     /*
      * Assume, A is in background and B in foreground. In simplified terms, we
      * want to do the following:
@@ -163,7 +166,7 @@ class LeftRight final {
   template <class F>
   auto _callWriteFuncOnBackgroundInstance(
       const F& writeFunc,
-      uint8_t localDataIndex) -> typename std::result_of<F(T&)>::type {
+      uint8_t localDataIndex) -> typename c10::invoke_result_t<F, T&> {
     try {
       return writeFunc(_data[localDataIndex ^ 1]);
     } catch (...) {
@@ -185,6 +188,36 @@ class LeftRight final {
   std::atomic<uint8_t> _foregroundDataIndex;
   std::array<T, 2> _data;
   std::mutex _writeMutex;
+};
+
+// RWSafeLeftRightWrapper is API compatible with LeftRight and uses a
+// read-write lock to protect T (data).
+template <class T>
+class RWSafeLeftRightWrapper final {
+ public:
+  template <class... Args>
+  explicit RWSafeLeftRightWrapper(const Args&... args) : data_{args...} {}
+
+  // RWSafeLeftRightWrapper is not copyable or moveable since LeftRight
+  // is not copyable or moveable.
+  RWSafeLeftRightWrapper(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
+  RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
+  RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
+
+  template <typename F>
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
+    return data_.withLock(
+        [&readFunc](T const& data) { return readFunc(data); });
+  }
+
+  template <typename F>
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
+    return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
+  }
+
+ private:
+  c10::Synchronized<T> data_;
 };
 
 } // namespace c10

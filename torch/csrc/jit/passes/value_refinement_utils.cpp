@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 
 namespace torch {
@@ -113,7 +114,7 @@ void joinIfRefinements(
     }
     Block* non_throwing_block =
         true_block_throws ? if_node->blocks().at(1) : if_node->blocks().at(0);
-    for (size_t i = 0; i < if_n.outputs().size(); ++i) {
+    for (const auto i : c10::irange(if_n.outputs().size())) {
       if (boolean_value_refinements.count(
               non_throwing_block->outputs().at(i))) {
         boolean_value_refinements[if_node->outputs().at(i)] =
@@ -123,7 +124,7 @@ void joinIfRefinements(
     return;
   }
 
-  for (size_t i = 0; i < if_n.outputs().size(); ++i) {
+  for (const auto i : c10::irange(if_n.outputs().size())) {
     if (!(if_n.outputs().at(i)->type() == BoolType::get())) {
       return;
     }

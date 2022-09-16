@@ -1,11 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_bicubic2d_native.h>
+#include <ATen/ops/upsample_bicubic2d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -170,8 +179,6 @@ static void upsample_bicubic2d_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_height = input.size(2);
   int input_width = input.size(3);
 
@@ -198,7 +205,7 @@ static void upsample_bicubic2d_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_output_elements, max_threads),
+            <<<ceil_div(num_output_elements, max_threads),
                max_threads,
                0,
                stream>>>(
@@ -227,8 +234,6 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_height = input_size[2];
   int input_width = input_size[3];
 
@@ -254,7 +259,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(

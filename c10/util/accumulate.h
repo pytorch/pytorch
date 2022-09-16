@@ -82,7 +82,7 @@ template <
 inline int64_t numelements_from_dim(const int k, const C& dims) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(k >= 0);
 
-  if (k > dims.size()) {
+  if (k > static_cast<int>(dims.size())) {
     return 1;
   } else {
     auto cbegin = dims.cbegin();

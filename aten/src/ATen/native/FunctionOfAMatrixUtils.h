@@ -1,11 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
+#include <cstdint>
 
-namespace at { namespace native {
+namespace at {
+struct TensorIterator;
+
+namespace native {
 
 using _compute_linear_combination_fn = void(*)(
   TensorIterator& iter,

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/partition_desc.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>

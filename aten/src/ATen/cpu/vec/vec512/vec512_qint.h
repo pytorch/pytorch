@@ -5,7 +5,9 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#include <ATen/native/quantized/affine_quantizer_base.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
@@ -37,7 +39,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
@@ -62,7 +64,7 @@ __m512i pack_saturate_and_clamp(
     T max_val);
 
 template <>
-__m512i pack_saturate_and_clamp<int32_t>(
+inline __m512i pack_saturate_and_clamp<int32_t>(
     __m512i first,
     __m512i second,
     int32_t min_val,
@@ -72,7 +74,7 @@ __m512i pack_saturate_and_clamp<int32_t>(
 }
 
 template <>
-__m512i pack_saturate_and_clamp<int8_t>(
+inline __m512i pack_saturate_and_clamp<int8_t>(
     __m512i first,
     __m512i second,
     int8_t min_val,
@@ -84,7 +86,7 @@ __m512i pack_saturate_and_clamp<int8_t>(
 }
 
 template <>
-__m512i pack_saturate_and_clamp<uint8_t>(
+inline __m512i pack_saturate_and_clamp<uint8_t>(
     __m512i first,
     __m512i second,
     uint8_t min_val,
@@ -266,6 +268,18 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
         return Vectorized<c10::qint32>(ptr);
     }
 
+    static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
+        __at_align__ value_type tmp_values[size()];
+        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+        // instructions while a loop would be compiled to one instruction.
+        for (const auto i : c10::irange(size())) {
+          tmp_values[i] = 0;
+        }
+        std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        return loadu(tmp_values);
+    }
+
     float_vec_return_type dequantize(
         Vectorized<float> scale,
         Vectorized<float> zero_point,
@@ -321,12 +335,6 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       return _mm512_add_epi32(rounded, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < 16; ++i) {
-          std::cout << ((int32_t*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
     // Load from memory constructor
     Vectorized(const void* ptr) {
@@ -434,6 +442,11 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     // constructor for moving the enum
     Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
 
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::qint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::qint8>&) = default;
+
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
             memcpy(ptr, &vals, count * sizeof(value_type));
@@ -444,6 +457,18 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
     static Vectorized<c10::qint8> loadu(const void* ptr) {
         return Vectorized<c10::qint8>(ptr);
+    }
+
+    static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
+        __at_align__ value_type tmp_values[size()];
+        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+        // instructions while a loop would be compiled to one instruction.
+        for (const auto i : c10::irange(size())) {
+          tmp_values[i] = 0;
+        }
+        std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        return loadu(tmp_values);
     }
 
  private:
@@ -549,12 +574,6 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < size(); ++i) {
-            std::cout << (int)((value_type*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
     // Load from memory constructor
     Vectorized(const void* ptr) {
@@ -599,6 +618,11 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
     Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
 
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::quint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::quint8>&) = default;
+
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
             memcpy(ptr, &vals, count * sizeof(value_type));
@@ -609,6 +633,18 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
     static Vectorized<c10::quint8> loadu(const void* ptr) {
         return Vectorized<c10::quint8>(ptr);
+    }
+
+    static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
+        __at_align__ value_type tmp_values[size()];
+        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+        // instructions while a loop would be compiled to one instruction.
+        for (const auto i : c10::irange(size())) {
+          tmp_values[i] = 0;
+        }
+        std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        return loadu(tmp_values);
     }
 
  private:
@@ -714,12 +750,6 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
     }
 
-    void dump() const {
-        for (size_t i = 0; i < size(); ++i) {
-            std::cout << (int)((value_type*)&vals)[i] << " ";
-        }
-        std::cout << std::endl;
-    }
  private:
 
     // Load from memory constructor
@@ -762,7 +792,7 @@ struct VectorizedQuantizedConverter {
   std::array<value_type, size_> vals;
 
   VectorizedQuantizedConverter(T val) {
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       vals[i] = val.val_;
     }
   }
@@ -780,9 +810,9 @@ struct VectorizedQuantizedConverter {
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
     float_vec_return_type rv;
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       float tmp_vals[16];
-      for (int j = 0; j < 16; ++j) {
+      for (const auto j : c10::irange(16)) {
         tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j], zero_point[j], T(vals[16 * i + j]));
       }
@@ -804,13 +834,6 @@ struct VectorizedQuantizedConverter {
           tmp_vals[15]);
     }
     return rv;
-  }
-
-  void dump() const {
-      for (int i = 0; i < size(); ++i) {
-          std::cout << vals[i] << " ";
-      }
-      std::cout << std::endl;
   }
 
  protected:
@@ -846,6 +869,18 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     return Vectorized<c10::qint32>(ptr);
   }
 
+  static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+    return loadu(tmp_values);
+  }
+
   static Vectorized<c10::qint32> quantize(
       const float_vec_return_type& rhs,
       float scale,
@@ -854,7 +889,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 16], 16);
     }
 
@@ -870,7 +905,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -878,7 +913,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -893,7 +928,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       Vectorized<c10::qint32> zero_point,
       Vectorized<c10::qint32> q_six) {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -902,7 +937,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
     int_vec_return_type retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval[0].vals[i] = vals[i] - b.vals[i];
     }
     return retval;
@@ -913,7 +948,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       float multiplier,
       int32_t zero_point) {
     Vectorized<c10::qint32> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] =
           nearbyint(static_cast<float>(inp[0].vals[i]) * multiplier) +
           zero_point;
@@ -932,7 +967,7 @@ Vectorized<c10::qint32> inline operator*(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] * b.vals[i];
   }
   return retval;
@@ -943,7 +978,7 @@ Vectorized<c10::qint32> inline operator+(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] + b.vals[i];
   }
   return retval;
@@ -978,6 +1013,18 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     return Vectorized<c10::qint8>(ptr);
   }
 
+  static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+    return loadu(tmp_values);
+  }
+
   static Vectorized<c10::qint8> quantize(
       const float_vec_return_type& rhs,
       float scale,
@@ -986,7 +1033,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 16], 16);
     }
 
@@ -1002,7 +1049,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1010,7 +1057,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1024,7 +1071,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       Vectorized<c10::qint8> zero_point,
       Vectorized<c10::qint8> q_six) {
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -1034,8 +1081,8 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
   int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         retval[i].vals[j] =
             static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
             static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
@@ -1051,8 +1098,8 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     constexpr auto min_val = std::numeric_limits<value_type>::min();
     constexpr auto max_val = std::numeric_limits<value_type>::max();
     Vectorized<c10::qint8> retval;
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
             nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;
@@ -1098,6 +1145,18 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     return Vectorized<c10::quint8>(ptr);
   }
 
+  static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+    return loadu(tmp_values);
+  }
+
   static Vectorized<c10::quint8> quantize(
       const float_vec_return_type& rhs,
       float scale,
@@ -1106,7 +1165,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 16> float_vals;
 
-    for (int i = 0; i < float_num_vecs(); ++i) {
+    for (const auto i : c10::irange(float_num_vecs())) {
       rhs[i].store(&float_vals[i * 16], 16);
     }
 
@@ -1122,7 +1181,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1130,7 +1189,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 
   Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
@@ -1145,7 +1204,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       Vectorized<c10::quint8> zero_point,
       Vectorized<c10::quint8> q_six) {
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       retval.vals[i] = std::min<value_type>(
           std::max<value_type>(vals[i], zero_point.vals[i]), q_six.vals[i]);
     }
@@ -1155,8 +1214,8 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
   int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         retval[i].vals[j] =
             static_cast<int32_t>(vals[i * elem_per_int_vec + j]) -
             static_cast<int32_t>(b.vals[i * elem_per_int_vec + j]);
@@ -1172,8 +1231,8 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     constexpr auto min_val = std::numeric_limits<value_type>::min();
     constexpr auto max_val = std::numeric_limits<value_type>::max();
     Vectorized<c10::quint8> retval;
-    for (size_t i = 0; i < int_num_vecs(); ++i) {
-      for (size_t j = 0; j < elem_per_int_vec; ++j) {
+    for (const auto i : c10::irange(int_num_vecs())) {
+      for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
             nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;

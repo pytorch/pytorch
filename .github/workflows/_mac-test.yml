@@ -1,0 +1,193 @@
+name: mac-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      arch:
+        required: true
+        type: string
+        description: |
+          Contains the architecture to run the tests with
+
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
+        required: true
+        description: access key id for test stats upload
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
+        required: true
+        description: secret acess key for test stats upload
+
+jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+  test:
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+    # Also ensure that we always run with the right architecture
+    defaults:
+      run:
+        shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
+    strategy:
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+      TEST_CONFIG: ${{ matrix.config }}
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          use-gha: true
+
+      - name: Setup miniconda (x86, py3.8)
+        if: ${{ runner.arch == 'X64' }}
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.8
+
+      - name: Setup miniconda (arm64, py3.9)
+        if: ${{ runner.arch == 'ARM64' }}
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.9
+
+      - name: Start monitoring script
+        id: monitor-script
+        run: |
+          ${CONDA_RUN} python3 -m pip install psutil==5.9.1
+          ${CONDA_RUN} python3 -m pip install pynvml==11.4.1
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "::set-output name=monitor-script-pid::${!}"
+
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Pre-process arm64 wheels
+        if: inputs.build-environment == 'macos-12-py3-arm64'
+        run: |
+          # As wheels are cross-compiled they are reported as x86_64 ones
+          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
+
+      - name: Test
+        id: test
+        run: |
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+
+          # sanitize the input commit message and PR body here:
+          #
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
+          arch
+
+          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stop monitoring script
+        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          set -x
+          ${CONDA_RUN} python3 -m pip install -r requirements.txt
+          ${CONDA_RUN} python3 -m pip install boto3==1.19.12
+          ${CONDA_RUN} python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

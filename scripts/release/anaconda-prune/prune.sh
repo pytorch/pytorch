@@ -31,7 +31,7 @@ set -eou pipefail
 
 CHANNEL=${CHANNEL:-pytorch-nightly}
 PKG=${PKG:-pytorch}
-PLATFORMS=${PLATFORMS:-noarch osx-64 linux-64 win-64}
+PLATFORMS=${PLATFORMS:-noarch osx-64 osx-arm64 linux-64 win-64}
 
 for platform in ${PLATFORMS}; do
     latest_version="$(grab_latest_version || true)"

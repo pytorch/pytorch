@@ -12,8 +12,8 @@ allprojects {
             rulesVersion = "1.2.0"
             junitVersion = "4.12"
 
-            fbjniJavaOnlyVersion = "0.0.3"
-            soLoaderNativeLoaderVersion = "0.8.0"
+            fbjniJavaOnlyVersion = "0.2.2"
+            soLoaderNativeLoaderVersion = "0.10.4"
         }
 
         repositories {

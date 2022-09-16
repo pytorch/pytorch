@@ -4,7 +4,7 @@ training processes on each of the training nodes.
 
 .. warning::
 
-    This module is going to be deprecated in favor of :ref:`torch.distributed.run <launcher-api>`.
+    This module is going to be deprecated in favor of :ref:`torchrun <launcher-api>`.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -30,7 +30,7 @@ GPU (nproc_per_node - 1)*.
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
                YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other
                arguments of your training script)
 
@@ -41,7 +41,7 @@ Node 1: *(IP: 192.168.1.1, and has a free port: 1234)*
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
                --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
                --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
                and all other arguments of your training script)
@@ -50,7 +50,7 @@ Node 2:
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
                --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
                --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
                and all other arguments of your training script)
@@ -59,7 +59,7 @@ Node 2:
 
 ::
 
-    >>> python -m torch.distributed.launch --help
+    python -m torch.distributed.launch --help
 
 
 **Important Notices:**
@@ -78,6 +78,7 @@ Parsing the local_rank argument
 
 ::
 
+    >>> # xdoctest: +SKIP
     >>> import argparse
     >>> parser = argparse.ArgumentParser()
     >>> parser.add_argument("--local_rank", type=int)
@@ -95,16 +96,17 @@ or
 
     >>> with torch.cuda.device(args.local_rank):
     >>>    # your code to run
+    >>>    ...
 
 3. In your training program, you are supposed to call the following function
-at the beginning to start the distributed backend. You need to make sure that
-the init_method uses ``env://``, which is the only supported ``init_method``
-by this module.
+at the beginning to start the distributed backend. It is strongly recommended
+that ``init_method=env://``. Other init methods (e.g. ``tcp://``) may work,
+but ``env://`` is the one that is officially supported by this module.
 
 ::
 
-    torch.distributed.init_process_group(backend='YOUR BACKEND',
-                                         init_method='env://')
+    >>> torch.distributed.init_process_group(backend='YOUR BACKEND',
+    >>>                                      init_method='env://')
 
 4. In your training program, you can either use regular distributed functions
 or use :func:`torch.nn.parallel.DistributedDataParallel` module. If your
@@ -114,9 +116,9 @@ here is how to configure it.
 
 ::
 
-    model = torch.nn.parallel.DistributedDataParallel(model,
-                                                      device_ids=[args.local_rank],
-                                                      output_device=args.local_rank)
+    >>> model = torch.nn.parallel.DistributedDataParallel(model,
+    >>>                                                   device_ids=[args.local_rank],
+    >>>                                                   output_device=args.local_rank)
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
@@ -147,6 +149,7 @@ import warnings
 
 from torch.distributed.run import get_args_parser, run
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,12 +179,13 @@ def launch(args):
 def main(args=None):
     warnings.warn(
         "The module torch.distributed.launch is deprecated\n"
-        "and will be removed in future. Use torch.distributed.run.\n"
-        "Note that --use_env is set by default in torch.distributed.run.\n"
+        "and will be removed in future. Use torchrun.\n"
+        "Note that --use_env is set by default in torchrun.\n"
         "If your script expects `--local_rank` argument to be set, please\n"
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
-        "further instructions\n", FutureWarning
+        "further instructions\n",
+        FutureWarning,
     )
     args = parse_args(args)
     launch(args)

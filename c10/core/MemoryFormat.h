@@ -4,7 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
-#include <iostream>
+#include <ostream>
 
 // Memory format is not the property of a Tensor. It is the way to tell an
 // operator how the result should be organized in memory and nothing more. That
@@ -29,7 +29,8 @@ enum class MemoryFormat : int8_t {
   Contiguous,
   Preserve,
   ChannelsLast,
-  ChannelsLast3d
+  ChannelsLast3d,
+  NumOptions
 };
 
 // If you are seeing this, it means that this call site was not checked if
@@ -54,7 +55,7 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      TORCH_CHECK(false, "Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format ", memory_format);
   }
 }
 

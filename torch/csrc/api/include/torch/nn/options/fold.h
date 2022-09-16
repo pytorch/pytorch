@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
@@ -12,7 +12,8 @@ namespace nn {
 ///
 /// Example:
 /// ```
-/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2));
+/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2,
+/// 1}).stride(2));
 /// ```
 struct TORCH_API FoldOptions {
   FoldOptions(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)

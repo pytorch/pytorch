@@ -55,13 +55,20 @@ int64_t VmapPhysicalView::numLogicalDims() const {
   return /*physical*/tensor_.dim() - numBatchDims();
 }
 
-VmapDimVector VmapPhysicalView::getPhysicalDims(IntArrayRef logical_dims) const {
+VmapDimVector VmapPhysicalView::getPhysicalDims(OptionalIntArrayRef opt_logical_dims) const {
   auto logical_ndim = numLogicalDims();
   // NB: fmap doesn't have a SmallVector variant, so we don't use it here.
   VmapDimVector result;
   result.reserve(logical_ndim);
-  for (auto dim : logical_dims) {
-    result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
+  if (opt_logical_dims.has_value()) {
+    auto logical_dims = opt_logical_dims.value();
+    for (auto dim : logical_dims) {
+      result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
+    }
+  } else {
+    for (int64_t dim = 0; dim < logical_ndim; dim++) {
+      result.push_back(dim + numBatchDims());
+    }
   }
   return result;
 }
@@ -83,7 +90,7 @@ VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) cons
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   BatchDims bdims;
   int64_t dim = 0;
-  for (int64_t level = 0; level < kVmapNumLevels; level++) {
+  for (const auto level : c10::irange(kVmapNumLevels)) {
     if (!levels_bitset[level]) {
       continue;
     }
@@ -208,7 +215,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   VmapDimVector batch_sizes(num_batch_dims, 1);
   for (const auto& physical_tensor : physical_tensors) {
     auto physical_sizes = physical_tensor.sizes();
-    for (int64_t dim = 0; dim < num_batch_dims; dim++) {
+    for (const auto dim : c10::irange(num_batch_dims)) {
       if (physical_sizes[dim] != 1) {
         batch_sizes[dim] = physical_sizes[dim];
       }

@@ -35,11 +35,12 @@ class SobolEngine(object):
 
     Examples::
 
+        >>> # xdoctest: +SKIP("unseeded random state")
         >>> soboleng = torch.quasirandom.SobolEngine(dimension=5)
         >>> soboleng.draw(3)
-        tensor([[0.5000, 0.5000, 0.5000, 0.5000, 0.5000],
-                [0.7500, 0.2500, 0.7500, 0.2500, 0.7500],
-                [0.2500, 0.7500, 0.2500, 0.7500, 0.2500]])
+        tensor([[0.0000, 0.0000, 0.0000, 0.0000, 0.0000],
+                [0.5000, 0.5000, 0.5000, 0.5000, 0.5000],
+                [0.7500, 0.2500, 0.2500, 0.2500, 0.7500]])
     """
     MAXBIT = 30
     MAXDIM = 21201

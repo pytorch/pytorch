@@ -5,6 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -38,7 +39,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
   int adj_size = input_zero.dim() + 1;
   int canonical_axis = 1;
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 2; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(2, InputSize())) {
     CAFFE_ENFORCE(
         Input(i).dtype() == input_zero.dtype(),
         "All inputs must have the same type, expected: ",
@@ -50,7 +51,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
   }
 
   int before = 1, after = 1;
-  for (int i = 0; i < input_zero.dim(); ++i) {
+  for (const auto i : c10::irange(input_zero.dim())) {
     int dim = input_zero.dim32(i);
     if (i < canonical_axis) {
       before *= dim;
@@ -58,7 +59,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 2; j < InputSize(); ++j) {
+    for (const auto j : c10::irange(2, InputSize())) {
       int dim_j = Input(j).dim32(i);
       CAFFE_ENFORCE(
           dim == dim_j,
@@ -93,7 +94,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
   auto* output = Output(0, output_dims, at::dtype<T>());
   // std::stringstream ss;
   // ss << "[";
-  // for(int i = 0; i < output_dims.size(); i++) ss << output_dims[i];
+  // for (const auto i : c10::irange(output_dims.size()))ss << output_dims[i];
   // ss << "]";
   // LOG(INFO) << "output size: " << ss.str();
 
@@ -107,7 +108,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
 #pragma omp for
     for (int b = 0; b < batch_size; ++b) {
       // concat input to scratch
-      for (int i = 1; i < InputSize(); ++i) {
+      for (const auto i : c10::irange(1, InputSize())) {
         auto* input_data = Input(i).template data<T>();
         memcpy(
             &scratch_input[(i - 1) * embed_size],
@@ -130,7 +131,7 @@ bool ConcatBatchMatMulBatchGatherOp<Context>::RunOnDevice() {
       // do gather
 
       int64_t output_offset = b * gather_size;
-      for (int i = 0; i < gather_size; i++) {
+      for (const auto i : c10::irange(gather_size)) {
         output_data[output_offset + i] = scratch_output[indices_data[i]];
       }
     }
