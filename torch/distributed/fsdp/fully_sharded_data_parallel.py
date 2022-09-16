@@ -163,7 +163,7 @@ class ShardingStrategy(Enum):
 class MixedPrecision:
     """
     A config to enable mixed precision training with FullyShardedDataParallel.
-    This class can be constructed with four flags:
+    This class can be constructed with several flags:
         ``param_dtype`` controls the precision of model parameters, inputs, and
         therefore the precision under which computation happens. After forward
         and backward passes, FSDP parameters point to full precision shards
@@ -179,7 +179,11 @@ class MixedPrecision:
         are checkpointed in their full precision (and then restored back to
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_casted_gradients``: Keep casted gradients.
+        ``keep_casted_gradients``: Whether to upcast gradients back to the
+        full parameter precision after backwards or not. This can be disabled
+        to keep the gradients in the lower precision, which can potentially
+        save memory if custom Optimizers are able to perform parameter updates
+        effectively with lower precision grads.
 
     .. note:: In ``summon_full_params``, parameters are summoned in full
         precision but buffers are not.
@@ -3424,7 +3428,7 @@ class FullyShardedDataParallel(nn.Module):
                         if p._post_backward_called:
                             p.grad = p._saved_grad_shard
                             if fsdp_module._mixed_precision_keep_low_precision_grads():
-                                p.grad.data = p.grad.data.to(
+                                p.grad.data = p.grad.to(
                                     fsdp_module.mixed_precision.param_dtype
                                 )
                     else:
