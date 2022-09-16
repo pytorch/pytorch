@@ -84,6 +84,15 @@ FUNCTORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 // prevent race conditions.
 FUNCTORCH_API bool areTransformsActive();
 
+// NOTE: [Life handles and lexically scoped transforms]
+// functorch transforms are lexically scoped.
+// Given a level, we store a "life handle" that is a boolean that tells us if the
+// transform with that level is active or not.
+//
+// functorch's TensorWrapper (for grad transforms) stores a life handle.
+// If a TensorWrapper escapes from the scope of the transform, then somehow
+// it must know it escaped; it can tell by querying the life handle.
+//
 // NB: not lock safe. TODO: does it need a lock?
 FUNCTORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 
