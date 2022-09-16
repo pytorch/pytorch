@@ -631,7 +631,8 @@ void fuseAllLoops(StmtPtr st) {
   std::vector<ForPtr> outer_loops;
   for (const auto& stmt : *block) {
     auto loop = to<For>(stmt);
-    if (!loop) {
+    auto hasReduction = NodeFinder<ReduceOp>::find(stmt).size() != 0;
+    if (!loop || hasReduction) {
       all_outer_loops.push_back(outer_loops);
       outer_loops.clear();
     } else {
