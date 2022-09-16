@@ -104,22 +104,11 @@ def set_meta(proxy, val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
-def cache(f):
-    out = None
-
-    @functools.wraps(f)
-    def new_f(*args, **kwargs):
-        nonlocal out
-        if out is None:
-            out = f(*args, **kwargs)
-        return out
-    return new_f
-
 def thunkify(f, *args, **kwargs):
     """
     Delays computation of f until it's called again, which is done by
     """
-    return cache(functools.partial(f, *args, **kwargs))
+    return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
@@ -129,11 +118,6 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             assert isinstance(inner_s, PySymInt)
             proxy = None
 
-            def thunk():
-                nonlocal proxy
-                if proxy is None:
-                    proxy = proxy_callable(inner_s, *args)
-                return proxy
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
