@@ -375,26 +375,18 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        try:
-            if len(expr.free_symbols) == 0:
-                return expr
-            expr = self.simplify(expr)
+        if len(expr.free_symbols) == 0:
+            return expr
+        expr = self.simplify(expr)
 
-            static_expr = self._maybe_evaluate_static(expr)
-            if static_expr is not None:
-                return static_expr
+        static_expr = self._maybe_evaluate_static(expr)
+        if static_expr is not None:
+            return static_expr
 
-            if isinstance(expr, sympy.Eq):
-                self._maybe_guard_eq(expr)
-            concrete_val = self.size_hint(expr)
+        if isinstance(expr, sympy.Eq):
+            self._maybe_guard_eq(expr)
+        concrete_val = self.size_hint(expr)
 
-            # Uncomment this to see what code triggered this guard.
-            # TODO: Save this to the guard representation so you can look
-            # at it later
-            stack = ''.join(traceback.format_stack())
-            self.guards.append((expr, concrete_val, stack))
-            return concrete_val
-        except Exception as e:
-            print(e)
-            print()
-            raise e
+        stack = ''.join(traceback.format_stack())
+        self.guards.append((expr, concrete_val, stack))
+        return concrete_val
