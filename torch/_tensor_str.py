@@ -1,10 +1,11 @@
 import math
-from typing import Optional
 import textwrap
+from typing import Optional
+
+import functorch
 
 import torch
 from torch._six import inf
-import functorch
 
 
 class __PrinterOptions(object):
@@ -617,32 +618,30 @@ def functorch_tensor_subclass_str(tensor, *, tensor_contents=None):
     try:
         # Disable temporarily FuncTorchDynamicLayerFrontMode and
         # FuncTorchDynamicLayerBackMode as included dispatch keys
-        if (dl_enabled):
+        if dl_enabled:
             functorch._C._set_dynamic_layer_keys_included(False)
         value_repr = repr(value)
     finally:
         # Reenable FuncTorchDynamicLayerFrontMode and
         # FuncTorchDynamicLayerBackMode as included dispatch keys
-        if (dl_enabled):
+        if dl_enabled:
             functorch._C._set_dynamic_layer_keys_included(True)
 
-    indented_value_repr = textwrap.indent(value_repr, ' ' * 4)
+    indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if functorch._C.is_batchedtensor(tensor):
         bdim = functorch._C.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
-            f'BatchedTensor(lvl={level}, bdim={bdim}, value=\n'
-            f'{indented_value_repr}\n'
-            f')'
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
+            f"{indented_value_repr}\n"
+            f")"
         )
     if functorch._C.is_gradtrackingtensor(tensor):
         return (
-            f'GradTrackingTensor(lvl={level}, value=\n'
-            f'{indented_value_repr}\n'
-            f')'
+            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
         )
     if functorch._C.is_functionaltensor(tensor):
-        return f'FunctionalTensor(lvl={level}, value=\\\n{value_repr})'
+        return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
 
     raise ValueError("We don't know how to print this, please file us an issue")
 
