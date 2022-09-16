@@ -3,6 +3,7 @@
 
 from typing import Sequence
 
+from torch.onnx import errors
 from torch.onnx._internal import registration
 from torch.testing._internal import common_utils
 
@@ -162,6 +163,90 @@ class TestOverrideDict(common_utils.TestCase):
         self.override_dict.remove_override("a")
         if not self.override_dict:
             self.fail("OverrideDict should be true when not empty")
+
+
+class TestRegistrationDecorators(common_utils.TestCase):
+    def tearDown(self) -> None:
+        registration.registry._registry.pop("test::test_op", None)
+
+    def test_onnx_symbolic_registers_function(self):
+        self.assertFalse(registration.registry.is_registered_op("test::test_op", 9))
+
+        @registration.onnx_symbolic("test::test_op", opset=9)
+        def test(g, x):
+            return g.op("test", x)
+
+        self.assertTrue(registration.registry.is_registered_op("test::test_op", 9))
+        function_group = registration.registry.get_function_group("test::test_op")
+        assert function_group is not None
+        self.assertEqual(function_group.get(9), test)
+
+    def test_onnx_symbolic_registers_function_applied_decorator_when_provided(self):
+        wrapper_called = False
+
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                nonlocal wrapper_called
+                wrapper_called = True
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        @registration.onnx_symbolic("test::test_op", opset=9, decorate=[decorator])
+        def test():
+            return
+
+        function_group = registration.registry.get_function_group("test::test_op")
+        assert function_group is not None
+        registered_function = function_group[9]
+        self.assertFalse(wrapper_called)
+        registered_function()
+        self.assertTrue(wrapper_called)
+
+    def test_onnx_symbolic_raises_warning_when_overriding_function(self):
+        self.assertFalse(registration.registry.is_registered_op("test::test_op", 9))
+
+        @registration.onnx_symbolic("test::test_op", opset=9)
+        def test1():
+            return
+
+        with self.assertWarnsRegex(
+            errors.OnnxExporterWarning,
+            "Symbolic function 'test::test_op' already registered",
+        ):
+
+            @registration.onnx_symbolic("test::test_op", opset=9)
+            def test2():
+                return
+
+    def test_custom_onnx_symbolic_registers_custom_function(self):
+        self.assertFalse(registration.registry.is_registered_op("test::test_op", 9))
+
+        @registration.custom_onnx_symbolic("test::test_op", opset=9)
+        def test(g, x):
+            return g.op("test", x)
+
+        self.assertTrue(registration.registry.is_registered_op("test::test_op", 9))
+        function_group = registration.registry.get_function_group("test::test_op")
+        assert function_group is not None
+        self.assertEqual(function_group.get(9), test)
+
+    def test_custom_onnx_symbolic_overrides_existing_function(self):
+        self.assertFalse(registration.registry.is_registered_op("test::test_op", 9))
+
+        @registration.onnx_symbolic("test::test_op", opset=9)
+        def test_original():
+            return "original"
+
+        self.assertTrue(registration.registry.is_registered_op("test::test_op", 9))
+
+        @registration.custom_onnx_symbolic("test::test_op", opset=9)
+        def test_custom():
+            return "custom"
+
+        function_group = registration.registry.get_function_group("test::test_op")
+        assert function_group is not None
+        self.assertEqual(function_group.get(9), test_custom)
 
 
 if __name__ == "__main__":
