@@ -57,7 +57,7 @@ class Environment {
   }
   virtual ~Environment() {
     auto rmCmd = fmt::format("rm -rf {}", extraPythonLibrariesDir_);
-    system(rmCmd.c_str());
+    (void)system(rmCmd.c_str());
   }
   virtual void configureInterpreter(Interpreter* interp) = 0;
   virtual const std::vector<std::string>& getExtraPythonPaths() {

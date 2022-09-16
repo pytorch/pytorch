@@ -302,7 +302,7 @@ Tensor flash_attention_helper(
     auto qkv_buffer_reshaped =
         get_buffer(query).view({Nnz_q, 3, num_heads, head_dim});
 
-    // If we are passing in query, key, value all the same tensors than we have
+    // If we are passing in query, key, value all the same tensors then we have
     // packed them into one tensor and need to slice for flash attention
     Tensor atten_buffer = at::_flash_scaled_dot_product_attention(
         qkv_buffer_reshaped.index({at::indexing::Slice(), 0}),

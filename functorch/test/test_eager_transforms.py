@@ -1592,6 +1592,31 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @FIXME_jacrev_only
+    def test_inplace(self, device, jacapi):
+        def f(x, y):
+            y.copy_(x)
+            return y
+
+        out = jacapi(f, argnums=0)  # x is differentiable
+        x, y = torch.randn(2, device=device), torch.randn(2, device=device)
+        self.assertEqual(out(x, y), torch.eye(y.shape[0]))
+
+        # testing tuple of argnums with the example that raised this issue originally
+        def g(x, y, z):
+            x[:2] = y
+            return torch.vstack([(x**2).sum(), (z**3).sum()])
+
+        out = jacapi(g, argnums=(1, 2))
+        x, y, z = torch.randn(3, device=device), torch.randn(2, device=device), torch.randn(2, device=device)
+
+        expected_out = (torch.zeros(2, 1, 2, device=device), torch.zeros(2, 1, 2, device=device))
+        expected_out[0][0][0] = 2 * y  # top left corner
+        expected_out[1][1][0] = 3 * (z ** 2)  # bottom right corner
+
+        out_val = out(x, y, z)
+        self.assertEqual(out_val, expected_out)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
