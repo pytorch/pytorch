@@ -1097,7 +1097,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+    return prims.div(a, b) - _maybe_convert_to_dtype(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1280,8 +1280,8 @@ def isclose(
     # If the values of the integer tensors cannot be exactly represented
     # by the default scalar type then this may cause an incorrect result.
     if not utils.is_float_dtype(a.dtype) and not utils.is_complex_dtype(a.dtype):
-        a = prims.convert_element_type(a, torch.get_default_dtype())
-        b = prims.convert_element_type(b, torch.get_default_dtype())
+        a = _maybe_convert_to_dtype(a, torch.get_default_dtype())
+        b = _maybe_convert_to_dtype(b, torch.get_default_dtype())
 
     allowed_error = add(atol, abs(mul(b, rtol)))
     actual_error = abs(sub(a, b))
@@ -1298,14 +1298,14 @@ def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
-        a = prims.convert_element_type(a, torch.int32)
-        b = prims.convert_element_type(b, torch.int32)
+        a = _maybe_convert_to_dtype(a, torch.int32)
+        b = _maybe_convert_to_dtype(b, torch.int32)
 
     g = torch.gcd(a, b)
     # Avoid division by zero in case gcd(0, 0) == 0
     g = torch.where(g == 0, 1, g)
     res = torch.abs(prims.div(a, g) * b)
-    return res if not promote_to_int else prims.convert_element_type(res, dtype)
+    return res if not promote_to_int else _maybe_convert_to_dtype(res, dtype)
 
 
 # TODO: add docstring
@@ -1698,7 +1698,7 @@ def to(
         and memory_format == torch.preserve_format
         and non_blocking is False
     ):
-        return prims.convert_element_type(a, dtype)
+        return _maybe_convert_to_dtype(a, dtype)
     result = torch.empty_like(
         a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
     )
@@ -1754,7 +1754,7 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a_converted = prims.convert_element_type(a, computation_dtype)
+    a_converted = _maybe_convert_to_dtype(a, computation_dtype)
     result = prim(a_converted, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
@@ -1771,7 +1771,7 @@ def _reduction(
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
-        result = prims.convert_element_type(result, result_dtype)
+        result = _maybe_convert_to_dtype(result, result_dtype)
 
     return result
 
@@ -1798,7 +1798,7 @@ def all(
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
-        return prims.convert_element_type(result, torch.uint8)
+        return _maybe_convert_to_dtype(result, torch.uint8)
 
     return result
 
@@ -1819,7 +1819,7 @@ def any(
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
-        return prims.convert_element_type(result, torch.uint8)
+        return _maybe_convert_to_dtype(result, torch.uint8)
 
     return result
 
@@ -2558,10 +2558,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = prims.convert_element_type(out, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)
     if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+        mean = _maybe_convert_to_dtype(mean, input.dtype)
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)
     return (out, mean, rstd)
 
 

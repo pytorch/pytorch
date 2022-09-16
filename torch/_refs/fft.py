@@ -9,7 +9,10 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch._decomp import register_decomposition
 from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
+    out_wrapper,
+)
 
 __all__ = [
     # Transforms
@@ -78,7 +81,7 @@ def _maybe_promote_tensor_fft(
     new_type = _promote_type_fft(cur_type, require_complex)
     if cur_type == new_type:
         return t
-    return prims.convert_element_type(t, new_type)
+    return _maybe_convert_to_dtype(t, new_type)
 
 
 def _resize_fft_input(
