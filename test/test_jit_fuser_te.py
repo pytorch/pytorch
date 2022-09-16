@@ -2343,6 +2343,24 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    def test_to_dtype(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.bfloat16)
+            h = z._autocast_to_full_precision(True, True)
+            i = h.to(dtype=torch.float32)
+            j = i.to(dtype=torch.bfloat16)
+            k = j.to(dtype=torch.float32)
+            return k
+
+        for dtype in [torch.float, torch.bfloat16]:
+            x = torch.rand((2, 2), dtype=dtype)
+            scr = torch.jit.script(f)
+            scr(x)
+            scr(x)
+            self.assertLastGraphAllFused()
+            self.assertEqual(f(x), scr(x), atol=4e-3, rtol=4e-3)
+
     def test_with_strict_fusion(self):
 
         def success(x):
