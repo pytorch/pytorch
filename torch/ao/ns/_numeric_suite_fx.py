@@ -106,15 +106,12 @@ from .fx.weight_utils import (
 from .fx.graph_passes import (
     add_loggers_to_model,
     create_a_shadows_b,
-    # TODO(before land): move to utils
-    _maybe_get_fqn,
 )
 
 from .fx.utils import (
     rekey_logger_info_on_node_name_of_model,
     maybe_add_missing_fqns,
     get_target_type_str,
-    get_normalized_nth_input,
 )
 
 from .fx.ns_types import (
@@ -126,23 +123,18 @@ from .fx.ns_types import (
 from torch.ao.quantization import (
     QConfigMapping,
 )
-from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
 from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
-    _get_attr_name,
-    _get_attr_wrapper_name,
     _get_dedup_subgraphs,
-    _get_logger_for_subgraph,
-    _add_logger_to_subgraph_wrapper,
     SHADOW_WRAPPER_NODE_NAME_PREFIX,
-    create_submodule_from_subgraph,
     group_results_by_subgraph,
     create_results_comparison,
     print_n_shadows_summary,
+    handle_subgraph,
 )
 
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
@@ -785,11 +777,6 @@ def prepare_n_shadows_model(
        automatically output a single model quantized with that best qconfig.
     """
 
-    # We need to set the loggers as non traceable to have them survive
-    # prepare_fx and convert_fx calls.
-    prepare_custom_config = PrepareCustomConfig()\
-        .set_non_traceable_module_classes([OutputLogger, OutputComparisonLogger])
-
     tracer = quantize_fx.QuantizationTracer([], [])
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
@@ -825,149 +812,9 @@ def prepare_n_shadows_model(
     # Iterate through each quantization region in the model
     for (subgraph_idx, (match_name, nodes_in_this_subgraph)) in \
             enumerate(subgraphs_dedup.items()):
-        # for now, assume that
-        # 1. the first node has one input
-        # 2. the last node has one output
-        # 3. all the nodes are modules
-
-        # for now, ignore all subgraphs that contain non-nodes (tuples, etc)
-        # TODO(future PR): implement this
-        if any(
-            not isinstance(node, Node)
-            for node in nodes_in_this_subgraph
-        ):
-            continue
-
-        first_node = nodes_in_this_subgraph[0]
-        last_node = nodes_in_this_subgraph[-1]
-        # We used output propagation to populate example values on each
-        # node. Use the example values from the previous node as the input
-        # to the current node.
-        prev_node = get_normalized_nth_input(first_node, mt, 0)
-        if isinstance(prev_node, list):
-            example_inputs = [x.traced_result for x in prev_node]
-        elif isinstance(prev_node, tuple):
-            example_inputs = (x.traced_result for x in prev_node)
-        else:
-            # currently some ads models do not have a traced_result in every node,
-            # so we have to guard for this case since we cannot quantize without
-            # an example input
-            # TODO(future PR): add a test case for this once we have an easy repro
-            if hasattr(prev_node, 'traced_result'):
-                example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined]
-            else:
-                print(
-                    'unable to get example input for node ' +
-                    f'{first_node.format_node()}, skipping')
-                continue
-
-        # If there are no quantization configs for this subgraph, skip adding
-        # loggers. This reduces memory usage for models where not all layers are
-        # quantized.
-        # TODO(future): consider making this configurable
-        found_at_least_one_qconfig = False
-        for subgraph_candidate_idx in range(len(qconfig_mappings)):
-            node_name_to_qconfig = \
-                list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
-            qconfig = node_name_to_qconfig[first_node.name]
-            if qconfig is not None:
-                found_at_least_one_qconfig = True
-                break
-        if not found_at_least_one_qconfig:
-            print('unable to find at least one qconfig for node ' +
-                  f'{first_node.format_node()}, skipping')
-            continue
-
-        fqn = _maybe_get_fqn(first_node, mt)
-
-        for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
-
-            if subgraph_candidate_idx == 0:
-                # idx = 0 is the floating point (original) version of the subgraph
-                # We keep the subgraph as is, and add a logger at the end
-
-                qconfig_str = ''
-                logger_mod_orig = _get_logger_for_subgraph(
-                    mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
-                    qconfig_str, OutputLogger, fqn)
-
-                attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-                assert not hasattr(mt, attr_name)
-                setattr(mt, attr_name, logger_mod_orig)
-                with mt.graph.inserting_after(last_node):
-                    new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
-
-            else:
-                # idx > 0 means we have a candidate qconfig to try, so we need
-                # to make a copy of the subgraph, feed it with the right inputs,
-                # and add a logger at the end
-
-                # get the qconfig
-                # subtract one because the first candidate is the floating point
-                # version of the subgraph
-                node_name_to_qconfig = \
-                    list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
-                qconfig = node_name_to_qconfig[first_node.name]
-
-                # if no quantization is requested, skip
-                # TODO(future PR): deduplicate equivalent qconfigs that come from
-                #   different qconfig mapping objects
-                if qconfig is None:
-                    continue
-
-                qconfig_mapping = QConfigMapping().set_global(qconfig)
-
-                # create a copy of the submodule, wrapped in a separate module
-                orig_mod_copy_wrapped = create_submodule_from_subgraph(
-                    mt, first_node, last_node)
-
-                # add a logger to the end of this submodule
-                # get first and last nodes of the submodule
-                _add_logger_to_subgraph_wrapper(
-                    orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
-                    str(qconfig), OutputComparisonLogger, last_node, fqn)
-
-                # add a call to prepare_fx on the wrapper module
-                orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
-                    orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
-                    prepare_custom_config=prepare_custom_config)
-
-                # attach the wrapper to the model
-                attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
-                assert not hasattr(mt, attr_name)
-                setattr(mt, attr_name, orig_mod_copy_wrapped)
-
-                # add a call to the wrapper module from the parent graph
-                with mt.graph.inserting_after(last_node):
-                    # TODO(future PR): handle fusion patterns where non-first nodes
-                    # need inputs
-
-                    # pass in all node args and kwargs
-
-                    # the first argument is always the reference output of the last
-                    # node of this subgraph
-                    new_args = [last_node]
-
-                    for arg in first_node.args:
-                        if isinstance(arg, Node):
-                            new_args.append(arg)
-                        elif isinstance(arg, (list, tuple)) and len(arg) and isinstance(arg[0], Node):
-                            for inner_arg in arg:
-                                if isinstance(inner_arg, Node):
-                                    new_args.append(inner_arg)
-
-                    new_kwargs = {}
-                    for name, old_kwarg in first_node.kwargs.items():
-                        if isinstance(old_kwarg, Node):
-                            new_kwargs[name] = old_kwarg
-                        elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
-                            for inner_old_kwarg in old_kwarg:
-                                new_args.append(inner_old_kwarg)
-
-                    new_args = tuple(new_args)  # type: ignore[assignment]
-
-                    new_node = mt.graph.call_module(
-                        attr_name, args=new_args, kwargs=new_kwargs)
+        handle_subgraph(
+            mt, subgraph_idx, match_name, nodes_in_this_subgraph,
+            qconfig_mappings, list_of_node_name_to_qconfig)
 
     mt.recompile()
     return mt

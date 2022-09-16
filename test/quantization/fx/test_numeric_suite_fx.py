@@ -2185,9 +2185,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                 # x = x.reshape(1, -1) * 2
                 # x = F.layer_norm(x.reshape(1, -1), x.shape[1:])
                 x = torch.matmul(x, x.reshape(2, 2))
-                # TODO: enable below
                 x = torch.matmul(x.reshape(2, 2), x.reshape(2, 2))
-                # TODO: enable below after FX graph mode quantization handles
+                # TODO(future PR): enable below after FX graph mode quantization handles
                 # it, currently this is not supported
                 # x = F.linear(input=x, weight=self.w1, bias=self.b1)
                 return x
@@ -2200,8 +2199,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             # QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
         ]
         self._test_impl(m, example_input, qconfig_mappings)
-
-    # TODO(this PR): test node without example input
 
     def test_partial_qconfig_mapping(self):
         class M(nn.Module):

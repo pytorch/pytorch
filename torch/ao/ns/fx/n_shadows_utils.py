@@ -9,11 +9,16 @@ from torch.fx import (
 from torch.ao.ns.fx.utils import (
     # TODO(future PR): make this work correctly for methods
     get_target_type_str,
+    get_normalized_nth_input,
 )
 from torch.ao.ns.fx.ns_types import (
     NSSingleResultValuesType,
     NSResultsType,
 )
+from torch.ao.ns.fx.graph_passes import _maybe_get_fqn
+from torch.ao.quantization import QConfigMapping
+from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
+from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import MatchResult
 
@@ -25,7 +30,7 @@ import operator
 SHADOW_NODE_NAME_PREFIX = 'shadow'
 SHADOW_WRAPPER_NODE_NAME_PREFIX = 'shadow_wrapper'
 
-# TODO: reuse existing mapping instead of creating a new one
+# TODO(future PR): reuse existing mapping instead of creating a new one
 BINARY_FUNCTIONS = {
     torch.add,
     torch.Tensor.add,
@@ -274,8 +279,11 @@ def _add_logger_to_subgraph_wrapper(
     #         /
     #   x0_ref
 
-    # TODO(this PR): verify this name can be used safely
     ph_name = 'SHADOW_PH_NAME'
+    # verify a node with this name does not exist
+    assert len([n for n in model.graph.nodes if n.name == ph_name]) == 0, \
+        'graph already contains node with name {ph_name}'
+
     new_ph = None
     with model.graph.inserting_before(first_node):
         new_ph = model.graph.placeholder(ph_name)
@@ -299,25 +307,23 @@ def create_submodule_from_subgraph(
       to the first node becoming the inputs to the submodule, and all other
       nodes in the subgraph being copied.
 
-    Example input - imagine module with graph:
+    Example inputs:
+
+    `model`: a module with graph
 
       x0 -> op1 -> x1 -> op2 -> x2
-             |            |
-            arg1         arg2
+             |
+            arg1
 
-    And first_node is op1 and last_node is op2.  Then, this function will create
+    `first_node`: op1
+    `last_node`: op2
 
-      x0 -> subgraph_copy_module -> x2
-
-    With the inside of subgraph_copy_module being
+    Example output: a new module with graph
 
       input1 -> op1_copy -> x1 -> op2_copy -> output1
-                   |                 |
-                arg1_copy         arg2_copy
-
+                   |
+                  arg1
     """
-    # TODO: handle kwargs
-    # TODO: handle non-normalized kwargs
 
     #
     # create a blank GraphModule with an empty graph
@@ -359,6 +365,9 @@ def create_submodule_from_subgraph(
             def _add_placeholder(
                 g: Graph, node: Node, seen_names, old_name_to_new_node
             ):
+                # note: for graphs starting with patterns such as `y = x + x`, we
+                # need to ensure we do not add multiple placeholders with the
+                # same name
                 counter = 0
                 while node.name + '_' + str(counter) in seen_names:
                     counter += 1
@@ -368,13 +377,7 @@ def create_submodule_from_subgraph(
                 old_name_to_new_node[node.name] = placeholder
                 return placeholder
 
-            # TODO(before land): unify common code for the arg and kwarg
-            # handling below
-
             for arg in cur_node_orig.args:
-                # note: for graphs starting with patterns such as `y = x + x`, we
-                # need to ensure we do not add multiple placeholders with the
-                # same name
                 if isinstance(arg, Node):
                     p = _add_placeholder(
                         g, arg, seen_names, old_name_to_new_node)
@@ -388,15 +391,11 @@ def create_submodule_from_subgraph(
                         else:
                             new_arg.append(inner_arg)
                     cur_args_copy.append(new_arg)
-                    # TODO(before land): populate old_name_to_new_node
                 else:
                     cur_args_copy.append(arg)
 
+            # TODO(future PR): handle non-normalized kwargs
             for kwarg_name, kwarg in cur_node_orig.kwargs.items():
-                # TODO: dedup code with above
-                # note: for graphs starting with patterns such as `y = x + x`, we
-                # need to ensure we do not add multiple placeholders with the
-                # same name
                 if isinstance(kwarg, Node):
                     cur_kwargs_copy[kwarg_name] = _add_placeholder(
                         g, kwarg, seen_names, old_name_to_new_node)
@@ -422,9 +421,11 @@ def create_submodule_from_subgraph(
 
             # at this point in the code, cur_node_copy is pointing to the copy
             # of the previous node
-            # TODO(future): this is not handling complicated graphs correctly, need to
+            # TODO(future PR): this is not handling complicated graphs correctly, need to
             # look at actual relationships instead of assuming sequential graph
-            # print(cur_args_orig, cur_kwargs_orig)
+            # TODO(future PR): this is ignoring kwargs, will need to support kwargs
+            # for any fusion pattern which has them for a node that is not the
+            # first node.
             cur_args_copy = [cur_node_copy]  # type: ignore[has-type]
 
             if len(cur_node_orig.args) > 1:
@@ -481,6 +482,195 @@ def create_submodule_from_subgraph(
 
     gm.recompile()
     return gm
+
+def handle_subgraph_candidate(
+    mt: GraphModule,
+    subgraph_idx: int,
+    subgraph_candidate_idx: int,
+    first_node: Node,
+    last_node: Node,
+    fqn: Optional[str],
+    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    example_inputs: Any,
+) -> None:
+    """
+    Given a subgraph in `mt` and a subgraph candidate idx, inserts the
+    subgraph candidate copy and instruments it with loggers.
+
+    If subgraph_idx is 0, this is the baseline fp32 subgraph and we just
+    add a logger to the end.
+
+    If subgraph_idx is not 0, we create a copy of the subgraph and
+    prepare it with `prepare_fx`.
+    """
+
+    # TODO(future PR): move logger classes to utils to remove circular dependency
+    from torch.ao.ns._numeric_suite_fx import OutputLogger, OutputComparisonLogger
+
+    if subgraph_candidate_idx == 0:
+        # idx = 0 is the floating point (original) version of the subgraph
+        # We keep the subgraph as is, and add a logger at the end
+
+        qconfig_str = ''
+        logger_mod_orig = _get_logger_for_subgraph(
+            mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
+            qconfig_str, OutputLogger, fqn)
+
+        attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
+        assert not hasattr(mt, attr_name)
+        setattr(mt, attr_name, logger_mod_orig)
+        with mt.graph.inserting_after(last_node):
+            new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
+
+    else:
+        # idx > 0 means we have a candidate qconfig to try, so we need
+        # to make a copy of the subgraph, feed it with the right inputs,
+        # and add a logger at the end
+
+        # get the qconfig
+        # subtract one because the first candidate is the floating point
+        # version of the subgraph
+        node_name_to_qconfig = \
+            list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
+        qconfig = node_name_to_qconfig[first_node.name]
+
+        # if no quantization is requested, skip
+        # TODO(future PR): deduplicate equivalent qconfigs that come from
+        #   different qconfig mapping objects
+        if qconfig is None:
+            return
+
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+
+        # create a copy of the submodule, wrapped in a separate module
+        orig_mod_copy_wrapped = create_submodule_from_subgraph(
+            mt, first_node, last_node)
+
+        # add a logger to the end of this submodule
+        # get first and last nodes of the submodule
+        _add_logger_to_subgraph_wrapper(
+            orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
+            str(qconfig), OutputComparisonLogger, last_node, fqn)
+
+        # We need to set the loggers as non traceable to have them survive
+        # prepare_fx and convert_fx calls.
+        prepare_custom_config = PrepareCustomConfig()\
+            .set_non_traceable_module_classes([OutputLogger, OutputComparisonLogger])
+
+        # add a call to prepare_fx on the wrapper module
+        orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
+            orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
+            prepare_custom_config=prepare_custom_config)
+
+        # attach the wrapper to the model
+        attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
+        assert not hasattr(mt, attr_name)
+        setattr(mt, attr_name, orig_mod_copy_wrapped)
+
+        # add a call to the wrapper module from the parent graph
+        with mt.graph.inserting_after(last_node):
+            # TODO(future PR): handle fusion patterns where non-first nodes
+            # need inputs
+
+            # pass in all node args and kwargs
+
+            # the first argument is always the reference output of the last
+            # node of this subgraph
+            new_args = [last_node]
+
+            for arg in first_node.args:
+                if isinstance(arg, Node):
+                    new_args.append(arg)
+                elif isinstance(arg, (list, tuple)) and len(arg) and isinstance(arg[0], Node):
+                    for inner_arg in arg:
+                        if isinstance(inner_arg, Node):
+                            new_args.append(inner_arg)
+
+            new_kwargs = {}
+            for name, old_kwarg in first_node.kwargs.items():
+                if isinstance(old_kwarg, Node):
+                    new_kwargs[name] = old_kwarg
+                elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
+                    for inner_old_kwarg in old_kwarg:
+                        new_args.append(inner_old_kwarg)
+
+            new_args = tuple(new_args)  # type: ignore[assignment]
+
+            new_node = mt.graph.call_module(
+                attr_name, args=new_args, kwargs=new_kwargs)
+
+def handle_subgraph(
+    mt: GraphModule,
+    subgraph_idx: int,
+    match_name: str,
+    nodes_in_this_subgraph: List[Any],
+    qconfig_mappings: List[QConfigMapping],
+    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+) -> None:
+    """
+    Given a model `mt` and a subgraph_idx, creates the needed copies
+    of the subgraph for all qconfigs, and instruments them with loggers.
+    """
+    # for now, assume that
+    # 1. the first node has one input
+    # 2. the last node has one output
+
+    # for now, ignore all subgraphs that contain non-nodes (tuples, etc)
+    # TODO(future PR): implement this
+    if any(
+        not isinstance(node, Node)
+        for node in nodes_in_this_subgraph
+    ):
+        return
+
+    first_node = nodes_in_this_subgraph[0]
+    last_node = nodes_in_this_subgraph[-1]
+    # We used output propagation to populate example values on each
+    # node. Use the example values from the previous node as the input
+    # to the current node.
+    prev_node = get_normalized_nth_input(first_node, mt, 0)
+    if isinstance(prev_node, list):
+        example_inputs = [x.traced_result for x in prev_node]
+    elif isinstance(prev_node, tuple):
+        example_inputs = (x.traced_result for x in prev_node)  # type: ignore[assignment]
+    else:
+        # currently some customer models do not have a traced_result in
+        # every node, so we have to guard for this case since we cannot
+        # quantize without an example input
+        # TODO(future PR): add a test case for this once we have an easy
+        # repro
+        if hasattr(prev_node, 'traced_result'):
+            example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined, assignment]
+        else:
+            print(
+                'unable to get example input for node ' +
+                f'{first_node.format_node()}, skipping')
+            return
+
+    # If there are no quantization configs for this subgraph, skip adding
+    # loggers. This reduces memory usage for models where not all layers are
+    # quantized.
+    # TODO(future): consider making this configurable
+    found_at_least_one_qconfig = False
+    for subgraph_candidate_idx in range(len(qconfig_mappings)):
+        node_name_to_qconfig = \
+            list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
+        qconfig = node_name_to_qconfig[first_node.name]
+        if qconfig is not None:
+            found_at_least_one_qconfig = True
+            break
+    if not found_at_least_one_qconfig:
+        print('unable to find at least one qconfig for node ' +
+              f'{first_node.format_node()}, skipping')
+        return
+
+    fqn = _maybe_get_fqn(first_node, mt)
+
+    for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
+        handle_subgraph_candidate(
+            mt, subgraph_idx, subgraph_candidate_idx, first_node,
+            last_node, fqn, list_of_node_name_to_qconfig,
+            example_inputs)
 
 def group_results_by_subgraph(results: NSResultsType) -> Any:
     """
@@ -539,8 +729,6 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     }
 
     """
-    # print(results)
-
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
     for subgraph_name_with_idx, subgraph_candidate_results in \
@@ -683,8 +871,6 @@ def print_n_shadows_summary(
 
     results = []
     for subgraph_name, subgraph_data in results_comparison.items():
-        # print('sd', subgraph_data)
-
         mean_all_candidates = [
             candidate['cmp_mean']
             for candidate_name, candidate in subgraph_data['candidates'].items()
