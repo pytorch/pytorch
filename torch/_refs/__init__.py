@@ -3454,6 +3454,7 @@ def new_zeros(
 
 
 @register_decomposition(torch.ops.aten.ones)
+@out_wrapper()
 def ones(
     *size,
     dtype: Optional[torch.dtype] = None,

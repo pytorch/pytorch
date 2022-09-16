@@ -13764,18 +13764,18 @@ op_db: List[OpInfo] = [
            supports_out=True,
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
-                # Tests that assume input is a tensor or sequence of tensors
-                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
-                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
-                # Same failure as arange: cannot find linspace in captured graph
-                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
-                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
     OpInfo('zeros',
            op=torch.zeros,
@@ -13785,18 +13785,18 @@ op_db: List[OpInfo] = [
            supports_out=True,
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
-                # Tests that assume input is a tensor or sequence of tensors
-                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
-                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
-                # Same failure as arange: cannot find linspace in captured graph
-                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
-                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
     OpInfo('new_empty',
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
@@ -15972,9 +15972,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # # See https://github.com/pytorch/pytorch/issues/82364
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
         ),
         supports_nvfuser=False,
     ),
@@ -15986,9 +15983,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # # See https://github.com/pytorch/pytorch/issues/82364
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
         ),
         supports_nvfuser=False,
     ),
