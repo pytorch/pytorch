@@ -381,7 +381,9 @@ auto handle_torch_function_no_python_arg_parser(
     if (module_name && func_name) {
       ss << module_name << "." << func_name;
     } else {
-      ss << torch_api_function;
+      py::handle fn = torch_api_function;
+      ss << py::str(fn.attr("__module__")) << "."
+         << py::str(fn.attr("__name__"));
     }
     ss << "' on types that implement " << torch_function_name_str << ": [";
     for (auto& arg : overloaded_args) {
