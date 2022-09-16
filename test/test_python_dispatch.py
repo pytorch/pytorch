@@ -1833,5 +1833,11 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+class TestPythonDispatcher(TestCase):
+    def test_basic(self):
+        x = torch.randn(2, requires_grad=True)
+        r = torch._C._EnablePythonDispatcher()
+        torch.add(x, x)
+
 if __name__ == '__main__':
     run_tests()
