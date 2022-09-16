@@ -1,6 +1,5 @@
 """Module for handling symbolic function registration."""
 
-import functools
 import importlib
 import inspect
 import itertools
@@ -13,7 +12,7 @@ OpsetVersion = int
 
 
 def _dispatch_opset_version(
-    target: OpsetVersion, available_opsets: Collection[OpsetVersion]
+    target: OpsetVersion, registered_opsets: Collection[OpsetVersion]
 ) -> Optional[OpsetVersion]:
     """Finds the registered opset given a target opset version and the available opsets.
 
@@ -24,27 +23,27 @@ def _dispatch_opset_version(
     Returns:
         The registered opset version.
     """
-    if not available_opsets:
+    if not registered_opsets:
         return None
-    available_versions = sorted(available_opsets)
+    registered_versions = sorted(registered_opsets)
     # Linear search for the opset version, which is fine since the number of opset
     # versions is small.
 
     # Always round toward opset 9 (ONNX_BASE_OPSET).
     # Count down until opset 9 is reached.
-    for version in reversed(available_versions):
+    for version in reversed(registered_versions):
         if _constants.ONNX_BASE_OPSET <= version <= target:
             return version
 
-    for version in available_versions:
+    for version in registered_versions:
         # Count back up until _constants.ONNX_BASE_OPSET
         if target <= version <= _constants.ONNX_BASE_OPSET:
             return version
 
     assert (
-        not available_versions
-        or _constants.ONNX_BASE_OPSET <= target < available_versions[0]
-        or available_versions[-1] < _constants.ONNX_BASE_OPSET < target
+        not registered_versions
+        or _constants.ONNX_BASE_OPSET <= target < registered_versions[0]
+        or registered_versions[-1] < _constants.ONNX_BASE_OPSET <= target
     )
     return None
 
@@ -73,11 +72,9 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
     def remove_override(self, key: _K) -> None:
         """Un-overrides a key-value pair."""
         self._overrides.pop(key, None)  # type: ignore[arg-type]
-        self._merged = {**self._base, **self._overrides}
-
-    def overrides(self):
-        """Returns the overridden keys."""
-        return self._overrides.keys()
+        self._merged.pop(key, None)  # type: ignore[arg-type]
+        if key in self._base:
+            self._merged[key] = self._base[key]
 
     def overridden(self, key: _K) -> bool:
         """Checks if a key-value pair is overridden."""
@@ -90,9 +87,10 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
 
-    def __setitem__(self, key: _K, value: _V) -> None:
+    def set_base(self, key: _K, value: _V) -> None:
         self._base[key] = value
-        self._merged = {**self._base, **self._overrides}
+        if key not in self._overrides:
+            self._merged[key] = value
 
     def get(self, key: _K, default: Optional[_V] = None):
         return self._merged.get(key, default)
@@ -116,8 +114,8 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
 class _SymbolicFunctionGroup:
     """Different versions of symbolic functions registered to the same name.
 
-    O(n) search is performed to find the most recent version of the op.
-    The results are cached for faster lookup.
+    O(number of registered versions of an op) search is performed to find the most
+    recent version of the op.
 
     The registration is delayed until op is used to improve startup time.
 
@@ -139,8 +137,8 @@ class _SymbolicFunctionGroup:
             raise KeyError(key)
         return result
 
-    # NOTE: Remember to clear the cache when the _functions dictionary is updated.
-    @functools.lru_cache(maxsize=None)
+    # TODO(justinchuby): Add @functools.lru_cache(maxsize=None) if lookup time becomes
+    # a problem.
     def get(self, opset: OpsetVersion) -> Optional[Callable]:
         """Find the most recent version of the function."""
         version = _dispatch_opset_version(opset, self._functions)
@@ -163,8 +161,7 @@ class _SymbolicFunctionGroup:
                 f"Please report it on {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
                 errors.OnnxExporterWarning,
             )
-        self._functions[opset] = func
-        self.get.cache_clear()
+        self._functions.set_base(opset, func)
 
     def add_custom(self, func: Callable, opset: OpsetVersion) -> None:
         """Adds a custom symbolic function.
@@ -174,7 +171,6 @@ class _SymbolicFunctionGroup:
             opset: The corresponding opset version.
         """
         self._functions.override(opset, func)
-        self.get.cache_clear()
 
     def remove_custom(self, opset: OpsetVersion) -> None:
         """Removes a custom symbolic function.
@@ -188,7 +184,6 @@ class _SymbolicFunctionGroup:
             )
             return
         self._functions.remove_override(opset)
-        self.get.cache_clear()
 
     def get_min_supported(self) -> OpsetVersion:
         """Returns the lowest built-in opset version supported by the function."""
@@ -207,7 +202,7 @@ class SymbolicRegistry:
         self._registry: Dict[str, _SymbolicFunctionGroup] = {}
 
     def register(
-        self, name: str, opset: OpsetVersion, func: Callable, custom=False
+        self, name: str, opset: OpsetVersion, func: Callable, custom: bool = False
     ) -> None:
         """Registers a symbolic function.
 
