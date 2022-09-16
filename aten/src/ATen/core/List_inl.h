@@ -221,12 +221,12 @@ typename List<T>::iterator List<T>::end() const {
 }
 
 template<class T>
-typename List<T>::iterator List<T>::rbegin() const {
+typename List<T>::reverse_iterator List<T>::rbegin() const {
   return iterator(impl_->list.rbegin());
 }
 
 template<class T>
-typename List<T>::iterator List<T>::rend() const {
+typename List<T>::reverse_iterator List<T>::rend() const {
   return iterator(impl_->list.rend());
 }
 
