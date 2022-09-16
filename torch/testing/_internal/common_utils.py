@@ -1991,12 +1991,12 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        if TEST_WITH_TORCHINDUCTOR:
-            super_run = torchdynamo.optimize("inductor")(super().run)
-            super_run(result=result)
-        elif TEST_WITH_TORCHDYNAMO:
+        if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
-            super_run = torchdynamo.optimize("eager")(super().run)
+            if TEST_WITH_TORCHINDUCTOR:
+                super_run = torchdynamo.optimize("inductor")(super().run)
+            else:
+                super_run = torchdynamo.optimize("eager")(super().run)
             super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
