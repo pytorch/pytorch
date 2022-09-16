@@ -963,4 +963,4 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
     csan.enable_cuda_sanitizer()
 
-from ._dispatch import python
+torch._C._set_python_dispatcher(True)
