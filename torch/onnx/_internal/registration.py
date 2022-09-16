@@ -278,9 +278,7 @@ def discover_and_register_all_symbolic_opsets() -> None:
     simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
     Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
     """
-    for opset in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
+    for opset in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         module = importlib.import_module(f"torch.onnx.symbolic_opset{opset}")
         _register_module(module, opset)
 
