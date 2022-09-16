@@ -29,6 +29,7 @@ def dl_open_guard():
     if _SET_GLOBAL_FLAGS:
         sys.setdlopenflags(old_flags)
 
+
 def has_key(op, k):
     return (
         torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), k)
@@ -47,6 +48,7 @@ class PyOperatorABC(ABC):
     def name(self):
         pass
 
+
 is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
 # Equivalent to computeDispatchTableEntryWithDebug
@@ -56,24 +58,31 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
         return k
     # 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available
     cand = DispatchKey.CompositeExplicitAutogradNonFunctional
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
         return cand
     # 2.2 Use CompositeExplicitAutograd kernel if available
     cand = DispatchKey.CompositeExplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
         return cand
-    has_backend_kernel = (
-        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k))
-        or has_key(op, DispatchKey.CompositeExplicitAutograd)
-    )
+    has_backend_kernel = torch._C._dispatch_has_kernel_for_any_dispatch_key(
+        op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k)
+    ) or has_key(op, DispatchKey.CompositeExplicitAutograd)
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
     if (
         (k != DispatchKey.Undefined and is_included_in_alias(k, cand))  # type: ignore[attr-defined]
-            and has_key(op, cand) and not has_backend_kernel):
+        and has_key(op, cand)
+        and not has_backend_kernel
+    ):
         return cand
     cand = DispatchKey.CompositeImplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
         if (
             k == DispatchKey.AutogradOther
             and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined] # noqa: B950
@@ -227,7 +236,7 @@ class OpOverload(PyOperatorABC):
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
-        self.__annotations__ = None
+        self.__annotations__ = {}
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
@@ -251,9 +260,7 @@ class OpOverload(PyOperatorABC):
     def decompose(self, *args, **kwargs):
         # TODO: should this consult py_impl?
         dk = torch._C.DispatchKey.CompositeImplicitAutograd  # type: ignore[attr-defined]
-        if (
-            torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk)
-        ):
+        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
             return NotImplemented
@@ -287,6 +294,7 @@ class OpOverload(PyOperatorABC):
             key = torch._C._dispatch_key_parse(attr)
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             raise AttributeError()
 

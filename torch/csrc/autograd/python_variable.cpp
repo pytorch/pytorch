@@ -2209,7 +2209,8 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
     const char* ns = ns_str.c_str();
     const char* func_name = qualified_name.c_str() + pos + strlen("::");
 
-    py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
     if (overload_name == "") {
       return torch_api_function.attr("default").ptr();
     } else {
@@ -2278,7 +2279,6 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet ks,
     torch::jit::Stack* stack) const {
-
   py::gil_scoped_acquire g;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
@@ -2302,10 +2302,8 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   auto args = std::move(args_kwargs.first);
   auto kwargs = std::move(args_kwargs.second);
 
-  py::object obj = py::reinterpret_steal<py::object>(PyObject_Call(
-      handler.ptr(),
-      args.ptr(),
-      kwargs.ptr()));
+  py::object obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
   if (obj == nullptr) {
     throw python_error();
