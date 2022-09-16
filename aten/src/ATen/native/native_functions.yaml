@@ -9023,7 +9023,7 @@
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
-    Meta, CompositeExplicitAutograd: alias
+    CompositeExplicitAutograd: alias
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   variants: function
