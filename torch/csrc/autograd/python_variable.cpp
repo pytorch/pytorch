@@ -2283,39 +2283,35 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet ks,
     torch::jit::Stack* stack) const {
+  py::gil_scoped_acquire g;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
+
+  c10::DispatchKey k = ks.highestPriorityTypeId();
+  auto handler = torch_api_function_overload.attr(toString(k));
+  if (handler.ptr() == nullptr) {
+    throw python_error();
+  }
+  if (py::isinstance<c10::DispatchKey>(handler)) {
+    // NB: not redispatch, as that will permanently remove the python
+    // dispatcher for subsequent redispatches
+    op.callBoxedForDispatchKey(py::cast<c10::DispatchKey>(handler), *stack);
+    return;
+  }
+
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // The plan: convert all the arguments back into PyObjects,
-  // extracting out the tensor handles, then call
-  // handle_torch_function_no_python_arg_parser
-  // NB: at the point arguments are pushed to the stack, ALL defaults
-  // are already present
-
-  py::gil_scoped_acquire g;
-
-  std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
   auto args = std::move(args_kwargs.first);
   auto kwargs = std::move(args_kwargs.second);
 
-  auto python_dispatcher =
-      c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(python_dispatcher);
+  py::object obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
-  py::object obj = py::reinterpret_steal<py::object>(PyObject_CallFunction(
-      python_dispatcher,
-      "OOOO",
-      torch_api_function_overload,
-      py::cast(ks).ptr(),
-      args.ptr(),
-      kwargs.ptr()));
-
-  if (obj == nullptr)
+  if (obj == nullptr) {
     throw python_error();
+  }
 
   pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }
