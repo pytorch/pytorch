@@ -6151,7 +6151,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
-    @skipIfTorchDynamo("requires https://github.com/pytorch/pytorch/pull/83567")
     def test_parsing_intlist(self):
         #  parse with integer variables
         self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
@@ -6844,7 +6843,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
-    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_Size_scalar(self):
         three = torch.tensor(3)
         two = torch.tensor(2)
