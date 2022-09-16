@@ -1205,8 +1205,8 @@ def export_to_pretty_string(
         opset_version = _constants.ONNX_DEFAULT_OPSET
     if custom_opsets is None:
         custom_opsets = {}
-    symbolic_helper._set_opset_version(opset_version)
-    symbolic_helper._set_operator_export_type(operator_export_type)
+    GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
 
     with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(
@@ -1264,7 +1264,7 @@ def unconvertible_ops(
     """
 
     opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
-    symbolic_helper._set_opset_version(opset_version)
+    GLOBALS.export_onnx_opset_version = opset_version
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     with exporter_context(model, training, False):
@@ -1443,8 +1443,8 @@ def _export(
         # If you really know what you're doing, you can turn
         # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
         # (to preserve whatever the original training mode was.)
-        symbolic_helper._set_opset_version(opset_version)
-        symbolic_helper._set_operator_export_type(operator_export_type)
+        GLOBALS.export_onnx_opset_version = opset_version
+        GLOBALS.operator_export_type = operator_export_type
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
                 keep_initializers_as_inputs, operator_export_type, opset_version
