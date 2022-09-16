@@ -52,16 +52,16 @@ class TestOverrideDict(common_utils.TestCase):
         ] = registration.OverrideDict()
 
     def test_get_item_returns_base_value_when_no_override(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
 
         self.assertEqual(self.override_dict["a"], 42)
         self.assertEqual(self.override_dict["b"], 0)
         self.assertEqual(len(self.override_dict), 2)
 
     def test_get_item_returns_overridden_value_when_override(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
         self.override_dict.override("a", 100)
         self.override_dict.override("c", 1)
 
@@ -71,14 +71,14 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertEqual(len(self.override_dict), 3)
 
     def test_get_item_raises_key_error_when_not_found(self):
-        self.override_dict["a"] = 42
+        self.override_dict.set_base("a", 42)
 
         with self.assertRaises(KeyError):
             self.override_dict["nonexistent_key"]
 
     def test_get_returns_overridden_value_when_override(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
         self.override_dict.override("a", 100)
         self.override_dict.override("c", 1)
 
@@ -88,13 +88,13 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertEqual(len(self.override_dict), 3)
 
     def test_get_returns_none_when_not_found(self):
-        self.override_dict["a"] = 42
+        self.override_dict.set_base("a", 42)
 
         self.assertEqual(self.override_dict.get("nonexistent_key"), None)
 
     def test_in_base_returns_true_for_base_value(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
         self.override_dict.override("a", 100)
         self.override_dict.override("c", 1)
 
@@ -108,8 +108,8 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertFalse(self.override_dict.in_base("nonexistent_key"))
 
     def test_overridden_returns_true_for_overridden_value(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
         self.override_dict.override("a", 100)
         self.override_dict.override("c", 1)
 
@@ -118,17 +118,9 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertTrue(self.override_dict.overridden("c"))
         self.assertFalse(self.override_dict.overridden("nonexistent_key"))
 
-    def test_overrides_returns_all_keys_overridden(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
-        self.override_dict.override("a", 100)
-        self.override_dict.override("c", 1)
-
-        self.assertEqual(set(self.override_dict.overrides()), {"a", "c"})
-
     def test_remove_override_removes_overridden_value(self):
-        self.override_dict["a"] = 42
-        self.override_dict["b"] = 0
+        self.override_dict.set_base("a", 42)
+        self.override_dict.set_base("b", 0)
         self.override_dict.override("a", 100)
         self.override_dict.override("c", 1)
 
@@ -139,7 +131,6 @@ class TestOverrideDict(common_utils.TestCase):
         self.override_dict.remove_override("c")
         self.assertEqual(self.override_dict["a"], 42)
         self.assertEqual(self.override_dict.get("c"), None)
-        self.assertEqual(set(self.override_dict.overrides()), set())
         self.assertFalse(self.override_dict.overridden("a"))
         self.assertFalse(self.override_dict.overridden("c"))
 
@@ -152,9 +143,9 @@ class TestOverrideDict(common_utils.TestCase):
         self.assertNotIn("a", self.override_dict)
 
     def test_overriden_key_precededs_base_key_regardless_of_insert_order(self):
-        self.override_dict["a"] = 42
+        self.override_dict.set_base("a", 42)
         self.override_dict.override("a", 100)
-        self.override_dict["a"] = 0
+        self.override_dict.set_base("a", 0)
 
         self.assertEqual(self.override_dict["a"], 100)
         self.assertEqual(len(self.override_dict), 1)
@@ -165,7 +156,7 @@ class TestOverrideDict(common_utils.TestCase):
         self.override_dict.override("a", 1)
         if not self.override_dict:
             self.fail("OverrideDict should be true when not empty")
-        self.override_dict["a"] = 42
+        self.override_dict.set_base("a", 42)
         if not self.override_dict:
             self.fail("OverrideDict should be true when not empty")
         self.override_dict.remove_override("a")
