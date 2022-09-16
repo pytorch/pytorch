@@ -821,10 +821,10 @@ class TestOperators(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
-        skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
+        xfail('linalg.det'),
+        xfail('linalg.det', 'singular'),
         xfail('cumprod'),
         xfail('lu_solve'),
-        xfail('linalg.det'),
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
@@ -910,7 +910,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('linalg.det'),
         xfail('linalg.eig'),
         xfail('linalg.householder_product'),
         xfail('lu'),
@@ -922,7 +921,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),
         xfail('prod'),
         xfail('put'),
-        skip('linalg.det'),  # https://github.com/pytorch/functorch/issues/961
         xfail('quantile'),
         xfail('renorm'),
         xfail('take'),
