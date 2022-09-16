@@ -158,7 +158,6 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
 }
 
 Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
-  //TODO Add in device check
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -171,7 +170,6 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
 
-  //TODO Fix mask check 
   auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
   if (std::get<0>(masked_fill_dispatch)) {
     return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
@@ -181,6 +179,8 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
   if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
     value_ = value.to(self.device());
   }
+  TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ", value.device(), " for value tensor");
+
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
