@@ -23,6 +23,8 @@ from torch.onnx import symbolic_helper
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+__all__ = ["layer_norm"]
+
 
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
 def layer_norm(

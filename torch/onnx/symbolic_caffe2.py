@@ -1,38 +1,38 @@
 import importlib
 import inspect
 
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9, symbolic_registry
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import registration
 
 
 def register_quantized_ops(domain: str, version: int):
-    # Register all the non-quantized ops
-    symbolic_registry.register_version("", version)
     # Register all quantized ops
     module = importlib.import_module("torch.onnx.symbolic_caffe2")
-    symbolic_registry._symbolic_versions["caffe2"] = module
-    quant_version_ops = inspect.getmembers(
-        symbolic_registry._symbolic_versions["caffe2"]
-    )
-    for op in quant_version_ops:
-        if inspect.isfunction(op[1]) and not symbolic_registry.is_registered_op(
-            op[0], domain, version
+    quant_version_ops = inspect.getmembers(module)
+    aten_q_ops = {
+        "relu",
+        "_empty_affine_quantized",
+        "dequantize",
+        "quantize_per_tensor",
+        "upsample_nearest2d",
+        "avg_pool2d",
+        "reshape",
+        "slice",
+        "cat",
+        "max_pool2d",
+        "sigmoid",
+    }
+    for op, func in quant_version_ops:
+        name = f"{domain}::{op}"
+        if inspect.isfunction(func) and not registration.registry.is_registered_op(
+            name, version
         ):
-            aten_q_ops = [
-                "relu",
-                "_empty_affine_quantized",
-                "dequantize",
-                "quantize_per_tensor",
-                "upsample_nearest2d",
-                "avg_pool2d",
-                "reshape",
-                "slice",
-                "cat",
-                "max_pool2d",
-                "sigmoid",
-            ]
-            if op[0] in aten_q_ops:
-                symbolic_registry.register_op(op[0], op[1], "", version)
-            symbolic_registry.register_op(op[0], op[1], domain, version)
+            if op in aten_q_ops:
+                # Override the builtin aten ops
+                registration.registry.register(
+                    f"aten::{op}", version, func, custom=True
+                )
+            registration.registry.register(name, version, func)
 
 
 def _permute_helper(g, input, axes):
