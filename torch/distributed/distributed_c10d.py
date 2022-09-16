@@ -50,7 +50,8 @@ __all__ = [
     'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
-    'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks'
+    'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
+    'reduce_op',
 ]
 
 _MPI_AVAILABLE = True
