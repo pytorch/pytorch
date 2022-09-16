@@ -741,8 +741,6 @@ class FakeTensorMode(TorchDispatchMode):
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
-                if symbolic_shapes.is_symbolic_op(func):
-                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
                     raise RuntimeError(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
