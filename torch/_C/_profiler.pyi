@@ -90,6 +90,12 @@ class _EventType(Enum):
 class _Inputs:
     shapes: List[List[int]]
     dtypes: List[str]
+    tensor_metadata: List[Optional[_TensorMetadata]]
+
+class _TensorMetadata:
+    impl_ptr: Optional[int]
+    storage_data_ptr: Optional[int]
+    id: Optional[int]
 
 class _ExtraFields_TorchOp:
     allow_tf32_cublas: bool
