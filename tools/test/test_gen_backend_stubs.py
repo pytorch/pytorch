@@ -3,10 +3,10 @@
 import os
 import tempfile
 import unittest
+from typing import Optional
 
 import expecttest
 from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
-from typing import Optional
 
 from torchgen.gen_backend_stubs import run
 
@@ -26,7 +26,9 @@ class TestGenBackendStubs(expecttest.TestCase):
             fp.flush()
             run(fp.name, "", True)
 
-    def get_errors_from_gen_backend_stubs(self, yaml_str: str, *, kernels_str: Optional[str] = None) -> str:
+    def get_errors_from_gen_backend_stubs(
+        self, yaml_str: str, *, kernels_str: Optional[str] = None
+    ) -> str:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)
             fp.flush()
@@ -290,15 +292,18 @@ autograd:
         kernels_str = """\
 at::Tensor& XLANativeFunctions::absWRONG(at::Tensor& self) {}
 at::Tensor& XLANativeFunctions::add(at::Tensor& self) {}"""
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str, kernels_str=kernels_str)
+        output_error = self.get_errors_from_gen_backend_stubs(
+            yaml_str, kernels_str=kernels_str
+        )
         self.assertExpectedInline(
-            output_error, '''\
+            output_error,
+            """\
 
 XLANativeFunctions is missing a kernel definition for abs. We found 0 kernel(s) with that name,
 but expected 1 kernel(s). The expected function schemas for the missing operator are:
 at::Tensor abs(const at::Tensor & self)
 
-'''
+""",
         )
 
 
