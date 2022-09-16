@@ -75,7 +75,7 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
     if (
-        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))  # type: ignore[attr-defined]
+        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))
         and has_key(op, cand)
         and not has_backend_kernel
     ):
@@ -86,7 +86,7 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
     ):
         if (
             k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined] # noqa: B950
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
@@ -132,9 +132,9 @@ class PyOperator(PyOperatorABC):
 
             dispatch_key = dispatch_key_or_mode
             assert (
-                dispatch_key != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+                dispatch_key != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
-            assert isinstance(dispatch_key, torch._C.DispatchKey)  # type: ignore[attr-defined]
+            assert isinstance(dispatch_key, torch._C.DispatchKey)
             assert dispatch_key not in self.table
             self.table[dispatch_key] = fn
             return fn
@@ -142,7 +142,7 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
+        if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
             curr_mode = type(torch._C._get_torch_dispatch_mode())
             assert (
@@ -174,10 +174,10 @@ class PyOperator(PyOperatorABC):
     # as opposed to being this sort of explicit thing where ops are a little too key aware...
     def _fallthrough_fn(self, operator, dispatch_key):
         def inner(*args, **kwargs):
-            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)  # type: ignore[attr-defined]
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
             all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
                 args, kwargs
-            )  # type: ignore[attr-defined]
+            )
             return self.dispatch(
                 all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
             )
@@ -206,10 +206,10 @@ def _get_tensors(args, kwargs):
 # Note - this should maintain identical impl to the C++ dispatcher key extraction logic
 # at ATen/core/dispatch/DispatchKeyExtractor.h
 def key_extractor(tensors):
-    key_set = torch._C._dispatch_tls_local_include_set()  # type: ignore[attr-defined]
+    key_set = torch._C._dispatch_tls_local_include_set()
     for tensor in tensors:
-        key_set = key_set | torch._C._dispatch_keys(tensor)  # type: ignore[attr-defined]
-    key_set = key_set - torch._C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
+        key_set = key_set | torch._C._dispatch_keys(tensor)
+    key_set = key_set - torch._C._dispatch_tls_local_exclude_set()
     return key_set
 
 
@@ -259,9 +259,14 @@ class OpOverload(PyOperatorABC):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
     def decompose(self, *args, **kwargs):
-        # TODO: should this consult py_impl?
-        dk = torch._C.DispatchKey.CompositeImplicitAutograd  # type: ignore[attr-defined]
-        if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        if dk in self.py_kernels:
+            # NB: This branch is not too necessary anymore, because we can
+            # apply Python CompositeImplicitAutograd *before* tracing
+            # using Python dispatcher (also taking advantage of the autograd
+            # formula).  But it's included for completeness
+            return self.py_kernels[dk](*args, **kwargs)
+        elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
             return NotImplemented
@@ -277,9 +282,9 @@ class OpOverload(PyOperatorABC):
                 self.python_key_mode_table[mode] = fn
                 return fn
 
-            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)  # type: ignore[attr-defined]
+            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)
             assert (
-                dispatch_key_or_mode != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+                dispatch_key_or_mode != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
 
             self.py_kernels[dispatch_key_or_mode] = fn
@@ -299,7 +304,7 @@ class OpOverload(PyOperatorABC):
             traceback.print_exc()
             raise AttributeError()
 
-        if key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
+        if key == torch._C.DispatchKey.Python:
             if not self.python_key_mode_table:
                 setattr(self, attr, key)
                 return key
