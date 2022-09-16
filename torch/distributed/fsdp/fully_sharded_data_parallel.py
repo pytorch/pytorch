@@ -1033,6 +1033,7 @@ class FullyShardedDataParallel(nn.Module):
             self.cpu_offload.offload_params,
             self.mixed_precision.param_dtype,
             self.mixed_precision.reduce_dtype,
+            self.mixed_precision.keep_casted_gradients,
         )
         self._fsdp_wrapped_module = FlattenParamsWrapper(
             module,
@@ -1072,7 +1073,8 @@ class FullyShardedDataParallel(nn.Module):
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
-        # where a module's forward involves multiple handles.
+        # where a module's forward involves multiple handles. The two forward
+        # order structures are populated and finalized in the first iteration.
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
@@ -1529,8 +1531,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not handles:
             return
-        p_assert(
-            len(handles) == len(free_unsharded_flat_params),
+        assert len(handles) == len(free_unsharded_flat_params), (
             "Expects both lists to have equal length but got "
             f"{len(handles)} and {len(free_unsharded_flat_params)}"
         )
@@ -1864,7 +1865,7 @@ class FullyShardedDataParallel(nn.Module):
         # transfer.
         if self.cpu_offload.offload_params:
             assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-            p._local_shard = p._local_shard.pin_memory()  # type: ignore[attr-defined]
+            p._local_shard.pin_memory()  # type: ignore[attr-defined]
             # When offloading parameters, also move the grad shard to CPU during
             # backward pass. In this case, it's important to pre-allocate the
             # CPU grad shard in pinned memory so that we can do a non-blocking
@@ -2655,11 +2656,7 @@ class FullyShardedDataParallel(nn.Module):
             )
             self._pre_forward(self._handles, unshard_fn, unused, unused)
             for handle in self._handles:
-                p_assert(
-                    handle.flat_param.device == self.compute_device,
-                    "Expected `FlatParameter` to be on the compute device "
-                    f"{self.compute_device} but got {handle.flat_param.device}"
-                )
+                assert handle.flat_param.device == self.compute_device
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return self._post_forward(self._handles, reshard_fn, unused, unused, output)
 
@@ -2769,7 +2766,7 @@ class FullyShardedDataParallel(nn.Module):
         inputs appropriately. If this is called on a non-root FSDP instance,
         then the forward inputs are returned directly.
         """
-        p_assert(self._is_root is not None, "Expects a root FSDP to have been set")
+        assert self._is_root is not None, "Expects a root FSDP to have been set"
         if not self._is_root:
             return args, kwargs
         self._wait_for_previous_optim_step()
@@ -3105,11 +3102,9 @@ class FullyShardedDataParallel(nn.Module):
                 continue
             # Get the `AccumulateGrad` object
             temp_flat_param = flat_param.expand_as(flat_param)
-            p_assert(
-                temp_flat_param.grad_fn is not None,
-                "The `grad_fn` is needed to access the `AccumulateGrad` and "
-                "register the post-backward hook"
-            )
+            assert (
+                temp_flat_param.grad_fn is not None
+            ), "The `grad_fn` is needed to access the `AccumulateGrad` and register the post-backward hook"
             acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
             hook_handle = acc_grad.register_hook(
                 functools.partial(self._post_backward_hook, handle)

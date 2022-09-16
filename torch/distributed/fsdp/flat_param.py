@@ -108,6 +108,7 @@ class HandleConfig:
     offload_params: bool
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
+    keep_low_precision_grads: Optional[bool] = False
 
 
 class FlatParameter(nn.Parameter):
@@ -801,7 +802,7 @@ class FlatParamHandle:
                     # _post_backward_hook and assign back in full precision
                     # in _wait_for_post_backward.
                     if (
-                        self._mixed_precision_keep_low_precision_grads() and
+                        self._config.keep_low_precision_grads and
                         flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype
                     ):
                         flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)

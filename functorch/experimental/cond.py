@@ -1,12 +1,11 @@
 import torch
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
-from torch._ops import PyOperator
+from functorch.experimental.ops import PyOperator, fallthrough_fn
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.fx.experimental.proxy_tensor import track_tensor_tree
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
 """
@@ -14,9 +13,6 @@ We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
 from contextlib import contextmanager
-
-cond = PyOperator('cond')
-
 
 # TODO(voz): Move out somewhere else once other py dispatched ops need it
 @contextmanager
@@ -102,7 +98,6 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@cond.py_impl(DispatchKey.CPU)
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = torch._C._get_torch_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU key"
@@ -112,7 +107,6 @@ def cond_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.AutogradCPU)
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
@@ -123,16 +117,21 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
     return cond(pred, true_fn, false_fn, *operands)
 
 
-@cond.py_impl(ProxyTorchDispatchMode)
-def inner(pred, true_fn, false_fn, operands):
-    mode = torch._C._get_torch_dispatch_mode()
-    assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with suspend_mode(mode):
-        res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
-    return res
+def python_fallback(op):
+    def inner(pred, true_fn, false_fn, operands):
+        mode = torch._C._get_torch_dispatch_mode()
+        assert (mode is not None), "Mode should always be enabled for python fallback key"
+        with suspend_mode(mode):
+            res = trace_cond(mode, op, pred, true_fn, false_fn, operands)
+        return res
+
+    return inner
 
 
-# TODO(voz): Make this automatic for keys, this is very ugly atm
-cond.fallthrough(DispatchKey.PythonTLSSnapshot)
-cond.fallthrough(DispatchKey.ADInplaceOrView)
-cond.fallthrough(DispatchKey.BackendSelect)
+cond = PyOperator('cond')
+cond.impl(DispatchKey.CPU, cond_dense)
+cond.impl(DispatchKey.Python, python_fallback(cond))
+cond.impl(DispatchKey.PythonTLSSnapshot, fallthrough_fn)
+cond.impl(DispatchKey.AutogradCPU, cond_autograd)
+cond.impl(DispatchKey.ADInplaceOrView, fallthrough_fn)
+cond.impl(DispatchKey.BackendSelect, fallthrough_fn)
