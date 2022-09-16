@@ -6390,6 +6390,40 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
+Tensor scatter_reduce_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int dim,
+    const Tensor& index,
+    const Tensor& src_p,
+    const Tensor& src_t,
+    c10::string_view reduce,
+    bool include_self,
+    const Tensor& result) {
+  if (reduce == "sum" || reduce == "mean") {
+    // The function is linear
+    return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
+    //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
+    //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
+    //  keepdim);
+  } else if (reduce == "amin" || reduce == "amax") {
+    auto gather_result = at::gather(result, dim, index);
+    auto mask_self = self_p == result;
+    auto mask_src = src_p == gather_result;
+    auto masked_src_t = at::where(mask_src, src_t, 0.);
+    auto div =
+        mask_self.to(self_t.dtype())
+            .scatter_reduce(
+                dim, index, mask_src.to(self_t.dtype()), "sum", include_self);
+    return at::where(mask_self, self_t, 0.)
+        .scatter_reduce(dim, index, masked_src_t, "sum", include_self)
+        .div(div);
+  } else {
+    // Not implemented
+    return Tensor{};
+  }
+}
+
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,
     const Tensor& self,
