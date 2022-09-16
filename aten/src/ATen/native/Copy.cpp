@@ -14,6 +14,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+#include <ATen/native/cpu/utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -34,36 +35,53 @@ namespace {
 
 using namespace at;
 
-bool fbgemm_copy_transpose_valid(const Tensor& self, const Tensor& src) {
-  const int MIN_SZ = 16 * 32;
+inline bool fbgemm_copy_transpose_valid(const Tensor& self, const Tensor& src) {
+  const int64_t MIN_SZ = 2048;
+  // The minimum number of rows of the transpose block
+  const int64_t fbgemm_bsize = 16;
+  auto nelms = src.numel();
+
+  if (nelms <= 1)
+    return false;
+
   auto srows = src.size(src.dim() - 1);
   auto scols = src.size(src.dim() - 2);
-  auto nelms = src.numel();
-  auto block_size = 16 < srows ? 16 : srows;
-  auto block_elms = block_size * scols;
-  auto ntrans = (nelms + block_elms - 1) / block_elms;
+  if (self.dim() != src.dim() || src.dim() < 2 || srows < MIN_SZ)
+    return false;
 
-  if (nelms < MIN_SZ || ntrans / at::get_num_threads() < 1)
+  // Set the number of rows of the transpose block
+  auto block_rsize = at::internal::GRAIN_SIZE / scols;
+  // Align block_rsize with fbgemm_bsize
+  block_rsize = block_rsize < fbgemm_bsize ? fbgemm_bsize : block_rsize;
+  block_rsize = block_rsize > fbgemm_bsize ? block_rsize - block_rsize % fbgemm_bsize : block_rsize;
+
+  auto block_elms = block_rsize * scols;
+  auto ntrans = (nelms + block_elms - 1) / block_elms;
+  // Check if the number of transpose blocks is enough to parallel
+  if (ntrans < at::get_num_threads())
       return false;
+
+  // Check if src and self are cpu tensors that self is contiguous and 
+  // src is in transposed memory format of self
   if ((self.device().is_cpu() && src.device().is_cpu()) &&
       (self.layout() == c10::kStrided) && (src.layout() == c10::kStrided) &&
       !self.is_sparse() && !src.is_sparse() && self.is_contiguous() &&
-      (self.is_conj() == src.is_conj()) && (self.is_neg() == src.is_neg()) &&
+      (self.is_neg() == src.is_neg()) &&
       !self.is_complex() && !src.is_complex() &&
-      self.sizes().equals(src.sizes()) && self.dim() >= 2 &&
-      // srows * scols >= MIN_SZ &&
-      (scols % block_size == 0 || block_size - scols % block_size <= 4) &&
-      (srows % block_size == 0 || block_size - srows % block_size <= 4) &&
+      self.sizes().equals(src.sizes()) &&
       src.stride(src.dim() - 2) == 1 && src.stride(src.dim() - 1) == scols &&
-      !(scols == 1 && srows == 1) &&
-      srows <= std::numeric_limits<int32_t>::max() &&
-      scols <= std::numeric_limits<int32_t>::max()) {
-      // Check if src is in contiguous blocks
-      for (long i = 0; i < src.dim() - 2; i++) {
-        if (!(src.stride(i) == (((i + 1) == (src.dim() - 2)) ?
-                src.stride(src.dim() - 1) * srows :  src.stride(i + 1) * src.size(i + 1)))){
-              return false;
-            }
+      !(scols == 1 && srows == 1)) {
+      // Check if src is in transposed contiguous memory
+      int64_t expected_stride = 0;
+      for (int64_t i = 0; i < src.dim() - 2; i++) {
+        if ((i + 1) == (src.dim() - 2)) {
+          expected_stride = src.stride(src.dim() - 1) * srows;
+        } else {
+          expected_stride = src.stride(i + 1) * src.size(i + 1);
+        }
+        if (src.stride(i) != expected_stride) {
+          return false;
+        }
       }
   } else {
     return false;
@@ -73,26 +91,30 @@ bool fbgemm_copy_transpose_valid(const Tensor& self, const Tensor& src) {
 }
 
 void fbgemm_copy_transpose_same_type(Tensor& self, const Tensor& src) {
+  const int64_t fbgemm_bsize = 16;
   auto srows = src.size(src.dim() - 1);
   auto scols = src.size(src.dim() - 2);
-  auto block_size = 16 < srows ? 16 : srows;
-  auto block_elms = block_size * scols;
-  auto nrows = src.numel() / scols;
+
+  auto block_rsize = at::divup(at::internal::GRAIN_SIZE, scols);
+  block_rsize = block_rsize > fbgemm_bsize ? block_rsize - block_rsize % fbgemm_bsize : block_rsize;
+  block_rsize = block_rsize < fbgemm_bsize ? fbgemm_bsize : block_rsize;
+  auto block_elms = block_rsize * scols;
   auto ntrans = at::divup(src.numel(), block_elms);
-  auto grain_size = std::max(at::internal::GRAIN_SIZE / block_elms, (int64_t)1);
+  auto nrows = src.numel() / scols;
+
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, src.scalar_type(),
     "fbgemm_transpose_copy_same_type", [&] {
     at::parallel_for(
     0,
     ntrans,
-    grain_size,
+    1,
     [&](int64_t begin, int64_t end) {
       for (int64_t i = begin; i < end; i++) {
-        int64_t row_n = i * block_size;
-        int64_t e = std::min(nrows, row_n + block_size);
+        int64_t row_n = i * block_rsize;
+        int64_t e = std::min(nrows, row_n + block_rsize);
         auto step = 1;
         for (int64_t j = row_n; j < e; j += step) {
-          step = std::min(std::min(srows - j % srows, block_size), e - j);
+          step = std::min(std::min(srows - j % srows, block_rsize), e - j);
           native::utils::transpose(
           step,
           scols,
@@ -239,10 +261,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       return self;
     }
 
-    if (fbgemm::fbgemmSupportedCPU() && fbgemm_copy_transpose_valid(self, src) &&
-      src.dtype() == self.dtype() && (src.dtype() == at::kFloat || src.dtype() == at::kBFloat16)) {
-      fbgemm_copy_transpose_same_type(self, src);
-      return self;
+    if (src.dtype() == self.dtype() && src.dtype() == at::kBFloat16 &&
+        fbgemm::fbgemmSupportedCPU() && fbgemm_copy_transpose_valid(self, src)) {
+     fbgemm_copy_transpose_same_type(self, src);
+     return self;
     }
   #endif
   if (self.is_same(src)) {

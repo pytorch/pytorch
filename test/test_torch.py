@@ -2796,6 +2796,29 @@ else:
             self.assertEqual(x, y)
 
     @onlyCPU
+    def test_transpose_copy(self, device):
+        for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
+            inputf = torch.randn(shape, dtype=torch.float, device=device)
+            inputbf = inputf.to(torch.bfloat16)
+            inputf_t = inputf.transpose(-1, -2)
+            inputbf_t = inputbf.transpose(-1, -2)
+            inputf_tc = inputf_t.contiguous()
+            inputbf_tc = inputbf_t.contiguous()
+            self.assertEqual(inputf_t, inputf_tc)
+            self.assertEqual(inputbf_t, inputbf_tc)
+            self.assertEqual(inputf.transpose(-1, -2), inputf_tc)
+            self.assertEqual(inputbf.transpose(-1, -2), inputbf_tc)
+            if len(shape) == 4:
+                inputf_p = inputf.permute(1, 0, 3, 2)
+                inputbf_p = inputbf.permute(1, 0, 3, 2)
+                inputf_pc = inputf_p.contiguous()
+                inputbf_pc = inputbf_p.contiguous()
+                self.assertEqual(inputf_p, inputf_pc)
+                self.assertEqual(inputbf_p, inputbf_pc)
+                self.assertEqual(inputf.permute(1, 0, 3, 2), inputf_pc)
+                self.assertEqual(inputbf.permute(1, 0, 3, 2), inputbf_pc)
+
+    @onlyCPU
     def test_bfloat16_float_copy(self, device):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
             input = torch.randn(shape, dtype=torch.float, device=device)
