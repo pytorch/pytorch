@@ -108,7 +108,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
               out.strides_.back().push_back(*tensor_size_strides_it++);
             }
           }
-          out.tensor_metadata_.emplace_back(md);
+          out.tensor_metadata_.emplace_back(TensorMetadata{md});
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
@@ -812,9 +812,9 @@ struct PairHash {
 };
 
 void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
-  // This problem is equivilent to: https://leetcode.com/problems/number-of-islands/
+  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
   // We first cluster events with a greedy index assignment, and then merge
-  // groups with overlap.
+  // groups that overlap.
 
   using storage_id_t = strong::type<
       size_t,

@@ -1292,9 +1292,9 @@ class TestTorchTidyProfiler(ProfilerTestCase):
                 node.extra_fields,
                 torch._C._profiler._ExtraFields_TorchOp)
             tensor_info = node.extra_fields.inputs.tensor_metadata[index]
-            self.assertIsNone(tensor_info.impl_ptr)
-            self.assertIsNone(tensor_info.storage_data_ptr)
-            self.assertIsNone(tensor_info.id)
+            self.assertIsNotNone(tensor_info.impl_ptr)
+            self.assertIsNotNone(tensor_info.storage_data_ptr)
+            self.assertIsNotNone(tensor_info.id)
             return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
 
         a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
