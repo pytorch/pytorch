@@ -3,9 +3,20 @@
 import importlib
 import inspect
 import warnings
-from typing import Callable, Collection, Dict, Generic, Optional, Set, TypeVar
+from typing import (
+    Callable,
+    Collection,
+    Dict,
+    Generic,
+    Optional,
+    Sequence,
+    Set,
+    TypeVar,
+    Union,
+)
 
 from torch.onnx import _constants, errors
+from torch.onnx._internal import _beartype
 
 OpsetVersion = int
 
@@ -63,6 +74,15 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
         self._overrides: Dict[_K, _V] = {}
         self._merged: Dict[_K, _V] = {}
 
+    def set_base(self, key: _K, value: _V) -> None:
+        self._base[key] = value
+        if key not in self._overrides:
+            self._merged[key] = value
+
+    def in_base(self, key: _K) -> bool:
+        """Checks if a key is in the base dictionary."""
+        return key in self._base
+
     def override(self, key: _K, value: _V) -> None:
         """Overrides a base key-value with a new pair."""
         self._overrides[key] = value
@@ -79,17 +99,8 @@ class OverrideDict(Generic[_K, _V], Collection[_K]):
         """Checks if a key-value pair is overridden."""
         return key in self._overrides
 
-    def in_base(self, key: _K) -> bool:
-        """Checks if a key is in the base dictionary."""
-        return key in self._base
-
     def __getitem__(self, key: _K) -> _V:
         return self._merged[key]
-
-    def set_base(self, key: _K, value: _V) -> None:
-        self._base[key] = value
-        if key not in self._overrides:
-            self._merged[key] = value
 
     def get(self, key: _K, default: Optional[_V] = None):
         return self._merged.get(key, default)
@@ -211,6 +222,9 @@ class SymbolicRegistry:
             opset: The opset version of the function to register.
             func: The symbolic function to register.
             custom: Whether the function is a custom function that overrides existing ones.
+
+        Raises:
+            ValueError: If the separator '::' is not in the name.
         """
         if "::" not in name:
             raise ValueError(
@@ -253,7 +267,6 @@ class SymbolicRegistry:
 
 def discover_and_register_all_symbolic_opsets() -> None:
     """Discover all symbolic functions.
-
     Opset 9 is the base version. It is selected as the base version because
         1. It is the first opset version supported by PyTorch export.
         2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
@@ -261,7 +274,6 @@ def discover_and_register_all_symbolic_opsets() -> None:
             we chose to handle them as special cases separately.
 
     Backward support for opset versions beyond opset 7 is not in our roadmap.
-
     For opset versions other than 9, by default they will inherit the symbolic functions defined in
     symbolic_opset9.py.
 
@@ -294,6 +306,77 @@ def _register_module(module, opset: OpsetVersion) -> None:
             if name in {"_len", "_list", "_any", "_all"}:
                 name = name[1:]
             registry.register(f"aten::{name}", opset, obj)
+
+
+@_beartype.beartype
+def onnx_symbolic(
+    name: str,
+    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
+    decorate: Optional[Sequence[Callable]] = None,
+    custom: bool = False,
+) -> Callable:
+    """Registers a symbolic function.
+
+    Usage::
+
+    ```
+    @onnx_symbolic("aten::symbolic_b", opset=10, decorate=[quantized_aten_handler(scale=1/128, zero_point=0)])
+    @symbolic_helper.parse_args("v", "v", "b")
+    def symbolic_b(g: _C.Graph, x: _C.Value, y: _C.Value, arg1: bool) -> _C.Value:
+        ...
+    ```
+
+    Args:
+        name: The qualified name of the function in the form of 'domain::op'.
+            E.g. 'aten::add'.
+        opset: The opset versions of the function to register at.
+        decorate: A sequence of decorators to apply to the function.
+        custom: Whether the function is a custom symbolic function.
+
+    Raises:
+        ValueError: If the separator '::' is not in the name.
+    """
+
+    def wrapper(func: Callable) -> Callable:
+        decorated = func
+        if decorate is not None:
+            for decorate_func in decorate:
+                decorated = decorate_func(decorated)
+
+        global registry
+        nonlocal opset
+        if isinstance(opset, OpsetVersion):
+            opset = (opset,)
+        for opset_version in opset:
+            registry.register(name, opset_version, decorated, custom=custom)
+
+        # Return the original function because the decorators in "decorate" are only
+        # specific to the instance being registered.
+        return func
+
+    return wrapper
+
+
+@_beartype.beartype
+def custom_onnx_symbolic(
+    name: str,
+    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
+    decorate: Optional[Sequence[Callable]] = None,
+) -> Callable:
+    """Registers a custom symbolic function.
+
+    Args:
+        name: the qualified name of the function.
+        opset: the opset version of the function.
+        decorate: a sequence of decorators to apply to the function.
+
+    Returns:
+        The decorator.
+
+    Raises:
+        ValueError: If the separator '::' is not in the name.
+    """
+    return onnx_symbolic(name, opset, decorate, custom=True)
 
 
 # The registry for all symbolic functions.
