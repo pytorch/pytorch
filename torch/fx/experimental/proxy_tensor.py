@@ -434,10 +434,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if not self.enable_tracing:
             return func(*args, **kwargs)
 
-        if symbolic_shapes.is_symbolic_op(func):
-            with self.restore():
-                return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
