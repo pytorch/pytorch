@@ -13705,9 +13705,9 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.skip, "TestCommon", "test_noncontiguous_samples"),
-               DecorateInfo(unittest.skip, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                # Reference doesn't support the pin_memory parameter
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # CPU randn generates different values based on the strides of out tensor
@@ -14225,7 +14225,7 @@ op_db: List[OpInfo] = [
                # linalg_vector_norm.default than original on output 0.
                # Original max diff: 2.560596747969157e-07,
                # Decomp max diff: 1.8187482915266173e-06
-               DecorateInfo(unittest.skip, 'TestDecomp', 'test_comprehensive',
+               DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestDecomp', 'test_comprehensive',
                             device_type='cpu', dtypes=(torch.float16,)),
            )),
     ShapeFuncInfo('repeat',
@@ -17324,10 +17324,10 @@ python_ref_db = [
                          'TestCommon',
                          'test_python_ref_executor'),
             # These tests expect the input to be a tensor or a sequence of tensors
-            DecorateInfo(unittest.skip, "TestCommon", "test_noncontiguous_samples"),
-            DecorateInfo(unittest.skip, 'TestMathBits', 'test_neg_view'),
-            DecorateInfo(unittest.skip, 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.skip, 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_neg_conj_view'),
         ),
     ),
     PythonRefInfo(
