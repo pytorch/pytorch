@@ -12,7 +12,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
@@ -1161,69 +1161,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
-    return skipIfTorchDynamo(expectedFailure('meta')(fn))
+    return skipIfTorchDynamo()(expectedFailure('meta')(fn))
 
 def expectedFailureXLA(fn):
     return expectedFailure('xla')(fn)
-
-# This decorator checks that the decorated function produces a nondeterministic
-# alert for the expected device types
-class expectedAlertNondeterministic:
-    # Args:
-    #
-    #   caller_name (str): Name of the operation that produces the
-    #       nondeterministic alert. This name is expected to appear
-    #       in the error/warning message.
-    #
-    #   device_types (list[str], optional): If provided, the alert is
-    #       expected to only be triggered for the specified devices, and
-    #       no others. If None, then the alert is expected to be triggered
-    #       for all devices. Default: None
-    #
-    def __init__(self, caller_name, device_types=None):
-        if device_types is not None:
-            assert isinstance(device_types, list)
-            for device_type in device_types:
-                assert isinstance(device_type, str)
-        self.device_types = device_types
-        self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-
-    def __call__(self, fn):
-        @wraps(fn)
-        def efail_fn(slf, device, *args, **kwargs):
-            should_alert = self.device_types is None or slf.device_type in self.device_types
-
-            # Check that errors are thrown correctly
-            with DeterministicGuard(True):
-                if should_alert:
-                    with slf.assertRaisesRegex(
-                            RuntimeError,
-                            self.error_message,
-                            msg='expected a non-deterministic error, but it was not raised'):
-                        fn(slf, device, *args, **kwargs)
-
-                else:
-                    # If a nondeterministic error is not expected, make sure
-                    # that it is not raised
-                    try:
-                        return fn(slf, device, *args, **kwargs)
-                    except RuntimeError as e:
-                        if 'does not have a deterministic implementation' in str(e):
-                            slf.fail(
-                                'did not expect non-deterministic error message, '
-                                + 'but got one anyway: "' + str(e) + '"')
-                        # Reraise exceptions unrelated to nondeterminism
-                        raise
-
-            # Check that warnings are thrown correctly
-            if should_alert:
-                with DeterministicGuard(True, warn_only=True):
-                    with slf.assertWarnsRegex(
-                            UserWarning,
-                            self.error_message):
-                        fn(slf, device, *args, **kwargs)
-
-        return efail_fn
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):

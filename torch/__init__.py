@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable
+from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
 import builtins
 
 __all__ = [
@@ -841,6 +841,7 @@ from torch.autograd import (
 )
 from torch import fft as fft
 from torch import futures as futures
+from torch import nested as nested
 from torch import nn as nn
 from torch import optim as optim
 import torch.optim._multi_tensor
@@ -907,7 +908,10 @@ from torch._classes import classes
 #         buffer = z
 #     return min - torch.log1p(z), buffer
 #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__ and not torch._C._is_deploy_enabled():  # type: ignore[attr-defined]
+if (os.environ.get("PYTORCH_JIT", "1") == "1" and
+        __debug__ and
+        not torch._C._is_deploy_enabled() and
+        os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
     from torch._decomp import decompositions_for_jvp
     del decompositions_for_jvp
 
@@ -948,7 +952,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from . import _masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import solve
+from ._linalg_utils import eig, solve
 
 
 def _register_device_module(device_type, module):
@@ -970,7 +974,7 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy':
+if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
