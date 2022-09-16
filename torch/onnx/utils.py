@@ -1780,6 +1780,7 @@ def _run_symbolic_function(
         onnx_block=block,
         original_node=node,
         params_dict=_params_dict,
+        env=env,
     )
 
     try:
