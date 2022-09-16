@@ -91,15 +91,6 @@
     "Union",
     "get_combined_dict"
   ],
-  "torch.ao.quantization.backend_config.utils": [
-    "Any",
-    "Dict",
-    "Callable",
-    "List",
-    "Union",
-    "Tuple",
-    "Pattern"
-  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
@@ -340,6 +331,7 @@
     "Dict",
     "List",
     "Optional",
+    "Set",
     "Tuple",
     "Union",
     "classproperty"
@@ -414,18 +406,6 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks": [
-    "Any",
-    "GradBucket"
-  ],
-  "torch.distributed.algorithms.ddp_comm_hooks.default_hooks": [
-    "Any",
-    "Callable"
-  ],
-  "torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks": [
-    "Any",
-    "Callable"
-  ],
   "torch.distributed.algorithms.model_averaging.utils": [
     "Dict",
     "Iterable",
@@ -438,34 +418,6 @@
     "DistAutogradContext",
     "backward",
     "get_gradients"
-  ],
-  "torch.distributed.distributed_c10d": [
-    "AllToAllOptions",
-    "AllreduceCoalescedOptions",
-    "AllreduceOptions",
-    "BarrierOptions",
-    "BroadcastOptions",
-    "Callable",
-    "DebugLevel",
-    "Dict",
-    "GatherOptions",
-    "Optional",
-    "PrefixStore",
-    "ProcessGroup",
-    "ProcessGroupGloo",
-    "ReduceOp",
-    "ReduceOptions",
-    "ReduceScatterOptions",
-    "ScatterOptions",
-    "Store",
-    "Tuple",
-    "Union",
-    "get_debug_level",
-    "register_rendezvous_handler",
-    "rendezvous",
-    "timedelta",
-    "ProcessGroupMPI",
-    "ProcessGroupNCCL"
   ],
   "torch.distributed.elastic.events": [
     "Dict",
@@ -1224,6 +1176,9 @@
   ],
   "torch.multiprocessing.spawn": [
     "Optional"
+  ],
+  "torch.nested": [
+    "to_padded_tensor"
   ],
   "torch.nn.common_types": [
     "Optional",
