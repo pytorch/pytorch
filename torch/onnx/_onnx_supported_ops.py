@@ -24,13 +24,15 @@ class _TorchSchema:
             self.opsets = []
 
     def __str__(self) -> str:
-        s = f"{self.name}.{self.overload_name}("
-        s += ", ".join(self.arguments)
-        s += ") -> ("
-        s += ", ".join(self.returns)
-        s += ")"
-        s += " in opsets "
-        s += ", ".join(str(opset) for opset in self.opsets)
+        s = (
+            f"{self.name}.{self.overload_name}("
+            + ", ".join(self.arguments)
+            + ") -> ("
+            + ", ".join(self.returns)
+            + ")"
+            + " in opsets "
+            + ", ".join(str(opset) for opset in self.opsets)
+        )
         return s
 
     def __hash__(self):
@@ -50,14 +52,6 @@ class _TorchSchema:
         return "backward" in self.name
 
 
-def _all_aten_forward_schemas():
-    """Creates a list of _TorchSchema for all aten schemas."""
-    torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
-    torch_schemas = sorted(torch_schemas, key=lambda x: x.name)
-    aten_schemas = [s for s in torch_schemas if s.is_aten() and not s.is_backward()]
-    return aten_schemas
-
-
 def _symbolic_argument_count(func):
     params = []
     signature = inspect.signature(func)
@@ -72,7 +66,14 @@ def _symbolic_argument_count(func):
     return params
 
 
-def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
+def all_forward_schemas() -> Dict[str, _TorchSchema]:
+    """Returns schemas for all TorchScript forward ops."""
+    torch_schemas = [_TorchSchema(s) for s in _C._jit_get_all_schemas()]
+    return {schema.name: schema for schema in torch_schemas if not schema.is_backward()}
+
+
+def all_symbolics_schemas() -> Dict[str, _TorchSchema]:
+    """Returns schemas for all onnx supported ops."""
     symbolics_schemas = {}
 
     for name in registration.registry.all_functions():
@@ -94,19 +95,3 @@ def _all_symbolics_schemas() -> Dict[str, _TorchSchema]:
         symbolics_schemas[name] = symbolics_schema
 
     return symbolics_schemas
-
-
-def onnx_supported_ops():
-    aten_schemas = _all_aten_forward_schemas()
-    symbolic_schemas = _all_symbolics_schemas()
-    torch_schemas = set(symbolic_schemas.values())
-    supported_ops = []
-    onnx_supported = []
-    for schema in aten_schemas:
-        if schema in torch_schemas:
-            opname = schema.name
-            opsets = symbolic_schemas[opname].opsets
-            if schema not in supported_ops:
-                supported_ops.append(symbolic_schemas[opname])
-                onnx_supported.append((opname, " ".join(str(o) for o in opsets)))
-    return sorted(onnx_supported, key=lambda x: x[0])
