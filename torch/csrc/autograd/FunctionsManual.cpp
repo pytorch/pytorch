@@ -677,6 +677,10 @@ Tensor prod_safe_zeros_backward(
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
+// checking the storage also encompasses FakeTensors, which report device and
+// dispatch keys as non-meta when not in an composite explicit kernel
+// invocation. because these backwards are implicit kernels fake tensors do not
+// appear as meta.
 bool is_meta_in_composite_kernels(const Tensor& t) {
   return t.storage().data_ptr().device() == c10::DeviceType::Meta;
 }
