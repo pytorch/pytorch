@@ -1972,8 +1972,9 @@ class TestCase(expecttest.TestCase):
 
 
         if TEST_WITH_TORCHDYNAMO:
-            with torchdynamo.optimize("eager"):
-                super().run(result=result)
+            # TorchDynamo optimize annotation
+            super_run = torchdynamo.optimize("eager")(super().run)
+            super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
             # torchdynamo.reset()
