@@ -179,24 +179,6 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
-namespace {
-
-bool einsum_check_label(unsigned char label) {
-  return std::isalpha(label);
-}
-
-uint8_t einsum_label_to_index(unsigned char label) {
-  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return std::isupper(label) ? label - 'A' : NUM_OF_LETTERS + (label - 'a');
-}
-
-unsigned char einsum_index_to_label(uint8_t index) {
-  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return index < NUM_OF_LETTERS ? index + 'A' : index - NUM_OF_LETTERS + 'a';
-}
-
-} // namespace
-
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
@@ -205,8 +187,22 @@ unsigned char einsum_index_to_label(uint8_t index) {
 Tensor einsum(c10::string_view equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
 
+  // Labels must be in range [A-Za-z]
+  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
+  constexpr uint8_t TOTAL_LABELS = NUM_OF_LETTERS * 2;
+
   // Code used to identify ELLIPSIS ("...")
-  constexpr uint8_t ELLIPSIS = 52;
+  constexpr uint8_t ELLIPSIS = TOTAL_LABELS;
+
+  // Convert label in [A-Za-z] to subscript in [0, TOTAL_LABELS)
+  auto label_to_subscript = [=](unsigned char label) -> uint8_t {
+    return std::isupper(label) ? label - 'A' : label - 'a' + NUM_OF_LETTERS;
+  };
+
+  // Convert subscript in [0, TOTAL_LABELS) to label in [A-Za-z]
+  auto subscript_to_label = [=](uint8_t s) -> unsigned char {
+    return s < NUM_OF_LETTERS ? s + 'A' : s + 'a' - NUM_OF_LETTERS;
+  };
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
@@ -255,11 +251,11 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
       default:
         // Parse label
         TORCH_CHECK(
-            einsum_check_label(label),
+            std::isalpha(label),
             "einsum(): invalid subscript given at index ",
             i,
             " in the equation string, subscripts must be in [a-zA-Z]");
-        op_labels[curr_op].push_back(einsum_label_to_index(label));
+        op_labels[curr_op].push_back(label_to_subscript(label));
     }
   }
 
@@ -267,8 +263,6 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
       curr_op == num_ops - 1,
       "einsum(): more operands were provided than specified in the equation");
 
-  // Labels must be within [a-zA-Z].
-  constexpr uint8_t TOTAL_LABELS = 52;
   std::vector<int64_t> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
@@ -354,11 +348,11 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
-              einsum_check_label(label),
+              std::isalpha(label),
               "einsum(): invalid subscript given at index ",
-            lhs.size() + 2 + i,
+              lhs.size() + 2 + i,
               " in the equation string, subscripts must be in [a-zA-Z]");
-          const auto index = einsum_label_to_index(label);
+          const auto index = label_to_subscript(label);
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
@@ -420,7 +414,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
         TORCH_CHECK(
             operand.size(j) == operand.size(dim),
             "einsum(): subscript ",
-            einsum_index_to_label(label),
+            subscript_to_label(label),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
