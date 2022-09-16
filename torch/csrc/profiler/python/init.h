@@ -1,10 +1,11 @@
 #pragma once
 
+#include <Python.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 namespace pybind11 {
 namespace detail {
@@ -19,7 +20,7 @@ struct strong_pointer_type_caster {
   template <typename T_>
   static handle cast(T_&& src, return_value_policy policy, handle parent) {
     const auto* ptr = reinterpret_cast<const void*>(src.value_of());
-    return ptr ? handle(PyLong_FromLong(reinterpret_cast<intptr_t>(ptr)))
+    return ptr ? handle(THPUtils_packUInt64(reinterpret_cast<intptr_t>(ptr)))
                : none();
   }
 
