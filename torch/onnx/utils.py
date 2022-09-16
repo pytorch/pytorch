@@ -1788,7 +1788,7 @@ def _run_symbolic_function(
                 if _need_symbolic_context(symbolic_fn):
                     # TODO(justinchuby): Refactor how we check for the need of the symbolic context
                     ctx = _exporter_states.SymbolicContext(
-                        _params_dict, env, node, block, opset_version
+                        _params_dict, env, node, block
                     )
                     return symbolic_fn(ctx, graph_context, *inputs, **attrs)
                 # PythonOp symbolic need access to the node to resolve the name conflict,
