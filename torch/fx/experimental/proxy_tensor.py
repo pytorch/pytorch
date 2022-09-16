@@ -244,7 +244,6 @@ def proxy_call(proxy_mode, func, args, kwargs):
             "It appears that you're trying to get value out of a tracing tensor - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
         )
-
     proxy_args, proxy_kwargs = pytree.tree_map_only(
         (SymInt, SymFloat),
         fetch_sym_proxy(proxy_mode.tracer),

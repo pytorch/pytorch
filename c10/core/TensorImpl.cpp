@@ -875,13 +875,57 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-void TensorImpl::set_sym_sizes_and_strides(
+bool _compute_contiguous(const ExtraMeta& extra_meta, std::vector<int> order) {
+  if (order.size() != extra_meta.sizes_.size())
+    return false;
+  bool is_contiguous = true;
+  if (extra_meta.numel_ == 0)
+    return is_contiguous;
+  SymInt z = 1;
+  for (auto d : order) {
+    const auto size_d = extra_meta.sizes_.at(d);
+    if (size_d != 1) {
+      if (extra_meta.strides_.at(d) == z) {
+        z *= size_d;
+      } else {
+        is_contiguous = false;
+        break;
+      }
+    }
+  }
+  return is_contiguous;
+}
+
+bool _compute_contiguous(const ExtraMeta& extra_meta) {
+  std::vector<int> order(extra_meta.sizes_.size());
+  std::iota(order.rbegin(), order.rend(), 0);
+  return _compute_contiguous(extra_meta, order);
+}
+
+void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
   has_symbolic_sizes_strides_ = true;
-  sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
-  sizes_and_strides_.set_sizes(sizes);
-  sizes_and_strides_.set_strides(strides);
+  refresh_sizes_strides_policy();
+  if (!extra_meta_) {
+    extra_meta_ = std::make_unique<ExtraMeta>();
+    if (!storage_offset.has_value())
+      extra_meta_->storage_offset_ = storage_offset_;
+  }
+  extra_meta_->sizes_ = sizes;
+  extra_meta_->strides_ = strides;
+  if (storage_offset.has_value())
+    extra_meta_->storage_offset_ = std::move(*storage_offset);
+  SymInt numel = 1;
+  for (const auto& s : sizes) {
+    numel *= s;
+  }
+  extra_meta_->numel_ = numel;
+  extra_meta_->is_contiguous_ = _compute_contiguous(*extra_meta_);
+  extra_meta_->is_channels_last_contiguous_ =
+      _compute_contiguous(*extra_meta_, {1, 3, 2, 0});
+  extra_meta_->is_channels_last_3d_contiguous_ =
+      _compute_contiguous(*extra_meta_, {1, 4, 3, 2, 0});
 }
 
 namespace impl {

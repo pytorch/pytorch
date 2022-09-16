@@ -718,7 +718,18 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
 
-        if has_symbolic_sizes:
+        functions_with_cpp_meta_impl_that_support_symint = [
+            aten.empty_strided.default,
+            aten.as_strided.default,
+            aten.zeros.default,
+            aten.clone.default,
+            aten.detach.default,
+        ]
+        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
+        if (
+            has_symbolic_sizes
+            and func not in functions_with_cpp_meta_impl_that_support_symint
+        ):
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
@@ -759,8 +770,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            constructors = [aten.empty.memory_format]
-            if func not in constructors:
+            if func not in functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )

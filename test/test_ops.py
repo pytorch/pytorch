@@ -1653,8 +1653,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svdvals',
         '_refs.unflatten',
         # ref implementation missing kwargs
-        '_refs.empty',  # missing "pin_memory"
-        '_refs.empty_like',  # missing "layout"
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
