@@ -336,7 +336,7 @@ class DistributedDataParallel(Module, Joinable):
         expected when there are no unused parameters in the model and each layer
         is checkpointed at most once (make sure you are not passing
         `find_unused_parameters=True` to DDP). We currently do not support the
-        case where a layer is checkpointed multiple times, or when there unused
+        case where a layer is checkpointed multiple times, or when there are unused
         parameters in the checkpointed model.
 
         Example::
