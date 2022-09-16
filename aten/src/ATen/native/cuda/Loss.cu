@@ -223,8 +223,8 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     index_t* target,
     scalar_t* weights,
     bool size_average,
-    int nframe,
-    int ndim,
+    int64_t nframe,
+    int64_t ndim,
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -233,12 +233,13 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
+  for (int64_t i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int64_t t = target[i];
-    if (t != static_cast<int>(ignore_index)) {
+    if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
           weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
+      // CUDA_KERNEL_ASSERT(threadIdx.x < NLL_LOSS_THREADS);
       sh_inputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
       acc_weight[threadIdx.x] += cur_weight;
     }
