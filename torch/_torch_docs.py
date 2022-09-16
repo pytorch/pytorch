@@ -8102,8 +8102,8 @@ add_docstr(
     r"""
 narrow_copy(input, dim, start, length, *, out=None) -> Tensor
 
-Same as :meth:`Tensor.narrow` except returning a copy rather
-than shared storage.  This is primarily for sparse tensors, which
+Same as :meth:`Tensor.narrow` except this returns a copy rather
+than shared storage. This is primarily for sparse tensors, which
 do not have a shared-storage narrow method.
 
 Args:
