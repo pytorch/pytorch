@@ -10,20 +10,24 @@ namespace torch {
 namespace jit {
 
 inline c10::optional<Module> as_module(py::handle obj) {
-  if (py::isinstance(
-          obj, py::module::import("torch.jit").attr("ScriptModule"))) {
+  static py::handle ScriptModule =
+      py::module::import("torch.jit").attr("ScriptModule");
+  if (py::isinstance(obj, ScriptModule)) {
     return py::cast<Module>(obj.attr("_c"));
   }
   return c10::nullopt;
 }
 
 inline c10::optional<Object> as_object(py::handle obj) {
-  if (py::isinstance(obj, py::module::import("torch").attr("ScriptObject"))) {
+  static py::handle ScriptObject =
+      py::module::import("torch").attr("ScriptObject");
+  if (py::isinstance(obj, ScriptObject)) {
     return py::cast<Object>(obj);
   }
 
-  if (py::isinstance(
-          obj, py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
+  static py::handle RecursiveScriptClass =
+      py::module::import("torch.jit").attr("RecursiveScriptClass");
+  if (py::isinstance(obj, RecursiveScriptClass)) {
     return py::cast<Object>(obj.attr("_c"));
   }
   return c10::nullopt;
