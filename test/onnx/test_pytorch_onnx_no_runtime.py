@@ -634,7 +634,7 @@ class TestONNXExport(common_utils.TestCase):
         f = io.BytesIO()
 
         try:
-            with self.assertRaises(torch.onnx.errors.OnnxExporterError):
+            with self.assertRaises(torch.onnx.errors.CheckerError):
                 torch.onnx.export(test_model, (x, y), f)
         finally:
             torch.onnx.unregister_custom_op_symbolic("::add", 1)
