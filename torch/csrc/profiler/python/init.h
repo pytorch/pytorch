@@ -3,11 +3,13 @@
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_stub.h>
 
 namespace pybind11 {
 namespace detail {
-namespace {
+using torch::profiler::impl::StorageImplData;
+using torch::profiler::impl::TensorImplAddress;
 
 // Strong typedefs don't make much sense in Python since everything is duck
 // typed. So instead we simply cast them to ints, return them, and let the
@@ -27,10 +29,6 @@ struct strong_pointer_type_caster {
 
   PYBIND11_TYPE_CASTER(T, _("strong_pointer"));
 };
-} // namespace
-
-using torch::profiler::impl::StorageImplData;
-using torch::profiler::impl::TensorImplAddress;
 
 template <>
 struct type_caster<StorageImplData>
