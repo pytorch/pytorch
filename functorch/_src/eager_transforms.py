@@ -637,15 +637,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
     return tuple(args[i] for i in argnums)
 
 
-def _argnums_partial(f, args, argnums):
-    def f_wrapper(*wrapper_args):
-        replaced_args = _replace_args(args, wrapper_args, argnums)
-        return f(*replaced_args)
-    wrapper_args = _slice_argnums(args, argnums)
-    wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
-    return (f_wrapper, wrapper_args)
-
-
 JVP_NESTING = 0
 
 
