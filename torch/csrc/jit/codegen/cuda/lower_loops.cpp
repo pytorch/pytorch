@@ -33,7 +33,7 @@ LoopNestGenerator::LoopNestGenerator(const std::vector<Expr*>& exprs) {
 namespace {
 
 kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
-  auto extent_with_halo = GpuLower::current()->haloInfo().getExtent(id);
+  auto extent_with_halo = GpuLower::current()->haloInfo()->getExtent(id);
   kir::ForLoop* new_scope = nullptr;
   if (extent_with_halo) {
     // When an axis is extended with halo, unrolling and vectorization

@@ -248,7 +248,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // mappings of all iteration domains across the fusion. There are three types
   // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
   // information.
-  compute_at_map_ = std::make_unique<ComputeAtMap>(fusion_);
+  compute_at_map_ = std::make_shared<ComputeAtMap>(fusion_);
 
   if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
     std::cout << compute_at_map_->toString() << std::endl;
@@ -281,7 +281,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
-  haloInfo().build(fusion_);
+  halo_info_ = std::make_shared<HaloInfo>(fusion_, compute_at_map_);
 
   // Want to run this after parallel map and halo info map are
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.

@@ -125,7 +125,8 @@ IndexingParameters getLinearIndexParameters(
 
   // Derive the halo extents from the loop indexing result.
   index_parameters.concrete_id_to_halo_extent =
-      GpuLower::current()->haloInfo().buildConcreteHaloExtentMap(loop_indexing);
+      GpuLower::current()->haloInfo()->buildConcreteHaloExtentMap(
+          loop_indexing);
 
   protectNonPredicateIndexWithMagicZero(
       loops,
@@ -233,7 +234,8 @@ IndexingParameters getNonGlobalInitialIndexParameters(
 
   // Derive the halo extents from the loop indexing result.
   index_parameters.concrete_id_to_halo_extent =
-      GpuLower::current()->haloInfo().buildConcreteHaloExtentMap(loop_indexing);
+      GpuLower::current()->haloInfo()->buildConcreteHaloExtentMap(
+          loop_indexing);
 
   return index_parameters;
 }
@@ -408,7 +410,8 @@ IndexingParameters getPredicateInitialIndexParameters(
 
   // Derive the halo extents from the loop indexing result.
   index_parameters.concrete_id_to_halo_extent =
-      GpuLower::current()->haloInfo().buildConcreteHaloExtentMap(loop_indexing);
+      GpuLower::current()->haloInfo()->buildConcreteHaloExtentMap(
+          loop_indexing);
 
   return index_parameters;
 }

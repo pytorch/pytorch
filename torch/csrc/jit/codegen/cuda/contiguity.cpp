@@ -51,7 +51,7 @@ ContigIDs::ContigIDs(
         (ignore_halo_constraint ||
          !GpuLower::current()
               ->haloInfo()
-              .getRootAxisInfo(root_domain_i)
+              ->getRootAxisInfo(root_domain_i)
               .hasHalo())) {
       contig_ids_.emplace(root_domain_i);
       is_contig_root_[root_domain_i] = true;

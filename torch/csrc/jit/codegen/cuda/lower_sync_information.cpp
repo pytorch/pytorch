@@ -240,12 +240,12 @@ void SyncMap::build(Fusion* fusion) {
                     p_id, c_id, IdMappingMode::PERMISSIVE)) {
               const auto halo_info = GpuLower::current()->haloInfo();
 
-              if (halo_info.hasHaloWidth(p_id) !=
-                      halo_info.hasHaloWidth(c_id) ||
-                  (halo_info.hasHaloWidth(p_id) &&
-                   halo_info.hasHaloWidth(c_id) &&
-                   halo_info.getHaloWidth(p_id) !=
-                       halo_info.getHaloWidth(c_id))) {
+              if (halo_info->hasHaloWidth(p_id) !=
+                      halo_info->hasHaloWidth(c_id) ||
+                  (halo_info->hasHaloWidth(p_id) &&
+                   halo_info->hasHaloWidth(c_id) &&
+                   halo_info->getHaloWidth(p_id) !=
+                       halo_info->getHaloWidth(c_id))) {
                 raw_dims.set(parallel_type);
                 continue;
               }

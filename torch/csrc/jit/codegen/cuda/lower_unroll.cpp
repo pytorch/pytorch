@@ -81,7 +81,7 @@ void UnrollPass::handle(Expr* expr) {
 
     // When a predicate needs to account for ShiftOp, it is currently
     // taken care by its own function.
-    if (GpuLower::current()->haloInfo().needsShiftPredicate(expr)) {
+    if (GpuLower::current()->haloInfo()->needsShiftPredicate(expr)) {
       ShiftPredicateInserter::insert(
           expr, for_loops_, thread_pred, unswitched_loop_);
       return;

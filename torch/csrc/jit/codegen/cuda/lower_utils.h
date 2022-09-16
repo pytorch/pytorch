@@ -243,7 +243,7 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
   IterDomainDependencySorter(
       const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
           concrete_id_dependencies,
-      const std::unique_ptr<ComputeAtMap>& compute_at_map)
+      std::shared_ptr<const ComputeAtMap> compute_at_map)
       : concrete_id_dependencies_(concrete_id_dependencies),
         compute_at_map_(compute_at_map) {}
 
@@ -269,7 +269,7 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
 
   const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
       concrete_id_dependencies_;
-  const std::unique_ptr<ComputeAtMap>& compute_at_map_;
+  const std::shared_ptr<const ComputeAtMap> compute_at_map_;
 };
 
 } // namespace cuda

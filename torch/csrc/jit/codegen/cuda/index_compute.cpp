@@ -51,8 +51,8 @@ int getProducerHaloOffset(
   IterDomain* consumer_id = it->second;
 
   const auto& halo_map = GpuLower::current()->haloInfo();
-  const auto p_pad = halo_map.getRootAxisInfo(producer_id).width(0);
-  const auto c_pad = halo_map.getRootAxisInfo(consumer_id).width(0);
+  const auto p_pad = halo_map->getRootAxisInfo(producer_id).width(0);
+  const auto c_pad = halo_map->getRootAxisInfo(consumer_id).width(0);
 
   auto offset = p_pad - c_pad;
 
@@ -985,7 +985,7 @@ Val* getHaloExtentOfRootAxis(IterDomain* id, Val* normal_extent = nullptr) {
     normal_extent = id->extent();
   }
 
-  const auto& halo = GpuLower::current()->haloInfo().getRootAxisInfo(id);
+  const auto& halo = GpuLower::current()->haloInfo()->getRootAxisInfo(id);
   if (halo.hasHalo()) {
     auto halo_extent = SimplifyingIrBuilder::addExpr(
         normal_extent, SimplifyingIrBuilder::create<Int>(halo.width()));
@@ -2351,7 +2351,7 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
   std::unordered_set<IterDomain*> excluded_ids;
 
   for (auto consumer_root_id : consumer_root_domain) {
-    if (gpu_lower->haloInfo().getRootAxisInfo(consumer_root_id).hasHalo()) {
+    if (gpu_lower->haloInfo()->getRootAxisInfo(consumer_root_id).hasHalo()) {
       excluded_ids.insert(consumer_root_id);
       continue;
     }
@@ -2487,7 +2487,7 @@ int getUnswitchStopOffset(
   const auto gpu_lower = GpuLower::current();
 
   AxisHaloInfo halo_info =
-      gpu_lower->haloInfo().getRootAxisInfo(consumer_root_id);
+      gpu_lower->haloInfo()->getRootAxisInfo(consumer_root_id);
 
   // If the consumer root domain to predicate does not have halo, no
   // adjustment is required.
@@ -2511,7 +2511,7 @@ int getUnswitchStopOffset(
           unswitch_it,
           consumer_tv->domain()->domain().end(),
           [&gpu_lower, &consumer_root_id](auto leaf_id) {
-            return gpu_lower->haloInfo().isHaloInherited(
+            return gpu_lower->haloInfo()->isHaloInherited(
                 consumer_root_id, leaf_id);
           })) {
     return halo_info.width();
@@ -2669,7 +2669,8 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
   Val* stop_limit = SimplifyingIrBuilder::negExpr(consumer_id->stopOffset());
 
   if (!non_divisible_pred) {
-    AxisHaloInfo halo_info = gpu_lower->haloInfo().getRootAxisInfo(consumer_id);
+    AxisHaloInfo halo_info =
+        gpu_lower->haloInfo()->getRootAxisInfo(consumer_id);
 
     // Below, "left" and "right" halo mean halo at offset zero and
     // axis extent, respectively.
@@ -2693,8 +2694,8 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
     // that it is less than the extent of the predicated ID +
     // halo. Note that getRootAxisInfo doesn't work since consumer_id
     // isn't a root domain.
-    if (gpu_lower->haloInfo().hasHaloWidth(consumer_id)) {
-      auto halo = gpu_lower->haloInfo().getHaloWidth(consumer_id);
+    if (gpu_lower->haloInfo()->hasHaloWidth(consumer_id)) {
+      auto halo = gpu_lower->haloInfo()->getHaloWidth(consumer_id);
       stop_limit = SimplifyingIrBuilder::addExpr(stop_limit, halo);
     }
   }
@@ -2841,8 +2842,8 @@ bool canOmitStopPredicate(
   // to be predicated, not its merged contig id even if it exists. So,
   // if contig_id does not have root axis info, contig_id is
   // guaranteed to have no halo.
-  auto halo_ext = gpu_lower->haloInfo().hasRootAxisInfo(contig_id)
-      ? gpu_lower->haloInfo().getRootAxisInfo(contig_id).width()
+  auto halo_ext = gpu_lower->haloInfo()->hasRootAxisInfo(contig_id)
+      ? gpu_lower->haloInfo()->getRootAxisInfo(contig_id).width()
       : 0;
 
   if (halo_ext + stop_offset_val.value() > 0) {

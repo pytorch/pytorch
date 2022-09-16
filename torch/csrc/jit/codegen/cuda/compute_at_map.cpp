@@ -676,7 +676,7 @@ void ComputeAtMap::allocateIndexVariables() {
                   // Halo extended parallel loops currently are handled
                   // differently and an index variable would still
                   // be allocated in this case.
-                  (GpuLower::current()->haloInfo().getExtent(id) == nullptr)) {
+                  (GpuLower::current()->haloInfo()->getExtent(id) == nullptr)) {
                 ptype = id->getParallelType();
                 return true;
               }

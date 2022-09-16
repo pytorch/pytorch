@@ -740,7 +740,7 @@ bool isTrivialIterDomain(IterDomain* id) {
       (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
       pt == ParallelType::Vectorize ||
       (isParallelTypeThread(pt) &&
-       !GpuLower::current()->haloInfo().hasHaloWidth(id));
+       !GpuLower::current()->haloInfo()->hasHaloWidth(id));
 }
 
 } // namespace cuda
