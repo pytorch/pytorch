@@ -13,12 +13,14 @@ enum class Rule : uint32_t {
   ONNXShapeInferenceIsMissingForNode,
 
   /**
-   * @brief Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
+   * @brief Missing symbolic function for custom PyTorch operator, cannot
+   * translate node to ONNX.
    */
   MissingCustomSymbolicFunction,
 
   /**
-   * @brief Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
+   * @brief Missing symbolic function for standard PyTorch operator, cannot
+   * translate node to ONNX.
    */
   MissingStandardSymbolicFunction,
 
@@ -28,11 +30,11 @@ enum class Rule : uint32_t {
   OperatorSupportedInNewerOpsetVersion,
 };
 
-static constexpr const char* const RuleNames [] = {
-  "ONNXShapeInferenceIsMissingForNode",
-  "MissingCustomSymbolicFunction",
-  "MissingStandardSymbolicFunction",
-  "OperatorSupportedInNewerOpsetVersion",
+static constexpr const char* const RuleNames[] = {
+    "ONNXShapeInferenceIsMissingForNode",
+    "MissingCustomSymbolicFunction",
+    "MissingStandardSymbolicFunction",
+    "OperatorSupportedInNewerOpsetVersion",
 };
 
 } // namespace diagnostic

@@ -10,3 +10,6 @@ class MultiformatMessageString(object):
     text = attr.ib(metadata={"schema_property_name": "text"})
     markdown = attr.ib(default=None, metadata={"schema_property_name": "markdown"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

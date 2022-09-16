@@ -10,3 +10,6 @@ class Stack(object):
     frames = attr.ib(metadata={"schema_property_name": "frames"})
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

@@ -2,6 +2,7 @@
 ${generated_comment}
 """
 
+# flake8: noqa
 from torch.onnx import diagnostic
 
 

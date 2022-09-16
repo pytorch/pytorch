@@ -8,10 +8,14 @@ class Artifact(object):
     """A single artifact. In some cases, this artifact might be nested within another artifact."""
 
     contents = attr.ib(default=None, metadata={"schema_property_name": "contents"})
-    description = attr.ib(default=None, metadata={"schema_property_name": "description"})
+    description = attr.ib(
+        default=None, metadata={"schema_property_name": "description"}
+    )
     encoding = attr.ib(default=None, metadata={"schema_property_name": "encoding"})
     hashes = attr.ib(default=None, metadata={"schema_property_name": "hashes"})
-    last_modified_time_utc = attr.ib(default=None, metadata={"schema_property_name": "lastModifiedTimeUtc"})
+    last_modified_time_utc = attr.ib(
+        default=None, metadata={"schema_property_name": "lastModifiedTimeUtc"}
+    )
     length = attr.ib(default=-1, metadata={"schema_property_name": "length"})
     location = attr.ib(default=None, metadata={"schema_property_name": "location"})
     mime_type = attr.ib(default=None, metadata={"schema_property_name": "mimeType"})
@@ -19,4 +23,9 @@ class Artifact(object):
     parent_index = attr.ib(default=-1, metadata={"schema_property_name": "parentIndex"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     roles = attr.ib(default=None, metadata={"schema_property_name": "roles"})
-    source_language = attr.ib(default=None, metadata={"schema_property_name": "sourceLanguage"})
+    source_language = attr.ib(
+        default=None, metadata={"schema_property_name": "sourceLanguage"}
+    )
+
+
+# flake8: noqa

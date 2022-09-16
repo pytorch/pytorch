@@ -10,3 +10,6 @@ class ConfigurationOverride(object):
     configuration = attr.ib(metadata={"schema_property_name": "configuration"})
     descriptor = attr.ib(metadata={"schema_property_name": "descriptor"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

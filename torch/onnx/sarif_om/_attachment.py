@@ -8,7 +8,12 @@ class Attachment(object):
     """An artifact relevant to a result."""
 
     artifact_location = attr.ib(metadata={"schema_property_name": "artifactLocation"})
-    description = attr.ib(default=None, metadata={"schema_property_name": "description"})
+    description = attr.ib(
+        default=None, metadata={"schema_property_name": "description"}
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     rectangles = attr.ib(default=None, metadata={"schema_property_name": "rectangles"})
     regions = attr.ib(default=None, metadata={"schema_property_name": "regions"})
+
+
+# flake8: noqa

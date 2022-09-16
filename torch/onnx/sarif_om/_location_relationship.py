@@ -8,6 +8,14 @@ class LocationRelationship(object):
     """Information about the relation of one location to another."""
 
     target = attr.ib(metadata={"schema_property_name": "target"})
-    description = attr.ib(default=None, metadata={"schema_property_name": "description"})
-    kinds = attr.ib(default=attr.Factory(lambda: ['relevant']), metadata={"schema_property_name": "kinds"})
+    description = attr.ib(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    kinds = attr.ib(
+        default=attr.Factory(lambda: ["relevant"]),
+        metadata={"schema_property_name": "kinds"},
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

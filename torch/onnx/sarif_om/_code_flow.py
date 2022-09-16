@@ -10,3 +10,6 @@ class CodeFlow(object):
     thread_flows = attr.ib(metadata={"schema_property_name": "threadFlows"})
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

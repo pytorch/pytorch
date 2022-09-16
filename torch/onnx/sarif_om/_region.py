@@ -16,6 +16,13 @@ class Region(object):
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     snippet = attr.ib(default=None, metadata={"schema_property_name": "snippet"})
-    source_language = attr.ib(default=None, metadata={"schema_property_name": "sourceLanguage"})
-    start_column = attr.ib(default=None, metadata={"schema_property_name": "startColumn"})
+    source_language = attr.ib(
+        default=None, metadata={"schema_property_name": "sourceLanguage"}
+    )
+    start_column = attr.ib(
+        default=None, metadata={"schema_property_name": "startColumn"}
+    )
     start_line = attr.ib(default=None, metadata={"schema_property_name": "startLine"})
+
+
+# flake8: noqa

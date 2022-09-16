@@ -13,3 +13,6 @@ class Rectangle(object):
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     right = attr.ib(default=None, metadata={"schema_property_name": "right"})
     top = attr.ib(default=None, metadata={"schema_property_name": "top"})
+
+
+# flake8: noqa

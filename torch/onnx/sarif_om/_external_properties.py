@@ -12,19 +12,36 @@ class ExternalProperties(object):
     conversion = attr.ib(default=None, metadata={"schema_property_name": "conversion"})
     driver = attr.ib(default=None, metadata={"schema_property_name": "driver"})
     extensions = attr.ib(default=None, metadata={"schema_property_name": "extensions"})
-    externalized_properties = attr.ib(default=None, metadata={"schema_property_name": "externalizedProperties"})
+    externalized_properties = attr.ib(
+        default=None, metadata={"schema_property_name": "externalizedProperties"}
+    )
     graphs = attr.ib(default=None, metadata={"schema_property_name": "graphs"})
     guid = attr.ib(default=None, metadata={"schema_property_name": "guid"})
-    invocations = attr.ib(default=None, metadata={"schema_property_name": "invocations"})
-    logical_locations = attr.ib(default=None, metadata={"schema_property_name": "logicalLocations"})
+    invocations = attr.ib(
+        default=None, metadata={"schema_property_name": "invocations"}
+    )
+    logical_locations = attr.ib(
+        default=None, metadata={"schema_property_name": "logicalLocations"}
+    )
     policies = attr.ib(default=None, metadata={"schema_property_name": "policies"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     results = attr.ib(default=None, metadata={"schema_property_name": "results"})
     run_guid = attr.ib(default=None, metadata={"schema_property_name": "runGuid"})
     schema = attr.ib(default=None, metadata={"schema_property_name": "schema"})
     taxonomies = attr.ib(default=None, metadata={"schema_property_name": "taxonomies"})
-    thread_flow_locations = attr.ib(default=None, metadata={"schema_property_name": "threadFlowLocations"})
-    translations = attr.ib(default=None, metadata={"schema_property_name": "translations"})
+    thread_flow_locations = attr.ib(
+        default=None, metadata={"schema_property_name": "threadFlowLocations"}
+    )
+    translations = attr.ib(
+        default=None, metadata={"schema_property_name": "translations"}
+    )
     version = attr.ib(default=None, metadata={"schema_property_name": "version"})
-    web_requests = attr.ib(default=None, metadata={"schema_property_name": "webRequests"})
-    web_responses = attr.ib(default=None, metadata={"schema_property_name": "webResponses"})
+    web_requests = attr.ib(
+        default=None, metadata={"schema_property_name": "webRequests"}
+    )
+    web_responses = attr.ib(
+        default=None, metadata={"schema_property_name": "webResponses"}
+    )
+
+
+# flake8: noqa

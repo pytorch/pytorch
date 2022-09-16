@@ -8,9 +8,20 @@ class TranslationMetadata(object):
     """Provides additional metadata related to translation."""
 
     name = attr.ib(metadata={"schema_property_name": "name"})
-    download_uri = attr.ib(default=None, metadata={"schema_property_name": "downloadUri"})
-    full_description = attr.ib(default=None, metadata={"schema_property_name": "fullDescription"})
+    download_uri = attr.ib(
+        default=None, metadata={"schema_property_name": "downloadUri"}
+    )
+    full_description = attr.ib(
+        default=None, metadata={"schema_property_name": "fullDescription"}
+    )
     full_name = attr.ib(default=None, metadata={"schema_property_name": "fullName"})
-    information_uri = attr.ib(default=None, metadata={"schema_property_name": "informationUri"})
+    information_uri = attr.ib(
+        default=None, metadata={"schema_property_name": "informationUri"}
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
-    short_description = attr.ib(default=None, metadata={"schema_property_name": "shortDescription"})
+    short_description = attr.ib(
+        default=None, metadata={"schema_property_name": "shortDescription"}
+    )
+
+
+# flake8: noqa

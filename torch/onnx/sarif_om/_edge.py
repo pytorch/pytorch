@@ -12,3 +12,6 @@ class Edge(object):
     target_node_id = attr.ib(metadata={"schema_property_name": "targetNodeId"})
     label = attr.ib(default=None, metadata={"schema_property_name": "label"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

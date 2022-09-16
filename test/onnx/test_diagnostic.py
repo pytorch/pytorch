@@ -1,9 +1,7 @@
 # Owner(s): ["module: onnx"]
 
-import contextlib
 import functools
 import io
-import unittest
 
 import torch
 from torch.onnx import diagnostic, errors, sarif_om
@@ -62,9 +60,7 @@ class _AssertDiagnosticContext:
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
             if isinstance(exc_value, errors.OnnxExporterError):
-                self.test_suite.assertTrue(
-                    self.level == diagnostic.Level.ERROR
-                )
+                self.test_suite.assertTrue(self.level == diagnostic.Level.ERROR)
                 return True
             else:
                 return False

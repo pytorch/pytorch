@@ -12,3 +12,6 @@ class Node(object):
     label = attr.ib(default=None, metadata={"schema_property_name": "label"})
     location = attr.ib(default=None, metadata={"schema_property_name": "location"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

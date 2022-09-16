@@ -11,4 +11,9 @@ class ReportingDescriptorReference(object):
     id = attr.ib(default=None, metadata={"schema_property_name": "id"})
     index = attr.ib(default=-1, metadata={"schema_property_name": "index"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
-    tool_component = attr.ib(default=None, metadata={"schema_property_name": "toolComponent"})
+    tool_component = attr.ib(
+        default=None, metadata={"schema_property_name": "toolComponent"}
+    )
+
+
+# flake8: noqa

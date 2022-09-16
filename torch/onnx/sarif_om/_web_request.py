@@ -16,3 +16,6 @@ class WebRequest(object):
     protocol = attr.ib(default=None, metadata={"schema_property_name": "protocol"})
     target = attr.ib(default=None, metadata={"schema_property_name": "target"})
     version = attr.ib(default=None, metadata={"schema_property_name": "version"})
+
+
+# flake8: noqa

@@ -8,30 +8,73 @@ class ToolComponent(object):
     """A component, such as a plug-in or the driver, of the analysis tool that was run."""
 
     name = attr.ib(metadata={"schema_property_name": "name"})
-    associated_component = attr.ib(default=None, metadata={"schema_property_name": "associatedComponent"})
-    contents = attr.ib(default=attr.Factory(lambda: ['localizedData', 'nonLocalizedData']), metadata={"schema_property_name": "contents"})
-    dotted_quad_file_version = attr.ib(default=None, metadata={"schema_property_name": "dottedQuadFileVersion"})
-    download_uri = attr.ib(default=None, metadata={"schema_property_name": "downloadUri"})
-    full_description = attr.ib(default=None, metadata={"schema_property_name": "fullDescription"})
+    associated_component = attr.ib(
+        default=None, metadata={"schema_property_name": "associatedComponent"}
+    )
+    contents = attr.ib(
+        default=attr.Factory(lambda: ["localizedData", "nonLocalizedData"]),
+        metadata={"schema_property_name": "contents"},
+    )
+    dotted_quad_file_version = attr.ib(
+        default=None, metadata={"schema_property_name": "dottedQuadFileVersion"}
+    )
+    download_uri = attr.ib(
+        default=None, metadata={"schema_property_name": "downloadUri"}
+    )
+    full_description = attr.ib(
+        default=None, metadata={"schema_property_name": "fullDescription"}
+    )
     full_name = attr.ib(default=None, metadata={"schema_property_name": "fullName"})
-    global_message_strings = attr.ib(default=None, metadata={"schema_property_name": "globalMessageStrings"})
+    global_message_strings = attr.ib(
+        default=None, metadata={"schema_property_name": "globalMessageStrings"}
+    )
     guid = attr.ib(default=None, metadata={"schema_property_name": "guid"})
-    information_uri = attr.ib(default=None, metadata={"schema_property_name": "informationUri"})
-    is_comprehensive = attr.ib(default=None, metadata={"schema_property_name": "isComprehensive"})
+    information_uri = attr.ib(
+        default=None, metadata={"schema_property_name": "informationUri"}
+    )
+    is_comprehensive = attr.ib(
+        default=None, metadata={"schema_property_name": "isComprehensive"}
+    )
     language = attr.ib(default="en-US", metadata={"schema_property_name": "language"})
-    localized_data_semantic_version = attr.ib(default=None, metadata={"schema_property_name": "localizedDataSemanticVersion"})
+    localized_data_semantic_version = attr.ib(
+        default=None, metadata={"schema_property_name": "localizedDataSemanticVersion"}
+    )
     locations = attr.ib(default=None, metadata={"schema_property_name": "locations"})
-    minimum_required_localized_data_semantic_version = attr.ib(default=None, metadata={"schema_property_name": "minimumRequiredLocalizedDataSemanticVersion"})
-    notifications = attr.ib(default=None, metadata={"schema_property_name": "notifications"})
-    organization = attr.ib(default=None, metadata={"schema_property_name": "organization"})
+    minimum_required_localized_data_semantic_version = attr.ib(
+        default=None,
+        metadata={
+            "schema_property_name": "minimumRequiredLocalizedDataSemanticVersion"
+        },
+    )
+    notifications = attr.ib(
+        default=None, metadata={"schema_property_name": "notifications"}
+    )
+    organization = attr.ib(
+        default=None, metadata={"schema_property_name": "organization"}
+    )
     product = attr.ib(default=None, metadata={"schema_property_name": "product"})
-    product_suite = attr.ib(default=None, metadata={"schema_property_name": "productSuite"})
+    product_suite = attr.ib(
+        default=None, metadata={"schema_property_name": "productSuite"}
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
-    release_date_utc = attr.ib(default=None, metadata={"schema_property_name": "releaseDateUtc"})
+    release_date_utc = attr.ib(
+        default=None, metadata={"schema_property_name": "releaseDateUtc"}
+    )
     rules = attr.ib(default=None, metadata={"schema_property_name": "rules"})
-    semantic_version = attr.ib(default=None, metadata={"schema_property_name": "semanticVersion"})
-    short_description = attr.ib(default=None, metadata={"schema_property_name": "shortDescription"})
-    supported_taxonomies = attr.ib(default=None, metadata={"schema_property_name": "supportedTaxonomies"})
+    semantic_version = attr.ib(
+        default=None, metadata={"schema_property_name": "semanticVersion"}
+    )
+    short_description = attr.ib(
+        default=None, metadata={"schema_property_name": "shortDescription"}
+    )
+    supported_taxonomies = attr.ib(
+        default=None, metadata={"schema_property_name": "supportedTaxonomies"}
+    )
     taxa = attr.ib(default=None, metadata={"schema_property_name": "taxa"})
-    translation_metadata = attr.ib(default=None, metadata={"schema_property_name": "translationMetadata"})
+    translation_metadata = attr.ib(
+        default=None, metadata={"schema_property_name": "translationMetadata"}
+    )
     version = attr.ib(default=None, metadata={"schema_property_name": "version"})
+
+
+# flake8: noqa

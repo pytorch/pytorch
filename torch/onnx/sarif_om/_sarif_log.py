@@ -10,5 +10,10 @@ class SarifLog(object):
     runs = attr.ib(metadata={"schema_property_name": "runs"})
     version = attr.ib(metadata={"schema_property_name": "version"})
     schema_uri = attr.ib(default=None, metadata={"schema_property_name": "$schema"})
-    inline_external_properties = attr.ib(default=None, metadata={"schema_property_name": "inlineExternalProperties"})
+    inline_external_properties = attr.ib(
+        default=None, metadata={"schema_property_name": "inlineExternalProperties"}
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

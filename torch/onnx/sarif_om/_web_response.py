@@ -10,9 +10,16 @@ class WebResponse(object):
     body = attr.ib(default=None, metadata={"schema_property_name": "body"})
     headers = attr.ib(default=None, metadata={"schema_property_name": "headers"})
     index = attr.ib(default=-1, metadata={"schema_property_name": "index"})
-    no_response_received = attr.ib(default=None, metadata={"schema_property_name": "noResponseReceived"})
+    no_response_received = attr.ib(
+        default=None, metadata={"schema_property_name": "noResponseReceived"}
+    )
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     protocol = attr.ib(default=None, metadata={"schema_property_name": "protocol"})
-    reason_phrase = attr.ib(default=None, metadata={"schema_property_name": "reasonPhrase"})
+    reason_phrase = attr.ib(
+        default=None, metadata={"schema_property_name": "reasonPhrase"}
+    )
     status_code = attr.ib(default=None, metadata={"schema_property_name": "statusCode"})
     version = attr.ib(default=None, metadata={"schema_property_name": "version"})
+
+
+# flake8: noqa

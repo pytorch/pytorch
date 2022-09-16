@@ -12,3 +12,6 @@ class StackFrame(object):
     parameters = attr.ib(default=None, metadata={"schema_property_name": "parameters"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     thread_id = attr.ib(default=None, metadata={"schema_property_name": "threadId"})
+
+
+# flake8: noqa

@@ -12,3 +12,6 @@ class Message(object):
     markdown = attr.ib(default=None, metadata={"schema_property_name": "markdown"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     text = attr.ib(default=None, metadata={"schema_property_name": "text"})
+
+
+# flake8: noqa

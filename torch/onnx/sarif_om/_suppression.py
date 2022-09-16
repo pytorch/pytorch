@@ -9,7 +9,12 @@ class Suppression(object):
 
     kind = attr.ib(metadata={"schema_property_name": "kind"})
     guid = attr.ib(default=None, metadata={"schema_property_name": "guid"})
-    justification = attr.ib(default=None, metadata={"schema_property_name": "justification"})
+    justification = attr.ib(
+        default=None, metadata={"schema_property_name": "justification"}
+    )
     location = attr.ib(default=None, metadata={"schema_property_name": "location"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     state = attr.ib(default=None, metadata={"schema_property_name": "state"})
+
+
+# flake8: noqa

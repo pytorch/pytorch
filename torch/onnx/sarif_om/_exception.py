@@ -7,8 +7,13 @@ import attr
 class Exception(object):
     """Describes a runtime exception encountered during the execution of an analysis tool."""
 
-    inner_exceptions = attr.ib(default=None, metadata={"schema_property_name": "innerExceptions"})
+    inner_exceptions = attr.ib(
+        default=None, metadata={"schema_property_name": "innerExceptions"}
+    )
     kind = attr.ib(default=None, metadata={"schema_property_name": "kind"})
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     stack = attr.ib(default=None, metadata={"schema_property_name": "stack"})
+
+
+# flake8: noqa

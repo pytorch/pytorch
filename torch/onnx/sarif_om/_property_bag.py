@@ -8,3 +8,6 @@ class PropertyBag(object):
     """Key/value pairs that provide additional information about the object."""
 
     tags = attr.ib(default=None, metadata={"schema_property_name": "tags"})
+
+
+# flake8: noqa

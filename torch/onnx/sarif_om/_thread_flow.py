@@ -9,7 +9,14 @@ class ThreadFlow(object):
 
     locations = attr.ib(metadata={"schema_property_name": "locations"})
     id = attr.ib(default=None, metadata={"schema_property_name": "id"})
-    immutable_state = attr.ib(default=None, metadata={"schema_property_name": "immutableState"})
-    initial_state = attr.ib(default=None, metadata={"schema_property_name": "initialState"})
+    immutable_state = attr.ib(
+        default=None, metadata={"schema_property_name": "immutableState"}
+    )
+    initial_state = attr.ib(
+        default=None, metadata={"schema_property_name": "initialState"}
+    )
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

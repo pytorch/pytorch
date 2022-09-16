@@ -7,8 +7,13 @@ import attr
 class ArtifactLocation(object):
     """Specifies the location of an artifact."""
 
-    description = attr.ib(default=None, metadata={"schema_property_name": "description"})
+    description = attr.ib(
+        default=None, metadata={"schema_property_name": "description"}
+    )
     index = attr.ib(default=-1, metadata={"schema_property_name": "index"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     uri = attr.ib(default=None, metadata={"schema_property_name": "uri"})
     uri_base_id = attr.ib(default=None, metadata={"schema_property_name": "uriBaseId"})
+
+
+# flake8: noqa

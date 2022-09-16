@@ -12,3 +12,6 @@ class ReportingConfiguration(object):
     parameters = attr.ib(default=None, metadata={"schema_property_name": "parameters"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     rank = attr.ib(default=-1.0, metadata={"schema_property_name": "rank"})
+
+
+# flake8: noqa

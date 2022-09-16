@@ -11,3 +11,6 @@ class ArtifactContent(object):
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
     rendered = attr.ib(default=None, metadata={"schema_property_name": "rendered"})
     text = attr.ib(default=None, metadata={"schema_property_name": "text"})
+
+
+# flake8: noqa

@@ -11,3 +11,6 @@ class ToolComponentReference(object):
     index = attr.ib(default=-1, metadata={"schema_property_name": "index"})
     name = attr.ib(default=None, metadata={"schema_property_name": "name"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

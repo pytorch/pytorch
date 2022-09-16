@@ -7,13 +7,14 @@ Usage:
 
 python -m tools.onnx.gen_diagnostic \
     torch/onnx/diagnostic/rules.yaml \
-    torch/onnx/diagnostic \
-    torch/csrc/onnx \
+    torch/onnx/diagnostic/generated \
+    torch/csrc/onnx/diagnostic/generated \
     torch/docs/source
 """
 
 import argparse
 import os
+import subprocess
 import textwrap
 from typing import Any, Mapping, Sequence
 
@@ -40,10 +41,6 @@ _CPP_RULE_TEMPLATE = """\
 {0},
 """
 
-_CPP_RULE_TO_STRING_TEMPLATE = """\
-case Rule::{0}:
-  return "{0}";"""
-
 
 def gen_diagnostic_python(
     rules: Sequence[Mapping[str, Any]], out_py_dir: str, template_dir: str
@@ -66,6 +63,7 @@ def gen_diagnostic_python(
             "rules": textwrap.indent("\n".join(rule_lines), " " * 4),
         },
     )
+    _lint_file(os.path.join(out_py_dir, "rules.py"))
 
 
 def gen_diagnostic_cpp(
@@ -89,29 +87,35 @@ def gen_diagnostic_cpp(
         lambda: {
             "generated_comment": f"@generated from {fm.template_dir}/rules.h.in",
             "rules": textwrap.indent("\n".join(rule_lines), " " * 2),
-            "rule_names": textwrap.indent("\n".join(rule_names), " " * 2),
+            "rule_names": textwrap.indent("\n".join(rule_names), " " * 4),
         },
     )
+    _lint_file(os.path.join(out_cpp_dir, "rules.h"))
 
 
-def gen_diagnostic_docs(out_docs_dir: str):
+def gen_diagnostic_docs(out_docs_dir: str) -> None:
     # TODO
     pass
 
 
+def _lint_file(file_path: str) -> None:
+    p = subprocess.Popen(["lintrunner", "-a", file_path])
+    p.wait()
+
+
 def gen_diagnostic(
     rules_path: str,
-    out_cpp_dir: str,
     out_py_dir: str,
+    out_cpp_dir: str,
     out_docs_dir: str,
 ) -> None:
 
     with open(rules_path, "r") as f:
         rules = yaml.load(f, Loader=torchgen_utils.YamlLoader)
 
-    template_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "templates"
-    )
+    template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+    # TODO: run lintrunner for generated files
 
     gen_diagnostic_python(
         rules,
@@ -129,21 +133,17 @@ def gen_diagnostic(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate ONNX diagnostic files"
-    )
+    parser = argparse.ArgumentParser(description="Generate ONNX diagnostic files")
+    parser.add_argument("rules_path", metavar="RULES", help="path to rules.yaml")
     parser.add_argument(
-        "rules_path", metavar="RULES", help="path to rules.yaml"
+        "out_py_dir",
+        metavar="OUT_PY",
+        help="path to output directory for Python",
     )
     parser.add_argument(
         "out_cpp_dir",
         metavar="OUT_CPP",
         help="path to output directory for C++",
-    )
-    parser.add_argument(
-        "out_py_dir",
-        metavar="OUT_PY",
-        help="path to output directory for Python",
     )
     parser.add_argument(
         "out_docs_dir",
@@ -153,8 +153,8 @@ def main() -> None:
     args = parser.parse_args()
     gen_diagnostic(
         args.rules_path,
-        args.out_cpp_dir,
         args.out_py_dir,
+        args.out_cpp_dir,
         args.out_docs_dir,
     )
 

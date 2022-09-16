@@ -11,3 +11,6 @@ class ExternalPropertyFileReference(object):
     item_count = attr.ib(default=-1, metadata={"schema_property_name": "itemCount"})
     location = attr.ib(default=None, metadata={"schema_property_name": "location"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa

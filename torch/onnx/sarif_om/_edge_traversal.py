@@ -11,4 +11,9 @@ class EdgeTraversal(object):
     final_state = attr.ib(default=None, metadata={"schema_property_name": "finalState"})
     message = attr.ib(default=None, metadata={"schema_property_name": "message"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
-    step_over_edge_count = attr.ib(default=None, metadata={"schema_property_name": "stepOverEdgeCount"})
+    step_over_edge_count = attr.ib(
+        default=None, metadata={"schema_property_name": "stepOverEdgeCount"}
+    )
+
+
+# flake8: noqa

@@ -1,9 +1,4 @@
-import json
-import re
-import sys
-from typing import Any, Callable, Dict, List, Optional, Set
-
-import attr
+from typing import Optional, Set
 
 import torch
 from torch.onnx import diagnostic, sarif_om
@@ -50,9 +45,7 @@ class DiagnosticEngine:
             level=level.value,
             # src_location,
             # export_location,
-            message=rule.message_strings["default"]["text"].format(
-                *message_args
-            ),
+            message=rule.message_strings["default"]["text"].format(*message_args),
         )
         sarif_run = self._current_run
         if not sarif_run:

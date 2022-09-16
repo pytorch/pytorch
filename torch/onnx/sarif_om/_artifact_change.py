@@ -10,3 +10,6 @@ class ArtifactChange(object):
     artifact_location = attr.ib(metadata={"schema_property_name": "artifactLocation"})
     replacements = attr.ib(metadata={"schema_property_name": "replacements"})
     properties = attr.ib(default=None, metadata={"schema_property_name": "properties"})
+
+
+# flake8: noqa
