@@ -6,16 +6,14 @@
 namespace c10 {
 
 // On x86 architecture atomic operations are lock-less.
-static std::atomic<DispatchKeySet> default_included_set{DispatchKeySet({
-    DispatchKey::BackendSelect,
-    DispatchKey::ADInplaceOrView
-})};
+static std::atomic<DispatchKeySet> default_included_set(
+    DispatchKeySet({DispatchKey::BackendSelect, DispatchKey::ADInplaceOrView}));
 
-static std::atomic<DispatchKeySet> default_excluded_set{DispatchKeySet({
+static std::atomic<DispatchKeySet> default_excluded_set(DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
-})};
+}));
 
 DispatchKeySet get_default_included_set() {
   return default_included_set.load();
