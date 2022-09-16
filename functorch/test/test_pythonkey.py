@@ -412,7 +412,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('cholesky'),
         xfail('cumulative_trapezoid'),
         xfail('diag_embed'),
-        xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('trapezoid'),
         xfail('trapz'),
@@ -701,6 +700,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
         res = aot_mod(*inputs)
+        res[0].sum().backward()
 
 
 only_for = ("cpu")

@@ -202,7 +202,10 @@ jobs:
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
       - name: Chown artifacts
         if: always()
-        uses: ./pytorch/.github/actions/chown-workspace
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
       - uses: actions/upload-artifact@v3
         with:
