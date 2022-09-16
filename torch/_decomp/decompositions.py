@@ -1559,6 +1559,20 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+@register_decomposition(aten.index_add_)
+def index_add_(x, dim, index, tensor, *, alpha=1):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    idx = (slice(None),) * dim + (index,)
+    if alpha != 1:
+        tensor = tensor * alpha
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    return x
+
+
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
