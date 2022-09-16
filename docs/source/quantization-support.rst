@@ -590,3 +590,8 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.quantizable.modules
 .. automodule:: torch.nn.quantized
    :noindex:
+
+.. automodule:: torch.ao.nn.quantized.reference
+   :noindex:
+.. automodule:: torch.ao.nn.quantized.reference.modules
+   :noindex:

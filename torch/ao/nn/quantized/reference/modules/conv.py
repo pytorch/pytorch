@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any, List
 from torch.nn.common_types import _size_1_t
 from .utils import ReferenceQuantizedModule
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']
+
 class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
     """ A reference version of nn.quantized.Conv2d
         we will not pack the parameters in this module, since weight packing is an
