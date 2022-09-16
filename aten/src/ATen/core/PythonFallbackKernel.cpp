@@ -1,5 +1,4 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
 
@@ -88,12 +87,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
 
-void pythonDispatcherFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  auto state = c10::impl::PythonDispatcherTLS::get_state();
-  TORCH_INTERNAL_ASSERT(state, "Hit PythonDispatcher dispatch key but PythonDispatcherTLS was not set");
-  state.pyinterpreter()->python_dispatcher(op, dispatch_keys.remove(c10::DispatchKey::PythonDispatcher), stack);
-}
-
 void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // It is ok for the tls to be already set here.
   // It means that there are multiple calls into the dispatcher not originating from python code.
@@ -139,10 +132,6 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());
-}
-
-TORCH_LIBRARY_IMPL(_, PythonDispatcher, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonDispatcherFallback>());
 }
 
 TORCH_LIBRARY_IMPL(_, PythonTLSSnapshot, m) {

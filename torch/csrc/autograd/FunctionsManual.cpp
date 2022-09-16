@@ -1245,10 +1245,8 @@ Tensor mm_mat1_sparse_backward(
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.is_sparse_csr()) {
-    // zero must to have mat1 sparsity pattern:
-    auto zero = mat1.clone();
-    zero.values().zero_();
-    return at::sparse_sampled_addmm(zero, grad, mat2.mH(), 1.0, alpha);
+    return at::sparse_sampled_addmm(
+        at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.layout() == c10::kStrided) {
@@ -2978,10 +2976,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     }
 
     Tensor ggO;
-    // areAnyTensorSubclassLike check necessary for composite compiance:
-    // e.g. it's possible that grad_out/gO is a BatchedTensor wrapping
-    // some Tensor that does require grad
-    if (areAnyTensorSubclassLike({grad_out}) || gO.requires_grad()) {
+    if (gO.requires_grad()) {
       // expand weight as input as in ggW/ggI above
       auto weight_expanded = weight;
       for (const auto i : c10::irange(dims_to_unsqueeze)) {

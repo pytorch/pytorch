@@ -693,15 +693,12 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
 
 Tensor new_empty_strided_batching_rule(
     const Tensor& self,
-    SymIntArrayRef sym_size,
-    SymIntArrayRef sym_stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
-
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.new_empty_strided(

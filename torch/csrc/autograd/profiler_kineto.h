@@ -20,9 +20,7 @@ namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent(
-      std::shared_ptr<const torch::profiler::impl::Result>,
-      const bool verbose);
+  explicit KinetoEvent(std::shared_ptr<const torch::profiler::impl::Result>);
 
   uint64_t startThreadId() const;
   uint64_t endThreadId() const;
