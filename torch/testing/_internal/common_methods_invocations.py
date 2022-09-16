@@ -16319,6 +16319,13 @@ python_ref_db = [
         torch_opinfo_name="sign",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.sgn",
+        torch_opinfo_name="sgn",
+        # This is an issue with the vectorised abs on CPU
+        handles_complex_extremal_values=False,
+        handles_large_floats=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.signbit",
         torch_opinfo_name="signbit",
         supports_nvfuser=False,
@@ -16326,6 +16333,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sin",
         torch_opinfo_name="sin",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.sinc",
+        torch_opinfo_name="sinc",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
