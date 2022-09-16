@@ -1394,7 +1394,9 @@ void initJITBindings(PyObject* module) {
           .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
           // Intentionally don't set file line, as the Python backtrace matters
           // more here
-          .def("guard_int", [](c10::SymIntNode a) { return a->guard_int(nullptr, 0); })
+          .def(
+              "guard_int",
+              [](c10::SymIntNode a) { return a->guard_int(nullptr, 0); })
           .def(
               "__sym_float__",
               [](c10::SymIntNode a) {
