@@ -737,6 +737,11 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
+@register_meta(aten.alias.default, register_dispatcher=False)
+def meta_alias(self):
+    return self.view(self.shape)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
