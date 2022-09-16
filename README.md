@@ -51,7 +51,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
 | [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
-| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd, designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
@@ -79,7 +79,7 @@ And they are fast!
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
 
-Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
+Most frameworks, such as TensorFlow, Theano, Caffe, and CNTK, have a static view of the world.
 One has to build a neural network and reuse the same structure again and again.
 Changing the way the network behaves means that one has to start from scratch.
 
@@ -90,8 +90,8 @@ from several research papers on this topic, as well as current and past work suc
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](https://chainer.org), etc.
 
-While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+While this technique is not unique to PyTorch, it's one of the fastest implementations to date.
+You get the best speed and flexibility for your crazy research.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/dynamic_graph.gif)
 
@@ -108,7 +108,7 @@ Our goal is to not reinvent the wheel where appropriate.
 
 PyTorch is designed to be intuitive, linear in thought, and easy to use.
 When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
-When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
+Wnderstanding them is straightforward when you drop into a debugger or receive error messages and stack traces.
 The stack trace points to exactly where your code was defined.
 We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
 
@@ -128,7 +128,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules or interfacing with PyTorch's Tensor API was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
@@ -277,17 +277,17 @@ conda activate
 python setup.py install
 ```
 
-Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). To link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
-**CUDA based build**
+**CUDA-based build**
 
-In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
+In this mode, PyTorch computations will leverage your GPU via CUDA for faster number crunching.
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
-NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
+NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA, run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
-Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
+Currently, VS 2017 / 2019 and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
 Additional libraries such as
@@ -321,7 +321,7 @@ python setup.py install
 
 ##### Adjust Build Options (Optional)
 
-You can adjust the configuration of cmake variables optionally (without building first), by doing
+You can adjust the configuration of CMake variables optionally (without building first) by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
 with such a step.
 
@@ -358,7 +358,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 **NOTE:** Must be built with a docker version > 18.06
 
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
-You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
+You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda or leave it
 unset to use the default.
 ```bash
 make -f docker.Makefile
@@ -426,12 +426,12 @@ Three-pointers to get you started:
 
 PyTorch has a 90-day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+We appreciate all contributions. If you plan contribute back bug fixes, please do so without further discussion.
 
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+Sending a PR without discussion might result in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
+To learn more about contributing to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
 
 ## The Team
 
