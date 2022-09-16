@@ -3414,7 +3414,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
         xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
-        xfail('linalg.lu_solve', ''),
+        xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
         xfail('special.scaled_modified_bessel_k0'),

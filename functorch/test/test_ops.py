@@ -828,14 +828,12 @@ class TestOperators(TestCase):
         xfail('cumprod'),
         xfail('masked_fill'),
         xfail('copysign'),
-        xfail('linalg.solve'),
         xfail('complex'),
         skip('_masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
         xfail('put'),
         xfail('take'),
-        xfail('linalg.tensorsolve'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
         xfail('nanmean'),
@@ -861,11 +859,8 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
-        xfail('logdet'),  # _linalg_slogdet doesn't have batching rule
-        xfail('linalg.slogdet'),  # _linalg_slogdet doesn't have batching rule
         xfail('linalg.lu', ''),
         xfail('linalg.lu_solve', ''),
-        xfail('linalg.solve_ex', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('_masked.cumprod', ''),
