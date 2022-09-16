@@ -3095,6 +3095,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
         ((1, 4, 5, 5), (4, 8, 3, 3), None,
          {})
     )
@@ -4250,11 +4251,12 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore[assignment]
         shapes = ((), (0,), (2,), (3, 2))  # type: ignore[assignment]
 
+    is_repeat_op = op_info.name in ['repeat', '_refs.repeat']
     samples = []
     for rep_dim, shape in product(rep_dims, shapes):
         # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
         # so we filter such combinations.
-        if op_info.name == 'repeat' and len(rep_dim) < len(shape):
+        if is_repeat_op and len(rep_dim) < len(shape):
             continue
         samples.append(SampleInput(make_arg(shape), args=(rep_dim,),))
 
@@ -4274,6 +4276,8 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
+        # narrow accepts `start` argument to be a Tensor.
+        yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
@@ -10731,7 +10735,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -10791,7 +10795,7 @@ op_db: List[OpInfo] = [
            aten_name='im2col',
            aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -11998,7 +12002,15 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_narrow),
+           sample_inputs_func=sample_inputs_narrow,
+           skips=(
+               # Use of .item()
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -16868,12 +16880,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
         torch_opinfo_name="broadcast_to",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.cat",
@@ -16931,6 +16941,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.expand_as",
+        torch_opinfo_name="expand_as",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
         supports_nvfuser=False,
@@ -16963,6 +16978,10 @@ python_ref_db = [
         "_refs.narrow",
         torch_opinfo_name="narrow",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
@@ -16977,6 +16996,12 @@ python_ref_db = [
         "_refs.ravel",
         torch_opinfo_name="ravel",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.repeat",
+        torch_opinfo_name="repeat",
+        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.reshape",
@@ -17009,7 +17034,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -17043,9 +17067,13 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.unfold_copy",
+        torch_opinfo_name="unfold",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.view",
@@ -17109,7 +17137,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
-        validate_view_consistency=False,
     ),
     ReductionPythonRefInfo(
         "_refs.sum",

@@ -81,6 +81,18 @@ inline void throw_error_for_complex_autograd(
   }
 }
 
+inline void throw_error_if_base_and_tensor_are_same(
+    const at::Tensor& base,
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl(),
+      "View operation returned a tensor that is the same as the input base tensor.  This "
+      "is no longer allowed; you must explicitly create a new tensor (e.g., using .detach()). "
+      "As a user, you could have made a mistake implementing __torch_dispatch__ or a Python "
+      "operator decomposition or meta registration; if that's not the case, please "
+      "report a bug to PyTorch or the backend you are using.");
+}
+
 inline void throw_error_for_complex_autograd(
     const at::TensorList& tensorlist,
     const char* name) {
@@ -167,6 +179,7 @@ inline at::Tensor as_view(
   // be used for both of them.
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) &&
       is_bw_differentiable && is_fw_differentiable) {
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     if (diff_view_meta) {
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
@@ -220,6 +233,7 @@ inline at::Tensor as_view(
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
     }
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     return make_variable_differentiable_view(
         tensor,
         std::move(new_bw_info),
