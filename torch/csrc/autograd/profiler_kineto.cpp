@@ -309,7 +309,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
             [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
             [](auto&) {}));
 
-        kineto_events_.emplace_back(e);
+        kineto_events_.emplace_back(e, config_.experimental_config.verbose);
         AddTensorboardFields add_tb(e, kineto_events_.back());
         AddGenericMetadata add_generic(e);
 
@@ -618,16 +618,19 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 KinetoEvent::KinetoEvent(
-    std::shared_ptr<const torch::profiler::impl::Result> result)
+    std::shared_ptr<const torch::profiler::impl::Result> result,
+    const bool verbose)
     : result_{result} {
   TORCH_INTERNAL_ASSERT(result != nullptr);
 
-  // Populate Python stack
-  auto parent = result_->parent_.lock();
-  while (parent != nullptr) {
-    parent->visit_if_base<PyExtraFieldsBase>(
-        [&](const auto& i) { python_stack_.push_back(parent->name()); });
-    parent = parent->parent_.lock();
+  if (verbose) {
+    // Populate Python stack
+    auto parent = result_->parent_.lock();
+    while (parent != nullptr) {
+      parent->visit_if_base<PyExtraFieldsBase>(
+          [&](const auto& i) { python_stack_.push_back(parent->name()); });
+      parent = parent->parent_.lock();
+    }
   }
 }
 
