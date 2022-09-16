@@ -1,5 +1,4 @@
 #include <type_traits>
-
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -121,13 +120,7 @@ Tensor masked_softmax(
     const Tensor& query,
     c10::optional<int64_t> mask_type = NULL) {
   if (query.is_nested() && !attn_mask) {
-    if (attn_scores.is_cpu()) {
-      NestedTensor_softmax_dropout(query, attn_scores);
-      return attn_scores;
-    }
-    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
-    attn_mask = attn_mask->to(query.device(), /*non-blocking=*/true);
-    mask_type = 1;  /* NestedTensor_to_mask produces a BxT mask */
+    return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {
     TORCH_WARN(
@@ -269,7 +262,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
+    ? c10::MaybeOwned<Tensor>::owned(nested_to_padded_tensor(qkv, 0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);

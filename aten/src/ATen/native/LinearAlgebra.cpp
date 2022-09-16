@@ -1884,21 +1884,7 @@ Tensor _matmul_impl(
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::Tensor result, unused;
-  // Note [is_nested check]
-  // We have 2 choices to support nested tensor matmul:
-  // 1. intercept here by is_nested check
-  // 2. add nested tensor dispatch key
-  // Although 1. is gross, we still choose 1. because we hesitate about 2.:
-  // * We tried 2. for reshape and it caused a weird autograd bug
-  //   (see comment in reshape in TensorShape.cpp)
-  // * but 2. for linear works?
-  // TODO: use 2. after we make sure it is fine
-  if (tensor1.is_nested() || tensor2.is_nested()) {
-    result = at::_NestedTensor_GeneralizedBMM(tensor1, tensor2);
-  }
-  else {
-    result = at::native::_matmul_impl(unused, tensor1, tensor2);
-  }
+  result = at::native::_matmul_impl(unused, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }

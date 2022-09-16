@@ -136,6 +136,9 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
+    "to",
+    "_to_copy",
+    "copy_",
 ]
 
 binary_ops = (
@@ -718,7 +721,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -728,7 +731,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )

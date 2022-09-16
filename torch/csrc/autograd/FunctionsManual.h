@@ -307,6 +307,7 @@ at::Tensor evenly_distribute_backward(
     const at::Tensor& input,
     const at::Tensor& value);
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
@@ -627,12 +628,6 @@ Tensor linalg_qr_backward(
     const Tensor& Q,
     const Tensor& R,
     const c10::string_view mode);
-Tensor eig_backward(
-    const std::vector<torch::autograd::Variable>& grads,
-    const Tensor& self,
-    bool eigenvectors,
-    const Tensor& lambda,
-    const Tensor& v);
 Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
@@ -834,6 +829,12 @@ Tensor linalg_det_backward(
     const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots);
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,

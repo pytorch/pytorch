@@ -14,6 +14,7 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/orchestration/python_tracer.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
@@ -61,9 +62,10 @@ struct TensorMetadata {
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
   std::vector<std::string> dtypes_;
   std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
-  std::vector<c10::IValue> ivalues_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -168,6 +170,7 @@ struct NNModuleInfo {
   PyModuleCls cls_;
   at::StringView cls_name_;
 
+  std::vector<std::pair<std::string, void*>> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
@@ -250,6 +253,17 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename T>
   decltype(auto) visit(T&& visitor) const {
     return c10::visit(std::forward<T>(visitor), extra_fields_);
+  }
+
+  template <typename T, typename Fn>
+  void visit_if_base(Fn&& fn) const {
+    visit([&](const auto& extra_fields) {
+      using extra_fields_t = typename std::remove_cv<
+          typename std::remove_reference<decltype(extra_fields)>::type>::type;
+
+      c10::guts::if_constexpr<std::is_base_of<T, extra_fields_t>::value>(
+          [&](auto _) { fn(_(extra_fields)); });
+    });
   }
 
   EventType tag() const {
@@ -347,53 +361,9 @@ class InputOutputEncoder final {
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
-  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
+  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
 };
-
-class RecordQueue;
-namespace python_tracer {
-/*
-Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
-when we call the profiler from libtorch_python we need the profiler to be able
-to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
-
-In order to solve this dependency issue we define a virtual base and a function
-to register a getter. The python tracer then implements these functions and
-exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
-This pattern of registration for faux python dependencies in libtorch is common
-in the PyTorch codebase.
-*/
-
-using TraceKey = strong::type<
-    uint64_t,
-    struct TraceKey_,
-    strong::regular,
-    strong::hashable,
-    strong::ostreamable>;
-
-struct CompressedEvent {
-  TraceKey key_;
-  uint64_t system_tid_;
-  kineto::DeviceAndResource kineto_info_;
-  time_t enter_t_;
-};
-
-struct TORCH_API PythonTracerBase {
-  static PythonTracerBase& get();
-  virtual ~PythonTracerBase() = default;
-
-  virtual void start(RecordQueue* queue) = 0;
-  virtual void stop() = 0;
-  virtual std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)> time_converter,
-      std::vector<CompressedEvent>& enters) = 0;
-  virtual void clear() = 0;
-};
-
-using GetFn = PythonTracerBase& (*)();
-TORCH_API void registerTracer(GetFn get_tracer);
-} // namespace python_tracer
 
 class TORCH_API ThreadLocalSubqueue {
  public:
@@ -438,49 +408,47 @@ class TORCH_API ThreadLocalSubqueue {
   // See `containers.h` for block size benchmarks.
   static constexpr size_t BlockSize = 512;
 
-  template <typename T, size_t ChunkSize>
-  class EventBlock : public std::array<T, ChunkSize> {
-   public:
-    EventBlock();
-    uint64_t correlation_id(const T* ptr) const {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          ptr >= this->data() && ptr < this->data() + ChunkSize);
-      return id_start_ + (ptr - this->data());
-    }
+  struct TorchOpStorage {
+    // NB: This is a destructive operation.
+    void materialize(
+        std::vector<std::shared_ptr<Result>>& out,
+        const std::function<time_t(approx_time_t)> time_converter,
+        const uint64_t tid,
+        const kineto::DeviceAndResource& kineto_info);
 
-   private:
-    uint64_t id_start_;
-  };
+    template <typename T, size_t ChunkSize>
+    class EventBlock : public std::array<T, ChunkSize> {
+     public:
+      EventBlock();
+      uint64_t correlation_id(const T* ptr) const;
 
-  class OpList : public AppendOnlyList<
-                     KinetoObserverContext::Event,
-                     BlockSize,
-                     EventBlock> {
-   public:
-    template <class... Args>
-    std::pair<KinetoObserverContext::Event*, uint64_t> emplace_back(
-        Args&&... args);
-    static uint64_t correlationID(const OpList::Iterator& e);
-  };
+     private:
+      uint64_t id_start_;
+    };
 
-  OpList op_events_;
+    using event_t = KinetoObserverContext::Event;
+    class OpList : public AppendOnlyList<event_t, BlockSize, EventBlock> {
+     public:
+      template <class... Args>
+      std::pair<event_t*, uint64_t> emplace_back(Args&&... args);
+      static uint64_t correlationID(const OpList::Iterator& e);
+    } op_events_;
 
-  // report_input_shapes
-  InputOutputEncoder inputs_outputs_;
+    // report_input_shapes
+    InputOutputEncoder inputs_outputs_;
 
-  // with_stack
-  AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
-  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
-      py_calls_;
+    // with_stack (JIT)
+    AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
 
-  // with_modules
-  AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
+    // with_modules
+    AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
 
-  // with_flops
-  AppendOnlyList<extra_args_t, BlockSize> extra_args_;
+    // with_flops
+    AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-  // ProfilerState::KINETO_GPU_FALLBACK
-  AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+    // ProfilerState::KINETO_GPU_FALLBACK
+    AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+  } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
@@ -490,6 +458,10 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
+
+  // with_stack (Python)
+  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
+      py_calls_;
 };
 
 class TORCH_API RecordQueue {
@@ -516,6 +488,7 @@ class TORCH_API RecordQueue {
   ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
       sub_queues_;
   std::mutex sub_queue_mutex_;
+  std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
 
 } // namespace impl

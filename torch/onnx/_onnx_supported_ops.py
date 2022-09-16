@@ -4,9 +4,8 @@ from typing import Dict, List, Union
 from torch import _C
 from torch.onnx import _constants, symbolic_registry
 
-for v in _constants.onnx_stable_opsets:
+for v in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
     symbolic_registry.register_version("", v)
-symbolic_registry.register_version("", _constants.onnx_main_opset)
 
 
 class _TorchSchema:
@@ -76,7 +75,7 @@ def _symbolic_argument_count(func):
 
 
 def _all_symbolics_schemas():
-    symbolics_schemas: Dict[str, _TorchSchema] = dict()
+    symbolics_schemas: Dict[str, _TorchSchema] = {}
 
     for domain, version in symbolic_registry._registry:
         for opname, sym_func in symbolic_registry._registry[(domain, version)].items():

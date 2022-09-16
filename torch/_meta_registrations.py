@@ -17,7 +17,7 @@ from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
-meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+_meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 
 meta_table = {}
 
@@ -32,7 +32,7 @@ def register_meta(op, register_dispatcher=True):
                     if op._overloadname != "default"
                     else op.overloadpacket.__name__
                 )
-                meta_lib.impl(name, f)
+                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
 
         tree_map(add_func, op)
         return f
@@ -83,6 +83,11 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     output_sizes = list(self.size())
     output_sizes[dim[-1]] = lastdim
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+
+
+@register_meta(aten.copy_.default, register_dispatcher=False)
+def meta_copy_(self, src, non_blocking=False):
+    return self
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -195,17 +200,7 @@ def _compute_reduction_shape(self, dims, keepdim):
     return utils.compute_reduction_output_shape(self.shape, dims)
 
 
-@register_meta(aten.inverse.default)
-def meta_inverse(self):
-    # Bug: https://github.com/pytorch/pytorch/issues/77498
-    if self.numel() == 0:
-        return torch.empty_like(self)
-    r = self.new_empty(self.shape)
-    r.transpose_(-2, -1)
-    return r
-
-
-@torch.library.impl(meta_lib, "bernoulli.out")
+@register_meta(aten.bernoulli.out)
 def meta_bernoulli(self, *, generator=None, out):
     torch._resize_output_(out, self.size(), self.device)
     return out
@@ -337,7 +332,7 @@ def meta_conv(
 
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] != input_tensor.shape[1] / groups:
+        if weight.shape[1] * groups != input_tensor.shape[1]:
             raise RuntimeError("Invalid channel dimensions")
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation
@@ -373,8 +368,7 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@torch.library.impl(meta_lib, "complex")
-@torch.library.impl(meta_lib, "complex.out")
+@register_meta([aten.complex.default, aten.complex.out])
 @out_wrapper()
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
@@ -383,7 +377,7 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
-@torch.library.impl(meta_lib, "vdot")
+@register_meta(aten.vdot.default)
 def vdot(self, other):
     if not self.is_complex:
         return torch.dot(self, other)
@@ -532,7 +526,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@torch.library.impl(meta_lib, "_cdist_forward")
+@register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
     check(
         x1.dim() >= 2,
@@ -568,7 +562,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     return x1.new_empty(output_shape)
 
 
-@torch.library.impl(meta_lib, "_embedding_bag")
+@register_meta(aten._embedding_bag.default)
 def meta_embedding_bag(
     weight,
     indices,
@@ -677,7 +671,7 @@ def meta_diag(self, dim=0):
     return self.new_empty((sz,))
 
 
-@torch.library.impl(meta_lib, "_embedding_bag_forward_only")
+@register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
         weight, indices, offsets, *args
@@ -728,9 +722,24 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     )
 
 
-@torch.library.impl(meta_lib, "logical_not_")
+@register_meta(aten.logical_not_.default)
 def meta_logical_not_(self):
     return self
+
+
+@register_meta(aten.repeat.default)
+def meta_repeat(self, repeats):
+    check(
+        len(repeats) >= self.dim(),
+        lambda: "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor",
+    )
+    # Add new leading dimensions to the tensor if the
+    # number of target dimensions is larger than the
+    # number of source dimensions.
+    num_new_dimensions = len(repeats) - self.dim()
+    padded_size = (1,) * num_new_dimensions + tuple(self.shape)
+    target_size = [padded_size[i] * repeats[i] for i in range(len(repeats))]
+    return self.new_empty(target_size)
 
 
 # We must also trigger meta registrations from PrimTorch ref

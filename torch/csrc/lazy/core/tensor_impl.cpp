@@ -88,16 +88,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
-
-  auto rank = tensor_->shape().Get().sizes().size();
-  sym_sizes_.reserve(rank);
-  for (auto i : c10::irange(rank)) {
-    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
-        this->tensor_->GetIrValue(), i);
-    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
-    sym_sizes_.push_back(sn->toSymInt());
-  }
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -142,18 +133,32 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  if (FLAGS_ltc_enable_symbolic_shapes) {
-    return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
-  }
-
-  // return upper bound
-  const_cast<LTCTensorImpl*>(this)->setup_size_properties();
-  return TensorImpl::sym_sizes_default();
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return sym_strides_default();
 }
 
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
-  return sym_sizes_custom();
+void LTCTensorImpl::setup_sym_sizes() const {
+  auto rank = tensor_->shape().Get().sizes().size();
+  std::vector<c10::SymInt> sym_sizes;
+  sym_sizes.reserve(rank);
+  for (auto i : c10::irange(rank)) {
+    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
+        this->tensor_->GetIrValue(), i);
+    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
+    sym_sizes.push_back(sn->toSymInt());
+  }
+
+  sym_sizes_ = sym_sizes;
+}
+
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
+  std::cout << FLAGS_ltc_enable_symbolic_shapes << std::endl;
+  if (FLAGS_ltc_enable_symbolic_shapes) {
+    setup_sym_sizes();
+    return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());
+  }
+
+  return c10::fromIntArrayRef(sizes_custom());
 }
 
 void LTCTensorImpl::setup_size_properties() {

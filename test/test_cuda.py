@@ -22,12 +22,10 @@ import torch.cuda.comm as comm
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1679,24 +1677,6 @@ except RuntimeError as e:
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def test_trilu_indices(self):
-        for test_args in tri_tests_args:
-            _compare_trilu_indices(self, *test_args, device='cuda')
-
-        # test default options
-        x = torch.ones(
-            3, 3, dtype=torch.long, device='cuda', layout=torch.strided)
-        self.assertEqual(
-            x.tril(0).nonzero().transpose(0, 1),
-            torch.tril_indices(3, 3, device='cuda'))
-        self.assertEqual(
-            x.triu(0).nonzero().transpose(0, 1),
-            torch.triu_indices(3, 3, device='cuda'))
-
-    def test_large_trilu_indices(self):
-        for test_args in tri_large_tests_args:
-            _compare_large_trilu_indices(self, *test_args, device='cuda')
-
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -1979,7 +1959,7 @@ t1.start()
 t2.start()
 """])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
+    @unittest.skipIf(TEST_WITH_ROCM, "In ROCm, kernel asserts are disabled due to performance overhead")
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3220,6 +3200,36 @@ torch.cuda.synchronize()
             except Exception as e:
                 raise RuntimeError("Failed on ", op) from e
 
+            # Do the same operations varying seeds
+            seeds = [6, 128, 9999]
+
+            for seed in seeds:
+                torch.cuda.manual_seed(seed)
+                graph_in.copy_(a)
+                for _ in range(3):
+                    g.replay()
+
+                # If the random seed was not updated then the graph would
+                # generate the same output as in previous check.
+                try:
+                    self.assertNotEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
+                # Now repeat the same operations in non-graphed mode.
+                torch.cuda.manual_seed(seed)
+                for _ in range(3):
+                    eager_out.copy_(a)
+                    eager_out = op(eager_out, **kwargs)
+                    eager_out = op(eager_out, **kwargs)
+
+                # In the end, graph_out and eager_out must be equal
+                # as they went under the same set of operations.
+                try:
+                    self.assertEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
             # We hold references to all tensors used across streams up til this sync,
             # so no need to call record_stream on those tensors.
             torch.cuda.synchronize()
@@ -3303,22 +3313,36 @@ torch.cuda.synchronize()
             except Exception as e:
                 raise RuntimeError("Failed on " + module + "." + op) from e
 
-            # Runs a dummy op prelude, as for controls, to make sure replay()
-            # picks up the dummy op's state increment.
-            if module == "torch":
-                dummy = getattr(torch, op)(*args, **kwargs)
-            else:
-                dummy = alloc.clone()
-                getattr(dummy, op)(*args)
+            # Set a new seed to check if graph would use it
+            for seed in [6, 314, 271]:
+                torch.cuda.manual_seed(seed)
+                # Runs a dummy op prelude, as for controls, to make sure replay()
+                # picks up the dummy op's state increment.
+                if (module == "torch"):
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                    control1 = getattr(torch, op)(*args, **kwargs)
+                    control2 = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+                    getattr(control1, op)(*args)
+                    getattr(control2, op)(*args)
 
-            # Runs RNG ops that fill t1 and t2.
-            g.replay()
+                torch.cuda.manual_seed(seed)
+                if (module == "torch"):
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
 
-            try:
-                self.assertEqual(control1, t1)
-                self.assertEqual(control2, t2)
-            except Exception as e:
-                raise RuntimeError("Failed on " + module + "." + op) from e
+                t1.copy_(alloc)
+                t2.copy_(alloc)
+                # Runs RNG ops that fill t1 and t2.
+                g.replay()
+
+                try:
+                    self.assertEqual(control1, t1)
+                    self.assertEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
 
             # We hold references to all tensors used across streams up til this sync,
             # so no need to call record_stream on those tensors.
@@ -3562,8 +3586,8 @@ torch.cuda.synchronize()
              delta_cudaMalloc_bytes_post_del_g,
              pool_string) in cases:
             if pool_string == "small_pool":
-                delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
-                delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+                delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
+                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
             else:
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
@@ -3752,7 +3776,8 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), (True, True)],
+    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True),
+                 decorators=[unittest.expectedFailure])],
                  name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
                                                     {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
     def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
@@ -3959,12 +3984,12 @@ torch.cuda.synchronize()
         loss.backward()
         optimizer.step()
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUDA_VISIBLE_DEVICES")
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
         from subprocess import check_output
-        test_script = "import os; import torch;os.environ['CUDA_VISIBLE_DEVICES']='32';print(torch.cuda.device_count())"
+        VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
+        test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
         rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
         self.assertEqual(rc, "0")
 
@@ -4444,6 +4469,10 @@ class TestCudaComm(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(False)
+
+    def test_raises_oom(self):
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
 instantiate_parametrized_tests(TestCuda)
 

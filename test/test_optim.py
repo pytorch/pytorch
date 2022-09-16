@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -311,10 +311,9 @@ class TestOptim(TestCase):
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
 
-        for i in range(3):
+        for _ in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
-
             complex_opt.step()
             real_opt.step()
 
@@ -331,7 +330,7 @@ class TestOptim(TestCase):
         optim1 = optimizer_constructor([a1])
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
-        for i in range(10):
+        for _ in range(10):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
@@ -437,10 +436,10 @@ class TestOptim(TestCase):
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=5e-3)
+                lambda params: optimizer(params, lr=4.8e-3)
             )
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=0.005),
+                lambda params: optimizer(params, lr=0.0048),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
@@ -871,6 +870,14 @@ class TestOptim(TestCase):
                     lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+            self._test_complex_2d(lambda param: optimizer(param, centered=True))
+            self._test_complex_2d(lambda param: optimizer(param, momentum=0.1))
+            self._test_complex_2d(lambda param: optimizer(param, maximize=True))
+            self._test_complex_optimizer(lambda param: optimizer([param]))
+            self._test_complex_optimizer(lambda param: optimizer([param], centered=True))
+            self._test_complex_optimizer(lambda param: optimizer([param], momentum=0.1))
+            self._test_complex_optimizer(lambda param: optimizer([param], maximize=True))
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
@@ -892,18 +899,36 @@ class TestOptim(TestCase):
                     lr=1e-3, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            # Ref: https://github.com/pytorch/pytorch/issues/84560
+            # self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(lambda params: optimizer([params]))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=False, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], weight_decay=0.9))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, maximize=True)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
@@ -2765,11 +2790,15 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # dict
     p = p.clone()
     p.grad = grad
-    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in opt_differentiable_state.items()
+    }
     opt = opt_class([p], **kwargs)
-    opt.state.update(opt_differentiable_state)
+    opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(opt_differentiable_state.values())
+    return (p,) + tuple(
+        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2780,6 +2809,38 @@ class TestDifferentiableOptimizer(TestCase):
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
         gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
+    def test_adam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adam,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
+
+    def test_rmsprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step'] = 0
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['momentum_buffer'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # This can cause issues with large values and nan due to sqrt ops
+        state['grad_avg'] = 1e-2 * torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RMSprop,
+             {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
+             *state.values()))
 
 
 if __name__ == '__main__':
