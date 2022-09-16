@@ -3301,6 +3301,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('scatter_reduce', 'sum'),
+        xfail('scatter_reduce', 'mean'),
+        xfail('scatter_reduce', 'amax'),
+        xfail('scatter_reduce', 'amin'),
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
