@@ -1828,12 +1828,13 @@ def _run_symbolic_function(
                 **attrs,
             )
 
-        if symbolic_function_group is not None:
-            supported_version = symbolic_function_group.get_min_supported()
-        else:
-            supported_version = None
         raise errors.UnsupportedOperatorError(
-            domain, op_name, opset_version, supported_version
+            domain,
+            op_name,
+            opset_version,
+            symbolic_function_group.get_min_supported()
+            if symbolic_function_group
+            else None,
         )
 
     except RuntimeError:
