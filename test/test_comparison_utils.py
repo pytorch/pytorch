@@ -1,5 +1,8 @@
+#!/usr/bin/env python3
+# Owner(s): ["module: comparison"]
+
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 
 class TestComparisonUtils(TestCase):
     def test_all_equal_no_assert(self):
