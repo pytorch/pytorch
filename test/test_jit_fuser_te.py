@@ -2348,18 +2348,25 @@ class TestTEFuser(JitTestCase):
             y = torch.sigmoid(x)
             z = y._autocast_to_reduced_precision(True, True, torch.half, torch.bfloat16)
             h = z._autocast_to_full_precision(True, True)
-            i = h.to(dtype=torch.float32)
-            j = i.to(dtype=torch.bfloat16)
-            k = j.to(dtype=torch.float32)
-            return k
+            i = h.to(dtype=torch.bfloat16)
+            j = i.to(dtype=torch.float32)
+            return j
 
-        for dtype in [torch.float, torch.bfloat16]:
-            x = torch.rand((2, 2), dtype=dtype)
-            scr = torch.jit.script(f)
-            scr(x)
-            scr(x)
-            self.assertLastGraphAllFused()
-            self.assertEqual(f(x), scr(x), atol=4e-3, rtol=4e-3)
+        x = torch.rand((2, 2), dtype=torch.float32)
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+        self.assertEqual(f(x), scr(x), atol=4e-3, rtol=4e-3)
+
+        bf_x = torch.rand((2, 2), dtype=torch.bfloat16)
+        bf_scr = torch.jit.trace(f, bf_x)
+        bf_scr(bf_x)
+        bf_scr(bf_x)
+        graph = bf_scr.graph_for(bf_x)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 2)
+        self.assertEqual(f(bf_x), bf_scr(bf_x), atol=4e-3, rtol=4e-3)
 
     def test_with_strict_fusion(self):
 
