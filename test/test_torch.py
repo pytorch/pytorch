@@ -1235,6 +1235,48 @@ else:
             'fractional_max_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool1d(3, 1)
+        input = torch.randn(1, 1, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool2d(3, 1)
+        input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool3d(3, 1)
+        input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling3d_forward_out')
+
     @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
@@ -5623,6 +5665,15 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
+
+    def test_pytorch_library_disabled_env(self):
+        import subprocess
+        env = os.environ.copy()
+        env['PYTORCH_DISABLE_LIBRARY'] = '1'
+        try:
+            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("Could not 'import torch' with PYTORCH_DISABLE_LIBRARY=0") from e
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
