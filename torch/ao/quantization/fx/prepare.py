@@ -178,20 +178,20 @@ def is_input_arg_dtype_supported_by_backend(
     if is_activation:
         is_dynamic = dtype_config.is_dynamic
         if is_dynamic:
-            input_activation_dtype = dtype_config.input_dtype
+            input_activation_dtype = dtype_config.get_input_dtype()
             # TODO: change this after the is_dynamic refactor is landed
             compute_dtype = node_name_to_target_dtype[node.name].get("input_activation_compute_dtype", None)
             return input_activation_dtype is None or \
                 compute_dtype == input_activation_dtype
         else:
-            input_activation_dtype = dtype_config.input_dtype
+            input_activation_dtype = dtype_config.get_input_dtype()
             return input_activation_dtype is None or \
                 node_name_to_target_dtype[node.name]["input_activation_dtype"] == input_activation_dtype
     elif is_weight:
-        weight_dtype = dtype_config.weight_dtype
+        weight_dtype = dtype_config.get_weight_dtype()
         return weight_dtype is None or node_name_to_target_dtype[node.name]["weight_dtype"] == weight_dtype
     else:  # bias
-        bias_dtype = dtype_config.bias_dtype
+        bias_dtype = dtype_config.get_bias_dtype()
         return bias_dtype is None or node_name_to_target_dtype[node.name]["bias_dtype"] == bias_dtype
 
 def is_output_dtype_supported_by_backend(
@@ -202,7 +202,7 @@ def is_output_dtype_supported_by_backend(
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
-    output_dtype = dtype_config.output_dtype
+    output_dtype = dtype_config.get_output_dtype()
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
@@ -265,7 +265,7 @@ def _update_qconfig_based_on_dtype_config(
     """
     def get_new_activation_post_process(
             activation_post_process: Union[_PartialWrapper, Type[ObserverBase]],
-            dtype_with_constraints: Optional[DTypeWithConstraints],
+            dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> Union[_PartialWrapper, Type[ObserverBase]]:
         """
         Return an updated activation post process that satisfies the constraints of the backend.
@@ -315,19 +315,13 @@ def _update_qconfig_based_on_dtype_config(
         return
     activation = qconfig.activation
     weight = qconfig.weight
-    if activation is not None:
-        # For now, assume input and output constraints match on the backend
-        # In the future, when we generalize qconfig to support separate input and output activations,
-        # we should check input and output constraints separately here
-        activation = get_new_activation_post_process(
-            activation,
-            dtype_config.input_dtype_with_constraints,
-            "activation")
-    if weight is not None:
-        weight = get_new_activation_post_process(
-            weight,
-            dtype_config.weight_dtype_with_constraints,
-            "weight")
+    # For now, assume input and output constraints match on the backend
+    # In the future, when we generalize qconfig to support separate input and output activations,
+    # we should check input and output constraints separately here
+    if activation is not None and isinstance(dtype_config.input_dtype, DTypeWithConstraints):
+        activation = get_new_activation_post_process(activation, dtype_config.input_dtype, "activation")
+    if weight is not None and isinstance(dtype_config.weight_dtype, DTypeWithConstraints):
+        weight = get_new_activation_post_process(weight, dtype_config.weight_dtype, "weight")
     if activation is qconfig.activation and weight is qconfig.weight:
         return qconfig
     else:

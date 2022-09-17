@@ -4790,17 +4790,21 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.linear(x)
 
         dtype_config = DTypeConfig(
-            input_dtype_with_constraints=DTypeWithConstraints(
+            input_dtype=DTypeWithConstraints(
                 dtype=torch.quint8,
                 quant_min=0,
                 quant_max=31,
             ),
-            weight_dtype_with_constraints=DTypeWithConstraints(
+            output_dtype=DTypeWithConstraints(
+                dtype=torch.quint8,
+                quant_min=0,
+                quant_max=31,
+            ),
+            weight_dtype=DTypeWithConstraints(
                 dtype=torch.qint8,
                 quant_min=-64,
                 quant_max=63,
             ),
-            output_dtype=torch.quint8,
             bias_dtype=torch.float,
         )
         backend_config = BackendConfig() \
@@ -4872,9 +4876,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.linear(x)
 
         dtype_config = DTypeConfig(
-            input_dtype_with_constraints=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
-            weight_dtype_with_constraints=DTypeWithConstraints(dtype=torch.qint8, scale_min=2 ** -12),
-            output_dtype=torch.quint8,
+            input_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
+            output_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
+            weight_dtype=DTypeWithConstraints(dtype=torch.qint8, scale_min=2 ** -12),
             bias_dtype=torch.float,
         )
 
