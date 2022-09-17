@@ -448,24 +448,41 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
     // Composite Compliant path for TensorSubclasses
     auto is_batched = log_probs.dim() == 3;
     Tensor log_probs_ = is_batched ? log_probs : log_probs.unsqueeze(1);
-    // TODO : Add cuDNN path!
-    // if the targets are on CPU (which you need for CuDNN, let's move them to
-    // GPU as a service for the user)
+    bool use_cudnn =
+        (log_probs.device().type() == at::kCUDA) &&
+        at::_use_cudnn_ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, BLANK);
 
-    // NOTE: Calling data-ptr is not Composite Compliant!,
-    // so we call the _ctc_loss.Tensor overload.
-    auto res = std::get<0>(at::_ctc_loss(
-        log_probs_,
-        targets.to(log_probs.device(), kLong),
-        input_lengths,
-        target_lengths,
-        BLANK,
-        zero_infinity));
-    if (zero_infinity) {
-      res = at::where(
-          res == Scalar(std::numeric_limits<double>::infinity()),
-          at::zeros({}, res.options()),
-          res);
+    Tensor res;
+    if (use_cudnn) {
+      // non-deterministic ctc loss on cudnn disabled due to inconsistent
+      // results see: https://github.com/pytorch/pytorch/issues/21680
+      res = std::get<0>(at::_cudnn_ctc_loss(
+          log_probs,
+          targets,
+          input_lengths,
+          target_lengths,
+          BLANK,
+          /*deterministic=*/true,
+          zero_infinity));
+    } else {
+      // NOTE: Calling data-ptr is not Composite Compliant!,
+      // so we call the _ctc_loss.Tensor overload.
+      auto res = std::get<0>(at::_ctc_loss(
+          log_probs_,
+          // if the targets are on CPU (which you need for CuDNN, let's move
+          // them to GPU as a service for the user)
+          targets.to(log_probs.device(), kLong),
+          input_lengths,
+          target_lengths,
+          BLANK,
+          zero_infinity));
+      if (zero_infinity) {
+        res = at::where(
+            res == Scalar(std::numeric_limits<double>::infinity()),
+            at::zeros({}, res.options()),
+            res);
+      }
     }
     if (reduction == at::Reduction::Mean) {
       auto target_lengths_t = target_lengths.clamp_min(1);
