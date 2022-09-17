@@ -3210,35 +3210,75 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 def error_inputs_conv3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for negative strides
     cases: Tuple = (
         ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'stride': (-1,)}),
     )
-
     for input_shape, weight, bias, kwargs in cases:
         yield ErrorInput(
             SampleInput(make_arg(input_shape), args=(make_arg(weight),
                         make_arg(bias) if bias is not None else bias), kwargs=kwargs),
             error_regex="non-positive stride is not supported")
 
+    # error inputs for negative padding
     cases: Tuple = (
         ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'padding': (-1,)}),
     )
-
     for input_shape, weight, bias, kwargs in cases:
         yield ErrorInput(
             SampleInput(make_arg(input_shape), args=(make_arg(weight),
                         make_arg(bias) if bias is not None else bias), kwargs=kwargs),
             error_regex="negative padding is not supported")
 
+    # error inputs for negative dilation
     cases: Tuple = (
         ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'dilation': (-1,), 'padding': (1,)}),
     )
-
     for input_shape, weight, bias, kwargs in cases:
         yield ErrorInput(
             SampleInput(make_arg(input_shape), args=(make_arg(weight),
                         make_arg(bias) if bias is not None else bias), kwargs=kwargs),
             error_regex="dilation should be greater than zero")
+
+    # error inputs for bias shape equal to the output channels
+    cases: Tuple = (
+        ((1, 1, 4, 4, 4), (1, 1, 3, 3, 3), (2,), {'padding': 'same'}),
+    )
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="expected bias to be 1-dimensional with 1 elements")
+
+    # error inputs for same dimensions of input and weight
+    cases: Tuple = (
+        ((1, 1, 3, 4, 5), (1, 1, 4, 3), (1,), {'padding': 'same'}),
+    )
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="Expected 4-dimensional input for 4-dimensional weight")
+
+    # error inputs for same dimensions of input and weight
+    cases: Tuple = (
+        ((1, 1, 3, 4, 5), (1, 1, 4, 3, 3), (1,), {'padding': 'same', 'groups': 2}),
+    )
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="expected weight to be at least 2 at dimension 0")
+
+    # error inputs for groups should be divisible by weight size
+    cases: Tuple = (
+        ((2, 2, 3, 4, 5), (2, 2, 4, 3, 3), (2,), {'padding': 'same', 'groups': 3}),
+    )
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="expected weight to be at least 3 at dimension 0")
 
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -10677,7 +10717,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs) INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.float32, torch.complex64)),
                # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
                             dtypes=(torch.float32,)),
