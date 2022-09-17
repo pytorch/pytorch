@@ -864,6 +864,15 @@ def saved_variables(
                 "expr": stride_expr,
             },
         ),
+        # replace self.sym_strides() with self_sym_strides
+        (
+            r"{}.sym_strides\(\)",
+            {
+                "suffix": "_sym_strides",
+                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
+                "expr": stride_expr,
+            },
+        ),
         # replace self.layout() with self_layout
         (
             r"{}.layout\(\)",
