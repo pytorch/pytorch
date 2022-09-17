@@ -8,7 +8,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import TensorSequenceType
+from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -1557,6 +1557,32 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         else:
             ret = ret + vals[..., i, :, j]
     return ret / (length_h * length_w)
+
+
+@register_decomposition(aten.index_add_)
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = torch._prims.mul(tensor, alpha)
+    idx = (slice(None),) * dim + (index,)
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    return x
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
