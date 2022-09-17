@@ -13505,6 +13505,17 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
+           skips=(
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness',
+                            dtypes=(torch.bool,)),
+               DecorateInfo(unittest.expectedFailure,
+                            'TestNNCOpInfo',
+                            'test_nnc_correctness',
+                            dtypes=(torch.bool,)),
+           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
