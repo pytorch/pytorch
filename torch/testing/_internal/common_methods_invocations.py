@@ -4073,13 +4073,13 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # target.index_select(dim, idx)
-    select = op_info.name == "index_select"
+    select = "index_select" in op_info.name
     # target.index_add(dim, idx, source, *, alpha=1)
-    add = op_info.name == "index_add"
+    add = "index_add" in op_info.name
     # target.index_copy(dim, idx, source)
-    copy = op_info.name == "index_copy"
+    copy = "index_copy" in op_info.name
     # target.index_fill(dim, idx, value)
-    fill = op_info.name == "index_fill"
+    fill = "index_fill" in op_info.name
 
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4090,7 +4090,13 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
 
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
-    alphas = (-1, 0, 2) if add else (None,)
+    if add:
+        if dtype == torch.bool:
+            alphas = (True, False)
+        else:
+            alphas = (-1, 0, 2)
+    else:
+        alphas = (None,)
 
     for shape, alpha in product(shapes, alphas):
         t = make_arg(shape)
@@ -13489,6 +13495,17 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
+           skips=(
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness',
+                            dtypes=(torch.bool,)),
+               DecorateInfo(unittest.expectedFailure,
+                            'TestNNCOpInfo',
+                            'test_nnc_correctness',
+                            dtypes=(torch.bool,)),
+           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -17485,6 +17502,45 @@ python_ref_db = [
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.index_select",
+        torch_opinfo_name="index_select",
+        # empty_strided
+        supports_nvfuser=False,
+        skips=(
+            # no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # Sample out= with a stride of zero. This _out operation checks that the input has no
+            # inner overlap
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),)
+    ),
+    PythonRefInfo(
+        "_refs.index_copy",
+        torch_opinfo_name="index_copy",
+        # empty_strided
+        supports_nvfuser=False,
+        skips=(
+            # no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+    ),
+    PythonRefInfo(
+        "_refs.index_add",
+        torch_opinfo_name="index_add",
+        # empty_strided
+        supports_nvfuser=False,
+        skips=(
+            # no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+    ),
+    PythonRefInfo(
+        "_refs.index_fill",
+        torch_opinfo_name="index_fill",
+        # empty_strided
+        supports_nvfuser=False,
+        skips=(
+            # no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
     ),
     #
     # Test-related functions
