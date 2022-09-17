@@ -38,8 +38,6 @@ constexpr auto exclude_keys_for_meta_dispatch =
 
 
 inline Tensor to_meta(const Tensor& t) {
-    TORCH_INTERNAL_ASSERT(t.sym_sizes().size() == t.strides().size());
-    TORCH_INTERNAL_ASSERT(t.sym_sizes().size() == t.sym_strides().size());
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
