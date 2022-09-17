@@ -92,9 +92,11 @@ __all__ = [
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
+    "sgn",
     "sign",
     "signbit",
     "sin",
+    "sinc",
     "sinh",
     "sqrt",
     "square",
@@ -445,7 +447,7 @@ def ceil(a):
 @register_decomposition(torch.ops.aten.conj_physical)
 @out_wrapper()
 def conj_physical(input: TensorLikeType):
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     return prims.conj_physical(input)
 
@@ -751,6 +753,15 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def sgn(a):
+    if utils.is_complex_dtype(a.dtype):
+        a_abs = a.abs()
+        return torch.where(a_abs == 0, 0, a / a_abs)
+    else:
+        return a.sign()
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def sign(a):
     return prims.sign(a)
 
@@ -763,6 +774,14 @@ def signbit(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def sin(a):
     return prims.sin(a)
+
+
+# Autograd note: This will give the right first derivative at zero (by chance),
+# but not the right second derivative
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sinc(a):
+    a = math.pi * a
+    return torch.where(a == 0, 1, torch.sin(a) / a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -2258,7 +2277,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 def conj(input: TensorLikeType) -> TensorLikeType:
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     if input.is_sparse:
         return torch.conj_physical(input)
@@ -3009,7 +3028,7 @@ def index_fill_(
 @register_decomposition(torch.ops.aten.index_add)
 @out_wrapper()
 def index_add(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: float = 1
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: NumberType = 1
 ):
     return x.clone().index_add_(dim, index, tensor, alpha=alpha)
 
@@ -3018,7 +3037,7 @@ def index_add(
 # We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
 # https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
 def index_add_(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: float = 1
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: NumberType = 1
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
