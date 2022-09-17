@@ -140,6 +140,10 @@ void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
+void SymInt::operator+=(SymInt sci) {
+  *this = *this + sci;
+}
+
 bool SymInt::operator<(int64_t sci) const {
   return *this < c10::SymInt(sci);
 }
