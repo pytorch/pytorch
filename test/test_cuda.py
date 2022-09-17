@@ -4470,6 +4470,60 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+
+    def test_allocator_settings(self):
+        def power2_div(size, div_factor):
+            pow2 = 1
+            while pow2 < size:
+                pow2 = pow2 * 2
+            if pow2 == size:
+                return pow2
+            step = pow2 / 2 / div_factor
+            ret = pow2 / 2
+            while ret < size:
+                ret = ret + step
+            return ret
+
+        torch.cuda.memory.empty_cache()
+        key = 'active_bytes.all.allocated'
+
+        nelems = 21 * 1024 * 1024
+        nbytes = 4 * nelems  # floats are 4 bytes
+
+        start_mem = torch.cuda.memory_stats()[key]
+        torch.cuda.memory._set_allocator_settings("")
+        x = torch.rand(nelems, device='cuda')
+
+        reg_mem = torch.cuda.memory_stats()[key]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:4")
+        y = torch.rand(nelems, device='cuda')
+
+        pow2_div4_mem = torch.cuda.memory_stats()[key]
+
+        self.assertTrue(reg_mem - start_mem == nbytes)
+        self.assertTrue(pow2_div4_mem - reg_mem == power2_div(nbytes, 4))
+
+        torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5")
+        torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5,max_split_size_mb:40")
+
+        # should have reset the power2 divisions now
+        torch.cuda.memory.empty_cache()
+        start_mem = torch.cuda.memory_stats()[key]
+        z = torch.rand(nelems, device='cuda')
+        reg_mem = torch.cuda.memory_stats()[key]
+        self.assertTrue(reg_mem - start_mem == nbytes)
+
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:1.2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+
+
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
