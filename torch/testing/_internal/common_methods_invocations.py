@@ -2714,10 +2714,7 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
 def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2732,10 +2729,7 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
 
 def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -2752,10 +2746,8 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
+
 
 def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2769,10 +2761,7 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
-        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
-        # Unbatched
-        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
 
 def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2790,10 +2779,7 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
-        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
-        # Unbatched
-        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
 
 
 def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -2811,10 +2797,8 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
-        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
-        # Unbatched
-        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+
 
 class _TestParamsMaxPoolBase(object):
 
@@ -3068,13 +3052,7 @@ def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(
-            make_arg(weight),
-            make_arg(bias) if bias is not None else bias
-        ), kwargs=kwargs)
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
@@ -3099,13 +3077,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(
-            make_arg(weight),
-            make_arg(bias) if bias is not None else bias
-        ), kwargs=kwargs)
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
@@ -3129,13 +3101,7 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(
-            make_arg(weight),
-            make_arg(bias) if bias is not None else bias
-        ), kwargs=kwargs)
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
@@ -3160,13 +3126,7 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
     # in test/test_nn.py
 
     for input_shape, weight, bias, kwargs in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(
-            make_arg(weight),
-            make_arg(bias) if bias is not None else bias
-        ), kwargs=kwargs)
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
@@ -3218,16 +3178,67 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
     )
 
     for input_shape, weight, bias, kwargs in cases:
-        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
-        # Unbatched
-        yield SampleInput(make_arg(input_shape[1:]), args=(
+
+
+def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for input, weight, bias
+    # and dict of values of (stride, padding, dilation, groups)
+    cases: Tuple = (
+        ((1, 1, 4, 4, 4), (1, 1, 1, 1, 1), (1,), {'padding': 'same'}),
+        ((1, 1, 4, 4, 4), (1, 1, 4, 4, 4), (1,), {'stride': (2, 2, 2)}),
+        ((1, 1, 5, 5, 5), (1, 1, 3, 3, 3), (1,), {'dilation': 2}),
+        ((1, 1, 1, 1, 10), (1, 1, 1, 1, 4), None, {'padding': 'valid'}),
+        ((1, 1, 10, 11, 12), (1, 1, 1, 2, 5), None, {'padding': 'same'}),
+        ((1, 1, 10, 11, 12), (1, 1, 1, 2, 5), None, {'padding': 'same', 'dilation': 2}),
+        ((1, 1, 10, 11, 12), (1, 1, 4, 4, 4), None, {'padding': 'same', 'dilation': 3}),
+        ((1, 1, 1, 1, 10), (1, 1, 1, 1, 4), None, {'padding': 'valid'}),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:
+        yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
         ), kwargs=kwargs)
+
+
+def error_inputs_conv3d(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    cases: Tuple = (
+        ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'stride': (-1,)}),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="non-positive stride is not supported")
+
+    cases: Tuple = (
+        ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'padding': (-1,)}),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="negative padding is not supported")
+
+    cases: Tuple = (
+        ((1, 1, 4, 4, 4), (1, 1, 2, 2, 2), (1,), {'dilation': (-1,), 'padding': (1,)}),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(input_shape), args=(make_arg(weight),
+                        make_arg(bias) if bias is not None else bias), kwargs=kwargs),
+            error_regex="dilation should be greater than zero")
 
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -10642,6 +10653,25 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+           ),
+           supports_expanded_weight=True,
+           supports_out=False,),
+    OpInfo('nn.functional.conv3d',
+           aliases=('conv3d',),
+           aten_name='conv3d',
+           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           sample_inputs_func=sample_inputs_conv3d,
+           error_inputs_func=error_inputs_conv3d,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           gradcheck_fast_mode=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
+                   'TestCommon', 'test_complex_half_reference_testing',
+               ),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
