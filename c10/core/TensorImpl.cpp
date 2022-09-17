@@ -909,8 +909,9 @@ void TensorImpl::set_sizes_and_strides(
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
-    if (!storage_offset.has_value())
+    if (!storage_offset.has_value()) {
       extra_meta_->storage_offset_ = storage_offset_;
+    }
   }
   extra_meta_->sizes_ = sizes;
   extra_meta_->strides_ = strides;
