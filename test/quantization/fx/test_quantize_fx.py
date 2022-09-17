@@ -70,11 +70,15 @@ from torch.ao.quantization import (
     HistogramObserver,
     QConfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qconfig,
 )
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     BackendPatternConfig,
+    DTypeConfig,
+    DTypeWithConstraints,
+    ObservationType
 )
 from torch.ao.quantization.backend_config.native import (
     get_test_only_legacy_native_backend_config,
@@ -135,6 +139,7 @@ from torch.ao.quantization.fake_quantize import (
 from torch.ao.quantization.observer import (
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
+    MinMaxObserver,
 )
 
 # test utils
@@ -4770,6 +4775,155 @@ class TestQuantizeFx(QuantizationTestCase):
         # Ensure prepare_fx and prepare_qat_fx work in both training and eval modes
         _test(prepare_fx, get_default_qconfig_mapping())
         _test(prepare_qat_fx, get_default_qat_qconfig_mapping())
+
+    def test_backend_config_quantization_range(self):
+        """
+        Check that quantization ranges specified through the BackendConfig are reflected in
+        the observers inserted into the model.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        dtype_config = DTypeConfig(
+            input_dtype_with_constraints=DTypeWithConstraints(
+                dtype=torch.quint8,
+                quant_min=0,
+                quant_max=31,
+            ),
+            weight_dtype_with_constraints=DTypeWithConstraints(
+                dtype=torch.qint8,
+                quant_min=-64,
+                quant_max=63,
+            ),
+            output_dtype=torch.quint8,
+            bias_dtype=torch.float,
+        )
+        backend_config = BackendConfig() \
+            .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .add_dtype_config(dtype_config)
+                .set_root_module(torch.nn.Linear)
+                .set_reference_quantized_module(nnqr.Linear))
+        example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+
+        def check_observers(qconfig, act_qmin, act_qmax, weight_qmin, weight_qmax):
+            """
+            Check that the quantization ranges in the observers match what we expect.
+            """
+            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+            m = MyModel()
+            m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
+            activation_observer = m.linear.qconfig.activation()
+            weight_observer = m.linear.qconfig.weight()
+            self.assertEqual(activation_observer.quant_min, act_qmin)
+            self.assertEqual(activation_observer.quant_max, act_qmax)
+            self.assertEqual(weight_observer.quant_min, weight_qmin)
+            self.assertEqual(weight_observer.quant_max, weight_qmax)
+            for node in m.graph.nodes:
+                if node.op == "call_module" and node.target.startswith("activation_post_process"):
+                    inserted_activation_observer = getattr(m, node.target)
+                    self.assertEqual(inserted_activation_observer.quant_min, act_qmin)
+                    self.assertEqual(inserted_activation_observer.quant_max, act_qmax)
+
+        # Case 1: QConfig ranges fit within backend ranges, just use the QConfig ranges in this case
+        qconfig1 = QConfig(
+            activation=MinMaxObserver.with_args(quant_min=0, quant_max=15, dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(quant_min=-32, quant_max=31, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        check_observers(qconfig1, 0, 15, -32, 31)
+
+        # Case 2: QConfig does not specify a range, borrow the ranges from BackendConfig
+        qconfig2 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        check_observers(qconfig2, 0, 31, -64, 63)
+
+        # Case 3: QConfig activation range falls outside backend range, throw error
+        qconfig3 = QConfig(
+            activation=MinMaxObserver.with_args(quant_min=0, quant_max=63, dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig3)
+        with self.assertRaisesRegex(ValueError, "QConfig activation quantization range"):
+            prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
+
+        # Case 4: QConfig weight range falls outside backend range, throw error
+        qconfig4 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(quant_min=-128, quant_max=127, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig4)
+        with self.assertRaisesRegex(ValueError, "QConfig weight quantization range"):
+            prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
+
+    def test_backend_config_scale_min(self):
+        """
+        Check that min scale values specified through the BackendConfig are reflected in
+        the observers inserted into the model.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        dtype_config = DTypeConfig(
+            input_dtype_with_constraints=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
+            weight_dtype_with_constraints=DTypeWithConstraints(dtype=torch.qint8, scale_min=2 ** -12),
+            output_dtype=torch.quint8,
+            bias_dtype=torch.float,
+        )
+
+        backend_config = BackendConfig() \
+            .set_backend_pattern_config(BackendPatternConfig(torch.nn.Linear)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E128
+                .add_dtype_config(dtype_config)
+                .set_root_module(torch.nn.Linear)
+                .set_reference_quantized_module(nnqr.Linear))
+        example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+
+        def check_observers(qconfig, act_scale_min, weight_scale_min):
+            """
+            Check that the min scale values (eps) in the observers match what we expect.
+            """
+            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+            m = MyModel()
+            m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
+            activation_observer = m.linear.qconfig.activation()
+            weight_observer = m.linear.qconfig.weight()
+            self.assertEqual(activation_observer.eps, act_scale_min)
+            self.assertEqual(weight_observer.eps, weight_scale_min)
+
+        # Case 1: They match
+        qconfig1 = default_symmetric_qnnpack_qconfig
+        check_observers(qconfig1, 2 ** -12, 2 ** -12)
+
+        # Case 2: QConfig doesn't specify scale min, borrow from BackendConfig
+        qconfig2 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        check_observers(qconfig2, 2 ** -12, 2 ** -12)
+
+        # Case 3: Activation doesn't match
+        qconfig3 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=123),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
+        qconfig_mapping3 = QConfigMapping().set_object_type(torch.nn.Linear, qconfig3)
+        with self.assertRaisesRegex(ValueError, "Inconsistent activation scale min"):
+            prepare_fx(MyModel(), qconfig_mapping3, example_inputs, backend_config=backend_config)
+
+        # Case 4: Weight doesn't match
+        qconfig4 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=234))
+        qconfig_mapping4 = QConfigMapping().set_object_type(torch.nn.Linear, qconfig4)
+        with self.assertRaisesRegex(ValueError, "Inconsistent weight scale min"):
+            prepare_fx(MyModel(), qconfig_mapping4, example_inputs, backend_config=backend_config)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

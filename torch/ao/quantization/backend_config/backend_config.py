@@ -12,9 +12,17 @@ __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
+    "DTypeWithConstraints",
     "ObservationType",
 ]
 
+
+# DTypeWithConstraints dict keys
+DTYPE_DICT_KEY = "dtype"
+QUANT_MIN_DICT_KEY = "quant_min"
+QUANT_MAX_DICT_KEY = "quant_max"
+SCALE_MIN_DICT_KEY = "scale_min"
+SCALE_MAX_DICT_KEY = "scale_max"
 
 # DTypeConfig dict keys
 INPUT_DTYPE_DICT_KEY = "input_dtype"
@@ -22,6 +30,8 @@ OUTPUT_DTYPE_DICT_KEY = "output_dtype"
 WEIGHT_DTYPE_DICT_KEY = "weight_dtype"
 BIAS_DTYPE_DICT_KEY = "bias_dtype"
 IS_DYNAMIC_DICT_KEY = "is_dynamic"
+INPUT_DTYPE_WITH_CONSTRAINTS_DICT_KEY = "input_dtype_with_constraints"
+WEIGHT_DTYPE_WITH_CONSTRAINTS_DICT_KEY = "weight_dtype_with_constraints"
 
 # BackendConfig dict keys
 NAME_DICT_KEY = "name"
@@ -44,6 +54,7 @@ INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
 OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
 OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
+
 # TODO: maybe rename this to something that's not related to observer
 # e.g. QParamsType
 class ObservationType(Enum):
@@ -63,6 +74,55 @@ class ObservationType(Enum):
     example: torch.cat, maxpool
     """
 
+
+@dataclass
+class DTypeWithConstraints:
+    """
+    Config for specifying additional constraints for a given dtype, such as quantization value
+    ranges and scale value ranges, to be used in :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
+    """
+    dtype: torch.dtype
+    quant_min: Optional[float] = None
+    quant_max: Optional[float] = None
+    scale_min: Optional[float] = None
+    scale_max: Optional[float] = None
+
+    @classmethod
+    def from_dict(cls, dtype_with_constraints_dict: Dict[str, Any]) -> DTypeWithConstraints:
+        """
+        Create a ``DTypeWithConstraints`` from a dictionary with the following items:
+            "dtype": torch.dtype
+            "quant_min": float (optional)
+            "quant_max": float (optional)
+            "scale_min": float (optional)
+            "scale_max": float (optional)
+        """
+        if DTYPE_DICT_KEY not in dtype_with_constraints_dict:
+            raise ValueError("Missing key '%s' in dtype_with_constraints_dict" % DTYPE_DICT_KEY)
+        dtype = dtype_with_constraints_dict[DTYPE_DICT_KEY]
+        quant_min = dtype_with_constraints_dict.get(QUANT_MIN_DICT_KEY, None)
+        quant_max = dtype_with_constraints_dict.get(QUANT_MAX_DICT_KEY, None)
+        scale_min = dtype_with_constraints_dict.get(SCALE_MIN_DICT_KEY, None)
+        scale_max = dtype_with_constraints_dict.get(SCALE_MAX_DICT_KEY, None)
+        return cls(dtype, quant_min, quant_max, scale_min, scale_max)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert this ``DTypeWithConstraints`` to a dictionary with the items described in
+        :func:`~torch.ao.quantization.backend_config.DTypeWithConstraints.from_dict`.
+        """
+        dtype_with_constraints_dict: Dict[str, Any] = {DTYPE_DICT_KEY: self.dtype}
+        if self.quant_min is not None:
+            dtype_with_constraints_dict[QUANT_MIN_DICT_KEY] = self.quant_min
+        if self.quant_max is not None:
+            dtype_with_constraints_dict[QUANT_MAX_DICT_KEY] = self.quant_max
+        if self.scale_min is not None:
+            dtype_with_constraints_dict[SCALE_MIN_DICT_KEY] = self.scale_min
+        if self.scale_max is not None:
+            dtype_with_constraints_dict[SCALE_MAX_DICT_KEY] = self.scale_max
+        return dtype_with_constraints_dict
+
+
 @dataclass
 class DTypeConfig:
     """
@@ -75,23 +135,66 @@ class DTypeConfig:
     bias_dtype: Optional[torch.dtype] = None
     is_dynamic: Optional[bool] = None
 
+    # Additional constraints for advanced use cases
+    input_dtype_with_constraints: Optional[DTypeWithConstraints] = None
+    weight_dtype_with_constraints: Optional[DTypeWithConstraints] = None
+
+    def __post_init__(self):
+        """
+        Ensure dtype fields match the corresponding dtype_with_constraints fields.
+        """
+        # input
+        if self.input_dtype is not None:
+            if self.input_dtype_with_constraints is None:
+                self.input_dtype_with_constraints = DTypeWithConstraints(self.input_dtype)
+            elif self.input_dtype != self.input_dtype_with_constraints.dtype:
+                raise ValueError("Inconsistent input dtypes: %s != %s" %
+                                 (self.input_dtype, self.input_dtype_with_constraints.dtype))
+        elif self.input_dtype_with_constraints is not None:
+            self.input_dtype = self.input_dtype_with_constraints.dtype
+        # weight
+        if self.weight_dtype is not None:
+            if self.weight_dtype_with_constraints is None:
+                self.weight_dtype_with_constraints = DTypeWithConstraints(self.weight_dtype)
+            elif self.weight_dtype != self.weight_dtype_with_constraints.dtype:
+                raise ValueError("Inconsistent weight dtypes: %s != %s" %
+                                 (self.weight_dtype, self.weight_dtype_with_constraints.dtype))
+        elif self.weight_dtype_with_constraints is not None:
+            self.weight_dtype = self.weight_dtype_with_constraints.dtype
+
     @classmethod
     def from_dict(cls, dtype_config_dict: Dict[str, Any]) -> DTypeConfig:
         """
         Create a ``DTypeConfig`` from a dictionary with the following items (all optional):
-
             "input_dtype": torch.dtype
             "output_dtype": torch.dtype
             "weight_dtype": torch.dtype
             "bias_type": torch.dtype
             "is_dynamic": bool
+            "input_dtype_with_constraints": a dictionary that represents `DTypeWithConstraints`
+            "weight_dtype_with_constraints": a dictionary that represents `DTypeWithConstraints`
         """
         input_dtype = dtype_config_dict.get(INPUT_DTYPE_DICT_KEY, None)
         output_dtype = dtype_config_dict.get(OUTPUT_DTYPE_DICT_KEY, None)
         weight_dtype = dtype_config_dict.get(WEIGHT_DTYPE_DICT_KEY, None)
         bias_dtype = dtype_config_dict.get(BIAS_DTYPE_DICT_KEY, None)
         is_dynamic = dtype_config_dict.get(IS_DYNAMIC_DICT_KEY, None)
-        return cls(input_dtype, output_dtype, weight_dtype, bias_dtype, is_dynamic)
+        input_dtype_with_constraints = dtype_config_dict.get(INPUT_DTYPE_WITH_CONSTRAINTS_DICT_KEY, None)
+        if input_dtype_with_constraints is not None:
+            if isinstance(input_dtype_with_constraints, Dict):
+                input_dtype_with_constraints = DTypeWithConstraints.from_dict(input_dtype_with_constraints)
+            if not isinstance(input_dtype_with_constraints, DTypeWithConstraints):
+                raise ValueError("Expected dtype_config_dict['%s'] to be a dictionary" %
+                                 INPUT_DTYPE_WITH_CONSTRAINTS_DICT_KEY)
+        weight_dtype_with_constraints = dtype_config_dict.get(WEIGHT_DTYPE_WITH_CONSTRAINTS_DICT_KEY, None)
+        if weight_dtype_with_constraints is not None:
+            if isinstance(weight_dtype_with_constraints, Dict):
+                weight_dtype_with_constraints = DTypeWithConstraints.from_dict(weight_dtype_with_constraints)
+            if not isinstance(weight_dtype_with_constraints, DTypeWithConstraints):
+                raise ValueError("Expected dtype_config_dict['%s'] to be a dictionary" %
+                                 WEIGHT_DTYPE_WITH_CONSTRAINTS_DICT_KEY)
+        return cls(input_dtype, output_dtype, weight_dtype, bias_dtype, is_dynamic,
+                   input_dtype_with_constraints, weight_dtype_with_constraints)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -109,6 +212,10 @@ class DTypeConfig:
             dtype_config_dict[BIAS_DTYPE_DICT_KEY] = self.bias_dtype
         if self.is_dynamic is not None:
             dtype_config_dict[IS_DYNAMIC_DICT_KEY] = self.is_dynamic
+        if self.input_dtype_with_constraints is not None:
+            dtype_config_dict[INPUT_DTYPE_WITH_CONSTRAINTS_DICT_KEY] = self.input_dtype_with_constraints.to_dict()
+        if self.weight_dtype_with_constraints is not None:
+            dtype_config_dict[WEIGHT_DTYPE_WITH_CONSTRAINTS_DICT_KEY] = self.weight_dtype_with_constraints.to_dict()
         return dtype_config_dict
 
 

@@ -10,6 +10,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
 from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
@@ -42,12 +43,21 @@ class TestBackendConfig(QuantizationTestCase):
         "output_dtype": torch.quint8,
         "weight_dtype": torch.qint8,
         "bias_dtype": torch.float,
+        "input_dtype_with_constraints": {
+            "dtype": torch.quint8,
+        },
+        "weight_dtype_with_constraints": {
+            "dtype": torch.qint8,
+        },
     }
 
     dtype_config_dict2 = {
         "input_dtype": torch.float16,
         "output_dtype": torch.float,
         "is_dynamic": True,
+        "input_dtype_with_constraints": {
+            "dtype": torch.float16,
+        },
     }
 
     def test_dtype_config_from_dict(self):
@@ -57,6 +67,27 @@ class TestBackendConfig(QuantizationTestCase):
     def test_dtype_config_to_dict(self):
         self.assertEqual(self.dtype_config1.to_dict(), self.dtype_config_dict1)
         self.assertEqual(self.dtype_config2.to_dict(), self.dtype_config_dict2)
+
+    def test_dtype_with_constraints(self):
+        self.assertEqual(self.dtype_config1.input_dtype_with_constraints.dtype, torch.quint8)
+        self.assertEqual(self.dtype_config1.weight_dtype_with_constraints.dtype, torch.qint8)
+        self.assertEqual(self.dtype_config2.input_dtype_with_constraints.dtype, torch.float16)
+        # Specify only dtype_with_constraints, should populate corresponding dtype fields
+        dtype_config3 = DTypeConfig(
+            input_dtype_with_constraints=DTypeWithConstraints(dtype=torch.quint8),
+            weight_dtype_with_constraints=DTypeWithConstraints(dtype=torch.qint8),
+        )
+        self.assertEqual(dtype_config3.input_dtype, torch.quint8)
+        self.assertEqual(dtype_config3.weight_dtype, torch.qint8)
+        # Specify inconsistent dtypes through dtype_with_constraints, should throw error
+        with self.assertRaisesRegex(ValueError, "Inconsistent input dtypes"):
+            DTypeConfig(
+                input_dtype=torch.quint8,
+                input_dtype_with_constraints=DTypeWithConstraints(dtype=torch.float16))
+        with self.assertRaisesRegex(ValueError, "Inconsistent weight dtypes"):
+            DTypeConfig(
+                weight_dtype=torch.qint8,
+                weight_dtype_with_constraints=DTypeWithConstraints(dtype=torch.float))
 
     # ======================
     #  BackendPatternConfig
