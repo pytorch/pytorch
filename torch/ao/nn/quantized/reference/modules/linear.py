@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from .utils import ReferenceQuantizedModule
 
+__all__ = ['Linear']
+
 class Linear(nn.Linear, ReferenceQuantizedModule):
     """ A reference quantized linear module that fits into the FX
     Graph Mode Quantization workflow
