@@ -104,21 +104,12 @@ def set_meta(proxy, val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
-def cache(f):
-    out = None
-    @functools.wraps(f)
-    def new_f(*args, **kwargs):
-        nonlocal out
-        if out is None:
-            out = f(*args, **kwargs)
-        return out
-    return new_f
-
 def thunkify(f, *args, **kwargs):
     """
-    Delays computation of f until it's called again, which is done by
+    Delays computation of f until it's called again
+    Also caches the result
     """
-    return cache(functools.partial(f, *args, **kwargs))
+    return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
@@ -126,13 +117,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         if isinstance(outer_s, SymInt):
             inner_s = outer_s.get_pyobj()
             assert isinstance(inner_s, PySymInt)
-            proxy = None
 
-            def thunk():
-                nonlocal proxy
-                if proxy is None:
-                    proxy = proxy_callable(inner_s, *args)
-                return proxy
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
@@ -225,14 +210,10 @@ def proxy_call(proxy_mode, func, args, kwargs):
             if r is not NotImplemented:
                 return r
 
-    # Some of these are not "real" aten ops and will fail if we
-    # call _dispatch_has_kernel_for_dispatch_key on them.
-    # This list is probably incomplete
-    if func not in [torch.ops.aten.size.default, torch.ops.aten.sym_storage_offset.default]:
-        with proxy_mode.restore():
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+    with proxy_mode.restore():
+        r = func.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
 
     tracer = proxy_mode.tracer
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))

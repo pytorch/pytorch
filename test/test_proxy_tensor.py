@@ -967,6 +967,17 @@ def forward(self, a_1):
         fx_g = _trace(f, 7, 7, 4, 3)
         self._assert_no_guards(fx_g, 2)
 
+        def f(a, b, c, d, e):
+            vals = [a, b, c, d, e]
+            x = a
+            for idx in range(len(vals) - 1):
+                x = torch.cat([x, vals[idx]]) + vals[idx + 1]
+            return x
+
+        fx_g = _trace(f, 2, 4, 8, 16, 32)
+        breakpoint()
+        self._assert_no_guards(fx_g, 1)
+
         def f(a, b):
             a = a.view(b.shape[0])
             return a + b.sum()
@@ -993,6 +1004,7 @@ def forward(self, a_1):
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self._assert_no_guards(fx_g, 1)
+
 
 
 
