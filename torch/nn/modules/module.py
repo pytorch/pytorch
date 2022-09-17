@@ -1250,6 +1250,7 @@ class Module:
             self._is_full_backward_hook = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+        # print("Module", id(self), self.__dict__)
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
             if name in _parameters:
