@@ -743,9 +743,6 @@ def saved_variables(
     nctypes: List[NamedCType],
     var_names: Tuple[str, ...],
 ) -> Tuple[str, Tuple[SavedAttribute, ...]]:
-    def unsupported(name: str) -> str:
-        raise RuntimeError("strides() call is not supported; use sym_strides()")
-
     def stride_expr(name: str) -> str:
         assert var_names == (name,), (
             'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
@@ -864,7 +861,7 @@ def saved_variables(
             {
                 "suffix": "_strides",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": unsupported,
+                "expr": stride_expr,
             },
         ),
         # replace self.sym_strides() with self_sym_strides
