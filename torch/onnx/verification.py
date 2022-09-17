@@ -172,13 +172,6 @@ def _compare_ort_pytorch_outputs(
         raise ValueError(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
         )
-    
-    if ort_outs.is_quantized and pt_outs.is_quantized:
-        assert ort_outs.q_scale() and pt_outs.q_scale(), "ONNX output and PyTorch output has scale difference"
-        assert ort_outs.q_zero_point() and pt_outs.q_zero_point(), "ONNX output and PyTorch output has zero point difference"
-    else:
-        assert ort_outs.is_quantized, "ONNX output is not quantized"
-        assert pt_outs.is_quantized, "PyTorch output is not quantized"
 
     for ort_out, pt_out in zip(ort_outs, pt_outs_np):
         try:
@@ -206,6 +199,18 @@ def _compare_ort_pytorch_outputs(
                         f"within acceptable range {acceptable_error_percentage}."
                     )
                     continue
+                else
+                    if ort_out.is_quantized and pt_out.is_quantized:
+                        if ort_out.q_scale() != pt_out.q_scale():
+                            warnings.warn("ONNX output and PyTorch output has scale difference") 
+
+                         if ort_out.q_zero_point() != pt_out.q_zero_point():
+                            warnings.warn("ONNX output and PyTorch output has zero point difference") 
+                    else:
+                        if ort_out.is_quantized != True:
+                            warnings.warn("ONNX output is not quantized")
+                        if pt_out.is_quantized != True:
+                            warnings.warn("PyTorch output is not quantized")
             raise
 
 
