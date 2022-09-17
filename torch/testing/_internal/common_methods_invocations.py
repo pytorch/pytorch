@@ -10659,8 +10659,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv3d',
            aliases=('conv3d',),
            aten_name='conv3d',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv3d,
            error_inputs_func=error_inputs_conv3d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -10672,6 +10673,14 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+           ),
+           skips=(
+               # RuntimeError: !lhs.isAliasOf(rhs) INTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
+                            dtypes=(torch.float32,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
