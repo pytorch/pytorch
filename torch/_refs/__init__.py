@@ -70,13 +70,6 @@ __all__ = [
     "fill",
     "floor",
     "frac",
-    "index_add",
-    "index_add_",
-    "index_copy",
-    "index_copy_",
-    "index_select",
-    "index_fill",
-    "index_fill_",
     "isfinite",
     "isinf",
     "isnan",
@@ -2945,104 +2938,6 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     return tuple(
         torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
     )
-
-
-@register_decomposition(torch.ops.aten.index_copy)
-@out_wrapper()
-def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    return x.clone().index_copy_(dim, index, tensor)
-
-
-@register_decomposition(torch.ops.aten.index_copy_)
-def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    idx = (slice(None),) * dim + (index,)
-    y[idx] = tensor
-    return x
-
-
-@register_decomposition(torch.ops.aten.index_fill)
-def index_fill(
-    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
-):
-    return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
-
-
-@register_decomposition(torch.ops.aten.index_fill_)
-def index_fill_(
-    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
-):
-    if isinstance(value, TensorLike):
-        utils.check(
-            value.ndim == 0,
-            lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
-            f"Got a tensor with {value.ndim} dimensions.",
-        )  # type: ignore[arg-type]
-        return x.clone().index_copy_(dim, index, value)
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    idx = (slice(None),) * dim + (index,)
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    y[idx] = value  # type: ignore[assignment]
-    return x
-
-
-@register_decomposition(torch.ops.aten.index_add)
-@out_wrapper()
-def index_add(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: float = 1
-):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)
-
-
-# The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
-# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
-def index_add_(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: float = 1
-):
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    if alpha != 1:
-        python_type = utils.dtype_to_type(x.dtype)
-        utils.check(
-            utils.is_weakly_lesser_type(type(alpha), python_type),
-            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
-        )
-        tensor = prims.mul(tensor, alpha)
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    idx = (slice(None),) * dim + (index,)
-    y[idx] += tensor
-    return x
-
-
-@register_decomposition(torch.ops.aten.index_select, disable_meta=True)
-@out_wrapper()
-def index_select(x: TensorLike, dim: int, index: TensorLike):
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    # Treat scalars as elements of \R^1
-    if x.ndim == 0:
-        return x.unsqueeze(0)[index].squeeze(0).clone()
-    idx = (slice(None),) * dim + (index,)
-    return x[idx]
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't

@@ -245,9 +245,7 @@ class TestCommon(TestCase):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
-                        msg = (f"The torch implementation {'returns' if b._is_view() else 'does not return'} "
-                               f"a view, while the reference {'does' if a._is_view() else 'does not'}")
-                        self.assertEqual(a._is_view(), b._is_view(), msg)
+                        self.assertEqual(a._is_view(), b._is_view())
 
             # Computes the dtype the more precise computatino would occur in
             precise_dtype = torch.bool
@@ -1600,10 +1598,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
-        # These should be tested with their out-of-place counterparts
-        '_refs.index_add_',
-        '_refs.index_copy_',
-        '_refs.index_fill_',
     }
 
     not_in_decomp_table = {
@@ -1612,8 +1606,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.mse_loss',
         '_refs.var',
         '_refs.rsub',
-        # duplicated due to efficiency concerns of the ref vs the decomp
-        '_refs.index_add_',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
@@ -1692,11 +1684,11 @@ class TestRefsOpsInfo(TestCase):
         op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
 
         if op in self.not_in_decomp_table:
-            self.assertNotIn(op_impl, torch._decomp.decomposition_table.values(),
+            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
                              f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
         else:
-            self.assertIn(op_impl, torch._decomp.decomposition_table.values(),
-                          f"Did not find {op} in torch._decomp.decomposition_table.values()")
+            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
+                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (
