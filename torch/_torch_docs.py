@@ -9026,7 +9026,8 @@ Example::
 add_docstr(
     torch.rand,
     r"""
-rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+     pin_memory=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
@@ -9044,6 +9045,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
