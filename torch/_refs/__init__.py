@@ -3028,16 +3028,26 @@ def index_fill_(
 @register_decomposition(torch.ops.aten.index_add)
 @out_wrapper()
 def index_add(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: NumberType = 1
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
 ):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)
+    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
 
 
 # The decomposition of this function dispatches to aten.index_put_ for efficiency
 # We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
 # https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
 def index_add_(
-    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, alpha: NumberType = 1
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
