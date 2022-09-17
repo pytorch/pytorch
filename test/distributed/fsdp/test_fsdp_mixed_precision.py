@@ -302,9 +302,9 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         m = MyModel().cuda()
         mp = MixedPrecision(
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.bfloat16,
-            buffer_dtype=torch.bfloat16,
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
             keep_casted_gradients=True,
         )
         m.lin1 = FSDP(m.lin1, mixed_precision=mp)
@@ -313,7 +313,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             inp = torch.ones(1, 10)
             m(inp).sum().backward()
             for param in m.parameters():
-                self.assertEqual(torch.bfloat16, param.grad.dtype)
+                self.assertEqual(torch.float16, param.grad.dtype)
 
         dist.barrier()
 
