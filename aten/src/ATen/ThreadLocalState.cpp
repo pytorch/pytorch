@@ -14,6 +14,7 @@ ThreadLocalState::ThreadLocalState()
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
+      python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()) {
   rf_tls_ = at::get_record_function_tls_();
 
@@ -40,6 +41,8 @@ void ThreadLocalState::setThreadLocalState(
   at::set_record_function_tls_(state.rf_tls_);
 
   at::SavedTensorDefaultHooks::set_stack(state.saved_tensors_default_hooks_);
+
+  c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 

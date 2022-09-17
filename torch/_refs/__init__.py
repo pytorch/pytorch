@@ -85,9 +85,11 @@ __all__ = [
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
+    "sgn",
     "sign",
     "signbit",
     "sin",
+    "sinc",
     "sinh",
     "sqrt",
     "square",
@@ -271,6 +273,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _broadcast_shapes(*_shapes):
@@ -437,7 +440,7 @@ def ceil(a):
 @register_decomposition(torch.ops.aten.conj_physical)
 @out_wrapper()
 def conj_physical(input: TensorLikeType):
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     return prims.conj_physical(input)
 
@@ -743,6 +746,15 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def sgn(a):
+    if utils.is_complex_dtype(a.dtype):
+        a_abs = a.abs()
+        return torch.where(a_abs == 0, 0, a / a_abs)
+    else:
+        return a.sign()
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def sign(a):
     return prims.sign(a)
 
@@ -755,6 +767,14 @@ def signbit(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def sin(a):
     return prims.sin(a)
+
+
+# Autograd note: This will give the right first derivative at zero (by chance),
+# but not the right second derivative
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sinc(a):
+    a = math.pi * a
+    return torch.where(a == 0, 1, torch.sin(a) / a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -2190,7 +2210,11 @@ def broadcast_shapes(*shapes) -> ShapeType:
     return torch.Size(_broadcast_shapes(*shapes))
 
 
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
+    if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
+        tensors = tensors[0]
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
@@ -2246,7 +2270,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 def conj(input: TensorLikeType) -> TensorLikeType:
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     if input.is_sparse:
         return torch.conj_physical(input)
@@ -3306,6 +3330,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
+@register_decomposition(torch.ops.aten.empty)
 @out_wrapper()
 def empty(
     *shape,
@@ -3396,6 +3421,31 @@ def new_empty_strided(
     )
 
 
+@register_decomposition(torch.ops.aten.zeros)
+@out_wrapper()
+def zeros(
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    return torch.full(
+        size,
+        False if dtype == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
 @register_decomposition(torch.ops.aten.new_zeros)
 def new_zeros(
     a: TensorLikeType,
@@ -3405,12 +3455,45 @@ def new_zeros(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        False if dtype == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
-    r.zero_()
-    return r
+
+
+@register_decomposition(torch.ops.aten.ones)
+def ones(
+    size: ShapeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    return torch.full(
+        size,
+        True if dtype == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
 
 
 @register_decomposition(torch.ops.aten.new_ones)
@@ -3422,32 +3505,49 @@ def new_ones(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        True if dtype == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
-    r.fill_(1)
-    return r
 
 
 @register_decomposition(torch.ops.aten.new_full)
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: NumberType,
+    fill_value: Union[int, float, bool],
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        fill_value,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
     )
-    r.fill_(fill_value)  # type: ignore[arg-type]
-    return r
 
 
+@register_decomposition(torch.ops.aten.empty_like)
 def empty_like(
     a: TensorLikeType,
     *,
@@ -3884,25 +3984,39 @@ def eye(
     if dtype is torch.bool:
         return cond
     else:
-        # TODO: pin_memory=pin_memory, layout=layout
-        one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
+        one = torch.ones(
+            (1,),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=False,
+        )
         return torch.where(cond, one, 0)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
     # result.requires_grad_(requires_grad)
 
 
-# TODO: missing kwargs (e.g. layout)
 @out_wrapper()
 def full(
     shape: ShapeType,
     fill_value: NumberType,
     *,
-    dtype: torch.dtype,
-    device: torch.device,
-    requires_grad: bool,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    e = empty(
+        shape,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
     return fill(e, fill_value)
 
 
@@ -3918,8 +4032,6 @@ def full_like(
     return fill(e, fill_value)
 
 
-ones = partial(full, fill_value=True)
-
 ones_like = partial(full_like, fill_value=True)
 
 
@@ -3934,8 +4046,6 @@ def scalar_tensor(
     device = device if device is not None else torch.device("cpu")
     return prims.scalar_tensor(a, dtype=dtype, device=device)
 
-
-zeros = partial(full, fill_value=False)
 
 zeros_like = partial(full_like, fill_value=False)
 
