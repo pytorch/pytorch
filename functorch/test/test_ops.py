@@ -1391,6 +1391,7 @@ class TestOperators(TestCase):
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
         skip('__rmatmul__'),  # flaky needs investigation
         skip('matmul'),  # flaky needs investigation
+        skip('nn.functional.conv3d'),
         skip('nn.functional.conv_transpose3d'),  # flaky needs investigation
         skip('nn.functional.conv_transpose2d'),  # flaky needs investigation
         skip('nn.functional.conv_transpose1d'),  # flaky needs investigation
@@ -1407,8 +1408,6 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
-        tol1('nn.functional.conv3d',
-             {torch.float32: tol(atol=6e-2, rtol=5e-2)}, device_type='cuda'),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
