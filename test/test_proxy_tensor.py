@@ -1272,8 +1272,6 @@ symbolic_tensor_failures = {
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('select', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('select_scatter', ''),  # aten.select_scatter.default - couldn't find symbolic meta function/decomposition
-    xfail('sgn', ''),  # aten.sgn.default - couldn't find symbolic meta function/decomposition
-    xfail('sinc', ''),  # aten.sinc.default - couldn't find symbolic meta function/decomposition
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
