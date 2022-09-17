@@ -52,6 +52,14 @@ static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
 }
 #endif
 
+int64_t SymInt::guard_int(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymIntNode a = toSymIntNodeImpl();
+  return a->guard_int(file, line);
+}
+
 SymInt SymInt::operator+(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymInt(data_ + sci.data_);
