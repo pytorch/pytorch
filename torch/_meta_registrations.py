@@ -4,11 +4,11 @@ import torch
 import torch._prims_common as utils
 from torch import Tensor
 from torch._prims_common import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
     check,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 
 from torch._prims_common.wrappers import out_wrapper
